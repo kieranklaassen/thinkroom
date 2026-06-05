@@ -47,7 +47,7 @@ class AgentGuide
                       body: { last_event_id: "(required) the ack_with value from poll_events" },
                       purpose: "Advance your event cursor." },
         create_document: { method: "POST", url: "#{base_url}/api/docs",
-                           body: { title: "(optional)", markdown: "(required) initial markdown" },
+                           body: { title: "(optional)", markdown: "(optional) initial markdown — defaults to a blank template" },
                            purpose: "Create a new shared document; returns its slug and share URL." }
       }
     end
@@ -57,7 +57,9 @@ class AgentGuide
         "Identity: send an X-Agent-Name header on every request. That name flows through everything — suggestion attribution, provenance marks when your text is accepted, the presence area, and the activity feed.",
         "All your writes go through the same provenance/suggestion machinery as the human UI. There is no side channel: you propose, humans review.",
         "Text you contribute is marked kind=agent provenance and tinted in the editor until a human advances its review state (pending -> reviewed -> endorsed).",
-        "Connected editors see your suggestions, comments, and presence live over WebSocket — no refresh needed on their side."
+        "Connected editors see your suggestions, comments, and presence live over WebSocket — no refresh needed on their side.",
+        "Reading state: use plain_markdown as your working context for proposals; markdown embeds provenance span HTML. Both reflect the last snapshot pushed by a connected editor and may lag if no human has the document open — the Yjs CRDT state is always authoritative.",
+        "Review is human-gated by design: accepting/rejecting suggestions and advancing review states happen in the editor, by humans. Your job is to propose well."
       ]
     end
 

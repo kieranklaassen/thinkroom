@@ -54,6 +54,28 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal "seeded", doc.reload.seed_state
   end
 
+
+  test "a no-op update does not persist or flip seed_state" do
+    doc = Document.create!(title: "Unseeded", seed_markdown: "# Template")
+
+    # The empty sync-reply a client sends when joining an empty doc.
+    empty_update = Base64.strict_encode64(Y::Doc.new.full_diff.pack("C*"))
+    YjsPersistence.merge(doc, empty_update)
+
+    doc.reload
+    assert_equal "pending", doc.seed_state, "no-op merge must not mark the doc seeded"
+    assert_not doc.yjs_state.present?, "no-op merge must not persist state"
+  end
+
+  test "corrupt base64 raises and leaves the document untouched" do
+    doc = Document.create!(title: "Corrupt")
+    YjsPersistence.merge(doc, b64_update_for("good content"))
+    before = doc.reload.yjs_state
+
+    assert_raises(ArgumentError) { YjsPersistence.merge(doc, "not!!base64!!") }
+    assert_equal before, doc.reload.yjs_state
+  end
+
   test "state_b64 round-trips through a fresh client doc" do
     doc = Document.create!(title: "Handshake")
     YjsPersistence.merge(doc, b64_update_for("server content"))

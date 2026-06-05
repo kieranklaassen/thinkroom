@@ -56,6 +56,37 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert doc.reload.yjs_state.present?
   end
 
+
+  test "malformed update frames are dropped without raising or relaying" do
+    doc = Document.create!(title: "Poison")
+    subscribe slug: doc.slug
+
+    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+      perform :receive, { "type" => "update", "update" => "not!!base64!!", "cid" => "x" }
+    end
+    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+      perform :receive, { "type" => "update", "cid" => "x" }
+    end
+    assert_nil doc.reload.yjs_state
+  end
+
+  test "first subscriber still gets the seed after an empty sync-reply was merged" do
+    doc = Document.create!(title: "Race", seed_markdown: "# Template")
+    subscribe slug: doc.slug
+
+    # A joining client with an empty doc replies with a no-op update.
+    empty_update = Base64.strict_encode64(Y::Doc.new.full_diff.pack("C*"))
+    perform :receive, { "type" => "sync-reply", "update" => empty_update, "cid" => "x" }
+
+    # The claim is consumed but reclaimable after timeout because the no-op
+    # merge did not flip seed_state to "seeded".
+    travel SyncChannel::SEED_CLAIM_TIMEOUT + 1.second do
+      unsubscribe
+      subscribe slug: doc.slug
+      assert_equal true, transmissions.last["seed"], "doc must remain seedable after a no-op merge"
+    end
+  end
+
   test "awareness messages relay without persisting" do
     doc = Document.create!(title: "Presence")
     subscribe slug: doc.slug

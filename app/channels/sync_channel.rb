@@ -34,8 +34,23 @@ class SyncChannel < ApplicationCable::Channel
     message = data.slice("type", "update", "cid")
     case data["type"]
     when "update", "sync-reply"
+      # Validate before relaying: a malformed frame must neither reach peers
+      # nor crash the channel action.
+      update = data["update"].to_s
+      return if update.blank?
+      begin
+        Base64.strict_decode64(update)
+      rescue ArgumentError
+        Rails.logger.warn("SyncChannel: dropped malformed update frame")
+        return
+      end
+
       self.class.broadcast_to(@document, message)
-      YjsPersistence.merge(@document, data["update"])
+      begin
+        YjsPersistence.merge(@document, update)
+      rescue StandardError => e
+        Rails.logger.warn("SyncChannel: merge failed: #{e.class}: #{e.message}")
+      end
     when "awareness", "awareness-query"
       self.class.broadcast_to(@document, message)
     end

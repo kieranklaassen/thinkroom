@@ -18,7 +18,13 @@ class YjsPersistence
       lock_for(document.id).synchronize do
         document.with_lock do
           ydoc = load_ydoc(document.reload)
+          before = ydoc.state
           ydoc.sync(update)
+          # A no-op update (e.g. the empty sync-reply a client joining an
+          # empty doc sends) must not persist — flipping seed_state to
+          # "seeded" without content would permanently block the seed claim.
+          next if ydoc.state == before
+
           document.update_columns(
             yjs_state: ydoc.full_diff.pack("C*"),
             seed_state: "seeded",

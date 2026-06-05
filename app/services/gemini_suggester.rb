@@ -35,7 +35,7 @@ class GeminiSuggester
       You are a careful writing collaborator inside a provenance-tracking editor.
       The document (markdown):
 
-      #{document.plain_markdown.presence || document.seed_markdown.to_s.truncate(4000)}
+      #{(document.plain_markdown.presence || document.seed_markdown.to_s).truncate(4000)}
 
       #{context.present? ? "The human selected this passage:\n\n#{context}\n" : ""}
       Instruction: #{instruction.presence || "Suggest a passage that improves or extends the document."}

@@ -29,7 +29,7 @@ module Api
       render json: {
         presence: { agent_name: current_agent, status: },
         agents_present: document.agent_presences.active.map(&:as_props)
-      }
+      }, status: :ok
     end
   end
 end

@@ -132,7 +132,13 @@ export class CableProvider {
       }
       case 'update':
       case 'sync-reply':
-        Y.applyUpdate(this.doc, fromBase64(data.update!), this)
+        try {
+          Y.applyUpdate(this.doc, fromBase64(data.update!), this)
+        } catch (error) {
+          // A malformed frame from a peer must not break this client's
+          // sync handler; the doc itself is untouched by a failed apply.
+          console.warn('CableProvider: dropped malformed update', error)
+        }
         break
       case 'awareness':
         applyAwarenessUpdate(this.awareness, fromBase64(data.update!), this)
