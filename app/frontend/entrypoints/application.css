@@ -1,0 +1,1983 @@
+@import 'tailwindcss';
+
+@plugin '@tailwindcss/typography';
+@plugin '@tailwindcss/forms';
+
+/* ---------------------------------------------------------------------------
+ * Design tokens. The default ("proof") theme: warm paper, editorial type.
+ * The "whitey" theme (Typora Whitey homage) overrides these on [data-theme].
+ * ------------------------------------------------------------------------- */
+:root {
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-doc: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+
+  --surface: #faf8f4;
+  --surface-raised: #ffffff;
+  --ink: #21201c;
+  --ink-soft: #6f6a60;
+  --ink-faint: #a8a294;
+  --line: #e7e2d8;
+  --accent: #b65c3d;
+  --accent-soft: #b65c3d22;
+
+  --prov-pending-bg: #ead9fb66;
+  --prov-pending-line: #9d4edd99;
+  --prov-reviewed-bg: #ead9fb33;
+  --prov-reviewed-line: #9d4edd55;
+  --prov-endorsed-line: #9d4edd40;
+
+  --code-bg: #f3f0e9;
+  --measure: 44rem;
+}
+
+/* Whitey — homage to Typora's Whitey theme: clean white, minimal chrome,
+ * generous margins, quiet typography. Everything derives from the tokens, so
+ * provenance tints and code blocks restyle coherently. */
+[data-theme='whitey'] {
+  --font-doc: 'Avenir Next', Avenir, 'Segoe UI', 'Helvetica Neue', sans-serif;
+
+  --surface: #ffffff;
+  --surface-raised: #fcfcfc;
+  --ink: #2b2b2b;
+  --ink-soft: #777777;
+  --ink-faint: #b3b3b3;
+  --line: #ececec;
+  --accent: #4183c4;
+  --accent-soft: #4183c422;
+
+  --prov-pending-bg: #dce9f766;
+  --prov-pending-line: #4183c499;
+  --prov-reviewed-bg: #dce9f733;
+  --prov-reviewed-line: #4183c455;
+  --prov-endorsed-line: #4183c440;
+
+  --code-bg: #f8f8f8;
+  --measure: 47rem;
+}
+
+[data-theme='whitey'] .milkdown .ProseMirror {
+  font-size: 1rem;
+  line-height: 1.8;
+  font-weight: 400;
+}
+
+[data-theme='whitey'] .doc-main {
+  padding-top: 4rem;
+}
+
+[data-theme='whitey'] .milkdown .ProseMirror blockquote {
+  font-style: normal;
+  border-left-color: var(--accent-soft);
+}
+
+html,
+body {
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  transition: background 220ms ease, color 220ms ease;
+}
+
+/* Keyboard navigation gets visible, consistent focus everywhere. */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ------------------------------ Theme picker ------------------------------ */
+.theme-picker {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.theme-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+  font-weight: 550;
+  padding: 0.26rem 0.55rem;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.theme-option.is-active {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+.theme-option:hover:not(.is-active) {
+  color: var(--ink-soft);
+}
+
+.theme-swatch {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+}
+
+.theme-swatch--proof {
+  background: #faf8f4;
+  border-color: #b65c3d66;
+}
+
+.theme-swatch--whitey {
+  background: #ffffff;
+  border-color: #4183c466;
+}
+
+/* --------------------------------- Landing ------------------------------- */
+.landing {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+
+.landing-main {
+  max-width: 26rem;
+  text-align: center;
+}
+
+.landing-wordmark {
+  font-family: var(--font-doc);
+  font-size: 2.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.landing-tagline {
+  margin-top: 0.75rem;
+  color: var(--ink-soft);
+  line-height: 1.55;
+  font-size: 0.95rem;
+}
+
+.landing-actions {
+  margin-top: 1.75rem;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.landing-recent {
+  margin-top: 3rem;
+  text-align: left;
+}
+
+.landing-recent-heading {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  margin-bottom: 0.5rem;
+}
+
+.landing-recent ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.landing-recent a {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  text-decoration: none;
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  margin: 0 -0.5rem;
+  display: block;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.landing-recent a:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.landing-recent-empty {
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+  line-height: 1.5;
+}
+
+/* --------------------------- Agent create card ---------------------------- */
+.landing-agent {
+  margin-top: 2.5rem;
+  text-align: left;
+}
+
+.landing-agent-hint {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  margin-bottom: 0.5rem;
+}
+
+.landing-agent-block {
+  position: relative;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+}
+
+.landing-agent-block code {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding-right: 3.2rem;
+}
+
+.landing-agent-block .share-copy {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.btn-primary {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.btn-primary:hover {
+  background: #000;
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-ghost {
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  background: transparent;
+}
+
+.btn-ghost:hover {
+  color: var(--ink);
+  border-color: var(--ink-faint);
+}
+
+/* ------------------------------- Doc layout ------------------------------ */
+.doc-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.doc-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  min-height: 2.75rem;
+}
+
+.doc-header-left,
+.doc-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+/* The title side absorbs all shrinkage (it can truncate); the chrome side
+ * is rigid — letting it shrink below content spills avatars and Share
+ * past the viewport edge on narrow screens. */
+.doc-header-left {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.doc-header-right {
+  flex: none;
+}
+
+.doc-home {
+  font-family: var(--font-doc);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--ink);
+  text-decoration: none;
+  opacity: 0.85;
+}
+
+.doc-home:hover {
+  opacity: 1;
+}
+
+.doc-title {
+  font-size: 0.875rem;
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Flex items default to min-width:auto — without this the nowrap title
+   * refuses to shrink and forces horizontal overflow on narrow screens. */
+  min-width: 0;
+}
+
+.doc-status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.doc-status--connecting {
+  background: var(--ink-faint);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.doc-status--live {
+  background: #6a994e;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.doc-body {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+/* The copy and its margin gutter share one scroll context — suggestion cards
+ * positioned against the gutter stay glued to their anchors while scrolling. */
+.doc-canvas {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.margin-gutter {
+  width: 15rem;
+  flex: none;
+  position: relative;
+  transition: width 200ms ease;
+}
+
+.doc-canvas.is-focus .margin-gutter {
+  width: 2rem;
+}
+
+/* Mobile keeps the gutter as a slim marker strip — suggestions stay
+ * discoverable at their anchors; the cards live in a bottom sheet. */
+@media (max-width: 64rem) {
+  .margin-gutter,
+  .doc-canvas.is-focus .margin-gutter {
+    width: 1.75rem;
+  }
+}
+
+.doc-main {
+  width: 100%;
+  max-width: var(--measure);
+  padding: 3rem 2rem 6rem;
+}
+
+.doc-editor-loading {
+  min-height: 50vh;
+}
+
+/* ----------------------------- Editor typography ------------------------- */
+.milkdown {
+  outline: none;
+}
+
+.milkdown .ProseMirror {
+  outline: none;
+  font-family: var(--font-doc);
+  font-size: 1.0625rem;
+  line-height: 1.72;
+  color: var(--ink);
+  caret-color: var(--accent);
+}
+
+.milkdown .ProseMirror > * + * {
+  margin-top: 0.85em;
+}
+
+.milkdown .ProseMirror h1,
+.milkdown .ProseMirror h2,
+.milkdown .ProseMirror h3 {
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.milkdown .ProseMirror h1 {
+  font-size: 2rem;
+  margin-top: 0;
+}
+
+.milkdown .ProseMirror h2 {
+  font-size: 1.45rem;
+  margin-top: 1.6em;
+}
+
+.milkdown .ProseMirror h3 {
+  font-size: 1.15rem;
+  margin-top: 1.3em;
+}
+
+.milkdown .ProseMirror a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-soft);
+  text-underline-offset: 2px;
+}
+
+.milkdown .ProseMirror blockquote {
+  border-left: 3px solid var(--line);
+  padding-left: 1.1em;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.milkdown .ProseMirror ul,
+.milkdown .ProseMirror ol {
+  padding-left: 1.5em;
+}
+
+.milkdown .ProseMirror ul {
+  list-style: disc;
+}
+
+.milkdown .ProseMirror ol {
+  list-style: decimal;
+}
+
+.milkdown .ProseMirror li {
+  margin: 0.25em 0;
+}
+
+.milkdown .ProseMirror code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 0.12em 0.35em;
+}
+
+.milkdown .ProseMirror pre {
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem 1.15rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.milkdown .ProseMirror pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+.milkdown .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 2em 0;
+}
+
+.milkdown .ProseMirror img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.milkdown .ProseMirror ::selection {
+  background: var(--accent-soft);
+}
+
+/* --------------------------------- Rail ---------------------------------- */
+.doc-body {
+  gap: 0;
+}
+
+/* Normal flow, no inner scrollbar — the whole page is one scroll surface. */
+.doc-rail {
+  width: 21rem;
+  flex: none;
+  border-left: 1px solid var(--line);
+  padding: 1.5rem 1.25rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.doc-page.is-panel-hidden .doc-rail {
+  display: none;
+}
+
+@media (max-width: 64rem) {
+  .doc-rail {
+    display: none;
+  }
+}
+
+.rail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.rail-section + .rail-section {
+  border-top: 1px solid var(--line);
+  padding-top: 1.5rem;
+}
+
+.rail-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.rail-heading h2 {
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}
+
+.rail-count {
+  font-size: 0.7rem;
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-empty {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--ink-faint);
+}
+
+/* ------------------------------- Ask AI ----------------------------------- */
+.ask-ai {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.ask-ai-input {
+  flex: 1;
+  font-size: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  background: var(--surface-raised);
+  color: var(--ink);
+  transition: border-color 120ms ease;
+}
+
+.ask-ai-input:focus {
+  outline: none;
+  border-color: var(--ink-faint);
+  box-shadow: none;
+}
+
+.ask-ai-input::placeholder {
+  color: var(--ink-faint);
+}
+
+.ask-ai-button {
+  border: none;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.78rem;
+  font-weight: 550;
+  border-radius: 8px;
+  padding: 0 0.8rem;
+  cursor: pointer;
+  min-width: 3.2rem;
+  transition: background 120ms ease;
+}
+
+.ask-ai-button:hover:not(:disabled) {
+  background: #000;
+}
+
+.ask-ai-button:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.ask-ai-spinner {
+  display: inline-block;
+  width: 0.8rem;
+  height: 0.8rem;
+  border: 2px solid color-mix(in srgb, var(--surface) 40%, transparent);
+  border-top-color: var(--surface);
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --------------------------- Suggestion cards ----------------------------- */
+.suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.suggestion-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  animation: card-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.suggestion-card.is-leaving {
+  opacity: 0;
+  transform: translateX(8px);
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.suggestion-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.author-chip {
+  font-size: 0.68rem;
+  font-weight: 650;
+  padding: 0.1rem 0.45rem;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+
+.author-chip--ai,
+.author-chip--agent {
+  background: var(--prov-pending-bg);
+  color: color-mix(in srgb, var(--prov-pending-line) 80%, var(--ink));
+}
+
+.author-chip--human {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.suggestion-intent {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+
+.suggestion-replaces {
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  font-style: italic;
+}
+
+.suggestion-body {
+  font-family: var(--font-doc);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: pre-wrap;
+  max-height: 9rem;
+  overflow-y: auto;
+}
+
+.suggestion-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-accept {
+  border: none;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.74rem;
+  font-weight: 550;
+  border-radius: 6px;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.btn-accept:hover {
+  background: #000;
+}
+
+.btn-reject {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.btn-reject:hover {
+  border-color: var(--ink-faint);
+  color: var(--ink);
+}
+
+/* In suggestion cards, Accept wears the provenance tint — clearly primary
+ * next to ghost Reject without reading as a black slab. */
+.margin-card .btn-accept,
+.sheet-card .btn-accept {
+  background: color-mix(in srgb, var(--prov-pending-line) 14%, var(--surface-raised));
+  color: color-mix(in srgb, var(--prov-pending-line) 70%, var(--ink));
+  border: 1px solid color-mix(in srgb, var(--prov-pending-line) 45%, var(--line));
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.margin-card .btn-accept:hover,
+.sheet-card .btn-accept:hover {
+  background: color-mix(in srgb, var(--prov-pending-line) 24%, var(--surface-raised));
+  border-color: color-mix(in srgb, var(--prov-pending-line) 65%, var(--line));
+}
+
+/* --------------------------- Margin suggestions --------------------------- */
+.margin-suggestions {
+  position: absolute;
+  inset: 0;
+}
+
+.margin-card {
+  position: absolute;
+  left: 0.9rem;
+  right: 0.4rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  cursor: pointer;
+  animation: card-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+/* `top` animates only after the first placement painted — restacks glide,
+ * initial layout and freshly arrived cards don't fly in from 0. */
+.margin-card.is-placed {
+  transition: top 160ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.margin-card:hover {
+  border-color: var(--prov-pending-line);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.06);
+}
+
+.margin-old {
+  font-family: var(--font-doc);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+.margin-new {
+  font-family: var(--font-doc);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--prov-pending-bg);
+  border-radius: 4px;
+  padding: 0.15rem 0.3rem;
+  white-space: pre-wrap;
+  max-height: 8.5rem;
+  overflow: hidden;
+}
+
+/* Focus mode: a quiet dot per suggestion instead of a card. */
+.margin-marker {
+  position: absolute;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--prov-pending-line);
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.margin-marker.is-placed {
+  transition: top 160ms ease, transform 120ms ease;
+}
+
+.margin-marker:hover {
+  transform: scale(1.4);
+}
+
+/* Anchor tint via the CSS Custom Highlight API — same hue family as the
+ * AI-provenance marks (purple on proof, blue on whitey). */
+::highlight(sug-anchor) {
+  background-color: rgb(157 78 221 / 0.12);
+}
+
+::highlight(sug-anchor-hot) {
+  background-color: rgb(157 78 221 / 0.3);
+}
+
+[data-theme='whitey'] ::highlight(sug-anchor) {
+  background-color: rgb(65 131 196 / 0.12);
+}
+
+[data-theme='whitey'] ::highlight(sug-anchor-hot) {
+  background-color: rgb(65 131 196 / 0.3);
+}
+
+/* Merge pulse: a freshly accepted suggestion flashes strong, steps down,
+ * then clears — registered transiently from flashMergedRange. */
+::highlight(sug-merged) {
+  background-color: rgb(157 78 221 / 0.38);
+}
+
+::highlight(sug-merged-soft) {
+  background-color: rgb(157 78 221 / 0.16);
+}
+
+[data-theme='whitey'] ::highlight(sug-merged) {
+  background-color: rgb(65 131 196 / 0.38);
+}
+
+[data-theme='whitey'] ::highlight(sug-merged-soft) {
+  background-color: rgb(65 131 196 / 0.16);
+}
+
+/* ------------------------------- Comments --------------------------------- */
+.comment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.comment-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  animation: card-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.comment-card.is-resolved {
+  opacity: 0.6;
+}
+
+.comment-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.comment-time {
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+}
+
+.comment-quote {
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  border-left: 2px solid var(--accent-soft);
+  padding-left: 0.5rem;
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.comment-quote--link {
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.comment-quote--link:hover {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.comment-body {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.comment-resolve {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+  font-weight: 550;
+  cursor: pointer;
+  padding: 0;
+  transition: color 120ms ease;
+}
+
+.comment-resolve:hover {
+  color: var(--accent);
+}
+
+.comment-resolved-toggle {
+  border: none;
+  background: none;
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+  cursor: pointer;
+  text-align: left;
+  padding: 0;
+}
+
+.comment-resolved-toggle:hover {
+  color: var(--ink-soft);
+}
+
+.comment-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--accent-soft);
+  border-radius: 10px;
+  padding: 0.65rem 0.8rem;
+  animation: card-in 180ms ease;
+}
+
+.comment-input {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 0.8rem;
+  padding: 0.45rem 0.6rem;
+  background: var(--surface);
+  color: var(--ink);
+  resize: vertical;
+}
+
+.comment-input:focus {
+  outline: none;
+  border-color: var(--ink-faint);
+  box-shadow: none;
+}
+
+.comment-composer-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* --------------------------- Selection toolbar ---------------------------- */
+.selection-toolbar {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  background: var(--ink);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
+  padding: 0.2rem 0.25rem;
+  animation: popover-in 140ms ease;
+}
+
+.selection-toolbar button {
+  border: none;
+  background: none;
+  color: var(--surface);
+  font-size: 0.74rem;
+  font-weight: 550;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 120ms ease;
+}
+
+.selection-toolbar button:hover {
+  background: rgb(255 255 255 / 0.14);
+}
+
+.selection-toolbar-sep {
+  width: 1px;
+  height: 0.9rem;
+  background: rgb(255 255 255 / 0.2);
+}
+
+/* ----------------------------- Provenance tints -------------------------- */
+/* Human text renders plain — the absence of decoration IS the design.       */
+.milkdown .prov--ai {
+  border-radius: 2px;
+  transition: background 240ms ease, border-color 240ms ease;
+}
+
+.milkdown .prov--ai.prov--pending {
+  background: var(--prov-pending-bg);
+  box-shadow: inset 0 -2px 0 var(--prov-pending-line);
+}
+
+.milkdown .prov--ai.prov--reviewed {
+  background: var(--prov-reviewed-bg);
+  box-shadow: inset 0 -2px 0 var(--prov-reviewed-line);
+}
+
+.milkdown .prov--ai.prov--endorsed {
+  background: transparent;
+  box-shadow: inset 0 -2px 0 var(--prov-endorsed-line);
+}
+
+/* ----------------------------- Provenance summary ------------------------ */
+.prov-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.prov-summary-sep {
+  color: var(--ink-faint);
+}
+
+.prov-summary-part--unreviewed {
+  color: var(--accent);
+}
+
+/* ------------------------------ Review popover --------------------------- */
+.review-popover {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.08);
+  padding: 0.3rem 0.6rem;
+  font-size: 0.72rem;
+  animation: popover-in 140ms ease;
+}
+
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+.review-popover-author {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.review-popover-states {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.review-popover-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.review-popover-dot.is-active {
+  background: var(--prov-pending-line);
+}
+
+.review-popover-state {
+  color: var(--ink-soft);
+}
+
+.review-popover-action {
+  border: none;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.72rem;
+  font-weight: 550;
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.review-popover-action:hover {
+  background: #000;
+}
+
+/* ----------------------------- Presence & agents -------------------------- */
+.presence-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.presence-stack {
+  display: inline-flex;
+  align-items: center;
+}
+
+.presence-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--surface-raised);
+  font-size: 0.66rem;
+  font-weight: 650;
+  color: #fff;
+  flex: none;
+  user-select: none;
+}
+
+.presence-stack .presence-avatar + .presence-avatar {
+  margin-left: -8px;
+}
+
+.presence-overflow {
+  background: var(--ink-faint);
+}
+
+.presence-avatar--agent {
+  background: var(--prov-pending-bg);
+  border: 2px dashed var(--prov-pending-line);
+  color: color-mix(in srgb, var(--prov-pending-line) 85%, var(--ink));
+  font-size: 0.78rem;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.presence-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.presence-agent-name {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.12rem 0.5rem;
+  border-radius: 99px;
+  background: var(--prov-pending-bg);
+  color: color-mix(in srgb, var(--prov-pending-line) 85%, var(--ink));
+  white-space: nowrap;
+}
+
+.presence-count {
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+/* Compact (mobile header) variant: 24px avatars. */
+.presence-bar--compact .presence-avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 0.58rem;
+}
+
+.presence-bar--compact .presence-stack .presence-avatar + .presence-avatar {
+  margin-left: -7px;
+}
+
+.share-button {
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-size: 0.74rem;
+  font-weight: 550;
+  border-radius: 7px;
+  padding: 0.28rem 0.7rem;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+  min-width: 4rem;
+}
+
+.share-button:hover {
+  border-color: var(--ink-faint);
+}
+
+/* Header chrome toggles (panel / focus). */
+.chrome-toggle {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 0.74rem;
+  font-weight: 550;
+  border-radius: 7px;
+  padding: 0.28rem 0.6rem;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.chrome-toggle:hover {
+  border-color: var(--ink-faint);
+  color: var(--ink-soft);
+}
+
+.chrome-toggle[aria-pressed='true'] {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+/* ------------------------------ Ownership chip ----------------------------- */
+.ownership-owner {
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ownership-confirm {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+
+.ownership-delete {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ownership-delete:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (max-width: 64rem) {
+  .ownership-owner {
+    max-width: 6rem;
+  }
+}
+
+/* ------------------------------ Agent cursor ------------------------------ */
+.agent-cursor {
+  position: relative;
+  display: inline;
+  border-left: 2px dashed var(--prov-pending-line);
+  margin-left: -1px;
+  pointer-events: none;
+}
+
+.agent-cursor-label {
+  position: absolute;
+  top: -1.6em;
+  left: -2px;
+  z-index: 10;
+  font-family: var(--font-ui);
+  font-size: 0.6rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  padding: 2.5px 6px;
+  border-radius: 99px;
+  background: var(--prov-pending-line);
+  color: #fff;
+  white-space: nowrap;
+  user-select: none;
+  box-shadow: 0 0 0 2px var(--surface), 0 2px 6px rgb(0 0 0 / 0.12);
+  animation: card-in 200ms ease;
+}
+
+/* ------------------------------ Activity feed ----------------------------- */
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.activity-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  animation: card-in 200ms ease;
+}
+
+.activity-glyph {
+  flex: none;
+  width: 1rem;
+  text-align: center;
+  color: var(--ink-faint);
+}
+
+.activity-row--agent .activity-glyph {
+  color: var(--prov-pending-line);
+}
+
+.activity-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-text strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.activity-detail {
+  color: var(--ink-faint);
+  font-style: normal;
+}
+
+.activity-time {
+  flex: none;
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+}
+
+.activity-expander {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+  font-weight: 550;
+  cursor: pointer;
+  padding: 0;
+  transition: color 120ms ease;
+}
+
+.activity-expander:hover {
+  color: var(--ink-soft);
+}
+
+/* ----------------------------- Collab cursors ---------------------------- */
+.ProseMirror-yjs-cursor {
+  position: relative;
+  border-left: 2px solid var(--user-color, var(--accent));
+  margin-left: -1px;
+  margin-right: -1px;
+  pointer-events: none;
+  word-break: normal;
+}
+
+.ProseMirror-yjs-cursor > div {
+  position: absolute;
+  top: -1.35em;
+  left: -2px;
+  font-family: var(--font-ui);
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px 4px 4px 0;
+  background: var(--user-color, var(--accent));
+  color: #fff;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.ProseMirror-yjs-selection {
+  background: color-mix(in srgb, var(--user-color, var(--accent)) 18%, transparent);
+}
+
+/* ----------------------------- Share popover ----------------------------- */
+
+.share-root {
+  position: relative;
+}
+
+.share-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  width: 21rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.1);
+  animation: popover-in 140ms ease;
+  overflow: hidden;
+}
+
+.share-section {
+  padding: 0.75rem 0.85rem;
+}
+
+.share-section--agent {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
+/* Reading theme lives in the share surface on every breakpoint —
+ * the header stays minimal. */
+.share-section--theme {
+  border-top: 1px solid var(--line);
+}
+
+.share-popover .theme-picker {
+  display: flex;
+  width: 100%;
+}
+
+.share-popover .theme-option {
+  flex: 1;
+  justify-content: center;
+  min-height: 2.25rem;
+  font-size: 0.78rem;
+}
+
+.share-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--ink);
+  margin-bottom: 0.25rem;
+}
+
+.share-section-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
+.share-section-hint code {
+  font-size: 0.66rem;
+}
+
+.share-copy-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.share-url {
+  flex: 1;
+  font-size: 0.64rem;
+  color: var(--ink-faint);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.3rem 0.45rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.share-copy {
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-size: 0.68rem;
+  font-weight: 550;
+  border-radius: 6px;
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 120ms ease;
+}
+
+.share-copy:hover {
+  border-color: var(--ink-faint);
+}
+
+.share-copy--wide {
+  width: 100%;
+}
+
+.share-agent-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.share-agent-dot.is-on {
+  background: #34a06b;
+  box-shadow: 0 0 0 3px rgb(52 160 107 / 0.18);
+}
+
+.share-agent-state {
+  font-weight: 450;
+  color: var(--ink-faint);
+}
+
+/* ------------------------------ Mobile dock ------------------------------ */
+.mobile-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.25rem;
+  padding: 0.35rem 0.6rem calc(0.35rem + env(safe-area-inset-bottom));
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--line);
+}
+
+.dock-item {
+  position: relative;
+  min-height: 44px;
+  border: none;
+  background: none;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 550;
+  color: var(--ink-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.dock-item.is-active {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.dock-count {
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.25rem;
+  border-radius: 99px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dock-busy {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--prov-pending-line);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+/* ------------------------------ Bottom sheets ----------------------------- */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgb(0 0 0 / 0.32);
+  display: flex;
+  align-items: flex-end;
+  animation: fade-in 160ms ease;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.sheet {
+  width: 100%;
+  max-height: 70dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-raised);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -8px 32px rgb(0 0 0 / 0.16);
+  padding-bottom: env(safe-area-inset-bottom);
+  animation: sheet-up 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+
+.sheet-handle {
+  flex: none;
+  width: 2.25rem;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--line);
+  margin: 0.5rem auto 0;
+}
+
+.sheet-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0.5rem 0.25rem 1rem;
+}
+
+.sheet-header h2 {
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}
+
+.sheet-close {
+  width: 2.75rem;
+  height: 2.75rem;
+  border: none;
+  background: none;
+  border-radius: 10px;
+  color: var(--ink-faint);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.sheet-close:hover {
+  color: var(--ink);
+}
+
+.sheet-body {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.25rem 1rem 1.25rem;
+}
+
+/* Panels reused inside sheets: the sheet header already names them. */
+.sheet-body .rail-heading {
+  display: none;
+}
+
+.sheet-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sheet-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.8rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sheet-card.is-focused {
+  border-color: var(--prov-pending-line);
+}
+
+/* Touch targets inside sheets: 44px minimum. */
+.sheet-body .btn-accept,
+.sheet-body .btn-reject {
+  min-height: 44px;
+  padding: 0 1.1rem;
+  font-size: 0.85rem;
+  flex: 1;
+}
+
+.sheet-body .ask-ai-input,
+.sheet-body .ask-ai-button {
+  min-height: 44px;
+  font-size: 0.9rem;
+}
+
+.sheet-body .comment-input {
+  min-height: 44px;
+  font-size: 0.9rem;
+}
+
+.sheet-body .comment-resolve,
+.sheet-body .comment-resolved-toggle {
+  padding: 0.7rem 0;
+}
+
+/* --------------------------------- Mobile --------------------------------- */
+@media (max-width: 64rem) {
+  /* No rail, no margin cards — their toggles go too. */
+  .chrome-toggle {
+    display: none;
+  }
+
+  /* Connection is implicit when live — only "connecting" warrants a dot,
+   * so the header doesn't carry a third orphaned visual system. */
+  .doc-status--live {
+    display: none;
+  }
+
+  /* The canvas spans the viewport; the copy yields the marker strip's width
+   * instead of forcing horizontal overflow. */
+  .doc-canvas {
+    width: 100%;
+  }
+
+  .doc-main {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    padding: 2rem 1.25rem calc(7rem + env(safe-area-inset-bottom));
+  }
+
+  .milkdown .ProseMirror {
+    font-size: 1rem;
+    line-height: 1.65;
+  }
+
+  /* Markers grow an invisible border into a 36×44 touch target; the visible
+   * dot stays 14px (background-clip keeps the border transparent). The right
+   * border is slimmer so the box ends flush with the viewport edge instead
+   * of forcing horizontal overflow. */
+  .margin-marker {
+    width: 14px;
+    height: 14px;
+    margin-left: -22px;
+    border: 15px solid transparent;
+    border-right-width: 7px;
+    background-clip: padding-box;
+    box-sizing: content-box;
+  }
+
+  /* Touch-sized floating chrome, clamped into the viewport. */
+  .selection-toolbar button {
+    padding: 0.75rem 0.9rem;
+    font-size: 0.85rem;
+  }
+
+  .review-popover {
+    flex-wrap: wrap;
+    max-width: calc(100vw - 16px);
+  }
+
+  .review-popover-action {
+    min-height: 40px;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 48rem) {
+  .doc-header {
+    padding: 0.45rem 0.75rem;
+    gap: 0.5rem;
+  }
+
+  /* Glanceable chrome only: counts live on the dock, labels in titles. */
+  .prov-summary,
+  .presence-count,
+  .presence-agent-name {
+    display: none;
+  }
+
+  .share-popover .theme-option {
+    min-height: 44px;
+  }
+
+  /* Share becomes a full-width sheet (portaled to body — the header's
+   * backdrop-filter would otherwise trap position:fixed inside it). */
+  .share-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 75;
+    background: rgb(0 0 0 / 0.32);
+    animation: fade-in 160ms ease;
+  }
+
+  .share-popover {
+    position: fixed;
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    z-index: 80;
+    border-radius: 16px 16px 0 0;
+    border-bottom: none;
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: sheet-up 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .share-copy {
+    min-height: 44px;
+    padding: 0.3rem 0.8rem;
+  }
+}
+
+/* ---------------------------- Feedback (Riffrec) ------------------------- */
+/* RiffrecRecorder puts our className on a wrapping <span> and inline-styles
+ * the <button> inside it (dark slab by default) — descendant !important
+ * rules are the supported way to reskin it. The wrapper itself stays
+ * unstyled: styling it as a pill drew empty outlines around the button. */
+
+.feedback-button {
+  display: inline-flex;
+  align-items: center;
+}
+
+.feedback-button > button {
+  border: 1px solid var(--line) !important;
+  background: var(--surface-raised) !important;
+  color: var(--ink-faint) !important;
+  font-family: var(--font-ui) !important;
+  font-size: 0.74rem !important;
+  font-weight: 550 !important;
+  border-radius: 7px !important;
+  padding: 0.28rem 0.7rem !important;
+  box-shadow: none !important;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.feedback-button > button:hover {
+  border-color: var(--ink-faint) !important;
+  color: var(--ink-soft) !important;
+}
+
+/* Recording — red dot + red text, still quiet (the [aria-live] indicator
+ * only exists while recording). */
+.feedback-button:has(> [aria-live]) > button {
+  background: var(--surface-raised) !important;
+  color: #b3261e !important;
+  border-color: color-mix(in srgb, #b3261e 45%, var(--line)) !important;
+}
+
+.feedback-button > [aria-live] {
+  margin-left: 0.45rem !important;
+  gap: 0.3rem !important;
+  font-size: 0.7rem !important;
+  font-weight: 550 !important;
+  color: #b3261e !important;
+}
+
+/* Consent dialog, re-dressed to the app's idiom. */
+.feedback-button [role='dialog'] {
+  background: var(--surface-raised) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 12px 48px rgb(0 0 0 / 0.16) !important;
+  font-family: var(--font-ui) !important;
+  padding: 1.4rem 1.5rem !important;
+}
+
+.feedback-button [role='dialog'] h2 {
+  font-size: 1.05rem !important;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.feedback-button [role='dialog'] button {
+  border-radius: 8px !important;
+  font-family: var(--font-ui) !important;
+  font-size: 0.8rem !important;
+  font-weight: 550 !important;
+  padding: 0.45rem 0.95rem !important;
+}
+
+.feedback-button [role='dialog'] > div:last-of-type > button:first-child {
+  background: var(--surface-raised) !important;
+  color: var(--ink-soft) !important;
+  border: 1px solid var(--line) !important;
+}
+
+.feedback-button [role='dialog'] > div:last-of-type > button:last-child {
+  background: var(--ink) !important;
+  color: var(--surface) !important;
+  border: 1px solid var(--ink) !important;
+}
+
+/* The header's backdrop-filter is a containing block for position:fixed —
+ * it would trap the consent overlay inside a 44px strip. Release it while
+ * the dialog is open (everything is dimmed behind the overlay anyway). */
+.doc-header:has(.feedback-button [role='dialog']) {
+  backdrop-filter: none;
+  background: var(--surface);
+}
+
+.landing-corner {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+}
+
+.landing {
+  position: relative;
+}
+
+@media (max-width: 30rem) {
+  .doc-header .feedback-button > button {
+    padding: 0.28rem 0.5rem !important;
+  }
+}
