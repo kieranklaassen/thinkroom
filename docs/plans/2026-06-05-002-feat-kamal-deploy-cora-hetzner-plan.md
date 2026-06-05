@@ -3,6 +3,7 @@ title: "feat: Deploy Pruf with Kamal 2 to cora-hetzner"
 type: feat
 status: active
 date: 2026-06-05
+deepened: 2026-06-05
 ---
 
 # feat: Deploy Pruf with Kamal 2 to cora-hetzner
@@ -43,7 +44,7 @@ Pruf currently runs only in development. The repo has a stock Rails 8 Dockerfile
 ## Key Technical Decisions
 
 - **Mirror diskman, simplify where Pruf needs less.** Diskman's `config/deploy.yml` is the schema-current reference (Kamal 2.11.0). Pruf drops what it doesn't have: no Solid Queue (`SOLID_QUEUE_IN_PUMA`), no Valkey accessory, no `llm_jobs` role — Pruf has zero background jobs; Gemini calls are synchronous in-request.
-- **Solid Cable over Redis for ActionCable.** `config/cable.yml` production currently says `adapter: redis` but the `redis` gem is commented out — production cannot boot as-is. Solid Cable matches diskman, keeps the zero-accessory SQLite story (no Valkey needed for Pruf), and survives any future `WEB_CONCURRENCY` bump because broadcasts go through the shared cable database. `polling_interval: 0.1.seconds` (diskman's value) keeps collab latency acceptable.
+- **Solid Cable over Redis for ActionCable.** `config/cable.yml` production currently says `adapter: redis` but the `redis` gem is commented out — production cannot boot as-is. Solid Cable matches diskman, keeps the zero-accessory SQLite story (no Valkey needed for Pruf), and its *broadcasts* survive any future `WEB_CONCURRENCY` bump because they go through the shared cable database. (Scope of that claim: `app/services/yjs_persistence.rb` serializes merges with an in-process per-document lock, so a future multi-worker bump still requires revisiting cross-process merge safety first — the cable adapter is not the only single-process assumption.) `polling_interval: 0.1.seconds` (diskman's value) keeps collab latency acceptable.
 - **Regenerate Rails credentials.** `config/credentials.yml.enc` exists but `config/master.key` is missing — the existing credentials are undecryptable. No app code reads custom credentials (only `secret_key_base` matters), so regenerating is safe and unblocks `RAILS_MASTER_KEY`.
 - **Thruster in front of Puma.** Mirrors diskman (`EXPOSE 80`, `CMD ["./bin/thrust", "./bin/rails", "server"]`); adds X-Sendfile, asset caching/compression. Pruf's stock `bin/docker-entrypoint` checks the last two argv entries for `./bin/rails server`, which still matches under Thruster, so `db:prepare` keeps running on boot.
 - **`WEB_CONCURRENCY: "1"`** — single Puma worker avoids multi-process SQLite write contention, mirroring diskman.
@@ -112,9 +113,7 @@ flowchart TB
   G1 -->|no| H1[User runs: ssh-add ~/.ssh/id_ed25519]
   H1 --> G1
   G1 -->|yes| S1[kamal setup<br/>builds on server, pushes to ghcr,<br/>boots container, reuses existing proxy]
-  S1 --> G2{DNS record created?<br/>dig pruf.kieranklaassen.com = 5.78.191.151}
-  G2 -->|no| H2[User adds A record in Cloudflare<br/>grey cloud / DNS only]
-  H2 --> G2
+  S1 --> G2{DNS resolves?<br/>dig pruf.kieranklaassen.com = 5.78.191.151<br/>already verified green 2026-06-05}
   G2 -->|yes| S2[First HTTPS request triggers<br/>on-demand LE cert issuance]
   S2 --> S3[Smoke tests: /up, landing page,<br/>demo doc, websocket sync]
 ```
@@ -151,11 +150,11 @@ Deploy order note: `kamal setup` does not require DNS (it connects over SSH via 
 - **Goal:** Production boots with SQLite primary + cable databases and Solid Cable broadcasting.
 - **Requirements:** R4, R5.
 - **Dependencies:** U2 (solid_cable gem).
-- **Files:** `config/database.yml`, `config/cable.yml`, `db/cable_schema.rb` (new), `config/environments/production.rb`.
+- **Files:** `config/database.yml`, `config/cable.yml`, `db/cable_schema.rb` (new), `db/cable_migrate/.keep` (new), `config/environments/production.rb`.
 - **Approach:**
   - `config/database.yml` production becomes multi-db: `primary` at `storage/production.sqlite3`, `cable` at `storage/production_cable.sqlite3` with `migrations_paths: db/cable_migrate` — mirroring diskman's production block shape but with flat `storage/` paths (see KTDs). Development and test blocks untouched.
   - `config/cable.yml` production switches from `redis` to `solid_cable` with `connects_to: database: writing: cable`, `polling_interval: 0.1.seconds`, `message_retention: 1.day` — exactly diskman's production block. Development (`async`) and test (`test`) untouched.
-  - `db/cable_schema.rb` comes from the solid_cable installer (or copied from the gem's canonical schema); `db:prepare` in `bin/docker-entrypoint` loads it for the cable database on first boot.
+  - `db/cable_schema.rb` comes from the solid_cable installer. **Ordering matters:** run the installer *first*, then apply diskman's production block to `config/cable.yml` — the installer template-writes `cable.yml` with `force: true` and would silently overwrite hand-made edits if run second. Also create `db/cable_migrate/` (empty, with `.keep`) so the declared `migrations_paths` exists for any future `db:migrate`. `db:prepare` in `bin/docker-entrypoint` loads the schema for the cable database on first boot.
   - `config/environments/production.rb`: uncomment the `/up` health-check SSL-redirect exclusion (line 34) so kamal-proxy health checks over plain HTTP don't get 301s — diskman has this exact line active.
 - **Patterns to follow:** `~/diskman/config/database.yml` (production multi-db), `~/diskman/config/cable.yml` (production solid_cable), `~/diskman/config/environments/production.rb` line 34 (`ssl_options` exclusion).
 - **Test scenarios:** Test expectation: none for production blocks (unreachable in test env) — guarded instead by: `bin/rails test` stays green (test config untouched), and `RAILS_ENV=production SECRET_KEY_BASE_DUMMY=1 bin/rails runner 'ActiveRecord::Base.configurations.configs_for(env_name: "production").map(&:name)'` lists `primary` and `cable`.
@@ -171,7 +170,7 @@ Deploy order note: `kamal setup` does not require DNS (it connects over SSH via 
   - Build stage: install Node 22 via NodeSource alongside the existing build packages; `COPY package.json package-lock.json ./` + `npm ci` after `bundle install` and before `COPY . .` (layer-cache friendly). `assets:precompile` (already present with `SECRET_KEY_BASE_DUMMY=1`) then succeeds — vite_rails invokes `vite build`.
   - Final stage: `EXPOSE 80`, `CMD ["./bin/thrust", "./bin/rails", "server"]` replacing `EXPOSE 3000` / plain `rails server`. The existing entrypoint's `./bin/rails server` argv detection still matches, so `db:prepare` runs on boot.
   - Fix the stale image-name comments (`proof` → `pruf`).
-  - Skip diskman's `COPY vendor/* ./vendor/` line — Pruf's `vendor/` is empty.
+  - **Remove the existing `COPY vendor/* ./vendor/` line** (already present in Pruf's Dockerfile, line 39) — Pruf's `vendor/` contains only a `.keep` file, and with `# check=error=true` a glob that matches nothing fails the build. Diskman keeps the line only because its `vendor/` has real content.
 - **Patterns to follow:** `~/diskman/Dockerfile` (Node stage lines ~35-43, npm ci lines ~56-58, Thruster CMD tail).
 - **Test scenarios:** Test expectation: none — Dockerfile only; proven by the remote image build in U7 (build failure = loud failure).
 - **Verification:** `kamal build` (or the build phase of `kamal setup`) completes on the remote builder; the built image's vite manifest exists (asset pages load in U7 smoke tests).
@@ -180,7 +179,7 @@ Deploy order note: `kamal setup` does not require DNS (it connects over SSH via 
 
 - **Goal:** Complete Kamal scaffolding so `kamal setup` can run.
 - **Requirements:** R1, R2, R3, R5, R6.
-- **Dependencies:** U2 (binstub), U6 (registry image path assumes `kieranklaassen/pruf` exists as the gh-token-owned namespace — package is created on first push, so only the gh login matters; no hard ordering).
+- **Dependencies:** U1 (`.kamal/secrets` reads `config/master.key`, which doesn't exist until U1 runs), U2 (binstub), U6 (registry image path assumes `kieranklaassen/pruf` exists as the gh-token-owned namespace — package is created on first push, so only the gh login matters; no hard ordering).
 - **Files:** `config/deploy.yml` (new), `.kamal/secrets` (new).
 - **Approach:** Start from diskman's `config/deploy.yml` and adapt:
   - `service: pruf`, `image: kieranklaassen/pruf`, `servers.web: [cora-hetzner]` (resolves via `~/.ssh/config` + Tailscale, as diskman does).
@@ -206,22 +205,29 @@ Deploy order note: `kamal setup` does not require DNS (it connects over SSH via 
 ### U7. First deploy, DNS, and end-to-end verification
 
 - **Goal:** Pruf live at `https://pruf.kieranklaassen.com` with realtime collab working; diskman untouched.
-- **Requirements:** R1-R7.
+- **Requirements:** R1-R8 (R8 is established by U6; U7's deploy exercises it end-to-end via the registry flow).
 - **Dependencies:** U1-U6.
 - **Files:** none (execution + verification).
 - **Approach:**
+  - **DNS: done.** The Cloudflare A record exists — `pruf` → `5.78.191.151`, DNS-only — and resolves from 1.1.1.1 and 8.8.8.8 (verified 2026-06-05). The LE rate-limit concern (5 failed validations/hostname/hour) is moot as long as the record stays correct. (Optional later: flip to Proxied with SSL/TLS mode "Full (strict)" once the origin cert exists.)
   - **Operator prerequisite (user action):** unlock the SSH key — `ssh-add ~/.ssh/id_ed25519` (the key has a passphrase; the agent socket at `~/.ssh/agent.sock` was restarted and is empty). Every Kamal command needs it.
+  - **Gate: before `kamal setup`** (all must pass; abort on any failure):
+    - `kamal config` validates the deploy.yml schema; `kamal secrets print` renders all `.kamal/secrets` interpolations and each of `RAILS_MASTER_KEY`, `KAMAL_REGISTRY_PASSWORD`, `GEMINI_API_KEY` is non-empty. (`kamal config` alone never evaluates the secrets file — secrets resolve lazily at deploy time, so it cannot catch an empty key.)
+    - Config alignment landed: `config/cable.yml` production is `solid_cable` and `db/cable_schema.rb` exists; `config/database.yml` production defines `primary` + `cable` under `storage/`; the `/up` SSL-redirect exclusion in `config/environments/production.rb` is actually uncommented (a still-commented line means kamal-proxy health checks get 301s and the container never goes live); the container listens where the proxy targets (Thruster: port 80 = Kamal's default `app_port`).
+    - Disk headroom on cora-hetzner recorded (`df`, `docker system df`); abort below ~10 GB free — the shared builder and new image layers land on a host diskman depends on.
+    - diskman baseline captured: HTTP status from `https://diskman.kieranklaassen.com`, container uptime, proxy route list — re-checked post-deploy so "diskman unaffected" is a verification, not an assertion.
   - Run `kamal setup` from the repo root: creates the `kamal` docker network if needed, reuses the running proxy, builds remotely (amd64) on cora-hetzner, pushes to ghcr.io, boots the container with the `pruf_storage` volume. First boot runs `db:prepare` → creates both SQLite DBs, loads schemas, seeds the demo document at `/d/demo`.
-  - **Cloudflare DNS (user action, exact values):** zone `kieranklaassen.com` → add record — Type `A`, Name `pruf`, IPv4 `5.78.191.151`, Proxy status **DNS only (grey cloud)**, TTL auto. (Optional later: flip to Proxied with SSL/TLS mode "Full (strict)" once the origin cert exists.)
-  - Avoid requesting `https://pruf.kieranklaassen.com` repeatedly before DNS resolves (LE rate limit: 5 failed validations/hostname/hour).
 - **Test scenarios:** (deployment smoke tests, not unit tests)
-  - `dig +short pruf.kieranklaassen.com` returns `5.78.191.151`.
+  - `dig +short pruf.kieranklaassen.com` returns `5.78.191.151` (already passing).
   - `curl -s https://pruf.kieranklaassen.com/up` returns 200 with a valid certificate (no `-k` needed).
-  - Landing page and `/d/demo` render (Inertia page loads, Vite assets resolve — proves the asset build and `asset_path` bridging).
-  - Two browser sessions on the same doc see each other's edits and presence within ~1s (proves ActionCable over wss + Solid Cable polling).
+  - Landing page and `/d/demo` render (Inertia page loads, Vite assets resolve); one hashed asset URL from the rendered page returns 200; logs show no Vite manifest errors.
+  - First-boot logs show `db:prepare` ran and the seed printed its demo-document line (proves the entrypoint's `./bin/rails server` argv guard still matches under Thruster — if it silently stopped matching, boot would crash-loop on a missing DB).
+  - Both DB files plus their `-wal`/`-shm` siblings exist inside the named volume (not the container's ephemeral FS) — the direct check that `database:` paths landed under `/rails/storage`.
+  - Two browser sessions on the same doc see each other's edits and presence within ~1s; during the test, the `solid_cable_messages` row count in `production_cable.sqlite3` increases (separates "cable transport broken" from "Yjs client bug").
+  - During concurrent edits, logs are clean of `SQLite3::BusyException` (single worker + WAL should make this zero; any occurrence is a config smell).
   - An agent-API request (e.g., suggestion creation via `/api/docs/...` with `X-Agent-Name`) appears in the open browser session in realtime.
   - `kamal app logs` shows no recurring errors; a second `kamal deploy` (no-op change) keeps data: the demo doc and any created content survive (proves volume persistence, R5).
-  - `https://diskman.kieranklaassen.com` still responds (R3).
+  - `https://diskman.kieranklaassen.com` still responds and matches the pre-deploy baseline (R3).
 - **Verification:** All smoke tests above pass; `kamal proxy logs` shows the new host registered without proxy restart.
 
 ---
@@ -242,11 +248,28 @@ Deploy order note: `kamal setup` does not require DNS (it connects over SSH via 
 
 ## Risks & Dependencies
 
+### Rollback and failure containment
+
+For this **first** deploy, the rollback story is **teardown, not rollback**: `kamal rollback` requires a prior version, and kamal-proxy only routes traffic after `/up` passes — so a failed `kamal setup` leaves nothing live for Pruf and diskman untouched. Containment by stage:
+
+- **Build fails** — nothing reaches the host beyond builder cache; fix and rebuild.
+- **Container won't boot / health check fails** — nothing goes live; read `kamal app logs`, fix, redeploy. Clean-slate reset (remove the app and the `pruf_storage` volume) is acceptable **only until the first real user document exists** — the seed restores `/d/demo` automatically. After that, this option is retired and a DB-file backup must precede any migrating deploy.
+- **Cert won't issue** — app stays reachable internally; fix DNS, ACME retries on the next handshake.
+- **Realtime broken but pages render** — fix-forward (no users yet); do not tear down a working HTTP deployment for a cable bug.
+- **Forbidden on this host:** `kamal remove` (full) and `kamal proxy reboot`/`proxy remove` — they take the **shared** proxy down with diskman behind it. Teardown is `kamal app remove` only. Known cosmetic state: after `kamal app remove`, the proxy's route for `pruf.kieranklaassen.com` lingers (serves errors for that host until removed inside the proxy container or overwritten by the next deploy).
+- **From deploy #2 onward**, "failed deploy changes nothing" becomes false: the entrypoint runs `db:prepare` **before** the health check, so a v2 container that migrates and then fails health checks leaves v1 running against already-migrated SQLite files. Before any future deploy containing a migration, snapshot the DB files with a proper online backup (`.backup`, not a raw `cp` of a live WAL database).
+- **Seed is create-only** (`find_or_create_by!`): editing `db/seeds.rb` and redeploying will not update the existing demo document — don't read that as a broken deploy.
+
+### Standing risks
+
 - **Unrelated uncommitted work in the tree.** The working tree on `feat/proof-clone` currently holds in-progress frontend changes (activity grouping, CSS polish across `app/frontend/`) that are not part of this plan. Implementation must stage only deployment-related files; do not sweep these into deployment commits.
 - **Public exposure without auth.** Deploying makes the unauthenticated app and header-trusting agent API internet-reachable. Accepted demo posture (see Assumptions); revisit before sharing the URL widely. Cloudflare Access is a cheap later mitigation.
-- **Let's Encrypt rate limits.** 5 failed validations/hostname/hour. Mitigation: create the DNS record promptly, don't poll HTTPS while DNS is wrong; cert issuance self-heals on the next handshake once DNS resolves.
+- **Gemini key abuse via the open agent API.** Any visitor can trigger Gemini calls (suggestion endpoints are unauthenticated), so the key is quota-exhaustible by strangers. Mitigation: set a low requests-per-day cap on the key in Google AI Studio before sharing the URL. Rotation runbook: update the exported `GEMINI_API_KEY` in the shell, then `kamal deploy` (secrets re-inject on boot). The canned-suggestion fallback keeps the product usable if the key is pulled.
+- **Registry token is broader than it needs to be.** `KAMAL_REGISTRY_PASSWORD=$(gh auth token)` injects a token carrying `repo` + `workflow` scopes (not just `write:packages`) — same accepted posture as diskman today. Optional hardening, deliberately deferred: mint a `write:packages`-only PAT, export as `GHCR_TOKEN`, and point `.kamal/secrets` at it for both apps in one pass.
+- **Let's Encrypt rate limits.** 5 failed validations/hostname/hour. Largely defused: the DNS record already exists and resolves correctly (verified 2026-06-05). Residual care: don't change/proxy the record before the first cert issues; issuance self-heals on the next handshake.
 - **Shared kamal-proxy blast radius.** Never run `kamal proxy reboot` during this work — it briefly downs diskman too. Pinning kamal 2.11.0 (= diskman) means the version check passes and no reboot is ever demanded.
 - **Shared remote builder.** Both apps build via the same buildx builder on cora-hetzner (named per remote URL). Don't build diskman and pruf concurrently; `kamal build remove` from either app removes the shared builder (recreated on next build).
+- **Third tenant: the box is also Cora's CI runner.** cora-hetzner doubles as a GitHub Actions self-hosted runner for Cora CI, so remote builds compete with CI jobs for CPU/RAM/disk and the U7 disk-headroom reading can drift between gate and build. Prefer deploying when CI is quiet; re-check `df` right before `kamal setup`.
 - **Deploy-time websocket blips.** kamal-proxy cancels hijacked (websocket) connections immediately on container replacement; ActionCable clients auto-reconnect and Yjs re-syncs on subscribe. Expected and acceptable; worth knowing when reading logs.
 - **SSH key passphrase.** All Kamal commands and the remote builder require the unlocked agent (`ssh-add ~/.ssh/id_ed25519`). This is a hard prerequisite for U7 that only the user can perform.
 - **Tailscale dependency.** `cora-hetzner` resolves via Tailscale; deploys require Tailscale up on the Mac. (DNS for the public record uses the public IP `5.78.191.151`, not the tailnet address.)
