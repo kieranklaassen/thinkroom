@@ -4,19 +4,19 @@ class SuggestionsController < InertiaController
   def accept
     @suggestion.accept!(by: params[:by].presence || "human")
     log_and_broadcast("accepted_suggestion", "accepted “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
-    redirect_back fallback_location: document_page_path(@suggestion.document.slug)
+    redirect_back fallback_location: document_page_path(@suggestion.document.slug), status: :see_other
   rescue ActiveRecord::RecordInvalid
     redirect_back fallback_location: document_page_path(@suggestion.document.slug),
-                  inertia: { errors: { suggestion: "is no longer pending" } }
+                  inertia: { errors: { suggestion: "is no longer pending" }, status: :see_other }
   end
 
   def reject
     @suggestion.reject!(by: params[:by].presence || "human")
     log_and_broadcast("rejected_suggestion", "rejected “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
-    redirect_back fallback_location: document_page_path(@suggestion.document.slug)
+    redirect_back fallback_location: document_page_path(@suggestion.document.slug), status: :see_other
   rescue ActiveRecord::RecordInvalid
     redirect_back fallback_location: document_page_path(@suggestion.document.slug),
-                  inertia: { errors: { suggestion: "is no longer pending" } }
+                  inertia: { errors: { suggestion: "is no longer pending" }, status: :see_other }
   end
 
   private
