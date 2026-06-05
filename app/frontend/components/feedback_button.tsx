@@ -13,7 +13,7 @@ export function FeedbackButton() {
       consentDescription="Records this tab’s screen, your voice, clicks, and console/network signals into a zip that downloads to your machine. Nothing is uploaded."
       consentLabel="I understand what's being recorded"
       onSessionComplete={(result) =>
-        console.info('riffrec session saved:', result.filesPresent.join(', '))
+        console.info('riffrec session saved:', result?.filesPresent.join(', ') ?? '(no files)')
       }
     />
   )
