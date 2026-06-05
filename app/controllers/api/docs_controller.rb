@@ -18,6 +18,7 @@ module Api
         slug: doc.slug,
         title: doc.title,
         share_url: document_page_url(doc.slug),
+        note: "This document is unclaimed. The first person to open the share URL in a browser can claim it — claiming grants them ownership (including delete).",
         api: AgentGuide.endpoints(doc, request.base_url)
       }, status: :created
     end

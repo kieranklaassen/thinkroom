@@ -25,8 +25,26 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal "created_document", doc.activities.last.action
     assert_equal "Scout", doc.activities.last.actor_name
 
+    # Agent docs are born unclaimed; the response says so.
+    assert_not doc.claimed?
+    assert_includes body["note"], "claim"
+
     get "/d/#{body['slug']}"
     assert_response :success
+  end
+
+  test "state read exposes ownership without leaking the token" do
+    get "/api/docs/#{@document.slug}", headers: AGENT
+    body = response.parsed_body
+    assert_equal({ "claimed" => false, "owner_name" => nil }, body["ownership"])
+
+    @document.claim!(token: "tok-owner", name: "Quiet Falcon")
+
+    get "/api/docs/#{@document.slug}", headers: AGENT
+    body = response.parsed_body
+    assert_equal({ "claimed" => true, "owner_name" => "Quiet Falcon" }, body["ownership"])
+    refute_includes response.body, "tok-owner"
+    refute_includes response.body, "owner_token"
   end
 
   test "state read returns content, provenance, suggestions, comments" do
