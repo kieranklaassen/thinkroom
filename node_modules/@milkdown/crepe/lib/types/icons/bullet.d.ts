@@ -1,0 +1,2 @@
+export declare const bulletIcon = "\n  <svg\n    xmlns=\"http://www.w3.org/2000/svg\"\n    width=\"24\"\n    height=\"24\"\n    viewBox=\"0 0 24 24\"\n  >\n    <g clip-path=\"url(#clip0_952_6527)\">\n      <circle cx=\"12\" cy=\"12\" r=\"3\" />\n    </g>\n    <defs>\n      <clipPath id=\"clip0_952_6527\">\n        <rect width=\"24\" height=\"24\" />\n      </clipPath>\n    </defs>\n  </svg>\n";
+//# sourceMappingURL=bullet.d.ts.map

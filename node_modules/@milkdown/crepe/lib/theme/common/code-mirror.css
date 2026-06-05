@@ -1,0 +1,347 @@
+.milkdown .milkdown-code-block {
+    display: block;
+    position: relative;
+    padding: 8px 20px 20px;
+    background: var(--crepe-color-surface);
+    margin: 4px 0;
+  }
+
+    .milkdown .milkdown-code-block .language-picker {
+      padding-top: 10px;
+      width: -moz-max-content;
+      width: max-content;
+      position: absolute;
+      z-index: 999;
+    }
+
+    .milkdown .milkdown-code-block .hidden {
+      display: none !important;
+    }
+
+    .milkdown .milkdown-code-block.selected {
+      outline: 1px solid var(--crepe-color-primary);
+    }
+
+    .milkdown .milkdown-code-block .milkdown-code-block-placeholder {
+      margin: 0;
+      padding: 4px 0;
+      font-family: var(--crepe-font-code, monospace);
+      font-size: 14px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .milkdown .milkdown-code-block .milkdown-code-block-placeholder code {
+        font-family: inherit;
+      }
+
+    .milkdown .milkdown-code-block .cm-editor {
+      outline: none !important;
+      background: var(--crepe-color-surface);
+    }
+
+    .milkdown .milkdown-code-block .cm-gutters {
+      border-right: none;
+      background: var(--crepe-color-surface);
+    }
+
+    .milkdown .milkdown-code-block .cm-panel {
+      font-family: var(--crepe-font-default);
+      background: var(--crepe-color-surface);
+      color: var(--crepe-color-on-surface);
+    }
+
+    .milkdown .milkdown-code-block .cm-panel input {
+        caret-color: var(--crepe-color-outline);
+        border-radius: 4px;
+        background: var(--crepe-color-surface-low);
+      }
+
+    .milkdown .milkdown-code-block .cm-panel > button {
+        text-transform: capitalize;
+        background: var(--crepe-color-surface-low);
+        color: var(--crepe-color-on-surface-variant);
+        border: 1px solid var(--crepe-color-outline);
+        font-weight: 600;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+
+    .milkdown .milkdown-code-block .cm-panel > button:hover {
+          background: var(--crepe-color-hover);
+        }
+
+    .milkdown .milkdown-code-block .cm-panel > label {
+        display: inline-flex;
+        align-items: center;
+        text-transform: capitalize;
+      }
+
+    .milkdown .milkdown-code-block .cm-panel > label input[type='checkbox'] {
+          border-radius: 4px;
+          cursor: pointer;
+          -moz-appearance: none;
+               appearance: none;
+          -webkit-appearance: none;
+          background: var(--crepe-color-surface-low);
+          width: 1.15em;
+          height: 1.15em;
+          border: 1px solid var(--crepe-color-outline);
+          display: grid;
+          place-content: center;
+        }
+
+    .milkdown .milkdown-code-block .cm-panel > label input[type='checkbox']::before {
+            content: '';
+            transform-origin: bottom left;
+            width: 0.65em;
+            height: 0.65em;
+            transform: scale(0);
+            transition: 120ms transform ease-in-out;
+            box-shadow: inset 1em 1em var(--crepe-color-outline);
+            clip-path: polygon(
+              14% 44%,
+              0 65%,
+              50% 100%,
+              100% 16%,
+              80% 0%,
+              43% 62%
+            );
+          }
+
+    .milkdown .milkdown-code-block .cm-panel > label input[type='checkbox']:checked::before {
+            transform: scale(1);
+          }
+
+    .milkdown .milkdown-code-block .tools {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .milkdown .milkdown-code-block .tools input {
+        caret-color: var(--crepe-color-outline);
+      }
+
+    .milkdown .milkdown-code-block .tools .tools-button-group {
+        display: flex;
+        gap: 2px;
+      }
+
+    .milkdown .milkdown-code-block .tools .tools-button-group button {
+          background: var(--crepe-color-secondary);
+          color: var(--crepe-color-on-surface-variant);
+          padding: 4px 10px;
+          opacity: 0;
+          cursor: pointer;
+          border-radius: 4px;
+          font-size: 12px;
+          line-height: 16px;
+          font-weight: 600;
+          font-family: var(--crepe-font-default);
+          transition: opacity 0.2s ease-in-out;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 4px;
+        }
+
+    .milkdown .milkdown-code-block .tools .tools-button-group button svg {
+            width: 14px;
+            height: 14px;
+            fill: var(--crepe-color-on-surface-variant);
+          }
+
+    .milkdown .milkdown-code-block .tools .tools-button-group button:first-child {
+          border-top-left-radius: 100px;
+          border-bottom-left-radius: 100px;
+        }
+
+    .milkdown .milkdown-code-block .tools .tools-button-group button:last-child {
+          border-top-right-radius: 100px;
+          border-bottom-right-radius: 100px;
+        }
+
+    .milkdown .milkdown-code-block .tools .language-button {
+        display: flex;
+        align-items: center;
+        font-family: var(--crepe-font-default);
+        gap: 6px;
+        padding: 2px 4px 2px 8px;
+        background: var(--crepe-color-surface-low);
+        color: var(--crepe-color-on-surface-variant);
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 16px;
+        margin-bottom: 8px;
+        opacity: 0;
+        cursor: pointer;
+        transition: opacity 0.2s ease-in-out;
+      }
+
+    .milkdown .milkdown-code-block .tools .language-button:hover {
+          background: var(--crepe-color-hover);
+        }
+
+    .milkdown .milkdown-code-block .tools .language-button .expand-icon {
+          transition: transform 0.2s ease-in-out;
+          width: 18px;
+          height: 18px;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+        }
+
+    .milkdown .milkdown-code-block .tools .language-button .expand-icon svg {
+          width: 14px;
+          height: 14px;
+          color: var(--crepe-color-outline);
+        }
+
+    .milkdown .milkdown-code-block .tools .language-button[data-expanded='true'] .expand-icon {
+          transform: rotate(180deg);
+        }
+
+    .milkdown .milkdown-code-block .tools .language-button .expand-icon svg:focus,
+        .milkdown .milkdown-code-block .tools .language-button .expand-icon:focus-visible {
+          outline: none;
+        }
+
+    .milkdown .milkdown-code-block:hover .language-button {
+      opacity: 1;
+    }
+
+    .milkdown .milkdown-code-block:hover .tools-button-group > button {
+      opacity: 1;
+    }
+
+    .milkdown .milkdown-code-block .list-wrapper {
+      background: var(--crepe-color-surface-low);
+      border-radius: 12px;
+      box-shadow: var(--crepe-shadow-1);
+      width: 240px;
+      padding-top: 12px;
+    }
+
+    .milkdown .milkdown-code-block .language-list {
+      height: 410px;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      margin: 0;
+      padding: 0;
+    }
+
+    .milkdown .milkdown-code-block .language-list-item {
+      cursor: pointer;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 22px;
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 20px;
+    }
+
+    .milkdown .milkdown-code-block .language-list-item:hover {
+        background: var(--crepe-color-hover);
+      }
+
+    .milkdown .milkdown-code-block .language-list-item:focus-visible {
+        outline: none;
+        background: var(--crepe-color-hover);
+      }
+
+    .milkdown .milkdown-code-block .language-list-item .leading,
+      .milkdown .milkdown-code-block .language-list-item .leading svg {
+        width: 24px;
+        height: 24px;
+      }
+
+    .milkdown .milkdown-code-block .language-list-item.no-result {
+        cursor: default;
+        opacity: 0.6;
+      }
+
+    .milkdown .milkdown-code-block .language-list-item.no-result:hover {
+          background: transparent;
+        }
+
+    .milkdown .milkdown-code-block .search-box {
+      display: flex;
+      align-items: center;
+      margin: 0 12px 8px;
+      background: transparent;
+      border-radius: 4px;
+      outline: 1px solid var(--crepe-color-primary);
+      gap: 8px;
+      padding: 6px 10px;
+    }
+
+    .milkdown .milkdown-code-block .search-box:has(input:focus) {
+        outline: 2px solid var(--crepe-color-primary);
+      }
+
+    .milkdown .milkdown-code-block .search-box .search-input {
+        width: 100%;
+        color: var(--crepe-color-on-surface);
+      }
+
+    .milkdown .milkdown-code-block .search-box .search-icon {
+        display: none;
+      }
+
+    .milkdown .milkdown-code-block .search-box .clear-icon {
+        cursor: pointer;
+        width: 20px;
+        height: 20px;
+      }
+
+    .milkdown .milkdown-code-block .search-box .clear-icon svg {
+          width: 20px;
+          height: 20px;
+          color: var(--crepe-color-primary);
+          fill: var(--crepe-color-primary);
+        }
+
+    .milkdown .milkdown-code-block .search-box .clear-icon:hover {
+          background: var(--crepe-color-hover);
+        }
+
+    .milkdown .milkdown-code-block .search-box input {
+        font-family: var(--crepe-font-default);
+        font-size: 14px;
+        line-height: 20px;
+        background: transparent;
+      }
+
+    .milkdown .milkdown-code-block .search-box input:focus {
+        outline: none;
+      }
+
+    .milkdown .milkdown-code-block .preview-panel .preview-divider {
+        height: 1px;
+        opacity: 0.2;
+        background: var(--crepe-color-outline);
+        margin: 6px 0;
+      }
+
+    .milkdown .milkdown-code-block .preview-panel .preview-label {
+        margin: 6px 0;
+        font-size: 12px;
+        color: color-mix(
+          in srgb,
+          var(--crepe-color-on-surface),
+          transparent 40%
+        );
+        font-weight: 600;
+        text-transform: uppercase;
+        font-family: var(--crepe-font-default);
+      }
+
+    .milkdown .milkdown-code-block .preview-panel .preview {
+        text-align: center;
+        overflow-x: auto;
+      }

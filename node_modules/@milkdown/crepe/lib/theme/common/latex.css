@@ -1,0 +1,44 @@
+@import 'katex/dist/katex.min.css';
+
+.milkdown span[data-type='math_inline'] {
+    padding: 0 4px;
+    display: inline-block;
+    vertical-align: bottom;
+    color: var(--crepe-color-primary);
+  }
+
+.milkdown .milkdown-latex-inline-edit[data-show='false'] {
+      display: none;
+    }
+
+.milkdown .milkdown-latex-inline-edit{
+    position: absolute;
+    background: var(--crepe-color-surface);
+    box-shadow: var(--crepe-shadow-1);
+    border-radius: 8px;
+    padding: 2px 6px 2px 12px;
+}
+
+.milkdown .milkdown-latex-inline-edit .container {
+      display: flex;
+      gap: 6px;
+      align-items: flex-start;
+    }
+
+.milkdown .milkdown-latex-inline-edit .container button {
+        width: 24px;
+        height: 24px;
+        cursor: pointer;
+        border-radius: 8px;
+      }
+
+.milkdown .milkdown-latex-inline-edit .container button:hover {
+          background: var(--crepe-color-hover);
+        }
+
+.milkdown .milkdown-latex-inline-edit .ProseMirror {
+      padding: 0;
+      min-width: 174px;
+      max-width: 294px;
+      font-family: var(--crepe-font-code);
+    }

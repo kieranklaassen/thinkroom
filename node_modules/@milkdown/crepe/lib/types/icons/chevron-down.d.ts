@@ -1,0 +1,2 @@
+export declare const chevronDownIcon = "\n  <svg\n    xmlns=\"http://www.w3.org/2000/svg\"\n    fill=\"none\"\n    viewBox=\"0 0 24 24\"\n    stroke-width=\"1.5\"\n    stroke=\"currentColor\"\n    class=\"w-6 h-6\"\n  >\n    <path\n      stroke-linecap=\"round\"\n      stroke-linejoin=\"round\"\n      d=\"M19.5 8.25l-7.5 7.5-7.5-7.5\"\n    />\n  </svg>\n";
+//# sourceMappingURL=chevron-down.d.ts.map

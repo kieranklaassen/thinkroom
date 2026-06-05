@@ -1,0 +1,3 @@
+import type { MilkdownImageBlockProps } from './image-block';
+export declare const ImageViewer: import("vue").DefineComponent<MilkdownImageBlockProps, {}, {}, {}, {}, import("vue").ComponentOptionsMixin, import("vue").ComponentOptionsMixin, {}, string, import("vue").PublicProps, Readonly<MilkdownImageBlockProps> & Readonly<{}>, {}, {}, {}, {}, string, import("vue").ComponentProvideOptions, false, {}, any>;
+//# sourceMappingURL=image-viewer.d.ts.map

@@ -1,0 +1,84 @@
+{
+  "name": "@ocavue/utils",
+  "type": "module",
+  "version": "1.6.0",
+  "description": "A collection of utility functions for the browser and other environments",
+  "author": "ocavue <ocavue@gmail.com>",
+  "license": "MIT",
+  "funding": "https://github.com/sponsors/ocavue",
+  "homepage": "https://github.com/ocavue/utils#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ocavue/utils.git"
+  },
+  "bugs": "https://github.com/ocavue/utils/issues",
+  "keywords": [],
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "import": "./dist/index.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "*": [
+        "./dist/*",
+        "./dist/index.d.ts"
+      ]
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "devDependencies": {
+    "@ocavue/eslint-config": "^4.2.0",
+    "@ocavue/tsconfig": "^0.6.3",
+    "@size-limit/preset-small-lib": "^12.0.0",
+    "@types/node": "^24.9.2",
+    "@vitest/coverage-v8": "^4.0.18",
+    "eslint": "^10.0.2",
+    "jsdom": "^28.1.0",
+    "knip": "^5.85.0",
+    "pkg-pr-new": "^0.0.65",
+    "prettier": "^3.8.1",
+    "size-limit": "^12.0.0",
+    "tinyexec": "^1.0.2",
+    "tinyglobby": "^0.2.15",
+    "tsdown": "^0.21.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "renovate": {
+    "extends": [
+      "github>ocavue/config-renovate"
+    ]
+  },
+  "size-limit": [
+    {
+      "path": "dist/index.js"
+    }
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "lint": "pnpm run lint:eslint && pnpm run lint:prettier && pnpm run lint:knip",
+    "lint:eslint": "eslint .",
+    "lint:prettier": "prettier --check .",
+    "lint:knip": "knip",
+    "fix": "pnpm run fix:eslint && pnpm run fix:prettier",
+    "fix:eslint": "eslint --fix .",
+    "fix:prettier": "prettier --write .",
+    "ci:publish:snapshot": "pkg-pr-new publish --pnpm",
+    "test": "vitest",
+    "typecheck": "tsc -b"
+  }
+}

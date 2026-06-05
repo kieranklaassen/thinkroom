@@ -1,0 +1,1 @@
+{"version":3,"file":"get-cells-in-row.d.ts","sourceRoot":"","sources":["../../../../src/node/table/utils/get-cells-in-row.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,SAAS,EAAE,MAAM,uBAAuB,CAAA;AAItD,OAAO,KAAK,EAAE,OAAO,EAAE,MAAM,SAAS,CAAA;AAGtC,wBAAgB,aAAa,CAC3B,QAAQ,EAAE,MAAM,GAAG,MAAM,EAAE,EAC3B,SAAS,EAAE,SAAS,GACnB,OAAO,EAAE,GAAG,SAAS,CAwBvB"}

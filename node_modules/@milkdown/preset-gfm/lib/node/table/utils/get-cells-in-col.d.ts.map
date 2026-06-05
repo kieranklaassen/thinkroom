@@ -1,0 +1,1 @@
+{"version":3,"file":"get-cells-in-col.d.ts","sourceRoot":"","sources":["../../../../src/node/table/utils/get-cells-in-col.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,SAAS,EAAE,MAAM,uBAAuB,CAAA;AAItD,OAAO,KAAK,EAAE,OAAO,EAAE,MAAM,SAAS,CAAA;AAGtC,wBAAgB,aAAa,CAC3B,aAAa,EAAE,MAAM,GAAG,MAAM,EAAE,EAChC,SAAS,EAAE,SAAS,GACnB,OAAO,EAAE,GAAG,SAAS,CAsBvB"}

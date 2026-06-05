@@ -1,0 +1,17 @@
+import { HttpRequestConfig, HttpResponse, FetchClientOptions } from './types.js';
+/**
+ * Create a fetch-based HTTP client.
+ */
+export declare function createFetchClient(options?: FetchClientOptions): {
+    setXsrfCookieName(name: string): void;
+    setXsrfHeaderName(name: string): void;
+    request(config: HttpRequestConfig): Promise<HttpResponse>;
+};
+/**
+ * Default fetch HTTP client instance.
+ */
+export declare const fetchHttpClient: {
+    setXsrfCookieName(name: string): void;
+    setXsrfHeaderName(name: string): void;
+    request(config: HttpRequestConfig): Promise<HttpResponse>;
+};

@@ -1,0 +1,247 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`e2e > bundler outputs match snapshot 1`] = `
+"
+################################################################################
+esbuild/fn1.js
+--------------------------------------------------------------------------------
+var s = 2 ** 53 - 1
+function e(t) {
+  let n = !1,
+    r
+  return () => (n || ((r = t()), (n = !0), (t = void 0)), r)
+}
+function o() {
+  console.log('function_1')
+}
+function u() {
+  console.log('function_2')
+}
+var l = e(u)
+function i() {
+  console.log('function_3')
+}
+var p = e(i)
+export { o as fn1 }
+
+
+################################################################################
+esbuild/fn2.js
+--------------------------------------------------------------------------------
+var i = 2 ** 53 - 1
+function e(t) {
+  let n = !1,
+    r
+  return () => (n || ((r = t()), (n = !0), (t = void 0)), r)
+}
+function o() {
+  console.log('function_2')
+}
+var f = e(o)
+function u() {
+  console.log('function_3')
+}
+var l = e(u)
+export { o as fn2 }
+
+
+################################################################################
+esbuild/fn3.js
+--------------------------------------------------------------------------------
+var i = 2 ** 53 - 1
+function e(t) {
+  let n = !1,
+    r
+  return () => (n || ((r = t()), (n = !0), (t = void 0)), r)
+}
+function u() {
+  console.log('function_2')
+}
+var f = e(u)
+function o() {
+  console.log('function_3')
+}
+var l = e(o)
+export { o as fn3 }
+
+
+################################################################################
+esbuild/fn4.js
+--------------------------------------------------------------------------------
+var s = 2 ** 53 - 1
+function e(t) {
+  let n = !1,
+    r
+  return () => (n || ((r = t()), (n = !0), (t = void 0)), r)
+}
+function o() {
+  console.log('function_2')
+}
+var l = e(o)
+function u() {
+  console.log('function_3')
+}
+var p = e(u)
+function i() {
+  console.log('function_4')
+}
+export { i as fn4 }
+
+
+################################################################################
+rolldown/fn1.js
+--------------------------------------------------------------------------------
+function e() {
+  console.log(\`function_1\`)
+}
+export { e as fn1 }
+
+
+################################################################################
+rolldown/fn2.js
+--------------------------------------------------------------------------------
+function e() {
+  console.log(\`function_2\`)
+}
+export { e as fn2 }
+
+
+################################################################################
+rolldown/fn3.js
+--------------------------------------------------------------------------------
+function e() {
+  console.log(\`function_3\`)
+}
+export { e as fn3 }
+
+
+################################################################################
+rolldown/fn4.js
+--------------------------------------------------------------------------------
+function e() {
+  console.log(\`function_4\`)
+}
+export { e as fn4 }
+
+
+################################################################################
+rollup/fn1.js
+--------------------------------------------------------------------------------
+// A function that is not wrapped by \`once()\`
+function fn1() {
+  console.log('function_1')
+}
+
+export { fn1 }
+
+
+################################################################################
+rollup/fn2.js
+--------------------------------------------------------------------------------
+// A function that is wrapped by \`once()\`, but the wrapper is not exported
+function fn2() {
+  console.log('function_2')
+}
+
+export { fn2 }
+
+
+################################################################################
+rollup/fn3.js
+--------------------------------------------------------------------------------
+// A function that is wrapped by \`once()\`, and the wrapper is exported
+function fn3() {
+  console.log('function_3')
+}
+
+export { fn3 }
+
+
+################################################################################
+rollup/fn4.js
+--------------------------------------------------------------------------------
+// A function that is wrapped by \`once()\`, but the wrapper is marked as \`__PURE__\`
+function fn4() {
+  console.log('function_4')
+}
+
+export { fn4 }
+
+
+################################################################################
+rslib/fn1.js
+--------------------------------------------------------------------------------
+function n(n) {
+  let o = !1,
+    c
+  return () => (o || ((c = n()), (o = !0), (n = void 0)), c)
+}
+function o() {
+  console.log('function_1')
+}
+;(n(function () {
+  console.log('function_2')
+}),
+  n(function () {
+    console.log('function_3')
+  }))
+export { o as fn1 }
+
+
+################################################################################
+rslib/fn2.js
+--------------------------------------------------------------------------------
+function n(n) {
+  let o = !1,
+    t
+  return () => (o || ((t = n()), (o = !0), (n = void 0)), t)
+}
+function o() {
+  console.log('function_2')
+}
+;(n(o),
+  n(function () {
+    console.log('function_3')
+  }))
+export { o as fn2 }
+
+
+################################################################################
+rslib/fn3.js
+--------------------------------------------------------------------------------
+function n(n) {
+  let o = !1,
+    t
+  return () => (o || ((t = n()), (o = !0), (n = void 0)), t)
+}
+function o() {
+  console.log('function_3')
+}
+;(n(function () {
+  console.log('function_2')
+}),
+  n(o))
+export { o as fn3 }
+
+
+################################################################################
+rslib/fn4.js
+--------------------------------------------------------------------------------
+function n(n) {
+  let o = !1,
+    c
+  return () => (o || ((c = n()), (o = !0), (n = void 0)), c)
+}
+function o() {
+  console.log('function_4')
+}
+;(n(function () {
+  console.log('function_2')
+}),
+  n(function () {
+    console.log('function_3')
+  }))
+export { o as fn4 }
+
+"
+`;

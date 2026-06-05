@@ -1,0 +1,23 @@
+.test-editor-root {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 320px;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.test-editor-content {
+  width: 320px;
+  box-sizing: border-box;
+}
+
+.test-editor-content p {
+  margin: 0;
+  height: 32px;
+  line-height: 32px;
+}
+
+.test-editor-content p + p {
+  margin-top: 8px;
+}

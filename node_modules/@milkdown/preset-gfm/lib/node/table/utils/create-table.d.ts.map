@@ -1,0 +1,1 @@
+{"version":3,"file":"create-table.d.ts","sourceRoot":"","sources":["../../../../src/node/table/utils/create-table.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,GAAG,EAAE,MAAM,eAAe,CAAA;AACxC,OAAO,KAAK,EAAE,IAAI,EAAE,MAAM,uBAAuB,CAAA;AAWjD,wBAAgB,WAAW,CAAC,GAAG,EAAE,GAAG,EAAE,SAAS,SAAI,EAAE,SAAS,SAAI,GAAG,IAAI,CAkBxE"}
