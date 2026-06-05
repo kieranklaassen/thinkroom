@@ -1,11 +1,18 @@
 class DocumentsController < InertiaController
   def index
+    # Your docs: claimed by this browser's ownership token, newest first.
+    yours = Document.where(owner_token: owner_token).order(created_at: :desc).limit(50)
+    your_slugs = yours.map(&:slug).to_set
+
     # Recents are session-scoped: you see the documents you opened, not a
-    # global listing of everyone's.
+    # global listing of everyone's. The mechanism is unchanged — the display
+    # just skips docs already shown under Your docs.
     slugs = Array(session[:recent_slugs])
     docs = Document.where(slug: slugs).index_by(&:slug)
     render inertia: "documents/index", props: {
-      recent: slugs.filter_map { |slug| docs[slug] }.map { |d| d.slice(:title, :slug) }
+      yours: yours.map { |d| d.slice(:title, :slug) },
+      recent: slugs.filter_map { |slug| your_slugs.include?(slug) ? nil : docs[slug] }
+                   .map { |d| d.slice(:title, :slug) }
     }
   end
 

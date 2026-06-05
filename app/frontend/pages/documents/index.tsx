@@ -1,13 +1,23 @@
 import { useCallback, useState } from 'react'
 import { Head, Link, useForm } from '@inertiajs/react'
 import { FeedbackButton } from '../../components/feedback_button'
+import { userIdentity } from '../../editor/identity'
 
-interface Props {
-  recent: { title: string; slug: string }[]
+interface DocLink {
+  title: string
+  slug: string
 }
 
-export default function DocumentsIndex({ recent }: Props) {
-  const { post, processing } = useForm({})
+interface Props {
+  yours: DocLink[]
+  recent: DocLink[]
+}
+
+export default function DocumentsIndex({ yours, recent }: Props) {
+  // Lazy initializer: reads the localStorage identity at first render so the
+  // creator's display name rides along and the new doc is owned from birth.
+  // Staying on useForm keeps the `processing` double-submit guard.
+  const { post, processing } = useForm(() => ({ name: userIdentity().name }))
   const [copied, setCopied] = useState(false)
 
   const origin = typeof window === 'undefined' ? '' : window.location.origin
@@ -49,6 +59,20 @@ export default function DocumentsIndex({ recent }: Props) {
               </Link>
             )}
           </div>
+          {yours.length > 0 && (
+            <section className="landing-recent">
+              <h2 className="landing-recent-heading">Your docs</h2>
+              <ul>
+                {yours.map((doc) => (
+                  <li key={doc.slug}>
+                    <Link href={`/d/${doc.slug}`} prefetch>
+                      {doc.title}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <section className="landing-recent">
             <h2 className="landing-recent-heading">Recent</h2>
             {recent.length > 0 ? (

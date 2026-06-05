@@ -188,6 +188,54 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
     refute_match(/owner_token/, response.body)
   end
 
+  # --- home page: Your docs + deduped recents ---
+
+  test "index lists docs claimed by this session under yours, newest first" do
+    establish_identity
+    older = Document.create!(title: "Older", created_at: 2.hours.ago)
+    newer = Document.create!(title: "Newer")
+    post claim_document_path(older.slug), params: { name: "Me" }
+    post claim_document_path(newer.slug), params: { name: "Me" }
+
+    get root_path
+    assert_inertia_props do |props|
+      props[:yours].map { |d| d[:title] } == [ "Newer", "Older" ]
+    end
+  end
+
+  test "index excludes docs owned by another token from yours" do
+    Document.where(id: @document.id).update_all(
+      owner_token: "someone-else", owner_name: "Other", claimed_at: Time.current
+    )
+
+    get root_path
+    assert_inertia_props do |props|
+      props[:yours].empty?
+    end
+  end
+
+  test "a doc both owned and recently viewed appears only under yours" do
+    establish_identity
+    get document_page_path(@document.slug), headers: browser # adds to recents
+    post claim_document_path(@document.slug), params: { name: "Me" }
+
+    get root_path
+    assert_inertia_props do |props|
+      props[:yours].any? { |d| d[:slug] == @document.slug } &&
+        props[:recent].none? { |d| d[:slug] == @document.slug }
+    end
+  end
+
+  test "unowned recently viewed docs still appear under recent" do
+    establish_identity
+    get document_page_path(@document.slug), headers: browser
+
+    get root_path
+    assert_inertia_props do |props|
+      props[:recent].any? { |d| d[:slug] == @document.slug }
+    end
+  end
+
   # --- CSRF: the claim/delete surface must be forgery-protected ---
   # test env disables forgery protection globally, so these re-enable it
   # locally; without that, a forged POST would "succeed" and prove nothing.
