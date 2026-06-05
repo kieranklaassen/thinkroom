@@ -80,6 +80,25 @@ body {
   transition: background 220ms ease, color 220ms ease;
 }
 
+/* Keyboard navigation gets visible, consistent focus everywhere. */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* ------------------------------ Theme picker ------------------------------ */
 .theme-picker {
   display: inline-flex;
@@ -464,6 +483,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
+}
+
+.rail-section + .rail-section {
+  border-top: 1px solid var(--line);
+  padding-top: 1.5rem;
 }
 
 .rail-heading {
@@ -1015,18 +1039,22 @@ body {
 
 .agent-cursor-label {
   position: absolute;
-  top: -1.35em;
+  top: -1.6em;
   left: -2px;
+  z-index: 10;
   font-family: var(--font-ui);
-  font-size: 0.625rem;
-  font-weight: 600;
+  font-size: 0.6rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
   line-height: 1;
-  padding: 2px 5px;
-  border-radius: 4px 4px 4px 0;
+  padding: 2.5px 6px;
+  border-radius: 99px;
   background: var(--prov-pending-line);
   color: #fff;
   white-space: nowrap;
   user-select: none;
+  box-shadow: 0 0 0 2px var(--surface), 0 2px 6px rgb(0 0 0 / 0.12);
+  animation: card-in 200ms ease;
 }
 
 /* ------------------------------ Activity feed ----------------------------- */
