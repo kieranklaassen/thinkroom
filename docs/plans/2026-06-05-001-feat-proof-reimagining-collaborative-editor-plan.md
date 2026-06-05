@@ -1,7 +1,7 @@
 ---
 title: "feat: Proof-inspired editor — provenance-tracking collaborative editor (Rails + Inertia + Yjs)"
 type: feat
-status: active
+status: completed
 date: 2026-06-05
 depth: deep
 ---
