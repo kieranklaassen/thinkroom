@@ -66,6 +66,7 @@ export function SuggestionsPanel({ suggestions, aiPending, onAccept, onReject, o
         {suggestions.map((suggestion) => (
           <li
             key={suggestion.id}
+            data-suggestion-id={suggestion.id}
             className={`suggestion-card ${leaving.has(suggestion.id) ? 'is-leaving' : ''}`}
           >
             <div className="suggestion-meta">

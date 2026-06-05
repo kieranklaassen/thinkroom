@@ -19,7 +19,9 @@ export function useMetaChannel(slug: string): void {
           timers.set(
             event,
             setTimeout(() => {
-              router.reload({ only: [event] })
+              // async: a background reload must never cancel (and roll back)
+              // an in-flight optimistic mutation like accepting a suggestion.
+              router.reload({ only: [event], async: true })
             }, 150),
           )
         },

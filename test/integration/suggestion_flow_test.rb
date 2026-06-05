@@ -59,6 +59,9 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
   test "document show exposes pending suggestions as props" do
     get document_page_path(@document.slug), headers: { "User-Agent" => "Mozilla/5.0" }
     assert_response :success
-    assert_includes response.body, "New paragraph."
+    assert_inertia_component "documents/show"
+    assert_inertia_props do |props|
+      props[:suggestions].any? { |s| s[:body] == "New paragraph." }
+    end
   end
 end

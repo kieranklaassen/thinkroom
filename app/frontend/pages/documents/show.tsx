@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Head, router } from '@inertiajs/react'
+import { Head, Link, router, usePoll } from '@inertiajs/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { TextSelection } from '@milkdown/kit/prose/state'
 import {
@@ -128,14 +128,16 @@ export default function DocumentShow({
     )
   }, [handle, presences])
 
-  // While agents are shown, refresh periodically so silent ones expire.
+  // While agents are shown, poll so silent ones expire from the presence bar.
+  const presencePoll = usePoll(
+    45000,
+    { only: ['presences'], async: true },
+    { autoStart: false },
+  )
   useEffect(() => {
-    if (presences.length === 0) return
-    const timer = setInterval(() => {
-      router.reload({ only: ['presences'] })
-    }, 45000)
-    return () => clearInterval(timer)
-  }, [presences.length])
+    if (presences.length > 0) presencePoll.start()
+    else presencePoll.stop()
+  }, [presences.length, presencePoll])
 
   const handleSelection = useCallback((view: EditorView) => {
     viewRef.current = view
@@ -195,7 +197,7 @@ export default function DocumentShow({
         .patch(
           `/suggestions/${suggestion.id}/accept`,
           { by: identity.name },
-          { preserveScroll: true, only: ['suggestions', 'activities'] },
+          { preserveScroll: true, only: ['suggestions', 'activities'], async: true },
         )
     },
     [handle, identity.name],
@@ -210,7 +212,7 @@ export default function DocumentShow({
         .patch(
           `/suggestions/${suggestion.id}/reject`,
           { by: identity.name },
-          { preserveScroll: true, only: ['suggestions', 'activities'] },
+          { preserveScroll: true, only: ['suggestions', 'activities'], async: true },
         )
     },
     [identity.name],
@@ -249,7 +251,7 @@ export default function DocumentShow({
         .post(
           `/d/${doc.slug}/comments`,
           { body, anchor_text: anchorText, author_name: identity.name },
-          { preserveScroll: true, only: ['comments', 'activities'] },
+          { preserveScroll: true, only: ['comments', 'activities'], async: true },
         )
     },
     [doc.slug, identity.name],
@@ -266,7 +268,7 @@ export default function DocumentShow({
         .patch(
           `/comments/${comment.id}/resolve`,
           { by: identity.name },
-          { preserveScroll: true, only: ['comments', 'activities'] },
+          { preserveScroll: true, only: ['comments', 'activities'], async: true },
         )
     },
     [identity.name],
@@ -298,9 +300,9 @@ export default function DocumentShow({
       <div className="doc-page">
         <header className="doc-header">
           <div className="doc-header-left">
-            <a href="/" className="doc-home" aria-label="Home">
+            <Link href="/" className="doc-home" aria-label="Home">
               P.
-            </a>
+            </Link>
             <span className="doc-title">{doc.title}</span>
             <span
               className={`doc-status doc-status--${status}`}
