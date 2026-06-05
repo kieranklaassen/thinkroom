@@ -1,7 +1,7 @@
 ---
 title: "feat: Claim agent-created docs to your browser identity"
 type: feat
-status: active
+status: completed
 date: 2026-06-05
 ---
 
