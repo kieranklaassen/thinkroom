@@ -1,7 +1,0 @@
-{
-  "success": true,
-  "errors": "[plugin builtin:vite-reporter] \n(!) Some chunks are larger than 500 kB after minification. Consider:\n- Using dynamic import() to code-split the application\n- Use build.rolldownOptions.output.codeSplitting to improve chunking: https://rolldown.rs/reference/OutputOptions.codeSplitting\n- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.\n",
-  "timestamp": "2026-06-05 10:55:00",
-  "vite_ruby": "3.10.2",
-  "digest": "5ec7fec90137f00d0d33cad1846d07264453a09c"
-}
