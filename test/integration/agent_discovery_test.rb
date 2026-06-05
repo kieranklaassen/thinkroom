@@ -48,4 +48,27 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert_equal "text/plain", response.media_type
     assert_includes response.body, "Announce yourself"
   end
+
+  test "text guide marks claiming browser-only and explains deletion 404 semantics" do
+    get "/d/#{@document.slug}", headers: { "User-Agent" => "curl/8.6.0" }
+
+    assert_response :success
+    assert_includes response.body, "browser-only"
+    assert_includes response.body, "cannot claim"
+    assert_includes response.body, "treat a 404 on a previously-working slug as"
+  end
+
+  test "JSON state on the share URL includes ownership" do
+    @document.claim!(token: "tok-owner", name: "Quiet Falcon")
+
+    get "/d/#{@document.slug}", headers: {
+      "Accept" => "application/json",
+      "User-Agent" => "Mozilla/5.0"
+    }
+
+    body = response.parsed_body
+    assert_equal({ "claimed" => true, "owner_name" => "Quiet Falcon" }, body["ownership"])
+    assert body["notes"].any? { |n| n.include?("cannot claim") }
+    refute_includes response.body, "tok-owner"
+  end
 end

@@ -10,6 +10,7 @@ class AgentGuide
         slug: document.slug,
         title: document.title,
         share_url: "#{base_url}/d/#{document.slug}",
+        ownership: { claimed: document.claimed?, owner_name: document.owner_name },
         markdown: document.content_markdown.presence || document.seed_markdown,
         plain_markdown: document.plain_markdown.presence || document.seed_markdown,
         provenance: {
@@ -59,7 +60,9 @@ class AgentGuide
         "Text you contribute is marked kind=agent provenance and tinted in the editor until a human advances its review state (pending -> reviewed -> endorsed).",
         "Connected editors see your suggestions, comments, and presence live over WebSocket — no refresh needed on their side.",
         "Reading state: use plain_markdown as your working context for proposals; markdown embeds provenance span HTML. Both reflect the last snapshot pushed by a connected editor and may lag if no human has the document open — the Yjs CRDT state is always authoritative.",
-        "Review is human-gated by design: accepting/rejecting suggestions and advancing review states happen in the editor, by humans. Your job is to propose well."
+        "Review is human-gated by design: accepting/rejecting suggestions and advancing review states happen in the editor, by humans. Your job is to propose well.",
+        "Ownership: a human can claim a document in the browser; claimed docs show an owner in this payload. Claiming is browser-only (cookie-based) — agents cannot claim, so don't POST to any claim path.",
+        "A claimed document can be deleted by its owner, after which every endpoint here returns 404. Treat a 404 on a previously-working slug as deletion, not an outage to retry."
       ]
     end
 
@@ -116,6 +119,13 @@ class AgentGuide
            curl -X POST #{base_url}/api/docs \\
              -H "X-Agent-Name: YOUR_NAME" -H "Content-Type: application/json" \\
              -d '{"title": "My doc", "markdown": "# Hello"}'
+
+        ## Ownership
+        A human can claim a document in their browser; the claimed owner shows
+        in the state payload. Claiming is browser-only (cookie-based) — agents
+        cannot claim. An owner can delete their document, after which every
+        endpoint returns 404: treat a 404 on a previously-working slug as
+        deletion, not an outage to retry.
 
         Machine-readable version of this guide: GET #{api_base} (JSON).
       GUIDE
