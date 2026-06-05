@@ -124,3 +124,56 @@ flowchart TD
 ## Final Status
 
 **READY** — 18/18 scenarios pass with screenshot/log/test evidence (21 Playwright captures in `/tmp/pruf-dogfood-*.png`, 4 agent-browser captures `/tmp/qa-*.png`). Full Rails suite green (72 runs / 0 failures), `tsc --noEmit` clean, `vite build` clean. Three real bugs found and fixed during dogfooding (frozen popovers, chdir-race 500s, 302-after-PATCH), one with a regression test. Deferred paper cuts listed above; none blocking.
+
+---
+
+## Mobile pass (same day, follow-up iteration)
+
+**Scope:** make Pruf complete on phones (320px up). Previously everything ≤64rem dropped the margin gutter *and* the rail — suggestions, comments, Ask AI, and activity were simply gone.
+
+### What was built
+
+- **Bottom dock** (`mobile_dock.tsx`): fixed, safe-area-aware, backdrop-blurred bar — Suggestions / Comments / Ask AI / Activity — with live count badges and a pulsing dot while AI is thinking.
+- **Bottom sheets**: max-height 70dvh, drag-handle, ✕, Esc, backdrop tap; body scroll locks beneath; the desktop rail panels (CommentsPanel, AskAiPanel, ActivityPanel) render inside unchanged, with sheet-scoped 44px touch targets.
+- **Suggestions, Google-Docs-mobile style**: anchors stay tinted; a slim marker strip (36×44 touch targets via transparent borders) sits at each anchor line. Tapping a marker — or tapping inside a tinted anchor in the copy — opens the suggestion sheet scrolled to that card (author ✦, intent, struck-through old / tinted new, Accept/Reject, double-tap guarded).
+- **Header condensed**: truncating title, 24px avatars max 3, chrome toggles hidden, theme picker relocated into the Share sheet, Share popover portaled to body as a full-width bottom sheet.
+- **Touch floating UI**: selection toolbar and review popover get ≥44px targets, clamp into the viewport, prefer above the anchor (clear of the keyboard), and flip below when they'd cover the sticky header. Anchor tracking through scroll carried over from the desktop fix.
+
+### Scenarios (Playwright, Chromium touch emulation; screenshots `/tmp/pruf-mobile-*.png`)
+
+| # | Scenario | Result |
+|---|----------|--------|
+| m1 | Cold load 390×844: populated paint, condensed header, dock, no overflow | PASS (scrollW=390, header 44px) |
+| m2 | API suggestion → marker at anchor + live badge | PASS (marker y=354 vs anchor y=351) |
+| m3 | Tap marker → sheet card → Accept merges with AI provenance, once | PASS (44px buttons) |
+| m4 | Touch selection → toolbar → comment composed in sheet → resolve | PASS (sheet stays open through submit) |
+| m5 | Ask AI from dock → sheet closes → busy dot → badge increments | PASS |
+| m6 | Touch-selection toolbar tracks 200px scroll | PASS (200px/200px) |
+| m7 | Tap AI span → review popover fits 390px, advance works | PASS (Pending → Reviewed) |
+| m8 | Share → full-width sheet, copy buttons work | PASS |
+| m9 | Whitey theme via Share-sheet picker: dock/sheets coherent | PASS |
+| m10 | 320px fresh load: scrollWidth=320, dock items ≥44px | PASS |
+| — | Desktop 1280 sanity: rail + margin cards, no dock/markers | PASS |
+
+Zero console errors across the final run.
+
+### Bugs found & fixed during the mobile pass
+
+1. **Horizontal overflow at every phone width** — `.doc-main { width:100% }` + the marker gutter overflowed `.doc-canvas`; mobile now gives the canvas `width:100%` and lets the copy flex around the strip.
+2. **Share popover stranded off-screen** — the sticky header's `backdrop-filter` makes it the containing block for `position:fixed` descendants, so the "full-width sheet" positioned against a 44px header. Fixed by portaling to `document.body` on mobile (plus backdrop).
+3. **Header spilling past the viewport edge** — `.doc-header-right { min-width:0 }` let the rigid chrome side get squeezed below content, pushing Share past 320/390px. Now `flex:none`, with the title side absorbing all shrinkage (`min-width:0` on `.doc-title` — flex won't truncate a nowrap span otherwise).
+4. **Markers misaligned under slow images** — anchor tops were measured before images loaded and never recomputed; a capture-phase `load` listener now triggers the debounced remeasure (committed separately — also fixes desktop cards).
+5. **Marker touch borders forcing 8px overflow** — the 44px transparent hit-area centered in a 28px gutter at the viewport edge; asymmetric borders end the box flush with the edge.
+
+### Test-harness learnings (not app bugs)
+
+- ProseMirror ignores programmatic `Range`/`selectionchange` injection — drive selection through PM itself (tap to place caret, `Shift+ArrowRight` to extend).
+- `agent-cursor` label widgets pollute `textContent` reads — clone-and-strip `.agent-cursor, .ProseMirror-yjs-cursor` before using DOM text as `replaces` anchors.
+- Playwright `isMobile` contexts keep a stale layout viewport across `setViewportSize` — test small widths with fresh contexts.
+- `waitForFunction(fn, {timeout})` passes the options object as the *arg*; the third position holds options.
+
+### Gates
+
+`tsc --noEmit` clean · `vite build` clean · `bin/rails test` 72 runs / 0 failures · desktop 1280 screenshot unchanged (`/tmp/pruf-mobile-11-desktop-sanity.png`).
+
+**Commits:** `52ad296` fix(margin): remeasure suggestion anchors when images load · `1eeed8a` feat(mobile): bottom dock, sheets, and anchor markers — full product from 320px up.
