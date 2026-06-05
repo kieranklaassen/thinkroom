@@ -44,12 +44,20 @@ class DocumentsController < InertiaController
 
   # Editor clients debounce-push a derived snapshot { markdown, spans } so the
   # Agent API can read document state without a Yjs client.
+  MAX_SNAPSHOT_BYTES = 2.megabytes
+
   def snapshot
     document = Document.find_by!(slug: params[:slug])
-    document.update!(
-      content_markdown: params[:markdown].to_s,
-      provenance_spans: params[:spans] || []
-    )
+    markdown = params[:markdown].to_s
+    return head :payload_too_large if markdown.bytesize > MAX_SNAPSHOT_BYTES
+
+    spans = Array(params[:spans]).first(2_000).map do |span|
+      next unless span.respond_to?(:permit)
+
+      span.permit(:kind, :author, :state, :chars, :text).to_h
+    end.compact
+
+    document.update!(content_markdown: markdown, provenance_spans: spans)
     head :ok
   end
 

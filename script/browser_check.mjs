@@ -141,6 +141,10 @@ try {
   const suggestionText = (await a.locator('.suggestion-card .suggestion-body').first().textContent())
     ?.trim()
     .slice(0, 40)
+  const acceptedId = await a
+    .locator('.suggestion-card')
+    .first()
+    .getAttribute('data-suggestion-id')
   await a.locator('.suggestion-card .btn-accept').first().click()
   await a.waitForFunction(
     (n) => document.querySelectorAll('.milkdown [data-kind="ai"]').length > n,
@@ -158,11 +162,8 @@ try {
   ok('accepted suggestion text synced live to window B')
 
   await a.waitForFunction(
-    (snippet) =>
-      !Array.from(document.querySelectorAll('.suggestion-card .suggestion-body')).some((el) =>
-        el.textContent?.includes(snippet),
-      ),
-    suggestionText,
+    (id) => !document.querySelector(`.suggestion-card[data-suggestion-id="${id}"]`),
+    acceptedId,
     { timeout: 10000 },
   )
   ok('suggestion card cleared after accept (optimistic + reconcile)')
