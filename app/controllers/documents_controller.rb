@@ -32,6 +32,9 @@ class DocumentsController < InertiaController
         has_state: document.yjs_state.present?,
         yjs_state_b64: (Base64.strict_encode64(document.yjs_state) if document.yjs_state.present?)
       ),
+      # Ownership rides its own lazy prop so claim events reload cheaply —
+      # never re-shipping the Yjs state embedded in the document prop above.
+      ownership: -> { document.ownership_props(owner_token) },
       suggestions: -> { document.suggestions.pending.order(:created_at).map(&:as_props) },
       comments: -> { document.comments.order(:created_at).map(&:as_props) },
       activities: -> { document.activities.recent.map(&:as_props) },
@@ -40,12 +43,49 @@ class DocumentsController < InertiaController
   end
 
   def create
+    # UI-created docs are owned by their creator from the same INSERT — a UI
+    # doc never exists momentarily unclaimed, and no claim activity is logged
+    # (the doc was never up for grabs).
     document = Document.create!(
       title: params[:title].presence || "Untitled",
-      seed_markdown: params[:markdown].presence || Document::DEFAULT_SEED
+      seed_markdown: params[:markdown].presence || Document::DEFAULT_SEED,
+      owner_token: owner_token,
+      owner_name: params[:name].to_s.strip.first(255).presence || "Anonymous",
+      claimed_at: Time.current
     )
     remember_recent(document)
     redirect_to document_page_path(document.slug), status: :see_other
+  end
+
+  # Explicit, deliberate claim — a button click, never a GET side effect, so
+  # prefetchers and unfurlers can't claim. First claim wins atomically.
+  def claim
+    document = Document.find_by!(slug: params[:slug])
+    document.claim!(token: owner_token, name: params[:name])
+    redirect_back fallback_location: document_page_path(document.slug), status: :see_other
+  rescue Document::UnclaimableError
+    redirect_back fallback_location: document_page_path(document.slug), status: :see_other,
+                  inertia: { errors: { claim: "This document cannot be claimed" } }
+  rescue ActiveRecord::RecordInvalid
+    redirect_back fallback_location: document_page_path(document.slug), status: :see_other,
+                  inertia: { errors: { claim: "already claimed" } }
+  end
+
+  # Owners only. The broadcast goes out before destroy so connected editors
+  # route home instead of 404ing; already-gone docs redirect home (idempotent
+  # — a second tab's delete shouldn't error).
+  def destroy
+    document = Document.find_by(slug: params[:slug])
+    return redirect_to root_path, status: :see_other if document.nil?
+
+    unless document.owned_by?(owner_token)
+      return redirect_back fallback_location: document_page_path(document.slug), status: :see_other,
+                           inertia: { errors: { document: "Only the owner can delete this document" } }
+    end
+
+    DocumentMetaChannel.broadcast_event(document, :document_deleted)
+    document.destroy!
+    redirect_to root_path, status: :see_other
   end
 
   # Editor clients debounce-push a derived snapshot { markdown, spans } so the
