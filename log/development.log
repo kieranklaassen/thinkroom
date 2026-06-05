@@ -1,0 +1,64 @@
+  [1m[35m (0.2ms)[0m  [1m[35mCREATE TABLE "schema_migrations" ("version" varchar NOT NULL PRIMARY KEY) /*application='Proof'*/[0m
+  [1m[35m (0.0ms)[0m  [1m[35mCREATE TABLE "ar_internal_metadata" ("key" varchar NOT NULL PRIMARY KEY, "value" varchar, "created_at" datetime(6) NOT NULL, "updated_at" datetime(6) NOT NULL) /*application='Proof'*/[0m
+  [1m[36mActiveRecord::InternalMetadata Load (0.1ms)[0m  [1m[34mSELECT * FROM "ar_internal_metadata" WHERE "ar_internal_metadata"."key" = 'environment' ORDER BY "ar_internal_metadata"."key" ASC LIMIT 1 /*application='Proof'*/[0m
+  [1m[36mActiveRecord::InternalMetadata Create (0.0ms)[0m  [1m[32mINSERT INTO "ar_internal_metadata" ("key", "value", "created_at", "updated_at") VALUES ('environment', 'development', '2026-06-05 16:38:30.343274', '2026-06-05 16:38:30.343275') RETURNING "key" /*application='Proof'*/[0m
+  [1m[36mActiveRecord::SchemaMigration Load (0.0ms)[0m  [1m[34mSELECT "schema_migrations"."version" FROM "schema_migrations" ORDER BY "schema_migrations"."version" ASC /*application='Proof'*/[0m
+Migrating to CreateDocuments (20260605000001)
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mBEGIN immediate TRANSACTION /*application='Proof'*/[0m
+  [1m[35m (0.3ms)[0m  [1m[35mCREATE TABLE "documents" ("id" integer PRIMARY KEY AUTOINCREMENT NOT NULL, "title" varchar DEFAULT 'Untitled' NOT NULL, "slug" varchar NOT NULL, "yjs_state" blob, "content_markdown" text, "provenance_spans" json DEFAULT '[]', "seed_markdown" text, "seed_state" varchar DEFAULT 'pending' NOT NULL, "created_at" datetime(6) NOT NULL, "updated_at" datetime(6) NOT NULL) /*application='Proof'*/[0m
+  [1m[35m (0.0ms)[0m  [1m[35mCREATE UNIQUE INDEX "index_documents_on_slug" ON "documents" ("slug") /*application='Proof'*/[0m
+  [1m[36mActiveRecord::SchemaMigration Create (0.0ms)[0m  [1m[32mINSERT INTO "schema_migrations" ("version") VALUES ('20260605000001') RETURNING "version" /*application='Proof'*/[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mCOMMIT TRANSACTION /*application='Proof'*/[0m
+  [1m[35m (0.1ms)[0m  [1m[35mCREATE TABLE "schema_migrations" ("version" varchar NOT NULL PRIMARY KEY) /*application='Proof'*/[0m
+  [1m[35m (0.0ms)[0m  [1m[35mCREATE TABLE "ar_internal_metadata" ("key" varchar NOT NULL PRIMARY KEY, "value" varchar, "created_at" datetime(6) NOT NULL, "updated_at" datetime(6) NOT NULL) /*application='Proof'*/[0m
+  [1m[36mActiveRecord::InternalMetadata Load (0.0ms)[0m  [1m[34mSELECT * FROM "ar_internal_metadata" WHERE "ar_internal_metadata"."key" = 'environment' ORDER BY "ar_internal_metadata"."key" ASC LIMIT 1 /*application='Proof'*/[0m
+  [1m[36mActiveRecord::InternalMetadata Create (0.0ms)[0m  [1m[32mINSERT INTO "ar_internal_metadata" ("key", "value", "created_at", "updated_at") VALUES ('environment', 'test', '2026-06-05 16:38:30.349701', '2026-06-05 16:38:30.349701') RETURNING "key" /*application='Proof'*/[0m
+  [1m[36mActiveRecord::SchemaMigration Load (0.0ms)[0m  [1m[34mSELECT "schema_migrations"."version" FROM "schema_migrations" ORDER BY "schema_migrations"."version" ASC /*application='Proof'*/[0m
+Migrating to CreateDocuments (20260605000001)
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mBEGIN immediate TRANSACTION /*application='Proof'*/[0m
+  [1m[35m (0.4ms)[0m  [1m[35mCREATE TABLE "documents" ("id" integer PRIMARY KEY AUTOINCREMENT NOT NULL, "title" varchar DEFAULT 'Untitled' NOT NULL, "slug" varchar NOT NULL, "yjs_state" blob, "content_markdown" text, "provenance_spans" json DEFAULT '[]', "seed_markdown" text, "seed_state" varchar DEFAULT 'pending' NOT NULL, "created_at" datetime(6) NOT NULL, "updated_at" datetime(6) NOT NULL) /*application='Proof'*/[0m
+  [1m[35m (0.0ms)[0m  [1m[35mCREATE UNIQUE INDEX "index_documents_on_slug" ON "documents" ("slug") /*application='Proof'*/[0m
+  [1m[36mActiveRecord::SchemaMigration Create (0.0ms)[0m  [1m[32mINSERT INTO "schema_migrations" ("version") VALUES ('20260605000001') RETURNING "version" /*application='Proof'*/[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mCOMMIT TRANSACTION /*application='Proof'*/[0m
+  [1m[36mActiveRecord::SchemaMigration Load (0.0ms)[0m  [1m[34mSELECT "schema_migrations"."version" FROM "schema_migrations" ORDER BY "schema_migrations"."version" ASC /*application='Proof'*/[0m
+  [1m[36mActiveRecord::SchemaMigration Load (0.0ms)[0m  [1m[34mSELECT "schema_migrations"."version" FROM "schema_migrations" ORDER BY "schema_migrations"."version" ASC /*application='Proof'*/[0m
+  [1m[36mDocument Load (0.1ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."slug" = 'demo' LIMIT 1 /*application='Proof'*/[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mBEGIN immediate TRANSACTION /*application='Proof'*/[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = 'demo' LIMIT 1 /*application='Proof'*/[0m
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("title", "slug", "yjs_state", "content_markdown", "provenance_spans", "seed_markdown", "seed_state", "created_at", "updated_at") VALUES ('The Proof Demo Document', 'demo', NULL, NULL, '[]', '# The Proof Demo Document
+
+Welcome — this document is **live**. Open this page in a second window and watch
+edits flow both ways. Everything you type is attributed to *you*; everything an
+AI contributes is tinted until a human reviews it.
+
+## How provenance works
+
+Text carries its author with it. <span data-provenance data-kind="ai" data-author="Gemini" data-state="pending">This sentence was drafted by an AI and is still awaiting review — notice the tint.</span> Human words sit quietly, unmarked. <span data-provenance data-kind="ai" data-author="Gemini" data-state="reviewed">This AI sentence has been reviewed once, so its tint has softened.</span> And <span data-provenance data-kind="ai" data-author="Gemini" data-state="endorsed">this one has been fully endorsed</span> — only a whisper of an underline remains.
+
+## Everything markdown
+
+- Type `##` for headings, `**bold**`, `*italic*`, and [links](https://example.com)
+- Lists, of course — including
+- Blockquotes:
+
+> The document is the hero. Chrome recedes.
+
+And code, with highlighting:
+
+```ruby
+class Document < ApplicationRecord
+  def provenance_summary
+    spans.group_by(&:kind).transform_values { |s| s.sum(&:chars) }
+  end
+end
+```
+
+## Try it
+
+1. Select any sentence and leave a **comment**
+2. Hit *Ask AI* and review the suggestion that arrives
+3. Share this URL with an agent — it will find its way in
+', 'pending', '2026-06-05 16:38:30.379098', '2026-06-05 16:38:30.379098') RETURNING "id" /*application='Proof'*/[0m
+  [1m[36mTRANSACTION (0.1ms)[0m  [1m[35mCOMMIT TRANSACTION /*application='Proof'*/[0m
+  [1m[36mActiveRecord::SchemaMigration Load (0.0ms)[0m  [1m[34mSELECT "schema_migrations"."version" FROM "schema_migrations" ORDER BY "schema_migrations"."version" ASC /*application='Proof'*/[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."slug" = 'demo' LIMIT 1 /*application='Proof'*/[0m
