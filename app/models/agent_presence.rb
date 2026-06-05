@@ -12,15 +12,25 @@ class AgentPresence < ApplicationRecord
 
   # Returns [presence, newly_arrived?]
   def self.touch!(document:, agent_name:, status: "active", location_text: nil)
-    presence = find_or_initialize_by(document:, agent_name:)
-    newly_arrived = presence.new_record? ||
-                    presence.status != "active" ||
-                    presence.last_seen_at < ACTIVE_WINDOW.ago
+    retried = false
+    begin
+      presence = find_or_initialize_by(document:, agent_name:)
+      newly_arrived = presence.new_record? ||
+                      presence.status != "active" ||
+                      presence.last_seen_at < ACTIVE_WINDOW.ago
 
-    presence.status = status
-    presence.location_text = location_text if location_text
-    presence.last_seen_at = Time.current
-    presence.save!
+      presence.status = status
+      presence.location_text = location_text if location_text
+      presence.last_seen_at = Time.current
+      presence.save!
+    rescue ActiveRecord::RecordNotUnique
+      # Concurrent first contact from the same agent (parallel tool calls):
+      # the loser re-fetches the winner's row and updates it instead of 500ing.
+      raise if retried
+
+      retried = true
+      retry
+    end
 
     DocumentMetaChannel.broadcast_event(document, :presences)
     [presence, newly_arrived && status == "active"]

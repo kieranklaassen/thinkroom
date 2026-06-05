@@ -54,12 +54,6 @@ export interface DocumentProps {
     seed_markdown: string | null
     has_state: boolean
   }
-  summary: {
-    total: number
-    human_pct: number
-    ai_pct: number
-    unreviewed_pct: number
-  }
   suggestions: SuggestionPayload[]
   comments: CommentPayload[]
   activities: ActivityPayload[]
@@ -91,15 +85,21 @@ export default function DocumentShow({
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
   const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null)
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
-  const [aiPending, setAiPending] = useState(false)
+  const [aiPendingCount, setAiPendingCount] = useState(0)
+  const aiPending = aiPendingCount > 0
+  const prevSuggestionCount = useRef(suggestions.length)
   const [copied, setCopied] = useState(false)
   const viewRef = useRef<EditorView | null>(null)
 
   useMetaChannel(doc.slug)
 
-  // A new suggestion arriving clears the "thinking" state.
+  // Only a suggestion ARRIVING clears the thinking state — accept/reject
+  // shrink the list and must not re-enable Ask AI while a request is live.
   useEffect(() => {
-    setAiPending(false)
+    if (suggestions.length > prevSuggestionCount.current) {
+      setAiPendingCount((count) => Math.max(0, count - 1))
+    }
+    prevSuggestionCount.current = suggestions.length
   }, [suggestions.length])
 
   // Human presence from Yjs awareness.
@@ -187,9 +187,10 @@ export default function DocumentShow({
   const acceptSuggestion = useCallback(
     (suggestion: SuggestionPayload) => {
       if (!handle) return
-      // Local-first: the text lands in the CRDT immediately (AI-attributed,
-      // pending review); the server reconciles the suggestion status.
-      applySuggestion(handle.editor, suggestion)
+      // The card clears optimistically, but the CRDT insert waits for the
+      // server to confirm THIS client won the accept — otherwise two windows
+      // accepting concurrently would each insert the text (the loser's PATCH
+      // 422s, but a local-first insert could not be rolled back).
       router
         .optimistic((props: Partial<DocumentProps>) => ({
           suggestions: (props.suggestions ?? []).filter((s) => s.id !== suggestion.id),
@@ -197,7 +198,14 @@ export default function DocumentShow({
         .patch(
           `/suggestions/${suggestion.id}/accept`,
           { by: identity.name },
-          { preserveScroll: true, only: ['suggestions', 'activities'], async: true },
+          {
+            preserveScroll: true,
+            only: ['suggestions', 'activities'],
+            async: true,
+            onSuccess: () => {
+              applySuggestion(handle.editor, suggestion)
+            },
+          },
         )
     },
     [handle, identity.name],
@@ -220,16 +228,25 @@ export default function DocumentShow({
 
   const askAi = useCallback(
     (instruction: string, selection?: string) => {
+      // One in-flight request at a time — the selection toolbar has no
+      // disabled state, so the guard lives here.
+      if (aiPendingCount > 0) return
       const context = selection ?? (handle ? selectedText(handle.editor) : '')
-      setAiPending(true)
+      setAiPendingCount((count) => count + 1)
+      const release = () => setAiPendingCount((count) => Math.max(0, count - 1))
       void postJSON(`/d/${doc.slug}/ai_suggestions`, {
         instruction,
         context: context || null,
         replaces: context || null,
         anchor_text: context || null,
-      }).catch(() => setAiPending(false))
+      })
+        .then((response) => {
+          // fetch resolves on 4xx/5xx — release the button on server errors.
+          if (!response.ok) release()
+        })
+        .catch(release)
     },
-    [doc.slug, handle],
+    [doc.slug, handle, aiPendingCount],
   )
 
   const submitComment = useCallback(

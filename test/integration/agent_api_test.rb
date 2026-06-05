@@ -124,6 +124,33 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_empty response.parsed_body["events"]
   end
 
+
+  test "suggestion without body returns an instructive 422" do
+    post "/api/docs/#{@document.slug}/suggestions",
+         params: { intent: "no body" }, headers: AGENT, as: :json
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "body is required"
+  end
+
+  test "comment without body returns an instructive 422" do
+    post "/api/docs/#{@document.slug}/comments",
+         params: { anchor_text: "provenance" }, headers: AGENT, as: :json
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "body is required"
+  end
+
+  test "event ack without last_event_id returns 422" do
+    post "/api/docs/#{@document.slug}/events/ack", params: {}, headers: AGENT, as: :json
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "last_event_id"
+  end
+
+  test "presence announce returns an explicit 200" do
+    post "/api/docs/#{@document.slug}/presence",
+         params: { status: "active" }, headers: AGENT, as: :json
+    assert_response :ok
+  end
+
   test "unknown slug returns a clean 404" do
     get "/api/docs/nope", headers: AGENT
     assert_response :not_found

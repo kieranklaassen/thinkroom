@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { timeAgo } from '../lib/time'
+import { truncate } from '../lib/truncate'
 
 export interface CommentPayload {
   id: number
@@ -138,6 +139,3 @@ export function CommentsPanel({
     </section>
   )
 }
-
-const truncate = (text: string, length: number): string =>
-  text.length > length ? `${text.slice(0, length)}…` : text

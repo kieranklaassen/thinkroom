@@ -15,22 +15,51 @@ export interface SuggestionPayload {
   created_at: string
 }
 
-/** First within-block occurrence of `search` as a doc position range. */
+/**
+ * First within-block occurrence of `search` as a doc position range.
+ *
+ * Maps string offsets through a per-text-child segment table rather than
+ * assuming 1 char == 1 position: inline leaf nodes (hard breaks, images)
+ * contribute nothing to textContent but occupy a document position each,
+ * which would otherwise shift every anchor after them.
+ */
 export function findTextRange(
   doc: Node,
   search: string | null,
 ): { from: number; to: number } | null {
   if (!search) return null
   let result: { from: number; to: number } | null = null
+
   doc.descendants((node, pos) => {
     if (result) return false
     if (!node.isTextblock) return true
-    const index = node.textContent.indexOf(search)
-    if (index !== -1) {
-      result = { from: pos + 1 + index, to: pos + 1 + index + search.length }
-      return false
+
+    let text = ''
+    const segments: { strFrom: number; strTo: number; docFrom: number }[] = []
+    node.forEach((child, offset) => {
+      if (child.isText && child.text) {
+        segments.push({
+          strFrom: text.length,
+          strTo: text.length + child.text.length,
+          docFrom: pos + 1 + offset,
+        })
+        text += child.text
+      }
+    })
+
+    const index = text.indexOf(search)
+    if (index === -1) return true
+
+    const endIndex = index + search.length
+    const startSeg = segments.find((s) => index >= s.strFrom && index < s.strTo)
+    const endSeg = segments.find((s) => endIndex > s.strFrom && endIndex <= s.strTo)
+    if (!startSeg || !endSeg) return true
+
+    result = {
+      from: startSeg.docFrom + (index - startSeg.strFrom),
+      to: endSeg.docFrom + (endIndex - endSeg.strFrom),
     }
-    return true
+    return false
   })
   return result
 }

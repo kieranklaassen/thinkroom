@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import type { SuggestionPayload } from '../editor/suggestions'
+import { truncate } from '../lib/truncate'
 
 interface Props {
   suggestions: SuggestionPayload[]
@@ -29,6 +30,9 @@ export function SuggestionsPanel({ suggestions, aiPending, onAccept, onReject, o
   }
 
   const resolve = (suggestion: SuggestionPayload, action: (s: SuggestionPayload) => void) => {
+    // Guard repeat clicks during the leave animation — a second click would
+    // schedule a second accept/reject (and a second CRDT insert).
+    if (leaving.has(suggestion.id)) return
     setLeaving((prev) => new Set(prev).add(suggestion.id))
     // Let the leave transition play before the optimistic prop removal.
     setTimeout(() => action(suggestion), 160)
@@ -84,12 +88,14 @@ export function SuggestionsPanel({ suggestions, aiPending, onAccept, onReject, o
             <div className="suggestion-actions">
               <button
                 className="btn-accept"
+                disabled={leaving.has(suggestion.id)}
                 onClick={() => resolve(suggestion, onAccept)}
               >
                 Accept
               </button>
               <button
                 className="btn-reject"
+                disabled={leaving.has(suggestion.id)}
                 onClick={() => resolve(suggestion, onReject)}
               >
                 Reject
@@ -101,6 +107,3 @@ export function SuggestionsPanel({ suggestions, aiPending, onAccept, onReject, o
     </section>
   )
 }
-
-const truncate = (text: string, length: number): string =>
-  text.length > length ? `${text.slice(0, length)}…` : text
