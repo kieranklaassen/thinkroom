@@ -1,4 +1,5 @@
-import { createConsumer, type Consumer, type Subscription } from '@rails/actioncable'
+import type { Consumer, Subscription } from '@rails/actioncable'
+import { getConsumer } from '../lib/cable'
 import * as Y from 'yjs'
 import {
   Awareness,
@@ -48,7 +49,7 @@ export class CableProvider {
   constructor(doc: Y.Doc, slug: string, consumer?: Consumer) {
     this.doc = doc
     this.awareness = new Awareness(doc)
-    this.consumer = consumer ?? createConsumer()
+    this.consumer = consumer ?? getConsumer()
 
     this.subscription = this.consumer.subscriptions.create(
       { channel: 'SyncChannel', slug },

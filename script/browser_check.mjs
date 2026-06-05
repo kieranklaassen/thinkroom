@@ -113,6 +113,41 @@ try {
   await b.waitForSelector('.milkdown .prov--ai.prov--pending', { timeout: 15000 })
   ok('AI provenance tints survive reload')
 
+  // --- Suggestion flow: Ask AI -> card in both windows -> accept -> merged ---
+  const beforeAiSpans = await a.locator('.milkdown [data-kind="ai"]').count()
+  await a.fill('.ask-ai-input', 'add a closing thought')
+  await a.click('.ask-ai-button')
+  await a.locator('.suggestion-card').first().waitFor({ timeout: 15000 })
+  ok('Ask AI produced a pending suggestion card in window A')
+  await b.locator('.suggestion-card').first().waitFor({ timeout: 10000 })
+  ok('suggestion card appeared live in window B')
+
+  const suggestionText = (await a.locator('.suggestion-card .suggestion-body').first().textContent())
+    ?.trim()
+    .slice(0, 40)
+  await a.locator('.suggestion-card .btn-accept').first().click()
+  await a.waitForFunction(
+    (n) => document.querySelectorAll('.milkdown [data-kind="ai"]').length > n,
+    beforeAiSpans,
+    { timeout: 10000 },
+  )
+  ok('accepting merged the text with AI provenance in window A')
+
+  await b.waitForFunction(
+    (snippet) =>
+      document.querySelector('.milkdown .ProseMirror')?.textContent?.includes(snippet),
+    suggestionText,
+    { timeout: 10000 },
+  )
+  ok('accepted suggestion text synced live to window B')
+
+  await a.waitForFunction(
+    () => document.querySelectorAll('.suggestion-card').length === 0,
+    undefined,
+    { timeout: 10000 },
+  )
+  ok('suggestion card cleared after accept (optimistic + reconcile)')
+
   for (const [label, errs] of Object.entries(errors)) {
     const fatal = errs.filter((e) => !e.includes('favicon') && !e.includes('Download the React DevTools'))
     if (fatal.length > 0) fail(`console errors in window ${label}:\n  ${fatal.join('\n  ')}`)

@@ -5,6 +5,10 @@ Rails.application.routes.draw do
 
   get "d/:slug", to: "documents#show", as: :document_page
   post "d/:slug/snapshot", to: "documents#snapshot", as: :document_snapshot
+  post "d/:slug/ai_suggestions", to: "ai_suggestions#create", as: :document_ai_suggestions
+
+  patch "suggestions/:id/accept", to: "suggestions#accept", as: :accept_suggestion
+  patch "suggestions/:id/reject", to: "suggestions#reject", as: :reject_suggestion
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
   get "up" => "rails/health#show", as: :rails_health_check

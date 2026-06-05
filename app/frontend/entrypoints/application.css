@@ -346,6 +346,246 @@ body {
   background: var(--accent-soft);
 }
 
+/* --------------------------------- Rail ---------------------------------- */
+.doc-body {
+  gap: 0;
+}
+
+.doc-rail {
+  width: 21rem;
+  flex: none;
+  border-left: 1px solid var(--line);
+  padding: 1.5rem 1.25rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  position: sticky;
+  top: 2.75rem;
+  height: calc(100vh - 2.75rem);
+  overflow-y: auto;
+}
+
+@media (max-width: 64rem) {
+  .doc-rail {
+    display: none;
+  }
+}
+
+.rail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.rail-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.rail-heading h2 {
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}
+
+.rail-count {
+  font-size: 0.7rem;
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-empty {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--ink-faint);
+}
+
+/* ------------------------------- Ask AI ----------------------------------- */
+.ask-ai {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.ask-ai-input {
+  flex: 1;
+  font-size: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  background: var(--surface-raised);
+  color: var(--ink);
+  transition: border-color 120ms ease;
+}
+
+.ask-ai-input:focus {
+  outline: none;
+  border-color: var(--ink-faint);
+  box-shadow: none;
+}
+
+.ask-ai-input::placeholder {
+  color: var(--ink-faint);
+}
+
+.ask-ai-button {
+  border: none;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.78rem;
+  font-weight: 550;
+  border-radius: 8px;
+  padding: 0 0.8rem;
+  cursor: pointer;
+  min-width: 3.2rem;
+  transition: background 120ms ease;
+}
+
+.ask-ai-button:hover:not(:disabled) {
+  background: #000;
+}
+
+.ask-ai-button:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.ask-ai-spinner {
+  display: inline-block;
+  width: 0.8rem;
+  height: 0.8rem;
+  border: 2px solid color-mix(in srgb, var(--surface) 40%, transparent);
+  border-top-color: var(--surface);
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --------------------------- Suggestion cards ----------------------------- */
+.suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.suggestion-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  animation: card-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.suggestion-card.is-leaving {
+  opacity: 0;
+  transform: translateX(8px);
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.suggestion-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.author-chip {
+  font-size: 0.68rem;
+  font-weight: 650;
+  padding: 0.1rem 0.45rem;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+
+.author-chip--ai,
+.author-chip--agent {
+  background: var(--prov-pending-bg);
+  color: color-mix(in srgb, var(--prov-pending-line) 80%, var(--ink));
+}
+
+.author-chip--human {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.suggestion-intent {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+
+.suggestion-replaces {
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  font-style: italic;
+}
+
+.suggestion-body {
+  font-family: var(--font-doc);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: pre-wrap;
+  max-height: 9rem;
+  overflow-y: auto;
+}
+
+.suggestion-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-accept {
+  border: none;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.74rem;
+  font-weight: 550;
+  border-radius: 6px;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.btn-accept:hover {
+  background: #000;
+}
+
+.btn-reject {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.btn-reject:hover {
+  border-color: var(--ink-faint);
+  color: var(--ink);
+}
+
 /* ----------------------------- Provenance tints -------------------------- */
 /* Human text renders plain — the absence of decoration IS the design.       */
 .milkdown .prov--ai {
