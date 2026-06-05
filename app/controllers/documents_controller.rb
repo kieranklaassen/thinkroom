@@ -15,6 +15,7 @@ class DocumentsController < InertiaController
       ),
       summary: document.provenance_summary,
       suggestions: -> { document.suggestions.pending.order(:created_at).map(&:as_props) },
+      comments: -> { document.comments.order(:created_at).map(&:as_props) },
       activities: -> { document.activities.recent.map(&:as_props) }
     }
   end

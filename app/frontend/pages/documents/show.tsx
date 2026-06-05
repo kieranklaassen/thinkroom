@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Head, router } from '@inertiajs/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
+import { TextSelection } from '@milkdown/kit/prose/state'
 import {
   DocumentEditor,
   type ConnectionStatus,
@@ -16,12 +17,15 @@ import {
 } from '../../editor/provenance'
 import {
   applySuggestion,
+  findTextRange,
   selectedText,
   type SuggestionPayload,
 } from '../../editor/suggestions'
 import { ProvenanceSummaryChip } from '../../components/provenance_summary'
 import { ReviewPopover } from '../../components/review_popover'
 import { SuggestionsPanel } from '../../components/suggestions_panel'
+import { CommentsPanel, type CommentPayload } from '../../components/comments_panel'
+import { SelectionToolbar } from '../../components/selection_toolbar'
 import { useMetaChannel } from '../../lib/use_meta_channel'
 import { postJSON } from '../../lib/csrf'
 
@@ -49,19 +53,33 @@ export interface DocumentProps {
     unreviewed_pct: number
   }
   suggestions: SuggestionPayload[]
+  comments: CommentPayload[]
   activities: ActivityPayload[]
 }
 
-interface ReviewTarget {
-  span: AiSpan
+interface FloatTarget {
   position: { x: number; y: number }
 }
 
-export default function DocumentShow({ document: doc, suggestions }: DocumentProps) {
+interface ReviewTarget extends FloatTarget {
+  span: AiSpan
+}
+
+interface SelectionTarget extends FloatTarget {
+  text: string
+}
+
+export default function DocumentShow({
+  document: doc,
+  suggestions,
+  comments,
+}: DocumentProps) {
   const identity = useMemo(userIdentity, [])
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [spans, setSpans] = useState<ProvenanceSpan[]>([])
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
+  const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null)
+  const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
   const [aiPending, setAiPending] = useState(false)
   const handleRef = useRef<EditorHandle | null>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -75,8 +93,30 @@ export default function DocumentShow({ document: doc, suggestions }: DocumentPro
 
   const handleSelection = useCallback((view: EditorView) => {
     viewRef.current = view
+    const { from, to, empty } = view.state.selection
+
+    if (!view.hasFocus()) {
+      setReviewTarget(null)
+      setSelectionTarget(null)
+      return
+    }
+
+    if (!empty) {
+      const text = view.state.doc.textBetween(from, to, '\n')
+      if (text.trim().length > 0) {
+        const coords = view.coordsAtPos(from)
+        setSelectionTarget({
+          text,
+          position: { x: coords.left, y: Math.max(8, coords.top - 44) },
+        })
+        setReviewTarget(null)
+        return
+      }
+    }
+    setSelectionTarget(null)
+
     const span = aiSpanAt(view.state)
-    if (!span || !view.hasFocus()) {
+    if (!span) {
       setReviewTarget(null)
       return
     }
@@ -132,19 +172,74 @@ export default function DocumentShow({ document: doc, suggestions }: DocumentPro
   )
 
   const askAi = useCallback(
-    (instruction: string) => {
+    (instruction: string, selection?: string) => {
       const handle = handleRef.current
-      const selection = handle ? selectedText(handle.editor) : ''
+      const context = selection ?? (handle ? selectedText(handle.editor) : '')
       setAiPending(true)
       void postJSON(`/d/${doc.slug}/ai_suggestions`, {
         instruction,
-        context: selection || null,
-        replaces: selection || null,
-        anchor_text: selection || null,
+        context: context || null,
+        replaces: context || null,
+        anchor_text: context || null,
       }).catch(() => setAiPending(false))
     },
     [doc.slug],
   )
+
+  const submitComment = useCallback(
+    (body: string, anchorText: string | null) => {
+      setComposerAnchor(null)
+      const optimisticComment: CommentPayload = {
+        id: -Date.now(),
+        author_name: identity.name,
+        author_kind: 'human',
+        body,
+        anchor_text: anchorText,
+        resolved: false,
+        created_at: new Date().toISOString(),
+      }
+      router
+        .optimistic((props: Partial<DocumentProps>) => ({
+          comments: [...(props.comments ?? []), optimisticComment],
+        }))
+        .post(
+          `/d/${doc.slug}/comments`,
+          { body, anchor_text: anchorText, author_name: identity.name },
+          { preserveScroll: true, only: ['comments', 'activities'] },
+        )
+    },
+    [doc.slug, identity.name],
+  )
+
+  const resolveComment = useCallback(
+    (comment: CommentPayload) => {
+      router
+        .optimistic((props: Partial<DocumentProps>) => ({
+          comments: (props.comments ?? []).map((c) =>
+            c.id === comment.id ? { ...c, resolved: true } : c,
+          ),
+        }))
+        .patch(
+          `/comments/${comment.id}/resolve`,
+          { by: identity.name },
+          { preserveScroll: true, only: ['comments', 'activities'] },
+        )
+    },
+    [identity.name],
+  )
+
+  const jumpToAnchor = useCallback((anchorText: string) => {
+    const view = viewRef.current
+    if (!view) return
+    const range = findTextRange(view.state.doc, anchorText)
+    if (!range) return
+    const tr = view.state.tr.setSelection(
+      TextSelection.create(view.state.doc, range.from, range.to),
+    )
+    tr.scrollIntoView()
+    view.dispatch(tr)
+    view.focus()
+  }, [])
 
   return (
     <>
@@ -184,10 +279,31 @@ export default function DocumentShow({ document: doc, suggestions }: DocumentPro
               aiPending={aiPending}
               onAccept={acceptSuggestion}
               onReject={rejectSuggestion}
-              onAskAi={askAi}
+              onAskAi={(instruction) => askAi(instruction)}
+            />
+            <CommentsPanel
+              comments={comments}
+              composerAnchor={composerAnchor}
+              onSubmit={submitComment}
+              onCancelComposer={() => setComposerAnchor(null)}
+              onResolve={resolveComment}
+              onJumpTo={jumpToAnchor}
             />
           </aside>
         </main>
+        {selectionTarget && (
+          <SelectionToolbar
+            position={selectionTarget.position}
+            onComment={() => {
+              setComposerAnchor(selectionTarget.text)
+              setSelectionTarget(null)
+            }}
+            onAskAi={() => {
+              askAi('', selectionTarget.text)
+              setSelectionTarget(null)
+            }}
+          />
+        )}
         {reviewTarget && (
           <ReviewPopover
             span={reviewTarget.span}
