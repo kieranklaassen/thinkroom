@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "skills": {
+    "inertia-rails-auth": {
+      "source": "cole-robertson/inertia-rails-skills",
+      "sourceType": "github",
+      "skillPath": "skills/inertia-rails-auth/SKILL.md",
+      "computedHash": "7592230c77a1bf2f9f55f6b97e7cde4511d32261f4ea2a25b448ecc702db2e5a"
+    },
+    "inertia-rails-best-practices": {
+      "source": "cole-robertson/inertia-rails-skills",
+      "sourceType": "github",
+      "skillPath": "skills/inertia-rails-best-practices/SKILL.md",
+      "computedHash": "58db830bbc6d7573f2cc572f2394d73fd2af92e2d8b82a3c6f6dc2fd0955c9c4"
+    },
+    "inertia-rails-cookbook": {
+      "source": "cole-robertson/inertia-rails-skills",
+      "sourceType": "github",
+      "skillPath": "skills/inertia-rails-cookbook/SKILL.md",
+      "computedHash": "efc1a40a9b91076ec4198518598d2476de3ced4c862044771ef5c7f45a154828"
+    },
+    "inertia-rails-forms": {
+      "source": "cole-robertson/inertia-rails-skills",
+      "sourceType": "github",
+      "skillPath": "skills/inertia-rails-forms/SKILL.md",
+      "computedHash": "2fd4b8c0cd642baa2a2cfa1d97a5cd25e452856cccfe730251eadc6ae4287f72"
+    },
+    "inertia-rails-performance": {
+      "source": "cole-robertson/inertia-rails-skills",
+      "sourceType": "github",
+      "skillPath": "skills/inertia-rails-performance/SKILL.md",
+      "computedHash": "c3531dc1eda31b9a1c190cbdd493640057f3e1252d665a8c5c425273cc7a8e64"
+    },
+    "inertia-rails-setup": {
+      "source": "cole-robertson/inertia-rails-skills",
+      "sourceType": "github",
+      "skillPath": "skills/inertia-rails-setup/SKILL.md",
+      "computedHash": "fcf78be0367f5c963af27b864493d50b1725b6e4c610531776f559ffa54290fa"
+    },
+    "inertia-rails-ssr": {
+      "source": "cole-robertson/inertia-rails-skills",
+      "sourceType": "github",
+      "skillPath": "skills/inertia-rails-ssr/SKILL.md",
+      "computedHash": "0447604666c116f0acef59f67f648e9c178cf176571a10b0e95396349f6c28be"
+    },
+    "inertia-rails-testing": {
+      "source": "cole-robertson/inertia-rails-skills",
+      "sourceType": "github",
+      "skillPath": "skills/inertia-rails-testing/SKILL.md",
+      "computedHash": "79afc8e85998540768296805bee249ed4a0e450855527561f3148d8e82840564"
+    }
+  }
+}
