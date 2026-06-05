@@ -35,6 +35,9 @@ export type ConnectionStatus = 'connecting' | 'live'
 interface EditorProps {
   slug: string
   identity: UserIdentity
+  /** Server-rendered Yjs state (base64) — hydrates the doc before the
+   *  provider syncs, so the first paint is already populated. */
+  initialStateB64?: string | null
   onReady?: (handle: EditorHandle) => void
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
@@ -42,6 +45,9 @@ interface EditorProps {
 }
 
 const SNAPSHOT_DEBOUNCE_MS = 900
+
+// Start loading shiki at import time so the parser is warm by mount.
+const shikiParserPromise = loadShikiParser()
 
 interface CollabSession {
   ydoc: Y.Doc
@@ -91,7 +97,7 @@ function EditorInner(props: EditorProps) {
   useEffect(() => {
     // Wrap in an updater: passing the parser function directly would make
     // React call it as a state updater.
-    void loadShikiParser().then((p) => setParser(() => p))
+    void shikiParserPromise.then((p) => setParser(() => p))
   }, [])
 
   if (!parser) return <div className="doc-editor-loading" aria-hidden />
@@ -102,6 +108,7 @@ function CollabEditor({
   slug,
   identity,
   parser,
+  initialStateB64,
   onReady,
   onStatus,
   onSpans,
@@ -151,6 +158,20 @@ function CollabEditor({
     const { ydoc, provider } = acquireSession(slug, identity)
     callbacksRef.current.onStatus?.('connecting')
 
+    // Hydrate from the server-rendered state so the first paint is already
+    // populated; Yjs converges idempotently when the provider's sync lands.
+    if (initialStateB64 && ydoc.store.clients.size === 0) {
+      try {
+        Y.applyUpdate(
+          ydoc,
+          Uint8Array.from(atob(initialStateB64), (c) => c.charCodeAt(0)),
+          'server-hydrate',
+        )
+      } catch {
+        // corrupt/stale prop — fall back to the wait-for-synced path
+      }
+    }
+
     let snapshotTimer: ReturnType<typeof setTimeout> | null = null
     const pushSnapshot = () => {
       editor.action((ctx) => {
@@ -194,7 +215,9 @@ function CollabEditor({
       callbacksRef.current.onStatus?.('live')
     }
 
-    if (provider.synced) start()
+    // A hydrated doc binds immediately — no visible empty-editor frame. The
+    // first-ever load (no state yet) keeps waiting for the seed-claim sync.
+    if (provider.synced || ydoc.store.clients.size > 0) start()
     else provider.on('synced', start)
 
     return () => {

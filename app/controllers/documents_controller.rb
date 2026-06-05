@@ -1,7 +1,11 @@
 class DocumentsController < InertiaController
   def index
+    # Recents are session-scoped: you see the documents you opened, not a
+    # global listing of everyone's.
+    slugs = Array(session[:recent_slugs])
+    docs = Document.where(slug: slugs).index_by(&:slug)
     render inertia: "documents/index", props: {
-      recent: Document.order(updated_at: :desc).limit(8).map { |d| d.slice(:title, :slug) }
+      recent: slugs.filter_map { |slug| docs[slug] }.map { |d| d.slice(:title, :slug) }
     }
   end
 
@@ -19,12 +23,14 @@ class DocumentsController < InertiaController
       return render plain: AgentGuide.text(document, request.base_url)
     end
 
+    remember_recent(document)
     @agent_guide = AgentGuide.text(document, request.base_url)
 
     render inertia: "documents/show", props: {
       document: document.slice(:id, :slug, :title).merge(
         seed_markdown: document.seed_markdown,
-        has_state: document.yjs_state.present?
+        has_state: document.yjs_state.present?,
+        yjs_state_b64: (Base64.strict_encode64(document.yjs_state) if document.yjs_state.present?)
       ),
       suggestions: -> { document.suggestions.pending.order(:created_at).map(&:as_props) },
       comments: -> { document.comments.order(:created_at).map(&:as_props) },
@@ -38,7 +44,8 @@ class DocumentsController < InertiaController
       title: params[:title].presence || "Untitled",
       seed_markdown: params[:markdown].presence || Document::DEFAULT_SEED
     )
-    redirect_to document_page_path(document.slug)
+    remember_recent(document)
+    redirect_to document_page_path(document.slug), status: :see_other
   end
 
   # Editor clients debounce-push a derived snapshot { markdown, spans } so the
@@ -61,6 +68,10 @@ class DocumentsController < InertiaController
   end
 
   private
+
+  def remember_recent(document)
+    session[:recent_slugs] = ([document.slug] + Array(session[:recent_slugs])).uniq.first(12)
+  end
 
   # Browsers identify as Mozilla/...; curl, wget, httpx, ruby, etc. don't.
   def agent_user_agent?

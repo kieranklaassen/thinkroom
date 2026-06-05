@@ -1,27 +1,14 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import type { SuggestionPayload } from '../editor/suggestions'
-import { truncate } from '../lib/truncate'
+import { useState, type FormEvent } from 'react'
 
 interface Props {
-  suggestions: SuggestionPayload[]
   aiPending: boolean
-  onAccept: (suggestion: SuggestionPayload) => void
-  onReject: (suggestion: SuggestionPayload) => void
   onAskAi: (instruction: string) => void
 }
 
-export function SuggestionsPanel({ suggestions, aiPending, onAccept, onReject, onAskAi }: Props) {
+/** The Ask AI composer. Pending suggestions themselves render as margin
+ *  cards beside the text they touch (see MarginSuggestions). */
+export function AskAiPanel({ aiPending, onAskAi }: Props) {
   const [instruction, setInstruction] = useState('')
-  const [leaving, setLeaving] = useState<Set<number>>(new Set())
-
-  // Forget leave-animations for cards that are gone from props.
-  useEffect(() => {
-    setLeaving((prev) => {
-      const ids = new Set(suggestions.map((s) => s.id))
-      const next = new Set([...prev].filter((id) => ids.has(id)))
-      return next.size === prev.size ? prev : next
-    })
-  }, [suggestions])
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
@@ -29,20 +16,10 @@ export function SuggestionsPanel({ suggestions, aiPending, onAccept, onReject, o
     setInstruction('')
   }
 
-  const resolve = (suggestion: SuggestionPayload, action: (s: SuggestionPayload) => void) => {
-    // Guard repeat clicks during the leave animation — a second click would
-    // schedule a second accept/reject (and a second CRDT insert).
-    if (leaving.has(suggestion.id)) return
-    setLeaving((prev) => new Set(prev).add(suggestion.id))
-    // Let the leave transition play before the optimistic prop removal.
-    setTimeout(() => action(suggestion), 160)
-  }
-
   return (
-    <section className="rail-section" aria-label="Suggestions">
+    <section className="rail-section" aria-label="Ask AI">
       <header className="rail-heading">
-        <h2>Suggestions</h2>
-        {suggestions.length > 0 && <span className="rail-count">{suggestions.length}</span>}
+        <h2>Ask AI</h2>
       </header>
 
       <form className="ask-ai" onSubmit={submit}>
@@ -59,51 +36,10 @@ export function SuggestionsPanel({ suggestions, aiPending, onAccept, onReject, o
         </button>
       </form>
 
-      {suggestions.length === 0 && !aiPending && (
-        <p className="rail-empty">
-          No pending suggestions. Select text or ask the AI to propose an edit —
-          it lands here for review.
-        </p>
-      )}
-
-      <ul className="suggestion-list">
-        {suggestions.map((suggestion) => (
-          <li
-            key={suggestion.id}
-            data-suggestion-id={suggestion.id}
-            className={`suggestion-card ${leaving.has(suggestion.id) ? 'is-leaving' : ''}`}
-          >
-            <div className="suggestion-meta">
-              <span className={`author-chip author-chip--${suggestion.author_kind}`}>
-                {suggestion.author_name}
-              </span>
-              {suggestion.intent && <span className="suggestion-intent">{suggestion.intent}</span>}
-            </div>
-            {suggestion.replaces && (
-              <p className="suggestion-replaces">
-                replaces <q>{truncate(suggestion.replaces, 90)}</q>
-              </p>
-            )}
-            <p className="suggestion-body">{suggestion.body}</p>
-            <div className="suggestion-actions">
-              <button
-                className="btn-accept"
-                disabled={leaving.has(suggestion.id)}
-                onClick={() => resolve(suggestion, onAccept)}
-              >
-                Accept
-              </button>
-              <button
-                className="btn-reject"
-                disabled={leaving.has(suggestion.id)}
-                onClick={() => resolve(suggestion, onReject)}
-              >
-                Reject
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
+      <p className="rail-empty">
+        Proposals appear in the margin, next to the text they touch — accept or
+        reject them there.
+      </p>
     </section>
   )
 }
