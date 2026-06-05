@@ -162,8 +162,9 @@ function CollabEditor({
     }
 
     let started = false
+    let cancelled = false
     const start = () => {
-      if (started) return
+      if (started || cancelled) return
       started = true
       editor.action((ctx) => {
         const service = ctx.get(collabServiceCtx)
@@ -197,6 +198,8 @@ function CollabEditor({
     else provider.on('synced', start)
 
     return () => {
+      cancelled = true
+      provider.off('synced', start)
       if (snapshotTimer) clearTimeout(snapshotTimer)
       try {
         editor.action((ctx) => ctx.get(collabServiceCtx).disconnect())

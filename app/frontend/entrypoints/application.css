@@ -31,12 +31,101 @@
   --measure: 44rem;
 }
 
+/* Whitey — homage to Typora's Whitey theme: clean white, minimal chrome,
+ * generous margins, quiet typography. Everything derives from the tokens, so
+ * provenance tints and code blocks restyle coherently. */
+[data-theme='whitey'] {
+  --font-doc: 'Avenir Next', Avenir, 'Segoe UI', 'Helvetica Neue', sans-serif;
+
+  --surface: #ffffff;
+  --surface-raised: #fcfcfc;
+  --ink: #2b2b2b;
+  --ink-soft: #777777;
+  --ink-faint: #b3b3b3;
+  --line: #ececec;
+  --accent: #4183c4;
+  --accent-soft: #4183c422;
+
+  --prov-pending-bg: #dce9f766;
+  --prov-pending-line: #4183c499;
+  --prov-reviewed-bg: #dce9f733;
+  --prov-reviewed-line: #4183c455;
+  --prov-endorsed-line: #4183c440;
+
+  --code-bg: #f8f8f8;
+  --measure: 47rem;
+}
+
+[data-theme='whitey'] .milkdown .ProseMirror {
+  font-size: 1rem;
+  line-height: 1.8;
+  font-weight: 400;
+}
+
+[data-theme='whitey'] .doc-main {
+  padding-top: 4rem;
+}
+
+[data-theme='whitey'] .milkdown .ProseMirror blockquote {
+  font-style: normal;
+  border-left-color: var(--accent-soft);
+}
+
 html,
 body {
   background: var(--surface);
   color: var(--ink);
   font-family: var(--font-ui);
   -webkit-font-smoothing: antialiased;
+  transition: background 220ms ease, color 220ms ease;
+}
+
+/* ------------------------------ Theme picker ------------------------------ */
+.theme-picker {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.theme-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+  font-weight: 550;
+  padding: 0.26rem 0.55rem;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.theme-option.is-active {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+.theme-option:hover:not(.is-active) {
+  color: var(--ink-soft);
+}
+
+.theme-swatch {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+}
+
+.theme-swatch--proof {
+  background: #faf8f4;
+  border-color: #b65c3d66;
+}
+
+.theme-swatch--whitey {
+  background: #ffffff;
+  border-color: #4183c466;
 }
 
 /* --------------------------------- Landing ------------------------------- */

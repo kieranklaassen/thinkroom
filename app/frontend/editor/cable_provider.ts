@@ -76,6 +76,10 @@ export class CableProvider {
     this.listeners.get(event)!.add(handler as never)
   }
 
+  off(event: 'synced' | 'seed', handler: () => void): void {
+    this.listeners.get(event)?.delete(handler as never)
+  }
+
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
@@ -88,7 +92,15 @@ export class CableProvider {
   }
 
   private emit(event: string): void {
-    this.listeners.get(event)?.forEach((handler) => (handler as () => void)())
+    // Isolate listener failures: one stale handler (e.g. bound to a
+    // destroyed editor) must never prevent the others from running.
+    this.listeners.get(event)?.forEach((handler) => {
+      try {
+        ;(handler as () => void)()
+      } catch (error) {
+        console.error(`CableProvider ${event} listener failed`, error)
+      }
+    })
   }
 
   private send(payload: Record<string, unknown>): void {
