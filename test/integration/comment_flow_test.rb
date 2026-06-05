@@ -52,3 +52,19 @@ class CommentFlowTest < ActionDispatch::IntegrationTest
     assert_equal "agent", comment.as_props[:author_kind]
   end
 end
+
+class ThemePersistenceTest < ActionDispatch::IntegrationTest
+  test "layout renders the persisted theme from the cookie" do
+    doc = Document.create!(title: "Themed")
+    get document_page_path(doc.slug),
+        headers: { "User-Agent" => "Mozilla/5.0", "Cookie" => "proof_theme=whitey" }
+    assert_includes response.body, 'data-theme="whitey"'
+  end
+
+  test "unknown theme cookie values fall back to the default" do
+    doc = Document.create!(title: "Themed")
+    get document_page_path(doc.slug),
+        headers: { "User-Agent" => "Mozilla/5.0", "Cookie" => "proof_theme=evil" }
+    assert_includes response.body, 'data-theme="proof"'
+  end
+end

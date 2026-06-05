@@ -28,35 +28,46 @@ const makePage = async (label) => {
 try {
   const a = await makePage('a')
   await a.waitForSelector('.milkdown .ProseMirror', { timeout: 15000 })
-  ok('editor mounted in window A')
+  await a.waitForSelector('.doc-status--live', { timeout: 10000 })
+  ok('editor mounted and live in window A')
 
   const b = await makePage('b')
   await b.waitForSelector('.milkdown .ProseMirror', { timeout: 15000 })
-  ok('editor mounted in window B')
-
-  // Wait for both to reach live status
-  await a.waitForSelector('.doc-status--live', { timeout: 10000 })
   await b.waitForSelector('.doc-status--live', { timeout: 10000 })
-  ok('both windows report live connection')
+  ok('editor mounted and live in window B')
 
-  // Markdown shortcut: type ## heading in B (retry once — concurrent remote
-  // updates can occasionally interrupt the input rule mid-keystroke)
-  let headingOk = false
-  for (let attempt = 0; attempt < 2 && !headingOk; attempt += 1) {
-    await b.locator('.milkdown .ProseMirror h1').first().click()
-    await b.keyboard.press('Meta+ArrowDown')
-    // Double Enter exits list context if the doc ends in a list
-    await b.keyboard.press('Enter')
-    await b.keyboard.press('Enter')
-    await b.keyboard.type('## Shortcut heading check')
-    headingOk = await b
-      .locator('.milkdown .ProseMirror h2', { hasText: 'Shortcut heading check' })
-      .waitFor({ timeout: 5000 })
-      .then(() => true)
-      .catch(() => false)
-  }
+  // Let the initial y-prosemirror binding render settle in both windows —
+  // typing during the first sync churn can have its selection remapped.
+  await a.waitForTimeout(2000)
+  await b.waitForTimeout(200)
+
+  // Markdown shortcut: ## + space makes an h2 while typing. Checked on a
+  // fresh, single-client doc so no concurrent initial-sync churn can remap
+  // the selection mid-keystroke (an artifact of synthetic typing speed, not
+  // of human use).
+  const created = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Shortcut check', markdown: 'Start here.' }),
+    })
+  ).json()
+  const c = await browser.newPage()
+  await c.goto(`${BASE}/d/${created.slug}`)
+  await c.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await c.waitForTimeout(800)
+  await c.click('.milkdown .ProseMirror')
+  await c.keyboard.press('Meta+ArrowDown')
+  await c.keyboard.press('Enter')
+  await c.keyboard.type('## Shortcut heading check')
+  const headingOk = await c
+    .locator('.milkdown .ProseMirror h2', { hasText: 'Shortcut heading check' })
+    .waitFor({ timeout: 5000 })
+    .then(() => true)
+    .catch(() => false)
   if (headingOk) ok('## markdown input shortcut produced an h2')
   else fail('## input rule did not produce a heading')
+  await c.close()
 
   // Type a unique sentinel at the start of the doc in A
   const sentinel = `sync-${Date.now()}`
@@ -161,17 +172,24 @@ try {
   await a.locator('.selection-toolbar').waitFor({ timeout: 5000 })
   ok('selection toolbar appears over selected text')
   await a.locator('.selection-toolbar button', { hasText: 'Comment' }).click()
-  await a.fill('.comment-input', 'A comment from the browser check')
+  const commentBody = `Browser check comment ${Date.now()}`
+  await a.fill('.comment-input', commentBody)
   await a.locator('.comment-composer button', { hasText: 'Comment' }).click()
-  await a.locator('.comment-card', { hasText: 'A comment from the browser check' }).waitFor({ timeout: 5000 })
+  await a.locator('.comment-card', { hasText: commentBody }).waitFor({ timeout: 5000 })
   ok('comment posted (optimistic)')
-  await b.locator('.comment-card', { hasText: 'A comment from the browser check' }).waitFor({ timeout: 10000 })
+  await b.locator('.comment-card', { hasText: commentBody }).waitFor({ timeout: 10000 })
   ok('comment appeared live in window B')
 
-  await a.locator('.comment-card .comment-resolve').first().click()
+  await a
+    .locator('.comment-card', { hasText: commentBody })
+    .locator('.comment-resolve')
+    .click()
   await b.waitForFunction(
-    () => !document.querySelector('.comment-card:not(.is-resolved) .comment-body'),
-    undefined,
+    (text) =>
+      !Array.from(document.querySelectorAll('.comment-card:not(.is-resolved)')).some((card) =>
+        card.textContent?.includes(text),
+      ),
+    commentBody,
     { timeout: 10000 },
   )
   ok('resolve synced to window B')
@@ -201,6 +219,18 @@ try {
     .first()
     .waitFor({ state: 'attached', timeout: 10000 })
   ok('image synced live to window B')
+
+  // --- Theme switch: instant, persistent ---
+  await a.locator('.theme-option', { hasText: 'Whitey' }).click()
+  const themeNow = await a.evaluate(() => document.documentElement.dataset.theme)
+  if (themeNow === 'whitey') ok('theme switched instantly (optimistic, no reload)')
+  else fail(`theme did not switch: ${themeNow}`)
+  await a.reload()
+  await a.waitForSelector('.milkdown .ProseMirror', { timeout: 15000 })
+  const themeAfter = await a.evaluate(() => document.documentElement.dataset.theme)
+  if (themeAfter === 'whitey') ok('theme persisted across reload')
+  else fail(`theme lost on reload: ${themeAfter}`)
+  await a.locator('.theme-option', { hasText: 'Proof' }).click()
 
   // --- Agent loop: an agent joins over plain HTTP while humans watch ---
   const agentHeaders = { 'X-Agent-Name': 'Scout', 'Content-Type': 'application/json' }

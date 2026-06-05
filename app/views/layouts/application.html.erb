@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html data-theme="<%= cookies[:proof_theme].to_s.presence_in(%w[proof whitey]) || "proof" %>">
   <head>
     <title data-inertia><%= content_for(:title) || "Proof" %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">

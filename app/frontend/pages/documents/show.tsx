@@ -33,6 +33,7 @@ import {
   type AgentPresencePayload,
 } from '../../components/presence_bar'
 import { ActivityPanel } from '../../components/activity_panel'
+import { ThemePicker } from '../../components/theme_picker'
 import { useMetaChannel } from '../../lib/use_meta_channel'
 import { postJSON } from '../../lib/csrf'
 
@@ -310,6 +311,7 @@ export default function DocumentShow({
           <div className="doc-header-right">
             <ProvenanceSummaryChip spans={spans} />
             <PresenceBar humans={peers} agents={presences} />
+            <ThemePicker />
             <button className="share-button" onClick={copyShareLink}>
               {copied ? 'Copied' : 'Share'}
             </button>
