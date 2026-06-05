@@ -115,12 +115,11 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
     assert_redirected_to root_path
   end
 
-  test "delete broadcasts document_deleted before destroying" do
+  test "delete broadcasts a document_deleted event after a successful destroy" do
     establish_identity
     post claim_document_path(@document.slug), params: { name: "Owner" }
 
-    # claim already broadcast 2; the delete adds exactly 1 document_deleted
-    assert_broadcasts(DocumentMetaChannel.broadcasting_for(@document), 1) do
+    assert_broadcast_on(DocumentMetaChannel.broadcasting_for(@document), event: "document_deleted") do
       delete destroy_document_path(@document.slug)
     end
   end
@@ -233,6 +232,21 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
     get root_path
     assert_inertia_props do |props|
       props[:recent].any? { |d| d[:slug] == @document.slug }
+    end
+  end
+
+  test "yours caps at 50 newest docs" do
+    establish_identity
+    oldest = Document.create!(title: "doc-oldest", created_at: 60.minutes.ago)
+    post claim_document_path(oldest.slug), params: { name: "Me" }
+    51.times do |i|
+      doc = Document.create!(title: "doc-#{i}", created_at: (50 - i).minutes.ago)
+      post claim_document_path(doc.slug), params: { name: "Me" }
+    end
+
+    get root_path
+    assert_inertia_props do |props|
+      props[:yours].length == 50 && props[:yours].none? { |d| d[:title] == "doc-oldest" }
     end
   end
 

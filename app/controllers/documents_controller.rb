@@ -11,7 +11,7 @@ class DocumentsController < InertiaController
     docs = Document.where(slug: slugs).index_by(&:slug)
     render inertia: "documents/index", props: {
       yours: yours.map { |d| d.slice(:title, :slug) },
-      recent: slugs.filter_map { |slug| your_slugs.include?(slug) ? nil : docs[slug] }
+      recent: slugs.filter_map { |slug| docs[slug] unless your_slugs.include?(slug) }
                    .map { |d| d.slice(:title, :slug) }
     }
   end
@@ -57,7 +57,7 @@ class DocumentsController < InertiaController
       title: params[:title].presence || "Untitled",
       seed_markdown: params[:markdown].presence || Document::DEFAULT_SEED,
       owner_token: owner_token,
-      owner_name: params[:name].to_s.strip.first(255).presence || "Anonymous",
+      owner_name: Document.normalize_owner_name(params[:name]),
       claimed_at: Time.current
     )
     remember_recent(document)
@@ -73,14 +73,20 @@ class DocumentsController < InertiaController
   rescue Document::UnclaimableError
     redirect_back fallback_location: document_page_path(document.slug), status: :see_other,
                   inertia: { errors: { claim: "This document cannot be claimed" } }
-  rescue ActiveRecord::RecordInvalid
+  rescue Document::ClaimRaceError
     redirect_back fallback_location: document_page_path(document.slug), status: :see_other,
                   inertia: { errors: { claim: "already claimed" } }
+  rescue ActiveRecord::RecordNotFound
+    # The doc was deleted while the claim was in flight — go home cleanly
+    # instead of popping a 404 modal over a dead editor.
+    redirect_to root_path, status: :see_other
   end
 
-  # Owners only. The broadcast goes out before destroy so connected editors
-  # route home instead of 404ing; already-gone docs redirect home (idempotent
-  # — a second tab's delete shouldn't error).
+  # Owners only. The broadcast goes out after a successful destroy — the
+  # stream name derives from the record's retained id, so it still reaches
+  # every subscriber, and clients are only evicted when the delete actually
+  # committed. Already-gone docs redirect home (idempotent — a second tab's
+  # delete shouldn't error).
   def destroy
     document = Document.find_by(slug: params[:slug])
     return redirect_to root_path, status: :see_other if document.nil?
@@ -90,9 +96,12 @@ class DocumentsController < InertiaController
                            inertia: { errors: { document: "Only the owner can delete this document" } }
     end
 
-    DocumentMetaChannel.broadcast_event(document, :document_deleted)
     document.destroy!
+    DocumentMetaChannel.broadcast_event(document, :document_deleted)
     redirect_to root_path, status: :see_other
+  rescue ActiveRecord::RecordNotDestroyed, ActiveRecord::StatementInvalid
+    redirect_back fallback_location: document_page_path(params[:slug]), status: :see_other,
+                  inertia: { errors: { document: "Delete failed — please try again" } }
   end
 
   # Editor clients debounce-push a derived snapshot { markdown, spans } so the

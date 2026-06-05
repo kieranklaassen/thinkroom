@@ -65,7 +65,7 @@ class DocumentTest < ActiveSupport::TestCase
     doc = Document.create!(title: "Taken")
     doc.claim!(token: "tok-a", name: "First")
 
-    assert_raises(ActiveRecord::RecordInvalid) do
+    assert_raises(Document::ClaimRaceError) do
       doc.claim!(token: "tok-b", name: "Second")
     end
     assert_equal "tok-a", doc.reload.owner_token
@@ -78,7 +78,9 @@ class DocumentTest < ActiveSupport::TestCase
     original_claimed_at = doc.claimed_at
     activity_count = doc.activities.count
 
-    assert_nothing_raised { doc.claim!(token: "tok-a", name: "Owner Again") }
+    assert_no_broadcasts(DocumentMetaChannel.broadcasting_for(doc)) do
+      doc.claim!(token: "tok-a", name: "Owner Again")
+    end
     doc.reload
     assert_equal original_claimed_at.to_i, doc.claimed_at.to_i
     assert_equal "Owner", doc.owner_name
@@ -90,10 +92,33 @@ class DocumentTest < ActiveSupport::TestCase
     # Simulate the other session winning between read and conditional UPDATE.
     Document.where(id: doc.id).update_all(owner_token: "tok-winner", owner_name: "Winner", claimed_at: Time.current)
 
-    assert_raises(ActiveRecord::RecordInvalid) do
+    assert_raises(Document::ClaimRaceError) do
       doc.claim!(token: "tok-loser", name: "Loser")
     end
     assert_equal "tok-winner", doc.reload.owner_token
+  end
+
+  test "same-token requests racing each other resolve as no-op success, not a lost race" do
+    doc = Document.create!(title: "Race")
+    # The other tab (same browser, same token) commits between this object's
+    # load and its conditional UPDATE.
+    Document.where(id: doc.id).update_all(owner_token: "tok-a", owner_name: "Owner", claimed_at: Time.current)
+
+    assert_nothing_raised { doc.claim!(token: "tok-a", name: "Owner") }
+    assert doc.owned_by?("tok-a")
+  end
+
+  test "claim rolls back ownership when the activity insert fails" do
+    doc = Document.create!(title: "Free")
+    Activity.define_singleton_method(:new) { |*, **| raise "activity insert failed" }
+    begin
+      assert_raises(RuntimeError) do
+        doc.claim!(token: "tok-a", name: "Owner")
+      end
+    ensure
+      Activity.singleton_class.remove_method(:new)
+    end
+    assert_not doc.reload.claimed?
   end
 
   test "claim on the demo slug raises UnclaimableError" do

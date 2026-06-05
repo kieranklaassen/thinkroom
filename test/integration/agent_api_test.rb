@@ -36,13 +36,13 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   test "state read exposes ownership without leaking the token" do
     get "/api/docs/#{@document.slug}", headers: AGENT
     body = response.parsed_body
-    assert_equal({ "claimed" => false, "owner_name" => nil }, body["ownership"])
+    assert_equal({ "claimed" => false, "claimable" => true, "owner_name" => nil }, body["ownership"])
 
     @document.claim!(token: "tok-owner", name: "Quiet Falcon")
 
     get "/api/docs/#{@document.slug}", headers: AGENT
     body = response.parsed_body
-    assert_equal({ "claimed" => true, "owner_name" => "Quiet Falcon" }, body["ownership"])
+    assert_equal({ "claimed" => true, "claimable" => false, "owner_name" => "Quiet Falcon" }, body["ownership"])
     refute_includes response.body, "tok-owner"
     refute_includes response.body, "owner_token"
   end
