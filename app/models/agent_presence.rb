@@ -33,7 +33,7 @@ class AgentPresence < ApplicationRecord
     end
 
     DocumentMetaChannel.broadcast_event(document, :presences)
-    [presence, newly_arrived && status == "active"]
+    [ presence, newly_arrived && status == "active" ]
   end
 
   def as_props

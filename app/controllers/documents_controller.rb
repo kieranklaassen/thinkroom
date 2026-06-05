@@ -126,7 +126,7 @@ class DocumentsController < InertiaController
   private
 
   def remember_recent(document)
-    session[:recent_slugs] = ([document.slug] + Array(session[:recent_slugs])).uniq.first(12)
+    session[:recent_slugs] = ([ document.slug ] + Array(session[:recent_slugs])).uniq.first(12)
   end
 
   # Browsers identify as Mozilla/...; curl, wget, httpx, ruby, etc. don't.
