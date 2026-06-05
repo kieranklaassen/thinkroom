@@ -9,7 +9,7 @@ class CreateCommentsAndAgentPresences < ActiveRecord::Migration[8.1]
       t.datetime :resolved_at
       t.timestamps
     end
-    add_index :comments, [:document_id, :resolved_at]
+    add_index :comments, [ :document_id, :resolved_at ]
 
     create_table :agent_presences do |t|
       t.references :document, null: false, foreign_key: true
@@ -19,6 +19,6 @@ class CreateCommentsAndAgentPresences < ActiveRecord::Migration[8.1]
       t.datetime :last_seen_at, null: false
       t.timestamps
     end
-    add_index :agent_presences, [:document_id, :agent_name], unique: true
+    add_index :agent_presences, [ :document_id, :agent_name ], unique: true
   end
 end

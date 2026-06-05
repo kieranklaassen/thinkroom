@@ -12,7 +12,7 @@ class CreateSuggestionsAndActivities < ActiveRecord::Migration[8.1]
       t.string :resolved_by
       t.timestamps
     end
-    add_index :suggestions, [:document_id, :status]
+    add_index :suggestions, [ :document_id, :status ]
 
     create_table :activities do |t|
       t.references :document, null: false, foreign_key: true
@@ -22,6 +22,6 @@ class CreateSuggestionsAndActivities < ActiveRecord::Migration[8.1]
       t.text :detail
       t.datetime :created_at, null: false
     end
-    add_index :activities, [:document_id, :created_at]
+    add_index :activities, [ :document_id, :created_at ]
   end
 end

@@ -71,6 +71,21 @@ jobs:
         with:
           bundler-cache: true
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      # Integration tests render Inertia views, which resolve assets through
+      # the Vite manifest — build it up front so vite_rails never falls back
+      # to an on-demand build mid-suite.
+      - name: Build Vite assets for test
+        run: bin/vite build --mode test
+
       - name: Run tests
         env:
           RAILS_ENV: test

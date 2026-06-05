@@ -53,7 +53,7 @@ class SuggestionTest < ActiveSupport::TestCase
   test "pending scope excludes resolved suggestions" do
     pending = build_suggestion
     build_suggestion.accept!
-    assert_equal [pending.id], @document.suggestions.pending.pluck(:id)
+    assert_equal [ pending.id ], @document.suggestions.pending.pluck(:id)
   end
 
   test "as_props exposes the client contract" do
