@@ -1292,6 +1292,39 @@ a:focus-visible {
   color: var(--ink);
 }
 
+/* ------------------------------ Ownership chip ----------------------------- */
+.ownership-owner {
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ownership-confirm {
+  display: inline-flex;
+  gap: 0.3rem;
+}
+
+.ownership-delete {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.ownership-delete:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (max-width: 64rem) {
+  .ownership-owner {
+    max-width: 6rem;
+  }
+}
+
 /* ------------------------------ Agent cursor ------------------------------ */
 .agent-cursor {
   position: relative;

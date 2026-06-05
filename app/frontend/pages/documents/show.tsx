@@ -32,6 +32,7 @@ import { SelectionToolbar } from '../../components/selection_toolbar'
 import { PresenceBar, type AgentPresencePayload } from '../../components/presence_bar'
 import { ActivityPanel } from '../../components/activity_panel'
 import { FeedbackButton } from '../../components/feedback_button'
+import { OwnershipChip, type OwnershipPayload } from '../../components/ownership_chip'
 import { SharePopover } from '../../components/share_popover'
 import {
   MobileDock,
@@ -61,6 +62,7 @@ export interface DocumentProps {
     has_state: boolean
     yjs_state_b64: string | null
   }
+  ownership: OwnershipPayload
   suggestions: SuggestionPayload[]
   comments: CommentPayload[]
   activities: ActivityPayload[]
@@ -97,6 +99,7 @@ const writeStoredFlag = (key: string, value: boolean): void => {
 
 export default function DocumentShow({
   document: doc,
+  ownership,
   suggestions,
   comments,
   activities,
@@ -137,7 +140,21 @@ export default function DocumentShow({
     if (isMobile && composerAnchor !== null) setActiveSheet('comments')
   }, [isMobile, composerAnchor])
 
-  useMetaChannel(doc.slug)
+  // When the doc is deleted (live broadcast, or channel rejection after an
+  // offline delete), leave the editor cleanly instead of 404ing in place.
+  const onDocumentGone = useCallback(() => {
+    router.visit('/')
+  }, [])
+  useMetaChannel(doc.slug, { onDeleted: onDocumentGone })
+
+  // The sync channel rejects its resubscription when the doc is gone —
+  // same exit path.
+  useEffect(() => {
+    if (!handle) return
+    const provider = handle.provider
+    provider.on('rejected', onDocumentGone)
+    return () => provider.off('rejected', onDocumentGone)
+  }, [handle, onDocumentGone])
 
   useEffect(() => writeStoredFlag('pruf:panel', panelOpen), [panelOpen])
   useEffect(() => writeStoredFlag('pruf:focus', focusMode), [focusMode])
@@ -474,6 +491,7 @@ export default function DocumentShow({
             >
               Focus
             </button>
+            <OwnershipChip slug={doc.slug} ownership={ownership} claimerName={identity.name} />
             <FeedbackButton />
             <SharePopover agentsActive={presences.length} />
           </div>
