@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { Head, Link, useForm } from '@inertiajs/react'
+import { FeedbackButton } from '../../components/feedback_button'
 
 interface Props {
   recent: { title: string; slug: string }[]
@@ -27,6 +28,7 @@ export default function DocumentsIndex({ recent }: Props) {
     <>
       <Head title="Pruf" />
       <div className="landing">
+        <div className="landing-corner"><FeedbackButton /></div>
         <main className="landing-main">
           <h1 className="landing-wordmark">Pruf</h1>
           <p className="landing-tagline">
