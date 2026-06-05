@@ -70,7 +70,7 @@ class AgentGuide
       <<~GUIDE
         # #{document.title} — agent guide
 
-        You are an agent reading a Proof share link. Humans see a live
+        You are an agent reading a Pruf share link. Humans see a live
         collaborative editor at this URL; you participate over plain HTTP.
         Everything you do appears live in their editors, attributed to you.
 

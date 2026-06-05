@@ -24,7 +24,8 @@ import {
 import { refreshAgentCursors } from '../../editor/agent_cursors'
 import { ProvenanceSummaryChip } from '../../components/provenance_summary'
 import { ReviewPopover } from '../../components/review_popover'
-import { SuggestionsPanel } from '../../components/suggestions_panel'
+import { AskAiPanel } from '../../components/suggestions_panel'
+import { MarginSuggestions } from '../../components/margin_suggestions'
 import { CommentsPanel, type CommentPayload } from '../../components/comments_panel'
 import { SelectionToolbar } from '../../components/selection_toolbar'
 import {
@@ -34,6 +35,7 @@ import {
 } from '../../components/presence_bar'
 import { ActivityPanel } from '../../components/activity_panel'
 import { ThemePicker } from '../../components/theme_picker'
+import { SharePopover } from '../../components/share_popover'
 import { useMetaChannel } from '../../lib/use_meta_channel'
 import { postJSON } from '../../lib/csrf'
 
@@ -53,6 +55,7 @@ export interface DocumentProps {
     title: string
     seed_markdown: string | null
     has_state: boolean
+    yjs_state_b64: string | null
   }
   suggestions: SuggestionPayload[]
   comments: CommentPayload[]
@@ -60,14 +63,32 @@ export interface DocumentProps {
   presences: AgentPresencePayload[]
 }
 
+// Floating chrome stores only its anchor identity; geometry is re-derived
+// from the live editor state on scroll / resize / doc updates, so popovers
+// track their text instead of freezing at birth coordinates.
 interface ReviewTarget {
   span: AiSpan
-  position: { x: number; y: number }
 }
 
 interface SelectionTarget {
   text: string
-  position: { x: number; y: number }
+}
+
+const readStoredFlag = (key: string, fallback: boolean): boolean => {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw === null ? fallback : raw === '1'
+  } catch {
+    return fallback
+  }
+}
+
+const writeStoredFlag = (key: string, value: boolean): void => {
+  try {
+    localStorage.setItem(key, value ? '1' : '0')
+  } catch {
+    // private mode — the toggle just won't persist
+  }
 }
 
 export default function DocumentShow({
@@ -88,10 +109,32 @@ export default function DocumentShow({
   const [aiPendingCount, setAiPendingCount] = useState(0)
   const aiPending = aiPendingCount > 0
   const prevSuggestionCount = useRef(suggestions.length)
-  const [copied, setCopied] = useState(false)
   const viewRef = useRef<EditorView | null>(null)
+  const [panelOpen, setPanelOpen] = useState(() => readStoredFlag('pruf:panel', true))
+  const [focusMode, setFocusMode] = useState(() => readStoredFlag('pruf:focus', false))
 
   useMetaChannel(doc.slug)
+
+  useEffect(() => writeStoredFlag('pruf:panel', panelOpen), [panelOpen])
+  useEffect(() => writeStoredFlag('pruf:focus', focusMode), [focusMode])
+
+  // ⌘\ toggles the side panel, ⌘. toggles suggestion focus.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey)) return
+      const target = event.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+      if (event.key === '\\') {
+        event.preventDefault()
+        setPanelOpen((open) => !open)
+      } else if (event.key === '.') {
+        event.preventDefault()
+        setFocusMode((focus) => !focus)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // Only a suggestion ARRIVING clears the thinking state — accept/reject
   // shrink the list and must not re-enable Ask AI while a request is live.
@@ -152,11 +195,7 @@ export default function DocumentShow({
     if (!empty) {
       const text = view.state.doc.textBetween(from, to, '\n')
       if (text.trim().length > 0) {
-        const coords = view.coordsAtPos(from)
-        setSelectionTarget({
-          text,
-          position: { x: coords.left, y: Math.max(8, coords.top - 44) },
-        })
+        setSelectionTarget({ text })
         setReviewTarget(null)
         return
       }
@@ -164,25 +203,73 @@ export default function DocumentShow({
     setSelectionTarget(null)
 
     const span = aiSpanAt(view.state)
-    if (!span) {
-      setReviewTarget(null)
-      return
-    }
-    const coords = view.coordsAtPos(span.from)
-    setReviewTarget({
-      span,
-      position: { x: coords.left, y: Math.max(8, coords.top - 44) },
-    })
+    setReviewTarget(span ? { span } : null)
   }, [])
 
-  const handleAdvance = useCallback(
-    (state: ReviewState) => {
-      const view = viewRef.current
-      if (!view || !reviewTarget) return
-      applyReviewState(view, reviewTarget.span, state)
-    },
-    [reviewTarget],
-  )
+  // While a popover is open, any scroll or resize schedules one rAF-throttled
+  // reposition pass (coordsAtPos for a single anchor is cheap).
+  const [popoverTick, setPopoverTick] = useState(0)
+  const popoverOpen = Boolean(reviewTarget) || Boolean(selectionTarget)
+  useEffect(() => {
+    if (!popoverOpen) return
+    let raf = 0
+    const schedule = () => {
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        setPopoverTick((tick) => tick + 1)
+      })
+    }
+    window.addEventListener('scroll', schedule, { passive: true, capture: true })
+    window.addEventListener('resize', schedule)
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+      window.removeEventListener('scroll', schedule, true)
+      window.removeEventListener('resize', schedule)
+    }
+  }, [popoverOpen])
+
+  // Anchor geometry in viewport coords — null while the anchor is off-screen
+  // or gone, hiding the popover until the text scrolls back into view.
+  const anchorPosition = useCallback((view: EditorView, pos: number) => {
+    try {
+      const coords = view.coordsAtPos(pos)
+      if (coords.top < -24 || coords.top > window.innerHeight + 24) return null
+      return { x: coords.left, y: Math.max(8, coords.top - 44) }
+    } catch {
+      return null
+    }
+  }, [])
+
+  const liveSelectionPosition = useMemo(() => {
+    if (!selectionTarget) return null
+    const view = viewRef.current
+    if (!view || view.state.selection.empty) return null
+    return anchorPosition(view, view.state.selection.from)
+    // spans (doc updates) + popoverTick (scroll/resize) drive repositioning.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionTarget, spans, popoverTick, anchorPosition])
+
+  const liveReview = useMemo(() => {
+    if (!reviewTarget) return null
+    const view = viewRef.current
+    if (!view) return null
+    // Re-derive the span from current state: edits shift positions, and
+    // advancing the review state changes the attrs the popover renders.
+    const span = aiSpanAt(view.state)
+    if (!span) return null
+    const position = anchorPosition(view, span.from)
+    return position ? { span, position } : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewTarget, spans, popoverTick, anchorPosition])
+
+  const handleAdvance = useCallback((state: ReviewState) => {
+    const view = viewRef.current
+    if (!view) return
+    const span = aiSpanAt(view.state)
+    if (!span) return
+    applyReviewState(view, span, state)
+  }, [])
 
   const acceptSuggestion = useCallback(
     (suggestion: SuggestionPayload) => {
@@ -304,17 +391,10 @@ export default function DocumentShow({
     view.focus()
   }, [])
 
-  const copyShareLink = useCallback(() => {
-    void navigator.clipboard.writeText(window.location.href).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
-    })
-  }, [])
-
   return (
     <>
       <Head title={doc.title} />
-      <div className="doc-page">
+      <div className={`doc-page ${panelOpen ? '' : 'is-panel-hidden'}`}>
         <header className="doc-header">
           <div className="doc-header-left">
             <Link href="/" className="doc-home" aria-label="Home">
@@ -330,31 +410,52 @@ export default function DocumentShow({
           <div className="doc-header-right">
             <ProvenanceSummaryChip spans={spans} />
             <PresenceBar humans={peers} agents={presences} />
-            <ThemePicker />
-            <button className="share-button" onClick={copyShareLink}>
-              {copied ? 'Copied' : 'Share'}
+            <button
+              className="chrome-toggle"
+              aria-pressed={panelOpen}
+              title="Hide/show panel — ⌘\"
+              onClick={() => setPanelOpen((open) => !open)}
+            >
+              Panel
             </button>
+            <button
+              className="chrome-toggle"
+              aria-pressed={focusMode}
+              title="Suggestion focus — ⌘."
+              onClick={() => setFocusMode((focus) => !focus)}
+            >
+              Focus
+            </button>
+            <ThemePicker />
+            <SharePopover agentsActive={presences.length} />
           </div>
         </header>
         <main className="doc-body">
-          <article className="doc-main">
-            <DocumentEditor
-              slug={doc.slug}
-              identity={identity}
-              onReady={setHandle}
-              onStatus={setStatus}
-              onSpans={setSpans}
-              onSelection={handleSelection}
-            />
-          </article>
+          <div className={`doc-canvas ${focusMode ? 'is-focus' : ''}`}>
+            <article className="doc-main">
+              <DocumentEditor
+                slug={doc.slug}
+                identity={identity}
+                initialStateB64={doc.yjs_state_b64}
+                onReady={setHandle}
+                onStatus={setStatus}
+                onSpans={setSpans}
+                onSelection={handleSelection}
+              />
+            </article>
+            <div className="margin-gutter">
+              <MarginSuggestions
+                suggestions={suggestions}
+                handle={handle}
+                spans={spans}
+                focusMode={focusMode}
+                onAccept={acceptSuggestion}
+                onReject={rejectSuggestion}
+              />
+            </div>
+          </div>
           <aside className="doc-rail">
-            <SuggestionsPanel
-              suggestions={suggestions}
-              aiPending={aiPending}
-              onAccept={acceptSuggestion}
-              onReject={rejectSuggestion}
-              onAskAi={(instruction) => askAi(instruction)}
-            />
+            <AskAiPanel aiPending={aiPending} onAskAi={(instruction) => askAi(instruction)} />
             <CommentsPanel
               comments={comments}
               composerAnchor={composerAnchor}
@@ -366,9 +467,9 @@ export default function DocumentShow({
             <ActivityPanel activities={activities} />
           </aside>
         </main>
-        {selectionTarget && (
+        {selectionTarget && liveSelectionPosition && (
           <SelectionToolbar
-            position={selectionTarget.position}
+            position={liveSelectionPosition}
             onComment={() => {
               setComposerAnchor(selectionTarget.text)
               setSelectionTarget(null)
@@ -379,10 +480,10 @@ export default function DocumentShow({
             }}
           />
         )}
-        {reviewTarget && (
+        {reviewTarget && liveReview && (
           <ReviewPopover
-            span={reviewTarget.span}
-            position={reviewTarget.position}
+            span={liveReview.span}
+            position={liveReview.position}
             onAdvance={handleAdvance}
           />
         )}
