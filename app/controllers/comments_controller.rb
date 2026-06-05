@@ -9,10 +9,10 @@ class CommentsController < InertiaController
       anchor_text: params[:anchor_text].presence
     )
 
-    redirect_back fallback_location: document_page_path(document.slug)
+    redirect_back fallback_location: document_page_path(document.slug), status: :see_other
   rescue ActiveRecord::RecordInvalid => e
     redirect_back fallback_location: document_page_path(params[:slug]),
-                  inertia: { errors: { comment: e.record.errors.full_messages.to_sentence } }
+                  inertia: { errors: { comment: e.record.errors.full_messages.to_sentence }, status: :see_other }
   end
 
   def resolve
@@ -29,6 +29,6 @@ class CommentsController < InertiaController
     )
     DocumentMetaChannel.broadcast_event(document, :comments)
 
-    redirect_back fallback_location: document_page_path(document.slug)
+    redirect_back fallback_location: document_page_path(document.slug), status: :see_other
   end
 end
