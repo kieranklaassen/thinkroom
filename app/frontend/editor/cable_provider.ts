@@ -63,6 +63,13 @@ export class CableProvider {
           )
           if (remote.length > 0) removeAwarenessStates(this.awareness, remote, this)
         },
+        rejected: () => {
+          // The channel rejects when the document no longer exists (e.g. it
+          // was deleted while this client was offline). Without this, the
+          // user keeps typing into a dead editor that will never sync.
+          this.synced = false
+          this.emit('rejected')
+        },
       },
     )
 
@@ -71,12 +78,12 @@ export class CableProvider {
     window.addEventListener('beforeunload', this.handleUnload)
   }
 
-  on(event: 'synced' | 'seed', handler: () => void): void {
+  on(event: 'synced' | 'seed' | 'rejected', handler: () => void): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set())
     this.listeners.get(event)!.add(handler as never)
   }
 
-  off(event: 'synced' | 'seed', handler: () => void): void {
+  off(event: 'synced' | 'seed' | 'rejected', handler: () => void): void {
     this.listeners.get(event)?.delete(handler as never)
   }
 
