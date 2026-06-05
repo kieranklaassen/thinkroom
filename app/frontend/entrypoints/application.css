@@ -847,6 +847,148 @@ body {
   background: #000;
 }
 
+/* ----------------------------- Presence & agents -------------------------- */
+.presence-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.presence-dot {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  border: 1.5px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.presence-overflow {
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+}
+
+.presence-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.12rem 0.5rem;
+  border-radius: 99px;
+}
+
+.presence-chip--agent {
+  background: var(--prov-pending-bg);
+  color: color-mix(in srgb, var(--prov-pending-line) 85%, var(--ink));
+  border: 1px dashed var(--prov-pending-line);
+}
+
+.presence-agent-glyph {
+  font-size: 0.65rem;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.agents-badge {
+  font-size: 0.7rem;
+  font-weight: 550;
+  color: color-mix(in srgb, var(--prov-pending-line) 85%, var(--ink));
+  background: var(--prov-pending-bg);
+  border-radius: 99px;
+  padding: 0.12rem 0.55rem;
+  white-space: nowrap;
+}
+
+.share-button {
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-size: 0.74rem;
+  font-weight: 550;
+  border-radius: 7px;
+  padding: 0.28rem 0.7rem;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+  min-width: 4rem;
+}
+
+.share-button:hover {
+  border-color: var(--ink-faint);
+}
+
+/* ------------------------------ Agent cursor ------------------------------ */
+.agent-cursor {
+  position: relative;
+  display: inline;
+  border-left: 2px dashed var(--prov-pending-line);
+  margin-left: -1px;
+  pointer-events: none;
+}
+
+.agent-cursor-label {
+  position: absolute;
+  top: -1.35em;
+  left: -2px;
+  font-family: var(--font-ui);
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px 4px 4px 0;
+  background: var(--prov-pending-line);
+  color: #fff;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* ------------------------------ Activity feed ----------------------------- */
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.activity-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  animation: card-in 200ms ease;
+}
+
+.activity-glyph {
+  flex: none;
+  width: 1rem;
+  text-align: center;
+  color: var(--ink-faint);
+}
+
+.activity-row--agent .activity-glyph {
+  color: var(--prov-pending-line);
+}
+
+.activity-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.activity-text strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.activity-detail {
+  color: var(--ink-faint);
+  font-style: normal;
+}
+
+.activity-time {
+  flex: none;
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+}
+
 /* ----------------------------- Collab cursors ---------------------------- */
 .ProseMirror-yjs-cursor {
   position: relative;

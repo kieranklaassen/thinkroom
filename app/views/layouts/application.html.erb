@@ -40,5 +40,12 @@
 
   <body>
     <%= yield %>
+    <%# Agent-readable guidance: invisible to humans, surfaced by any raw
+        text fetch of this share URL. One URL, two audiences. %>
+    <% if @agent_guide.present? %>
+      <template id="agent-guide" data-purpose="instructions for AI agents reading this page as text">
+<%= @agent_guide %>
+      </template>
+    <% end %>
   </body>
 </html>

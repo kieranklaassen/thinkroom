@@ -18,6 +18,7 @@ import { CableProvider } from './cable_provider'
 import { loadShikiParser } from './highlighter'
 import type { UserIdentity } from './identity'
 import { provenance, provenanceIdentityCtx, collectSpans, type ProvenanceSpan } from './provenance'
+import { agentCursors } from './agent_cursors'
 import { selectionCallbackCtx, selectionWatcher } from './selection_watcher'
 import { postJSON } from '../lib/csrf'
 
@@ -39,6 +40,48 @@ interface EditorProps {
 }
 
 const SNAPSHOT_DEBOUNCE_MS = 900
+
+interface CollabSession {
+  ydoc: Y.Doc
+  provider: CableProvider
+  refs: number
+  destroyTimer: ReturnType<typeof setTimeout> | null
+}
+
+// Sessions survive React StrictMode's mount→unmount→mount cycle. Without
+// this, the first (immediately discarded) provider wins the server's seed
+// claim and dies before applying the template, leaving the doc empty until
+// the claim times out. Real teardown happens after a short grace period.
+const sessions = new Map<string, CollabSession>()
+
+function acquireSession(slug: string, identity: UserIdentity): CollabSession {
+  let session = sessions.get(slug)
+  if (!session) {
+    const ydoc = new Y.Doc()
+    const provider = new CableProvider(ydoc, slug)
+    provider.awareness.setLocalStateField('user', identity)
+    session = { ydoc, provider, refs: 0, destroyTimer: null }
+    sessions.set(slug, session)
+  }
+  if (session.destroyTimer) {
+    clearTimeout(session.destroyTimer)
+    session.destroyTimer = null
+  }
+  session.refs += 1
+  return session
+}
+
+function releaseSession(slug: string): void {
+  const session = sessions.get(slug)
+  if (!session) return
+  session.refs -= 1
+  if (session.refs > 0) return
+  session.destroyTimer = setTimeout(() => {
+    sessions.delete(slug)
+    session.provider.destroy()
+    session.ydoc.destroy()
+  }, 1000)
+}
 
 function EditorInner(props: EditorProps) {
   const [parser, setParser] = useState<Parser | null>(null)
@@ -87,6 +130,7 @@ function CollabEditor({
         .use(highlight)
         .use(provenance)
         .use(selectionWatcher)
+        .use(agentCursors)
         .use(collab),
     [],
   )
@@ -96,11 +140,7 @@ function CollabEditor({
     const editor = get()
     if (!editor) return
 
-    // Y.Doc and provider live outside the editor factory (StrictMode-safe:
-    // this effect's cleanup tears them down symmetrically).
-    const ydoc = new Y.Doc()
-    const provider = new CableProvider(ydoc, slug)
-    provider.awareness.setLocalStateField('user', identity)
+    const { ydoc, provider } = acquireSession(slug, identity)
     callbacksRef.current.onStatus?.('connecting')
 
     let snapshotTimer: ReturnType<typeof setTimeout> | null = null
@@ -123,7 +163,9 @@ function CollabEditor({
         if (provider.seedMarkdown) {
           // Server granted this client the seed claim; the default condition
           // (remote doc empty) double-guards against racing another seeder.
+          // Consume one-shot so a remounted editor never re-applies.
           service.applyTemplate(provider.seedMarkdown)
+          provider.seedMarkdown = null
         }
         service.connect()
 
@@ -153,8 +195,7 @@ function CollabEditor({
       } catch {
         // editor may already be destroyed during unmount — fine
       }
-      provider.destroy()
-      ydoc.destroy()
+      releaseSession(slug)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, slug])

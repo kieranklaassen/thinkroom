@@ -1,21 +1,13 @@
 class CommentsController < InertiaController
   def create
     document = Document.find_by!(slug: params[:slug])
-    comment = document.comments.create!(
+    Comment.post!(
+      document:,
       author_name: params[:author_name].presence || "Anonymous",
       author_kind: "human",
       body: params[:body],
       anchor_text: params[:anchor_text].presence
     )
-
-    Activity.log!(
-      document:,
-      actor_name: comment.author_name,
-      actor_kind: "human",
-      action: "commented",
-      detail: comment.body.truncate(80)
-    )
-    DocumentMetaChannel.broadcast_event(document, :comments)
 
     redirect_back fallback_location: document_page_path(document.slug)
   rescue ActiveRecord::RecordInvalid => e

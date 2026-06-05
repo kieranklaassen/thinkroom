@@ -16,25 +16,15 @@ class GeminiSuggester
   def self.call(document:, instruction: nil, context: nil, author_name: "Gemini", author_kind: "ai", anchor_text: nil, replaces: nil)
     body = generate(document:, instruction:, context:) || CANNED.sample
 
-    suggestion = document.suggestions.create!(
+    Suggestion.propose!(
+      document:,
       author_name:,
       author_kind:,
       intent: instruction.presence || (replaces.present? ? "Rewrite selection" : "Add a passage"),
       body: body.strip,
       anchor_text:,
-      replaces:,
-      status: "pending"
+      replaces:
     )
-
-    Activity.log!(
-      document:,
-      actor_name: author_name,
-      actor_kind: author_kind,
-      action: "suggested",
-      detail: suggestion.intent
-    )
-    DocumentMetaChannel.broadcast_event(document, :suggestions)
-    suggestion
   end
 
   def self.generate(document:, instruction:, context:)

@@ -13,6 +13,16 @@ Rails.application.routes.draw do
   post "d/:slug/comments", to: "comments#create", as: :document_comments
   patch "comments/:id/resolve", to: "comments#resolve", as: :resolve_comment
 
+  namespace :api do
+    post "docs", to: "docs#create"
+    get "docs/:slug", to: "docs#show", as: :doc
+    post "docs/:slug/suggestions", to: "suggestions#create", as: :doc_suggestions
+    post "docs/:slug/comments", to: "comments#create", as: :doc_comments
+    post "docs/:slug/presence", to: "presences#create", as: :doc_presence
+    get "docs/:slug/events/pending", to: "events#pending", as: :doc_pending_events
+    post "docs/:slug/events/ack", to: "events#ack", as: :doc_ack_events
+  end
+
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
   get "up" => "rails/health#show", as: :rails_health_check
 
