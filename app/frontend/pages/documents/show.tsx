@@ -36,7 +36,14 @@ import {
 import { ActivityPanel } from '../../components/activity_panel'
 import { ThemePicker } from '../../components/theme_picker'
 import { SharePopover } from '../../components/share_popover'
+import {
+  MobileDock,
+  MobileSheet,
+  SuggestionSheetList,
+  type SheetKind,
+} from '../../components/mobile_dock'
 import { useMetaChannel } from '../../lib/use_meta_channel'
+import { useMediaQuery } from '../../lib/use_media_query'
 import { postJSON } from '../../lib/csrf'
 
 export interface ActivityPayload {
@@ -112,6 +119,26 @@ export default function DocumentShow({
   const viewRef = useRef<EditorView | null>(null)
   const [panelOpen, setPanelOpen] = useState(() => readStoredFlag('pruf:panel', true))
   const [focusMode, setFocusMode] = useState(() => readStoredFlag('pruf:focus', false))
+
+  // ≤64rem: rail and margin cards give way to anchor markers, a bottom dock,
+  // and sheets — the full product, rearranged for one hand.
+  const isMobile = useMediaQuery('(max-width: 64rem)')
+  const [activeSheet, setActiveSheet] = useState<SheetKind | null>(null)
+  const [sheetFocusId, setSheetFocusId] = useState<number | null>(null)
+  const suggestionsRef = useRef(suggestions)
+  suggestionsRef.current = suggestions
+  const isMobileRef = useRef(isMobile)
+  isMobileRef.current = isMobile
+
+  useEffect(() => {
+    if (!isMobile) setActiveSheet(null)
+  }, [isMobile])
+
+  // The comment composer lives in the comments panel — on mobile that means
+  // opening its sheet when a selection chooses "Comment".
+  useEffect(() => {
+    if (isMobile && composerAnchor !== null) setActiveSheet('comments')
+  }, [isMobile, composerAnchor])
 
   useMetaChannel(doc.slug)
 
@@ -202,6 +229,22 @@ export default function DocumentShow({
     }
     setSelectionTarget(null)
 
+    // Mobile: tapping inside a pending suggestion's tinted anchor opens its
+    // sheet card — the touch equivalent of glancing at the margin.
+    if (isMobileRef.current && empty) {
+      const pos = view.state.selection.head
+      const hit = suggestionsRef.current.find((s) => {
+        const range = findTextRange(view.state.doc, s.replaces ?? s.anchor_text)
+        return range !== null && pos >= range.from && pos <= range.to
+      })
+      if (hit) {
+        setSheetFocusId(hit.id)
+        setActiveSheet('suggestions')
+        setReviewTarget(null)
+        return
+      }
+    }
+
     const span = aiSpanAt(view.state)
     setReviewTarget(span ? { span } : null)
   }, [])
@@ -231,11 +274,18 @@ export default function DocumentShow({
 
   // Anchor geometry in viewport coords — null while the anchor is off-screen
   // or gone, hiding the popover until the text scrolls back into view.
-  const anchorPosition = useCallback((view: EditorView, pos: number) => {
+  // Prefers above the anchor (clear of the on-screen keyboard on touch),
+  // flips below when that would cover the sticky header, and clamps x into
+  // the viewport using the popover's estimated width.
+  const anchorPosition = useCallback((view: EditorView, pos: number, estWidth = 200) => {
     try {
       const coords = view.coordsAtPos(pos)
       if (coords.top < -24 || coords.top > window.innerHeight + 24) return null
-      return { x: coords.left, y: Math.max(8, coords.top - 44) }
+      const offset = isMobileRef.current ? 60 : 44
+      const above = coords.top - offset
+      const y = above < 52 ? coords.bottom + 8 : above
+      const x = Math.max(8, Math.min(coords.left, window.innerWidth - estWidth - 8))
+      return { x, y }
     } catch {
       return null
     }
@@ -245,7 +295,7 @@ export default function DocumentShow({
     if (!selectionTarget) return null
     const view = viewRef.current
     if (!view || view.state.selection.empty) return null
-    return anchorPosition(view, view.state.selection.from)
+    return anchorPosition(view, view.state.selection.from, 190)
     // spans (doc updates) + popoverTick (scroll/resize) drive repositioning.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionTarget, spans, popoverTick, anchorPosition])
@@ -258,7 +308,7 @@ export default function DocumentShow({
     // advancing the review state changes the attrs the popover renders.
     const span = aiSpanAt(view.state)
     if (!span) return null
-    const position = anchorPosition(view, span.from)
+    const position = anchorPosition(view, span.from, 320)
     return position ? { span, position } : null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reviewTarget, spans, popoverTick, anchorPosition])
@@ -409,7 +459,7 @@ export default function DocumentShow({
           </div>
           <div className="doc-header-right">
             <ProvenanceSummaryChip spans={spans} />
-            <PresenceBar humans={peers} agents={presences} />
+            <PresenceBar humans={peers} agents={presences} compact={isMobile} />
             <button
               className="chrome-toggle"
               aria-pressed={panelOpen}
@@ -448,24 +498,34 @@ export default function DocumentShow({
                 suggestions={suggestions}
                 handle={handle}
                 spans={spans}
-                focusMode={focusMode}
+                focusMode={focusMode || isMobile}
                 onAccept={acceptSuggestion}
                 onReject={rejectSuggestion}
+                onMarkerSelect={
+                  isMobile
+                    ? (suggestion) => {
+                        setSheetFocusId(suggestion.id)
+                        setActiveSheet('suggestions')
+                      }
+                    : undefined
+                }
               />
             </div>
           </div>
-          <aside className="doc-rail">
-            <AskAiPanel aiPending={aiPending} onAskAi={(instruction) => askAi(instruction)} />
-            <CommentsPanel
-              comments={comments}
-              composerAnchor={composerAnchor}
-              onSubmit={submitComment}
-              onCancelComposer={() => setComposerAnchor(null)}
-              onResolve={resolveComment}
-              onJumpTo={jumpToAnchor}
-            />
-            <ActivityPanel activities={activities} />
-          </aside>
+          {!isMobile && (
+            <aside className="doc-rail">
+              <AskAiPanel aiPending={aiPending} onAskAi={(instruction) => askAi(instruction)} />
+              <CommentsPanel
+                comments={comments}
+                composerAnchor={composerAnchor}
+                onSubmit={submitComment}
+                onCancelComposer={() => setComposerAnchor(null)}
+                onResolve={resolveComment}
+                onJumpTo={jumpToAnchor}
+              />
+              <ActivityPanel activities={activities} />
+            </aside>
+          )}
         </main>
         {selectionTarget && liveSelectionPosition && (
           <SelectionToolbar
@@ -486,6 +546,63 @@ export default function DocumentShow({
             position={liveReview.position}
             onAdvance={handleAdvance}
           />
+        )}
+        {isMobile && (
+          <MobileDock
+            suggestionCount={suggestions.length}
+            commentCount={comments.filter((c) => !c.resolved).length}
+            aiPending={aiPending}
+            active={activeSheet}
+            onOpen={(kind) => setActiveSheet((current) => (current === kind ? null : kind))}
+          />
+        )}
+        {isMobile && activeSheet === 'suggestions' && (
+          <MobileSheet
+            title={`Suggestions${suggestions.length > 0 ? ` · ${suggestions.length}` : ''}`}
+            onClose={() => {
+              setActiveSheet(null)
+              setSheetFocusId(null)
+            }}
+          >
+            <SuggestionSheetList
+              suggestions={suggestions}
+              focusId={sheetFocusId}
+              onAccept={acceptSuggestion}
+              onReject={rejectSuggestion}
+            />
+          </MobileSheet>
+        )}
+        {isMobile && activeSheet === 'comments' && (
+          <MobileSheet title="Comments" onClose={() => setActiveSheet(null)}>
+            <CommentsPanel
+              comments={comments}
+              composerAnchor={composerAnchor}
+              onSubmit={submitComment}
+              onCancelComposer={() => setComposerAnchor(null)}
+              onResolve={resolveComment}
+              onJumpTo={(anchorText) => {
+                jumpToAnchor(anchorText)
+                setActiveSheet(null)
+              }}
+            />
+          </MobileSheet>
+        )}
+        {isMobile && activeSheet === 'ask' && (
+          <MobileSheet title="Ask AI" onClose={() => setActiveSheet(null)}>
+            <AskAiPanel
+              aiPending={aiPending}
+              onAskAi={(instruction) => {
+                askAi(instruction)
+                // Close so the dock's badge tells the story when it lands.
+                setActiveSheet(null)
+              }}
+            />
+          </MobileSheet>
+        )}
+        {isMobile && activeSheet === 'activity' && (
+          <MobileSheet title="Activity" onClose={() => setActiveSheet(null)}>
+            <ActivityPanel activities={activities} />
+          </MobileSheet>
         )}
       </div>
     </>

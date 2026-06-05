@@ -11,9 +11,12 @@ export interface AgentPresencePayload {
 interface Props {
   humans: UserIdentity[]
   agents: AgentPresencePayload[]
+  /** Mobile header: 24px avatars, max 3 visible. */
+  compact?: boolean
 }
 
 const MAX_VISIBLE = 5
+const MAX_VISIBLE_COMPACT = 3
 
 /** 1–2 letter initials from a display name, e.g. "Quiet Falcon" → "QF". */
 const initials = (name: string): string =>
@@ -24,15 +27,18 @@ const initials = (name: string): string =>
     .map((word) => word[0]!.toUpperCase())
     .join('')
 
-export function PresenceBar({ humans, agents }: Props) {
+export function PresenceBar({ humans, agents, compact = false }: Props) {
   const total = humans.length + agents.length
   if (total === 0) return null
 
-  const visibleHumans = humans.slice(0, MAX_VISIBLE)
+  const visibleHumans = humans.slice(0, compact ? MAX_VISIBLE_COMPACT : MAX_VISIBLE)
   const overflow = humans.length - visibleHumans.length
 
   return (
-    <span className="presence-bar" aria-label={`${total} collaborators present`}>
+    <span
+      className={`presence-bar ${compact ? 'presence-bar--compact' : ''}`}
+      aria-label={`${total} collaborators present`}
+    >
       {agents.map((agent) => (
         <span
           key={`agent-${agent.id}`}

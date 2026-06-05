@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useMediaQuery } from '../lib/use_media_query'
+import { ThemePicker } from './theme_picker'
 
 /** Share is two audiences, one URL: humans get the editor, agents fetching the
  *  same link discover the API. The popover teaches both — copy the link for a
@@ -7,6 +10,10 @@ export function SharePopover({ agentsActive }: { agentsActive: number }) {
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState<'link' | 'agent' | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  const popoverRef = useRef<HTMLDivElement>(null)
+  // The sticky header's backdrop-filter makes it the containing block for
+  // fixed descendants — so the mobile full-width sheet must portal to body.
+  const isMobile = useMediaQuery('(max-width: 48rem)')
 
   const url = typeof window === 'undefined' ? '' : window.location.href
 
@@ -26,7 +33,9 @@ export function SharePopover({ agentsActive }: { agentsActive: number }) {
   useEffect(() => {
     if (!open) return
     const close = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      if (rootRef.current?.contains(target) || popoverRef.current?.contains(target)) return
+      setOpen(false)
     }
     const esc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false)
@@ -39,17 +48,14 @@ export function SharePopover({ agentsActive }: { agentsActive: number }) {
     }
   }, [open])
 
-  return (
-    <div className="share-root" ref={rootRef}>
-      <button
-        className="share-button"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        Share
-      </button>
-      {open && (
-        <div className="share-popover" role="dialog" aria-label="Share this document">
+  const popover = (
+    <div
+      className="share-popover"
+      ref={popoverRef}
+      role="dialog"
+      aria-label="Share this document"
+      onClick={(event) => event.stopPropagation()}
+    >
           <div className="share-section">
             <div className="share-section-title">People</div>
             <p className="share-section-hint">Anyone with the link joins this live document.</p>
@@ -76,8 +82,34 @@ export function SharePopover({ agentsActive }: { agentsActive: number }) {
               {copied === 'agent' ? 'Copied — paste it to your agent' : 'Copy agent invite'}
             </button>
           </div>
+      {/* The compact header has no room for the picker — it lives here. */}
+      {isMobile && (
+        <div className="share-section share-section--theme">
+          <div className="share-section-title">Theme</div>
+          <ThemePicker />
         </div>
       )}
+    </div>
+  )
+
+  return (
+    <div className="share-root" ref={rootRef}>
+      <button
+        className="share-button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        Share
+      </button>
+      {open &&
+        (isMobile
+          ? createPortal(
+              <div className="share-backdrop" onClick={() => setOpen(false)}>
+                {popover}
+              </div>,
+              document.body,
+            )
+          : popover)}
     </div>
   )
 }

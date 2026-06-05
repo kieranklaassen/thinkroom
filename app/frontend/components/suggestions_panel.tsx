@@ -37,8 +37,8 @@ export function AskAiPanel({ aiPending, onAskAi }: Props) {
       </form>
 
       <p className="rail-empty">
-        Proposals appear in the margin, next to the text they touch — accept or
-        reject them there.
+        Proposals appear beside the text they touch — accept or reject them
+        there.
       </p>
     </section>
   )

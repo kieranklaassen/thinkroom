@@ -15,6 +15,9 @@ interface Props {
   focusMode: boolean
   onAccept: (suggestion: SuggestionPayload) => void
   onReject: (suggestion: SuggestionPayload) => void
+  /** When set, marker taps open this instead of jumping to the anchor —
+   *  mobile routes markers into the suggestion sheet. */
+  onMarkerSelect?: (suggestion: SuggestionPayload) => void
 }
 
 const CARD_GAP = 10
@@ -51,6 +54,7 @@ export function MarginSuggestions({
   focusMode,
   onAccept,
   onReject,
+  onMarkerSelect,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const cardRefs = useRef(new Map<number, HTMLElement>())
@@ -221,7 +225,9 @@ export function MarginSuggestions({
               title={`${machine ? '✦ ' : ''}${suggestion.author_name}${suggestion.intent ? ` — ${suggestion.intent}` : ''}`}
               onMouseEnter={() => hover(suggestion.id)}
               onMouseLeave={() => hover(null)}
-              onClick={() => jumpToSuggestion(suggestion)}
+              onClick={() =>
+                onMarkerSelect ? onMarkerSelect(suggestion) : jumpToSuggestion(suggestion)
+              }
             />
           )
         }
