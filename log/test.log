@@ -3186,3 +3186,611 @@ Completed 201 Created in 1ms (ActiveRecord: 0.1ms (3 queries, 0 cached) | GC: 0.
   [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
   [1m[36mActiveRecord::InternalMetadata Load (0.1ms)[0m  [1m[34mSELECT * FROM "ar_internal_metadata" WHERE "ar_internal_metadata"."key" = ? ORDER BY "ar_internal_metadata"."key" ASC LIMIT 1[0m  [[nil, "schema_sha1"]]
   [1m[36mActiveRecord::SchemaMigration Load (0.0ms)[0m  [1m[34mSELECT "schema_migrations"."version" FROM "schema_migrations" ORDER BY "schema_migrations"."version" ASC[0m
+  [1m[36mActiveRecord::InternalMetadata Load (0.1ms)[0m  [1m[34mSELECT * FROM "ar_internal_metadata" WHERE "ar_internal_metadata"."key" = ? ORDER BY "ar_internal_metadata"."key" ASC LIMIT 1[0m  [[nil, "schema_sha1"]]
+  [1m[36mActiveRecord::SchemaMigration Load (0.0ms)[0m  [1m[34mSELECT "schema_migrations"."version" FROM "schema_migrations" ORDER BY "schema_migrations"."version" ASC[0m
+  [1m[36mActiveRecord::InternalMetadata Load (0.1ms)[0m  [1m[34mSELECT * FROM "ar_internal_metadata" WHERE "ar_internal_metadata"."key" = ? ORDER BY "ar_internal_metadata"."key" ASC LIMIT 1[0m  [[nil, "schema_sha1"]]
+  [1m[36mActiveRecord::SchemaMigration Load (0.0ms)[0m  [1m[34mSELECT "schema_migrations"."version" FROM "schema_migrations" ORDER BY "schema_migrations"."version" ASC[0m
+  [1m[36mActiveRecord::InternalMetadata Load (0.1ms)[0m  [1m[34mSELECT * FROM "ar_internal_metadata" WHERE "ar_internal_metadata"."key" = ? ORDER BY "ar_internal_metadata"."key" ASC LIMIT 1[0m  [[nil, "schema_sha1"]]
+  [1m[36mActiveRecord::SchemaMigration Load (0.0ms)[0m  [1m[34mSELECT "schema_migrations"."version" FROM "schema_migrations" ORDER BY "schema_migrations"."version" ASC[0m
+  [1m[36mActiveRecord::InternalMetadata Load (0.1ms)[0m  [1m[34mSELECT * FROM "ar_internal_metadata" WHERE "ar_internal_metadata"."key" = ? ORDER BY "ar_internal_metadata"."key" ASC LIMIT 1[0m  [[nil, "schema_sha1"]]
+  [1m[36mActiveRecord::SchemaMigration Load (0.0ms)[0m  [1m[34mSELECT "schema_migrations"."version" FROM "schema_migrations" ORDER BY "schema_migrations"."version" ASC[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+-----------------------------------------------------------------------------------
+SuggestionFlowTest: test_accept_broadcasts_a_suggestions_event_to_connected_editors
+-----------------------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.1ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "H4gx9ab8Kf"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.1ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.185577"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "H4gx9ab8Kf"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.185577"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.1ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "New paragraph."], ["created_at", "2026-06-05 17:08:20.196333"], ["document_id", 1], ["intent", nil], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.196333"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+Started PATCH "/suggestions/1/accept" for 127.0.0.1 at 2026-06-05 10:08:20 -0700
+Processing by SuggestionsController#accept as HTML
+  Parameters: {"id" => "1"}
+  [1m[36mSuggestion Load (0.1ms)[0m  [1m[34mSELECT "suggestions".* FROM "suggestions" WHERE "suggestions"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Update (0.1ms)[0m  [1m[33mUPDATE "suggestions" SET "resolved_by" = ?, "status" = ?, "updated_at" = ? WHERE "suggestions"."id" = ?[0m  [["resolved_by", "human"], ["status", "accepted"], ["updated_at", "2026-06-05 17:08:20.214376"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mActivity Create (0.1ms)[0m  [1m[32mINSERT INTO "activities" ("action", "actor_kind", "actor_name", "created_at", "detail", "document_id") VALUES (?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["action", "accepted_suggestion"], ["actor_kind", "human"], ["actor_name", "Someone"], ["created_at", "2026-06-05 17:08:20.216707"], ["detail", "accepted “a suggestion” from Gemini"], ["document_id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "activities"}
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "suggestions"}
+Redirected to http://www.example.com/d/H4gx9ab8Kf
+Completed 302 Found in 8ms (ActiveRecord: 0.4ms (4 queries, 0 cached) | GC: 0.0ms)
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+---------------------------------------------------------------------------
+SuggestionFlowTest: test_document_show_exposes_pending_suggestions_as_props
+---------------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.1ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "TzFU7fmWwP"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.220457"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "TzFU7fmWwP"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.220457"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.1ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "New paragraph."], ["created_at", "2026-06-05 17:08:20.220916"], ["document_id", 1], ["intent", nil], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.220916"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+Started GET "/d/TzFU7fmWwP" for 127.0.0.1 at 2026-06-05 10:08:20 -0700
+Processing by DocumentsController#show as HTML
+  Parameters: {"slug" => "TzFU7fmWwP"}
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "TzFU7fmWwP"], ["LIMIT", 1]]
+  [1m[36mSuggestion Load (0.0ms)[0m  [1m[34mSELECT "suggestions".* FROM "suggestions" WHERE "suggestions"."document_id" = ? AND "suggestions"."status" = ? ORDER BY "suggestions"."created_at" ASC[0m  [["document_id", 1], ["status", "pending"]]
+  [1m[36mActivity Load (0.0ms)[0m  [1m[34mSELECT "activities".* FROM "activities" WHERE "activities"."document_id" = ? ORDER BY "activities"."created_at" DESC LIMIT ?[0m  [["document_id", 1], ["LIMIT", 50]]
+  Rendering layout layouts/application.html.erb
+  Rendering /Users/kieranklaassen/.rbenv/versions/3.4.2/lib/ruby/gems/3.4.0/gems/inertia_rails-3.21.1/app/views/inertia.html.erb within layouts/application
+  Rendered /Users/kieranklaassen/.rbenv/versions/3.4.2/lib/ruby/gems/3.4.0/gems/inertia_rails-3.21.1/app/views/inertia.html.erb within layouts/application (Duration: 0.2ms | GC: 0.0ms)
+Skipping vite build. Watched files have not changed since the last build at 2026-06-05 10:07:13
+Skipping vite build. Watched files have not changed since the last build at 2026-06-05 10:07:13
+Skipping vite build. Watched files have not changed since the last build at 2026-06-05 10:07:13
+  Rendered layout layouts/application.html.erb (Duration: 4.3ms | GC: 0.0ms)
+Completed 200 OK in 8ms (Views: 7.6ms | ActiveRecord: 0.1ms (3 queries, 0 cached) | GC: 0.0ms)
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+-------------------------------------------------------------------------------------------
+SuggestionFlowTest: test_accepting_a_pending_suggestion_marks_it_accepted_and_logs_activity
+-------------------------------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.1ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "4y4Ez7h7cZ"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.230301"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "4y4Ez7h7cZ"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.230301"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.1ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "New paragraph."], ["created_at", "2026-06-05 17:08:20.230704"], ["document_id", 1], ["intent", nil], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.230704"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mActivity Count (0.0ms)[0m  [1m[34mSELECT COUNT(*) FROM "activities" WHERE "activities"."document_id" = ?[0m  [["document_id", 1]]
+Started PATCH "/suggestions/1/accept" for 127.0.0.1 at 2026-06-05 10:08:20 -0700
+Processing by SuggestionsController#accept as HTML
+  Parameters: {"by" => "Quiet Falcon", "id" => "1"}
+  [1m[36mSuggestion Load (0.0ms)[0m  [1m[34mSELECT "suggestions".* FROM "suggestions" WHERE "suggestions"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Update (0.0ms)[0m  [1m[33mUPDATE "suggestions" SET "resolved_by" = ?, "status" = ?, "updated_at" = ? WHERE "suggestions"."id" = ?[0m  [["resolved_by", "Quiet Falcon"], ["status", "accepted"], ["updated_at", "2026-06-05 17:08:20.231569"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mActivity Create (0.0ms)[0m  [1m[32mINSERT INTO "activities" ("action", "actor_kind", "actor_name", "created_at", "detail", "document_id") VALUES (?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["action", "accepted_suggestion"], ["actor_kind", "human"], ["actor_name", "Quiet Falcon"], ["created_at", "2026-06-05 17:08:20.231963"], ["detail", "accepted “a suggestion” from Gemini"], ["document_id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "activities"}
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "suggestions"}
+Redirected to http://www.example.com/d/4y4Ez7h7cZ
+Completed 302 Found in 1ms (ActiveRecord: 0.2ms (4 queries, 0 cached) | GC: 0.0ms)
+  [1m[36mActivity Count (0.0ms)[0m  [1m[34mSELECT COUNT(*) FROM "activities" WHERE "activities"."document_id" = ?[0m  [["document_id", 1]]
+  [1m[36mSuggestion Load (0.0ms)[0m  [1m[34mSELECT "suggestions".* FROM "suggestions" WHERE "suggestions"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mActivity Load (0.0ms)[0m  [1m[34mSELECT "activities".* FROM "activities" WHERE "activities"."document_id" = ? ORDER BY "activities"."id" DESC LIMIT ?[0m  [["document_id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+-----------------------------------------------------------------------------------------
+SuggestionFlowTest: test_rejecting_a_pending_suggestion_discards_it_from_the_pending_list
+-----------------------------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "yzUHJLDk14"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.233101"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "yzUHJLDk14"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.233101"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.0ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "New paragraph."], ["created_at", "2026-06-05 17:08:20.233408"], ["document_id", 1], ["intent", nil], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.233408"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+Started PATCH "/suggestions/1/reject" for 127.0.0.1 at 2026-06-05 10:08:20 -0700
+Processing by SuggestionsController#reject as HTML
+  Parameters: {"id" => "1"}
+  [1m[36mSuggestion Load (0.0ms)[0m  [1m[34mSELECT "suggestions".* FROM "suggestions" WHERE "suggestions"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Update (0.0ms)[0m  [1m[33mUPDATE "suggestions" SET "resolved_by" = ?, "status" = ?, "updated_at" = ? WHERE "suggestions"."id" = ?[0m  [["resolved_by", "human"], ["status", "rejected"], ["updated_at", "2026-06-05 17:08:20.233942"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mActivity Create (0.0ms)[0m  [1m[32mINSERT INTO "activities" ("action", "actor_kind", "actor_name", "created_at", "detail", "document_id") VALUES (?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["action", "rejected_suggestion"], ["actor_kind", "human"], ["actor_name", "Someone"], ["created_at", "2026-06-05 17:08:20.234285"], ["detail", "rejected “a suggestion” from Gemini"], ["document_id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "activities"}
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "suggestions"}
+Redirected to http://www.example.com/d/yzUHJLDk14
+Completed 302 Found in 1ms (ActiveRecord: 0.1ms (4 queries, 0 cached) | GC: 0.0ms)
+  [1m[36mSuggestion Load (0.0ms)[0m  [1m[34mSELECT "suggestions".* FROM "suggestions" WHERE "suggestions"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mSuggestion Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "suggestions" WHERE "suggestions"."document_id" = ? AND "suggestions"."status" = ? LIMIT ?[0m  [["document_id", 1], ["status", "pending"], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+----------------------------------------------------------------------------------
+SuggestionFlowTest: test_resolving_an_already-resolved_suggestion_reports_an_error
+----------------------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "NLPZMyXLxZ"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.235160"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "NLPZMyXLxZ"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.235160"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.0ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "New paragraph."], ["created_at", "2026-06-05 17:08:20.235455"], ["document_id", 1], ["intent", nil], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.235455"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Update (0.0ms)[0m  [1m[33mUPDATE "suggestions" SET "status" = ?, "updated_at" = ? WHERE "suggestions"."id" = ?[0m  [["status", "rejected"], ["updated_at", "2026-06-05 17:08:20.235702"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+Started PATCH "/suggestions/1/accept" for 127.0.0.1 at 2026-06-05 10:08:20 -0700
+Processing by SuggestionsController#accept as HTML
+  Parameters: {"id" => "1"}
+  [1m[36mSuggestion Load (0.0ms)[0m  [1m[34mSELECT "suggestions".* FROM "suggestions" WHERE "suggestions"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+Redirected to http://www.example.com/d/NLPZMyXLxZ
+Completed 302 Found in 0ms (ActiveRecord: 0.0ms (2 queries, 0 cached) | GC: 0.0ms)
+  [1m[36mSuggestion Load (0.0ms)[0m  [1m[34mSELECT "suggestions".* FROM "suggestions" WHERE "suggestions"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+------------------------------------------------------------------------
+SuggestionFlowTest: test_ask_AI_endpoint_creates_a_pending_ai_suggestion
+------------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "cGxCivyqgK"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.237034"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "cGxCivyqgK"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.237034"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.0ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "New paragraph."], ["created_at", "2026-06-05 17:08:20.237330"], ["document_id", 1], ["intent", nil], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.237330"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Count (0.0ms)[0m  [1m[34mSELECT COUNT(*) FROM "suggestions" WHERE "suggestions"."document_id" = ? AND "suggestions"."status" = ?[0m  [["document_id", 1], ["status", "pending"]]
+Started POST "/d/cGxCivyqgK/ai_suggestions" for 127.0.0.1 at 2026-06-05 10:08:20 -0700
+Processing by AiSuggestionsController#create as JSON
+  Parameters: {"instruction" => "expand the intro", "slug" => "cGxCivyqgK", "ai_suggestion" => {"instruction" => "expand the intro"}}
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "cGxCivyqgK"], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.1ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "Consider opening with the reader's problem instead of the product: name the friction of not knowing who wrote what, then introduce provenance as the answer. A single concrete scenario — two collaborators and an AI editing the same paragraph — will carry more weight than any feature list."], ["created_at", "2026-06-05 17:08:20.238552"], ["document_id", 1], ["intent", "expand the intro"], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.238552"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mActivity Create (0.0ms)[0m  [1m[32mINSERT INTO "activities" ("action", "actor_kind", "actor_name", "created_at", "detail", "document_id") VALUES (?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["action", "suggested"], ["actor_kind", "ai"], ["actor_name", "Gemini"], ["created_at", "2026-06-05 17:08:20.238815"], ["detail", "expand the intro"], ["document_id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "activities"}
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "suggestions"}
+Completed 201 Created in 1ms (ActiveRecord: 0.1ms (3 queries, 0 cached) | GC: 0.0ms)
+  [1m[36mSuggestion Count (0.0ms)[0m  [1m[34mSELECT COUNT(*) FROM "suggestions" WHERE "suggestions"."document_id" = ? AND "suggestions"."status" = ?[0m  [["document_id", 1], ["status", "pending"]]
+  [1m[36mSuggestion Load (0.0ms)[0m  [1m[34mSELECT "suggestions".* FROM "suggestions" WHERE "suggestions"."document_id" = ? AND "suggestions"."status" = ? ORDER BY "suggestions"."id" DESC LIMIT ?[0m  [["document_id", 1], ["status", "pending"], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+---------------------------------------------
+DocumentTest: test_generates_a_slug_on_create
+---------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "4hAGyMZr9t"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.239908"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "4hAGyMZr9t"], ["title", "Fresh"], ["updated_at", "2026-06-05 17:08:20.239908"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+-------------------------------------------------
+DocumentTest: test_slug_is_immutable_after_create
+-------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "2fmvbuvFuR"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.240367"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "2fmvbuvFuR"], ["title", "Locked"], ["updated_at", "2026-06-05 17:08:20.240367"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+---------------------------------------------------------------------
+DocumentTest: test_provenance_summary_computes_percentages_from_spans
+---------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "azNcAbQd1q"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.241029"], ["provenance_spans", "[{\"kind\":\"human\",\"state\":\"verbatim\",\"chars\":62},{\"kind\":\"ai\",\"state\":\"pending\",\"chars\":12},{\"kind\":\"ai\",\"state\":\"reviewed\",\"chars\":26}]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "azNcAbQd1q"], ["title", "Mixed"], ["updated_at", "2026-06-05 17:08:20.241029"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+--------------------------------------
+DocumentTest: test_slug_must_be_unique
+--------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "taken-slug"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.241481"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "taken-slug"], ["title", "One"], ["updated_at", "2026-06-05 17:08:20.241481"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "taken-slug"], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+--------------------------------------------
+DocumentTest: test_to_param_returns_the_slug
+--------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "WNz9ZrnkJJ"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.242173"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "WNz9ZrnkJJ"], ["title", "Param"], ["updated_at", "2026-06-05 17:08:20.242173"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+----------------------------------------------------------------
+DocumentTest: test_provenance_summary_with_no_spans_is_all_zeros
+----------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "xBUXTkGS8k"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.242613"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "xBUXTkGS8k"], ["title", "Empty"], ["updated_at", "2026-06-05 17:08:20.242613"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+--------------------------------------------------------------
+YjsPersistenceTest: test_concurrent_merges_do_not_lose_updates
+--------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "rKBy3LhVAf"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.243144"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "rKBy3LhVAf"], ["title", "Race"], ["updated_at", "2026-06-05 17:08:20.243144"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.1ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<19 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.244557"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.1ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<37 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.245059"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.1ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<55 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.245495"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.1ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<73 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.245932"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<91 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.246356"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.1ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<108 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.246789"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.1ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<125 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.247222"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<143 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.247613"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+--------------------------------------------------------
+YjsPersistenceTest: test_merge_marks_the_document_seeded
+--------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "GjvYt5egFK"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.248199"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", "# Hi"], ["seed_state", "pending"], ["slug", "GjvYt5egFK"], ["title", "Seedable"], ["updated_at", "2026-06-05 17:08:20.248199"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<28 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.248685"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+--------------------------------------------------------------------------------------
+YjsPersistenceTest: test_merging_updates_from_two_independent_clients_keeps_both_edits
+--------------------------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "1AJqAjzMdw"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.249191"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "1AJqAjzMdw"], ["title", "Converge"], ["updated_at", "2026-06-05 17:08:20.249191"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<29 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.249635"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<55 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.250011"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+-------------------------------------------------------------------------
+YjsPersistenceTest: test_state_b64_round-trips_through_a_fresh_client_doc
+-------------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "ch15WHRftz"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.250521"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "ch15WHRftz"], ["title", "Handshake"], ["updated_at", "2026-06-05 17:08:20.250521"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<28 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.250955"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+---------------------------------------------------------------------
+YjsPersistenceTest: test_merge_persists_an_update_and_survives_reload
+---------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "zmimeVKDpJ"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.251472"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "zmimeVKDpJ"], ["title", "Sync"], ["updated_at", "2026-06-05 17:08:20.251472"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<19 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.251896"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+---------------------------------------------------------
+SuggestionTest: test_as_props_exposes_the_client_contract
+---------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "7vJzZVkbxm"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.252467"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "7vJzZVkbxm"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.252467"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.0ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", "anchor"], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "Proposed text."], ["created_at", "2026-06-05 17:08:20.252799"], ["document_id", 1], ["intent", "Tighten intro"], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.252799"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+--------------------------------------------------
+SuggestionTest: test_requires_body_and_author_name
+--------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "vvD6YKDbJT"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.253322"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "vvD6YKDbJT"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.253322"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+------------------------------------------------------------
+SuggestionTest: test_reject!_transitions_pending_to_rejected
+------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "rBssbUgjwQ"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.253987"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "rBssbUgjwQ"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.253987"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.0ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "Proposed text."], ["created_at", "2026-06-05 17:08:20.254294"], ["document_id", 1], ["intent", nil], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.254294"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Update (0.0ms)[0m  [1m[33mUPDATE "suggestions" SET "resolved_by" = ?, "status" = ?, "updated_at" = ? WHERE "suggestions"."id" = ?[0m  [["resolved_by", "Quiet Falcon"], ["status", "rejected"], ["updated_at", "2026-06-05 17:08:20.254545"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Load (0.0ms)[0m  [1m[34mSELECT "suggestions".* FROM "suggestions" WHERE "suggestions"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+---------------------------------------------------------------------------------
+SuggestionTest: test_accept!_transitions_pending_to_accepted_and_records_resolver
+---------------------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "7sJecBXwuc"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.255129"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "7sJecBXwuc"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.255129"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.0ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "Proposed text."], ["created_at", "2026-06-05 17:08:20.255429"], ["document_id", 1], ["intent", nil], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.255429"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Update (0.0ms)[0m  [1m[33mUPDATE "suggestions" SET "resolved_by" = ?, "status" = ?, "updated_at" = ? WHERE "suggestions"."id" = ?[0m  [["resolved_by", "Quiet Falcon"], ["status", "accepted"], ["updated_at", "2026-06-05 17:08:20.255702"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Load (0.0ms)[0m  [1m[34mSELECT "suggestions".* FROM "suggestions" WHERE "suggestions"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+----------------------------------------------------------------
+SuggestionTest: test_pending_scope_excludes_resolved_suggestions
+----------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "r82Sn3rxXv"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.256254"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "r82Sn3rxXv"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.256254"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.0ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "Proposed text."], ["created_at", "2026-06-05 17:08:20.256609"], ["document_id", 1], ["intent", nil], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.256609"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.0ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "Proposed text."], ["created_at", "2026-06-05 17:08:20.256895"], ["document_id", 1], ["intent", nil], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.256895"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Update (0.0ms)[0m  [1m[33mUPDATE "suggestions" SET "status" = ?, "updated_at" = ? WHERE "suggestions"."id" = ?[0m  [["status", "accepted"], ["updated_at", "2026-06-05 17:08:20.257132"], ["id", 2]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Pluck (0.0ms)[0m  [1m[34mSELECT "suggestions"."id" FROM "suggestions" WHERE "suggestions"."document_id" = ? AND "suggestions"."status" = ?[0m  [["document_id", 1], ["status", "pending"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+------------------------------------------------------------
+SuggestionTest: test_transitions_from_a_resolved_state_raise
+------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "S7ZbtLz3r9"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.257712"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "S7ZbtLz3r9"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.257712"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.0ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "Proposed text."], ["created_at", "2026-06-05 17:08:20.258024"], ["document_id", 1], ["intent", nil], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.258024"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Update (0.0ms)[0m  [1m[33mUPDATE "suggestions" SET "status" = ?, "updated_at" = ? WHERE "suggestions"."id" = ?[0m  [["status", "rejected"], ["updated_at", "2026-06-05 17:08:20.258265"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Load (0.0ms)[0m  [1m[34mSELECT "suggestions".* FROM "suggestions" WHERE "suggestions"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+----------------------------------------------------------
+SuggestionTest: test_author_kind_restricted_to_ai_or_agent
+----------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "m2GW9mPqC2"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.258832"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "m2GW9mPqC2"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.258832"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.0ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "Proposed text."], ["created_at", "2026-06-05 17:08:20.259126"], ["document_id", 1], ["intent", nil], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.259126"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+----------------------------------------
+SuggestionTest: test_valid_with_defaults
+----------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "khPAMqtSNg"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.259640"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "khPAMqtSNg"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.259640"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.1ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "Proposed text."], ["created_at", "2026-06-05 17:08:20.259986"], ["document_id", 1], ["intent", nil], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.259986"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+-----------------------------------------------------------------
+SyncChannelTest: test_awareness_messages_relay_without_persisting
+-----------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.1ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "Hyd82jRKb2"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.260807"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "Hyd82jRKb2"], ["title", "Presence"], ["updated_at", "2026-06-05 17:08:20.260807"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "Hyd82jRKb2"], ["LIMIT", 1]]
+[ActionCable] Broadcasting to sync:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {"type" => "awareness", "update" => "AAAA", "cid" => "abc"}
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+----------------------------------------------------------------
+SyncChannelTest: test_subscribing_to_an_unknown_slug_is_rejected
+----------------------------------------------------------------
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "nope"], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+--------------------------------------------------------------
+SyncChannelTest: test_documents_with_existing_state_never_seed
+--------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "9wB9BFRXXN"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.262512"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", "# Template"], ["seed_state", "pending"], ["slug", "9wB9BFRXXN"], ["title", "Existing"], ["updated_at", "2026-06-05 17:08:20.262512"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<26 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.262953"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "9wB9BFRXXN"], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+--------------------------------------------------------------
+SyncChannelTest: test_subscribing_transmits_the_sync_handshake
+--------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "ax7s3xxVWZ"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.263514"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "ax7s3xxVWZ"], ["title", "Live"], ["updated_at", "2026-06-05 17:08:20.263514"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "ax7s3xxVWZ"], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+----------------------------------------------------------------------------------------
+SyncChannelTest: test_update_messages_are_broadcast_to_the_document_stream_and_persisted
+----------------------------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "8TuukRAnvv"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.264118"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "8TuukRAnvv"], ["title", "Relay"], ["updated_at", "2026-06-05 17:08:20.264118"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "8TuukRAnvv"], ["LIMIT", 1]]
+[ActionCable] Broadcasting to sync:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {"type" => "update", "update" => "AQHr19ykDAAEAQF0CnR5cGVkIHRleHQA", "cid" => "abc"}
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ? [0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mDocument Update (0.0ms)[0m  [1m[33mUPDATE "documents" SET "yjs_state" = ?, "seed_state" = ?, "updated_at" = ? WHERE "documents"."id" = ?[0m  [["yjs_state", "<24 bytes of binary data>"], ["seed_state", "seeded"], ["updated_at", "2026-06-05 17:08:20.264779"], ["id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."id" = ? LIMIT ?[0m  [["id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+---------------------------------------------------------------------------------------------
+SyncChannelTest: test_first_subscriber_to_an_unseeded_doc_gets_the_seed_flag,_second_does_not
+---------------------------------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "cR2RKcX5Rb"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", nil], ["created_at", "2026-06-05 17:08:20.265299"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", "# Template"], ["seed_state", "pending"], ["slug", "cR2RKcX5Rb"], ["title", "Seedme"], ["updated_at", "2026-06-05 17:08:20.265299"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "cR2RKcX5Rb"], ["LIMIT", 1]]
+  [1m[36mDocument Update All (0.0ms)[0m  [1m[33mUPDATE "documents" SET "seed_state" = ?, "seed_claimed_at" = ? WHERE "documents"."id" = ? AND (seed_state = 'pending' OR (seed_state = 'claimed' AND seed_claimed_at < ?))[0m  [["seed_state", "claimed"], ["seed_claimed_at", "2026-06-05 17:08:20.265636"], ["id", 1], [nil, "2026-06-05 17:07:50.265611"]]
+  [1m[36mDocument Load (0.0ms)[0m  [1m[34mSELECT "documents".* FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "cR2RKcX5Rb"], ["LIMIT", 1]]
+  [1m[36mDocument Update All (0.0ms)[0m  [1m[33mUPDATE "documents" SET "seed_state" = ?, "seed_claimed_at" = ? WHERE "documents"."id" = ? AND (seed_state = 'pending' OR (seed_state = 'claimed' AND seed_claimed_at < ?))[0m  [["seed_state", "claimed"], ["seed_claimed_at", "2026-06-05 17:08:20.265956"], ["id", 1], [nil, "2026-06-05 17:07:50.265945"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+-----------------------------------------------------------------------------
+GeminiSuggesterTest: test_logs_an_activity_and_uses_the_instruction_as_intent
+-----------------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "HBtcs91HGq"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", "# Hello"], ["created_at", "2026-06-05 17:08:20.266406"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "HBtcs91HGq"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.266406"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mActivity Count (0.0ms)[0m  [1m[34mSELECT COUNT(*) FROM "activities" WHERE "activities"."document_id" = ?[0m  [["document_id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.1ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "A short closing paragraph could tie the threads together: live collaboration gives speed, provenance gives trust, and the review states give editors a deliberate path from machine draft to human-endorsed prose."], ["created_at", "2026-06-05 17:08:20.266890"], ["document_id", 1], ["intent", "add a summary"], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.266890"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mActivity Create (0.0ms)[0m  [1m[32mINSERT INTO "activities" ("action", "actor_kind", "actor_name", "created_at", "detail", "document_id") VALUES (?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["action", "suggested"], ["actor_kind", "ai"], ["actor_name", "Gemini"], ["created_at", "2026-06-05 17:08:20.267159"], ["detail", "add a summary"], ["document_id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "activities"}
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "suggestions"}
+  [1m[36mActivity Count (0.0ms)[0m  [1m[34mSELECT COUNT(*) FROM "activities" WHERE "activities"."document_id" = ?[0m  [["document_id", 1]]
+  [1m[36mActivity Load (0.0ms)[0m  [1m[34mSELECT "activities".* FROM "activities" WHERE "activities"."document_id" = ? ORDER BY "activities"."id" DESC LIMIT ?[0m  [["document_id", 1], ["LIMIT", 1]]
+  [1m[36mSuggestion Load (0.0ms)[0m  [1m[34mSELECT "suggestions".* FROM "suggestions" WHERE "suggestions"."document_id" = ? ORDER BY "suggestions"."id" DESC LIMIT ?[0m  [["document_id", 1], ["LIMIT", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+-----------------------------------------------------------------------
+GeminiSuggesterTest: test_agent_attribution_flows_through_author_fields
+-----------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "8bFSs1D4cL"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", "# Hello"], ["created_at", "2026-06-05 17:08:20.268069"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "8bFSs1D4cL"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.268069"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.0ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "agent"], ["author_name", "Scout"], ["body", "This section would benefit from a worked example. Show a sentence before and after AI revision, with the provenance marks visible, so readers can see exactly how attribution travels with the text rather than taking it on faith."], ["created_at", "2026-06-05 17:08:20.268395"], ["document_id", 1], ["intent", "rewrite"], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.268395"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mActivity Create (0.0ms)[0m  [1m[32mINSERT INTO "activities" ("action", "actor_kind", "actor_name", "created_at", "detail", "document_id") VALUES (?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["action", "suggested"], ["actor_kind", "agent"], ["actor_name", "Scout"], ["created_at", "2026-06-05 17:08:20.268666"], ["detail", "rewrite"], ["document_id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "activities"}
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "suggestions"}
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+---------------------------------------------------------------------
+GeminiSuggesterTest: test_uses_generated_text_when_the_model_responds
+---------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "TNmxHHKB23"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", "# Hello"], ["created_at", "2026-06-05 17:08:20.269161"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "TNmxHHKB23"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.269161"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.1ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "A generated passage."], ["created_at", "2026-06-05 17:08:20.269468"], ["document_id", 1], ["intent", "Add a passage"], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.269468"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mActivity Create (0.0ms)[0m  [1m[32mINSERT INTO "activities" ("action", "actor_kind", "actor_name", "created_at", "detail", "document_id") VALUES (?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["action", "suggested"], ["actor_kind", "ai"], ["actor_name", "Gemini"], ["created_at", "2026-06-05 17:08:20.269755"], ["detail", "Add a passage"], ["document_id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "activities"}
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "suggestions"}
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[36mBEGIN deferred TRANSACTION[0m
+--------------------------------------------------------------------------------
+GeminiSuggesterTest: test_without_an_API_key_creates_a_canned_pending_suggestion
+--------------------------------------------------------------------------------
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mDocument Exists? (0.0ms)[0m  [1m[34mSELECT 1 AS one FROM "documents" WHERE "documents"."slug" = ? LIMIT ?[0m  [["slug", "6oiG6n8vov"], ["LIMIT", 1]]
+  [1m[36mDocument Create (0.0ms)[0m  [1m[32mINSERT INTO "documents" ("content_markdown", "created_at", "provenance_spans", "seed_claimed_at", "seed_markdown", "seed_state", "slug", "title", "updated_at", "yjs_state") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["content_markdown", "# Hello"], ["created_at", "2026-06-05 17:08:20.270253"], ["provenance_spans", "[]"], ["seed_claimed_at", nil], ["seed_markdown", nil], ["seed_state", "pending"], ["slug", "6oiG6n8vov"], ["title", "Doc"], ["updated_at", "2026-06-05 17:08:20.270253"], ["yjs_state", nil]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mSuggestion Create (0.1ms)[0m  [1m[32mINSERT INTO "suggestions" ("anchor_text", "author_kind", "author_name", "body", "created_at", "document_id", "intent", "replaces", "resolved_by", "status", "updated_at") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["anchor_text", nil], ["author_kind", "ai"], ["author_name", "Gemini"], ["body", "Consider opening with the reader's problem instead of the product: name the friction of not knowing who wrote what, then introduce provenance as the answer. A single concrete scenario — two collaborators and an AI editing the same paragraph — will carry more weight than any feature list."], ["created_at", "2026-06-05 17:08:20.270579"], ["document_id", 1], ["intent", "improve"], ["replaces", nil], ["resolved_by", nil], ["status", "pending"], ["updated_at", "2026-06-05 17:08:20.270579"]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mSAVEPOINT active_record_1[0m
+  [1m[36mActivity Create (0.0ms)[0m  [1m[32mINSERT INTO "activities" ("action", "actor_kind", "actor_name", "created_at", "detail", "document_id") VALUES (?, ?, ?, ?, ?, ?) RETURNING "id"[0m  [["action", "suggested"], ["actor_kind", "ai"], ["actor_name", "Gemini"], ["created_at", "2026-06-05 17:08:20.270840"], ["detail", "improve"], ["document_id", 1]]
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[35mRELEASE SAVEPOINT active_record_1[0m
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "activities"}
+[ActionCable] Broadcasting to document_meta:Z2lkOi8vcHJvb2YvRG9jdW1lbnQvMQ: {event: "suggestions"}
+  [1m[36mTRANSACTION (0.0ms)[0m  [1m[31mROLLBACK TRANSACTION[0m

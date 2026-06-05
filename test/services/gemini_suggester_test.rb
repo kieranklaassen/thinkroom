@@ -1,5 +1,4 @@
 require "test_helper"
-require "minitest/mock"
 
 class GeminiSuggesterTest < ActiveSupport::TestCase
   setup do
@@ -30,10 +29,12 @@ class GeminiSuggesterTest < ActiveSupport::TestCase
   end
 
   test "uses generated text when the model responds" do
-    GeminiSuggester.stub(:generate, "A generated passage.") do
-      suggestion = GeminiSuggester.call(document: @document)
-      assert_equal "A generated passage.", suggestion.body
-    end
+    original = GeminiSuggester.method(:generate)
+    GeminiSuggester.define_singleton_method(:generate) { |**| "A generated passage." }
+    suggestion = GeminiSuggester.call(document: @document)
+    assert_equal "A generated passage.", suggestion.body
+  ensure
+    GeminiSuggester.define_singleton_method(:generate, original)
   end
 
   test "agent attribution flows through author fields" do
