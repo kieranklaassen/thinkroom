@@ -76,14 +76,21 @@ export function MarginSuggestions({
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
-    const onResize = () => {
+    const remeasure = () => {
       if (timer) clearTimeout(timer)
       timer = setTimeout(() => setResizeTick((t) => t + 1), 150)
     }
-    window.addEventListener('resize', onResize)
+    // Images loading into the copy reflow everything below them — anchors
+    // move, so positions must be recomputed (load doesn't bubble; capture).
+    const onLoad = (event: Event) => {
+      if ((event.target as HTMLElement | null)?.tagName === 'IMG') remeasure()
+    }
+    window.addEventListener('resize', remeasure)
+    document.addEventListener('load', onLoad, true)
     return () => {
       if (timer) clearTimeout(timer)
-      window.removeEventListener('resize', onResize)
+      window.removeEventListener('resize', remeasure)
+      document.removeEventListener('load', onLoad, true)
     }
   }, [])
 
