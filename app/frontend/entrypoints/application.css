@@ -1788,3 +1788,45 @@ a:focus-visible {
     padding: 0.3rem 0.8rem;
   }
 }
+
+/* ---------------------------- Feedback (Riffrec) ------------------------- */
+
+.feedback-button {
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--ink-faint);
+  font-size: 0.74rem;
+  font-weight: 550;
+  border-radius: 7px;
+  padding: 0.28rem 0.7rem;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+  font-family: inherit;
+}
+
+.feedback-button:hover {
+  border-color: var(--ink-faint);
+  color: var(--ink);
+}
+
+/* Recording in progress — quiet but unmistakable */
+.feedback-button[data-status="recording"] {
+  color: #b3261e;
+  border-color: color-mix(in srgb, #b3261e 40%, var(--line));
+}
+
+.landing-corner {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+}
+
+.landing {
+  position: relative;
+}
+
+@media (max-width: 30rem) {
+  .doc-header .feedback-button {
+    padding: 0.28rem 0.5rem;
+  }
+}

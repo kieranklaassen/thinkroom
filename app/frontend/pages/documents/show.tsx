@@ -35,6 +35,7 @@ import {
 } from '../../components/presence_bar'
 import { ActivityPanel } from '../../components/activity_panel'
 import { ThemePicker } from '../../components/theme_picker'
+import { FeedbackButton } from '../../components/feedback_button'
 import { SharePopover } from '../../components/share_popover'
 import {
   MobileDock,
@@ -476,6 +477,7 @@ export default function DocumentShow({
             >
               Focus
             </button>
+            <FeedbackButton />
             <ThemePicker />
             <SharePopover agentsActive={presences.length} />
           </div>

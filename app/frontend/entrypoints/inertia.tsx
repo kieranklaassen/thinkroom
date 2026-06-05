@@ -1,9 +1,10 @@
 import { createInertiaApp } from '@inertiajs/react'
+import { createRoot } from 'react-dom/client'
+import { StrictMode } from 'react'
+import { RiffrecProvider } from 'riffrec'
 
 void createInertiaApp({
   pages: "../pages",
-
-  strictMode: true,
 
   defaults: {
     form: {
@@ -13,6 +14,18 @@ void createInertiaApp({
     visitOptions: () => {
       return { queryStringArrayFormat: "brackets" }
     },
+  },
+
+  // Custom setup so every page mounts inside RiffrecProvider — the
+  // header's Feedback button records screen/voice/event sessions anywhere.
+  setup({ el, App, props }) {
+    createRoot(el).render(
+      <StrictMode>
+        <RiffrecProvider forceEnable>
+          <App {...props} />
+        </RiffrecProvider>
+      </StrictMode>,
+    )
   },
 }).catch((error) => {
   // This ensures this entrypoint is only loaded on Inertia pages

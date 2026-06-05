@@ -25,6 +25,7 @@
     "@vitejs/plugin-react": "^6.0.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "riffrec": "^2.0.0",
     "shiki": "^4.2.0",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
