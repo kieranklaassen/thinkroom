@@ -39,6 +39,25 @@ try {
   await b.waitForSelector('.doc-status--live', { timeout: 10000 })
   ok('both windows report live connection')
 
+  // Markdown shortcut: type ## heading in B (retry once — concurrent remote
+  // updates can occasionally interrupt the input rule mid-keystroke)
+  let headingOk = false
+  for (let attempt = 0; attempt < 2 && !headingOk; attempt += 1) {
+    await b.locator('.milkdown .ProseMirror h1').first().click()
+    await b.keyboard.press('Meta+ArrowDown')
+    // Double Enter exits list context if the doc ends in a list
+    await b.keyboard.press('Enter')
+    await b.keyboard.press('Enter')
+    await b.keyboard.type('## Shortcut heading check')
+    headingOk = await b
+      .locator('.milkdown .ProseMirror h2', { hasText: 'Shortcut heading check' })
+      .waitFor({ timeout: 5000 })
+      .then(() => true)
+      .catch(() => false)
+  }
+  if (headingOk) ok('## markdown input shortcut produced an h2')
+  else fail('## input rule did not produce a heading')
+
   // Type a unique sentinel at the start of the doc in A
   const sentinel = `sync-${Date.now()}`
   await a.click('.milkdown .ProseMirror')
@@ -53,24 +72,7 @@ try {
   )
   ok('edit from A appeared live in B (CRDT sync works)')
 
-  // Markdown shortcut: type ## heading in B (retry once — concurrent remote
-  // updates can occasionally interrupt the input rule mid-keystroke)
-  let headingOk = false
-  for (let attempt = 0; attempt < 2 && !headingOk; attempt += 1) {
-    await b.click('.milkdown .ProseMirror')
-    await b.keyboard.press('Meta+ArrowDown')
-    // Double Enter exits list context if the doc ends in a list
-    await b.keyboard.press('Enter')
-    await b.keyboard.press('Enter')
-    await b.keyboard.type('## Shortcut heading check')
-    headingOk = await b
-      .locator('.milkdown .ProseMirror h2', { hasText: 'Shortcut heading check' })
-      .waitFor({ timeout: 5000 })
-      .then(() => true)
-      .catch(() => false)
-  }
-  if (headingOk) ok('## markdown input shortcut produced an h2')
-  else fail('## input rule did not produce a heading')
+
   // Reload A and confirm persistence
   await a.reload()
   await a.waitForSelector('.milkdown .ProseMirror', { timeout: 15000 })
@@ -173,6 +175,94 @@ try {
     { timeout: 10000 },
   )
   ok('resolve synced to window B')
+
+  // --- Agent loop: an agent joins over plain HTTP while humans watch ---
+  const agentHeaders = { 'X-Agent-Name': 'Scout', 'Content-Type': 'application/json' }
+  const api = `${BASE}/api/docs/${SLUG}`
+
+  // Cold discovery: fetch share URL like curl would
+  const discovery = await fetch(`${BASE}/d/${SLUG}`, { headers: { 'User-Agent': 'curl/8.0' } })
+  const guide = await discovery.text()
+  if (guide.includes('X-Agent-Name') && guide.includes('/api/docs/')) {
+    ok('cold fetch of the share URL surfaces the agent guide')
+  } else {
+    fail('share URL did not teach the agent how to participate')
+  }
+
+  await fetch(`${api}/presence`, {
+    method: 'POST',
+    headers: agentHeaders,
+    body: JSON.stringify({ status: 'active', location: 'provenance' }),
+  })
+  await a.locator('.presence-chip--agent', { hasText: 'Scout' }).waitFor({ timeout: 10000 })
+  ok('agent presence chip appeared live')
+  await a.locator('.agents-badge').waitFor({ timeout: 5000 })
+  ok('"Shared with agents" badge is visible')
+  await a.locator('.agent-cursor-label', { hasText: 'Scout' }).waitFor({ timeout: 5000 })
+  ok('agent pseudo-cursor rendered at its work location')
+
+  const suggestRes = await fetch(`${api}/suggestions`, {
+    method: 'POST',
+    headers: agentHeaders,
+    body: JSON.stringify({
+      body: 'An agent-proposed closing paragraph.',
+      intent: 'Add a closing',
+      anchor_text: 'provenance',
+    }),
+  })
+  if (suggestRes.status === 201) ok('agent proposed a suggestion over HTTP (201)')
+  else fail(`agent suggestion failed: ${suggestRes.status}`)
+
+  await b.locator('.suggestion-card .author-chip', { hasText: 'Scout' }).waitFor({ timeout: 10000 })
+  ok('agent suggestion appeared live, agent-attributed')
+
+  await fetch(`${api}/comments`, {
+    method: 'POST',
+    headers: agentHeaders,
+    body: JSON.stringify({ body: 'Comment from the agent API.', anchor_text: 'markdown' }),
+  })
+  await b.locator('.comment-card .author-chip--agent', { hasText: 'Scout' }).waitFor({ timeout: 10000 })
+  ok('agent comment appeared live, agent-attributed')
+
+  await b.locator('.activity-row', { hasText: 'Scout' }).first().waitFor({ timeout: 5000 })
+  ok('activity feed logged the agent actions')
+
+  // Human accepts the agent suggestion; agent provenance lands in the doc
+  await b.locator('.suggestion-card .btn-accept').first().click()
+  await a.waitForFunction(
+    () =>
+      Array.from(document.querySelectorAll('.milkdown [data-provenance][data-kind="ai"]')).some(
+        (el) => el.dataset.author === 'Scout',
+      ),
+    undefined,
+    { timeout: 10000 },
+  )
+  ok('accepted agent text carries agent attribution in the document')
+
+  // Agent reacts to the human: poll + ack events
+  const events = await (await fetch(`${api}/events/pending`, { headers: agentHeaders })).json()
+  if (events.events.some((e) => e.action === 'accepted_suggestion')) {
+    ok('agent event polling saw the human acceptance')
+  } else {
+    fail('event polling missed the acceptance')
+  }
+  await fetch(`${api}/events/ack`, {
+    method: 'POST',
+    headers: agentHeaders,
+    body: JSON.stringify({ last_event_id: events.ack_with }),
+  })
+
+  await fetch(`${api}/presence`, {
+    method: 'POST',
+    headers: agentHeaders,
+    body: JSON.stringify({ status: 'done' }),
+  })
+  await a.waitForFunction(
+    () => !document.querySelector('.presence-chip--agent'),
+    undefined,
+    { timeout: 10000 },
+  )
+  ok('agent sign-off cleared its presence')
 
   for (const [label, errs] of Object.entries(errors)) {
     const fatal = errs.filter((e) => !e.includes('favicon') && !e.includes('Download the React DevTools'))

@@ -7,7 +7,7 @@ import {
   type ConnectionStatus,
   type EditorHandle,
 } from '../../editor/milkdown_editor'
-import { userIdentity } from '../../editor/identity'
+import { userIdentity, type UserIdentity } from '../../editor/identity'
 import {
   aiSpanAt,
   applyReviewState,
@@ -21,11 +21,18 @@ import {
   selectedText,
   type SuggestionPayload,
 } from '../../editor/suggestions'
+import { refreshAgentCursors } from '../../editor/agent_cursors'
 import { ProvenanceSummaryChip } from '../../components/provenance_summary'
 import { ReviewPopover } from '../../components/review_popover'
 import { SuggestionsPanel } from '../../components/suggestions_panel'
 import { CommentsPanel, type CommentPayload } from '../../components/comments_panel'
 import { SelectionToolbar } from '../../components/selection_toolbar'
+import {
+  AgentsBadge,
+  PresenceBar,
+  type AgentPresencePayload,
+} from '../../components/presence_bar'
+import { ActivityPanel } from '../../components/activity_panel'
 import { useMetaChannel } from '../../lib/use_meta_channel'
 import { postJSON } from '../../lib/csrf'
 
@@ -55,33 +62,36 @@ export interface DocumentProps {
   suggestions: SuggestionPayload[]
   comments: CommentPayload[]
   activities: ActivityPayload[]
+  presences: AgentPresencePayload[]
 }
 
-interface FloatTarget {
+interface ReviewTarget {
+  span: AiSpan
   position: { x: number; y: number }
 }
 
-interface ReviewTarget extends FloatTarget {
-  span: AiSpan
-}
-
-interface SelectionTarget extends FloatTarget {
+interface SelectionTarget {
   text: string
+  position: { x: number; y: number }
 }
 
 export default function DocumentShow({
   document: doc,
   suggestions,
   comments,
+  activities,
+  presences,
 }: DocumentProps) {
   const identity = useMemo(userIdentity, [])
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
+  const [handle, setHandle] = useState<EditorHandle | null>(null)
   const [spans, setSpans] = useState<ProvenanceSpan[]>([])
+  const [peers, setPeers] = useState<UserIdentity[]>([])
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
   const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null)
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
   const [aiPending, setAiPending] = useState(false)
-  const handleRef = useRef<EditorHandle | null>(null)
+  const [copied, setCopied] = useState(false)
   const viewRef = useRef<EditorView | null>(null)
 
   useMetaChannel(doc.slug)
@@ -90,6 +100,41 @@ export default function DocumentShow({
   useEffect(() => {
     setAiPending(false)
   }, [suggestions.length])
+
+  // Human presence from Yjs awareness.
+  useEffect(() => {
+    if (!handle) return
+    const { awareness } = handle.provider
+    const update = () => {
+      const states = Array.from(awareness.getStates().values())
+      setPeers(
+        states
+          .map((state) => (state as { user?: UserIdentity }).user)
+          .filter((user): user is UserIdentity => Boolean(user)),
+      )
+    }
+    update()
+    awareness.on('change', update)
+    return () => awareness.off('change', update)
+  }, [handle])
+
+  // Agent pseudo-cursors track the presences prop.
+  useEffect(() => {
+    if (!handle) return
+    refreshAgentCursors(
+      handle.editor,
+      presences.map((p) => ({ name: p.agent_name, location: p.location_text })),
+    )
+  }, [handle, presences])
+
+  // While agents are shown, refresh periodically so silent ones expire.
+  useEffect(() => {
+    if (presences.length === 0) return
+    const timer = setInterval(() => {
+      router.reload({ only: ['presences'] })
+    }, 45000)
+    return () => clearInterval(timer)
+  }, [presences.length])
 
   const handleSelection = useCallback((view: EditorView) => {
     viewRef.current = view
@@ -138,7 +183,6 @@ export default function DocumentShow({
 
   const acceptSuggestion = useCallback(
     (suggestion: SuggestionPayload) => {
-      const handle = handleRef.current
       if (!handle) return
       // Local-first: the text lands in the CRDT immediately (AI-attributed,
       // pending review); the server reconciles the suggestion status.
@@ -153,7 +197,7 @@ export default function DocumentShow({
           { preserveScroll: true, only: ['suggestions', 'activities'] },
         )
     },
-    [identity.name],
+    [handle, identity.name],
   )
 
   const rejectSuggestion = useCallback(
@@ -173,7 +217,6 @@ export default function DocumentShow({
 
   const askAi = useCallback(
     (instruction: string, selection?: string) => {
-      const handle = handleRef.current
       const context = selection ?? (handle ? selectedText(handle.editor) : '')
       setAiPending(true)
       void postJSON(`/d/${doc.slug}/ai_suggestions`, {
@@ -183,7 +226,7 @@ export default function DocumentShow({
         anchor_text: context || null,
       }).catch(() => setAiPending(false))
     },
-    [doc.slug],
+    [doc.slug, handle],
   )
 
   const submitComment = useCallback(
@@ -241,6 +284,13 @@ export default function DocumentShow({
     view.focus()
   }, [])
 
+  const copyShareLink = useCallback(() => {
+    void navigator.clipboard.writeText(window.location.href).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    })
+  }, [])
+
   return (
     <>
       <Head title={doc.title} />
@@ -255,9 +305,14 @@ export default function DocumentShow({
               className={`doc-status doc-status--${status}`}
               title={status === 'live' ? 'Connected — edits sync live' : 'Connecting…'}
             />
+            <AgentsBadge agents={presences} />
           </div>
           <div className="doc-header-right">
             <ProvenanceSummaryChip spans={spans} />
+            <PresenceBar humans={peers} agents={presences} />
+            <button className="share-button" onClick={copyShareLink}>
+              {copied ? 'Copied' : 'Share'}
+            </button>
           </div>
         </header>
         <main className="doc-body">
@@ -265,9 +320,7 @@ export default function DocumentShow({
             <DocumentEditor
               slug={doc.slug}
               identity={identity}
-              onReady={(handle) => {
-                handleRef.current = handle
-              }}
+              onReady={setHandle}
               onStatus={setStatus}
               onSpans={setSpans}
               onSelection={handleSelection}
@@ -289,6 +342,7 @@ export default function DocumentShow({
               onResolve={resolveComment}
               onJumpTo={jumpToAnchor}
             />
+            <ActivityPanel activities={activities} />
           </aside>
         </main>
         {selectionTarget && (

@@ -57,7 +57,7 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
   end
 
   test "document show exposes pending suggestions as props" do
-    get document_page_path(@document.slug)
+    get document_page_path(@document.slug), headers: { "User-Agent" => "Mozilla/5.0" }
     assert_response :success
     assert_includes response.body, "New paragraph."
   end

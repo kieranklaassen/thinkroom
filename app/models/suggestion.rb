@@ -14,6 +14,25 @@ class Suggestion < ApplicationRecord
 
   scope :pending, -> { where(status: "pending") }
 
+  # The single entry point for proposing a suggestion — the UI's AI path and
+  # the agent API both flow through here (create + activity + live broadcast),
+  # so there is no side channel around the review machinery.
+  def self.propose!(document:, author_name:, author_kind:, body:, intent: nil, anchor_text: nil, replaces: nil)
+    suggestion = document.suggestions.create!(
+      author_name:, author_kind:, body:, intent:, anchor_text:, replaces:,
+      status: "pending"
+    )
+    Activity.log!(
+      document:,
+      actor_name: author_name,
+      actor_kind: author_kind,
+      action: "suggested",
+      detail: intent.presence || body.truncate(80)
+    )
+    DocumentMetaChannel.broadcast_event(document, :suggestions)
+    suggestion
+  end
+
   def accept!(by: nil)
     transition!("accepted", by:)
   end
