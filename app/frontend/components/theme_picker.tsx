@@ -45,7 +45,7 @@ export function ThemePicker() {
           title={name === 'proof' ? 'Pruf — warm paper' : 'Whitey — clean white'}
         >
           <span className={`theme-swatch theme-swatch--${name}`} />
-          {name === 'proof' ? 'Pruf' : 'Whitey'}
+          <span className="theme-label">{name === 'proof' ? 'Pruf' : 'Whitey'}</span>
         </button>
       ))}
     </span>

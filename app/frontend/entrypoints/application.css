@@ -324,7 +324,18 @@ a:focus-visible {
   display: flex;
   align-items: center;
   gap: 0.625rem;
+}
+
+/* The title side absorbs all shrinkage (it can truncate); the chrome side
+ * is rigid — letting it shrink below content spills avatars and Share
+ * past the viewport edge on narrow screens. */
+.doc-header-left {
+  flex: 1 1 0;
   min-width: 0;
+}
+
+.doc-header-right {
+  flex: none;
 }
 
 .doc-home {
@@ -346,6 +357,9 @@ a:focus-visible {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Flex items default to min-width:auto — without this the nowrap title
+   * refuses to shrink and forces horizontal overflow on narrow screens. */
+  min-width: 0;
 }
 
 .doc-status {
@@ -396,9 +410,12 @@ a:focus-visible {
   width: 2rem;
 }
 
+/* Mobile keeps the gutter as a slim marker strip — suggestions stay
+ * discoverable at their anchors; the cards live in a bottom sheet. */
 @media (max-width: 64rem) {
-  .margin-gutter {
-    display: none;
+  .margin-gutter,
+  .doc-canvas.is-focus .margin-gutter {
+    width: 1.75rem;
   }
 }
 
@@ -1190,6 +1207,17 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+/* Compact (mobile header) variant: 24px avatars. */
+.presence-bar--compact .presence-avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 0.58rem;
+}
+
+.presence-bar--compact .presence-stack .presence-avatar + .presence-avatar {
+  margin-left: -7px;
+}
+
 .agents-badge {
   font-size: 0.7rem;
   font-weight: 550;
@@ -1452,4 +1480,311 @@ a:focus-visible {
 .share-agent-state {
   font-weight: 450;
   color: var(--ink-faint);
+}
+
+/* ------------------------------ Mobile dock ------------------------------ */
+.mobile-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.25rem;
+  padding: 0.35rem 0.6rem calc(0.35rem + env(safe-area-inset-bottom));
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--line);
+}
+
+.dock-item {
+  position: relative;
+  min-height: 44px;
+  border: none;
+  background: none;
+  border-radius: 10px;
+  font-size: 0.72rem;
+  font-weight: 550;
+  color: var(--ink-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.dock-item.is-active {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.dock-count {
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.25rem;
+  border-radius: 99px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dock-busy {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--prov-pending-line);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+/* ------------------------------ Bottom sheets ----------------------------- */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgb(0 0 0 / 0.32);
+  display: flex;
+  align-items: flex-end;
+  animation: fade-in 160ms ease;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.sheet {
+  width: 100%;
+  max-height: 70dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-raised);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -8px 32px rgb(0 0 0 / 0.16);
+  padding-bottom: env(safe-area-inset-bottom);
+  animation: sheet-up 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+}
+
+.sheet-handle {
+  flex: none;
+  width: 2.25rem;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--line);
+  margin: 0.5rem auto 0;
+}
+
+.sheet-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 0.5rem 0.25rem 1rem;
+}
+
+.sheet-header h2 {
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}
+
+.sheet-close {
+  width: 2.75rem;
+  height: 2.75rem;
+  border: none;
+  background: none;
+  border-radius: 10px;
+  color: var(--ink-faint);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.sheet-close:hover {
+  color: var(--ink);
+}
+
+.sheet-body {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.25rem 1rem 1.25rem;
+}
+
+/* Panels reused inside sheets: the sheet header already names them. */
+.sheet-body .rail-heading {
+  display: none;
+}
+
+.sheet-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.sheet-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.8rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.sheet-card.is-focused {
+  border-color: var(--prov-pending-line);
+}
+
+/* Touch targets inside sheets: 44px minimum. */
+.sheet-body .btn-accept,
+.sheet-body .btn-reject {
+  min-height: 44px;
+  padding: 0 1.1rem;
+  font-size: 0.85rem;
+  flex: 1;
+}
+
+.sheet-body .ask-ai-input,
+.sheet-body .ask-ai-button {
+  min-height: 44px;
+  font-size: 0.9rem;
+}
+
+.sheet-body .comment-input {
+  min-height: 44px;
+  font-size: 0.9rem;
+}
+
+.sheet-body .comment-resolve,
+.sheet-body .comment-resolved-toggle {
+  padding: 0.7rem 0;
+}
+
+/* --------------------------------- Mobile --------------------------------- */
+@media (max-width: 64rem) {
+  /* No rail, no margin cards — their toggles go too. */
+  .chrome-toggle {
+    display: none;
+  }
+
+  /* The canvas spans the viewport; the copy yields the marker strip's width
+   * instead of forcing horizontal overflow. */
+  .doc-canvas {
+    width: 100%;
+  }
+
+  .doc-main {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    padding: 2rem 1.25rem calc(7rem + env(safe-area-inset-bottom));
+  }
+
+  .milkdown .ProseMirror {
+    font-size: 1rem;
+    line-height: 1.65;
+  }
+
+  /* Markers grow an invisible border into a 36×44 touch target; the visible
+   * dot stays 14px (background-clip keeps the border transparent). The right
+   * border is slimmer so the box ends flush with the viewport edge instead
+   * of forcing horizontal overflow. */
+  .margin-marker {
+    width: 14px;
+    height: 14px;
+    margin-left: -22px;
+    border: 15px solid transparent;
+    border-right-width: 7px;
+    background-clip: padding-box;
+    box-sizing: content-box;
+  }
+
+  /* Touch-sized floating chrome, clamped into the viewport. */
+  .selection-toolbar button {
+    padding: 0.75rem 0.9rem;
+    font-size: 0.85rem;
+  }
+
+  .review-popover {
+    flex-wrap: wrap;
+    max-width: calc(100vw - 16px);
+  }
+
+  .review-popover-action {
+    min-height: 40px;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 48rem) {
+  .doc-header {
+    padding: 0.45rem 0.75rem;
+    gap: 0.5rem;
+  }
+
+  /* Glanceable chrome only: counts live on the dock, labels in titles.
+   * The theme picker moves into the share sheet (no room in the header). */
+  .prov-summary,
+  .agents-badge,
+  .presence-count,
+  .presence-agent-name,
+  .doc-header-right > .theme-picker {
+    display: none;
+  }
+
+  .share-popover .theme-picker {
+    width: 100%;
+  }
+
+  .share-popover .theme-option {
+    flex: 1;
+    justify-content: center;
+    min-height: 44px;
+    font-size: 0.8rem;
+  }
+
+  /* Share becomes a full-width sheet (portaled to body — the header's
+   * backdrop-filter would otherwise trap position:fixed inside it). */
+  .share-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 75;
+    background: rgb(0 0 0 / 0.32);
+    animation: fade-in 160ms ease;
+  }
+
+  .share-popover {
+    position: fixed;
+    top: auto;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    z-index: 80;
+    border-radius: 16px 16px 0 0;
+    border-bottom: none;
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: sheet-up 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .share-copy {
+    min-height: 44px;
+    padding: 0.3rem 0.8rem;
+  }
 }
