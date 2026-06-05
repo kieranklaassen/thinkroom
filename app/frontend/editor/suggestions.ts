@@ -72,9 +72,14 @@ export function findTextRange(
  * - `replaces` present and found → the matched range is replaced
  * - `anchor_text` present and found → content inserted after that block
  * - otherwise → appended at the end of the document
+ *
+ * Returns the inserted range so callers can spotlight the merge.
  */
-export function applySuggestion(editor: Editor, suggestion: SuggestionPayload): boolean {
-  let applied = false
+export function applySuggestion(
+  editor: Editor,
+  suggestion: SuggestionPayload,
+): { from: number; to: number } | null {
+  let applied: { from: number; to: number } | null = null
 
   editor.action((ctx) => {
     const view = ctx.get(editorViewCtx)
@@ -123,10 +128,37 @@ export function applySuggestion(editor: Editor, suggestion: SuggestionPayload): 
     tr.setSelection(TextSelection.near(tr.doc.resolve(insertFrom + insertSize)))
     tr.scrollIntoView()
     view.dispatch(tr)
-    applied = true
+    applied = { from: insertFrom, to: insertFrom + insertSize }
   })
 
   return applied
+}
+
+/**
+ * One-beat pulse on freshly merged text: a strong tint that steps down to
+ * resting and clears (~600ms). Highlight pseudo-elements can't transition,
+ * so the fade is two steps — still reads as a single ease-out pulse.
+ */
+export function flashMergedRange(editor: Editor, range: { from: number; to: number }): void {
+  if (typeof CSS === 'undefined' || !('highlights' in CSS)) return
+  editor.action((ctx) => {
+    const view = ctx.get(editorViewCtx)
+    try {
+      const start = view.domAtPos(range.from)
+      const end = view.domAtPos(range.to)
+      const dom = document.createRange()
+      dom.setStart(start.node, start.offset)
+      dom.setEnd(end.node, end.offset)
+      CSS.highlights.set('sug-merged', new Highlight(dom))
+      setTimeout(() => {
+        CSS.highlights.delete('sug-merged')
+        CSS.highlights.set('sug-merged-soft', new Highlight(dom))
+      }, 260)
+      setTimeout(() => CSS.highlights.delete('sug-merged-soft'), 620)
+    } catch {
+      // best-effort flourish — never let it break an accept
+    }
+  })
 }
 
 /** Selected text in the editor, for Ask AI context / rewrite mode. */

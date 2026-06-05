@@ -18,6 +18,7 @@ import {
 import {
   applySuggestion,
   findTextRange,
+  flashMergedRange,
   selectedText,
   type SuggestionPayload,
 } from '../../editor/suggestions'
@@ -28,13 +29,8 @@ import { AskAiPanel } from '../../components/suggestions_panel'
 import { MarginSuggestions } from '../../components/margin_suggestions'
 import { CommentsPanel, type CommentPayload } from '../../components/comments_panel'
 import { SelectionToolbar } from '../../components/selection_toolbar'
-import {
-  AgentsBadge,
-  PresenceBar,
-  type AgentPresencePayload,
-} from '../../components/presence_bar'
+import { PresenceBar, type AgentPresencePayload } from '../../components/presence_bar'
 import { ActivityPanel } from '../../components/activity_panel'
-import { ThemePicker } from '../../components/theme_picker'
 import { FeedbackButton } from '../../components/feedback_button'
 import { SharePopover } from '../../components/share_popover'
 import {
@@ -341,7 +337,9 @@ export default function DocumentShow({
             only: ['suggestions', 'activities'],
             async: true,
             onSuccess: () => {
-              applySuggestion(handle.editor, suggestion)
+              const merged = applySuggestion(handle.editor, suggestion)
+              // A one-beat pulse on the merged text — the reward for review.
+              if (merged) flashMergedRange(handle.editor, merged)
             },
           },
         )
@@ -456,7 +454,6 @@ export default function DocumentShow({
               className={`doc-status doc-status--${status}`}
               title={status === 'live' ? 'Connected — edits sync live' : 'Connecting…'}
             />
-            <AgentsBadge agents={presences} />
           </div>
           <div className="doc-header-right">
             <ProvenanceSummaryChip spans={spans} />
@@ -478,7 +475,6 @@ export default function DocumentShow({
               Focus
             </button>
             <FeedbackButton />
-            <ThemePicker />
             <SharePopover agentsActive={presences.length} />
           </div>
         </header>

@@ -786,6 +786,22 @@ a:focus-visible {
   color: var(--ink);
 }
 
+/* In suggestion cards, Accept wears the provenance tint — clearly primary
+ * next to ghost Reject without reading as a black slab. */
+.margin-card .btn-accept,
+.sheet-card .btn-accept {
+  background: color-mix(in srgb, var(--prov-pending-line) 14%, var(--surface-raised));
+  color: color-mix(in srgb, var(--prov-pending-line) 70%, var(--ink));
+  border: 1px solid color-mix(in srgb, var(--prov-pending-line) 45%, var(--line));
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.margin-card .btn-accept:hover,
+.sheet-card .btn-accept:hover {
+  background: color-mix(in srgb, var(--prov-pending-line) 24%, var(--surface-raised));
+  border-color: color-mix(in srgb, var(--prov-pending-line) 65%, var(--line));
+}
+
 /* --------------------------- Margin suggestions --------------------------- */
 .margin-suggestions {
   position: absolute;
@@ -879,6 +895,24 @@ a:focus-visible {
 
 [data-theme='whitey'] ::highlight(sug-anchor-hot) {
   background-color: rgb(65 131 196 / 0.3);
+}
+
+/* Merge pulse: a freshly accepted suggestion flashes strong, steps down,
+ * then clears — registered transiently from flashMergedRange. */
+::highlight(sug-merged) {
+  background-color: rgb(157 78 221 / 0.38);
+}
+
+::highlight(sug-merged-soft) {
+  background-color: rgb(157 78 221 / 0.16);
+}
+
+[data-theme='whitey'] ::highlight(sug-merged) {
+  background-color: rgb(65 131 196 / 0.38);
+}
+
+[data-theme='whitey'] ::highlight(sug-merged-soft) {
+  background-color: rgb(65 131 196 / 0.16);
 }
 
 /* ------------------------------- Comments --------------------------------- */
@@ -1218,16 +1252,6 @@ a:focus-visible {
   margin-left: -7px;
 }
 
-.agents-badge {
-  font-size: 0.7rem;
-  font-weight: 550;
-  color: color-mix(in srgb, var(--prov-pending-line) 85%, var(--ink));
-  background: var(--prov-pending-bg);
-  border-radius: 99px;
-  padding: 0.12rem 0.55rem;
-  white-space: nowrap;
-}
-
 .share-button {
   border: 1px solid var(--line);
   background: var(--surface-raised);
@@ -1346,6 +1370,22 @@ a:focus-visible {
   color: var(--ink-faint);
 }
 
+.activity-expander {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+  font-weight: 550;
+  cursor: pointer;
+  padding: 0;
+  transition: color 120ms ease;
+}
+
+.activity-expander:hover {
+  color: var(--ink-soft);
+}
+
 /* ----------------------------- Collab cursors ---------------------------- */
 .ProseMirror-yjs-cursor {
   position: relative;
@@ -1403,6 +1443,24 @@ a:focus-visible {
 .share-section--agent {
   border-top: 1px solid var(--line);
   background: var(--surface);
+}
+
+/* Reading theme lives in the share surface on every breakpoint —
+ * the header stays minimal. */
+.share-section--theme {
+  border-top: 1px solid var(--line);
+}
+
+.share-popover .theme-picker {
+  display: flex;
+  width: 100%;
+}
+
+.share-popover .theme-option {
+  flex: 1;
+  justify-content: center;
+  min-height: 2.25rem;
+  font-size: 0.78rem;
 }
 
 .share-section-title {
@@ -1682,6 +1740,12 @@ a:focus-visible {
     display: none;
   }
 
+  /* Connection is implicit when live — only "connecting" warrants a dot,
+   * so the header doesn't carry a third orphaned visual system. */
+  .doc-status--live {
+    display: none;
+  }
+
   /* The canvas spans the viewport; the copy yields the marker strip's width
    * instead of forcing horizontal overflow. */
   .doc-canvas {
@@ -1738,25 +1802,15 @@ a:focus-visible {
     gap: 0.5rem;
   }
 
-  /* Glanceable chrome only: counts live on the dock, labels in titles.
-   * The theme picker moves into the share sheet (no room in the header). */
+  /* Glanceable chrome only: counts live on the dock, labels in titles. */
   .prov-summary,
-  .agents-badge,
   .presence-count,
-  .presence-agent-name,
-  .doc-header-right > .theme-picker {
+  .presence-agent-name {
     display: none;
   }
 
-  .share-popover .theme-picker {
-    width: 100%;
-  }
-
   .share-popover .theme-option {
-    flex: 1;
-    justify-content: center;
     min-height: 44px;
-    font-size: 0.8rem;
   }
 
   /* Share becomes a full-width sheet (portaled to body — the header's
@@ -1790,29 +1844,93 @@ a:focus-visible {
 }
 
 /* ---------------------------- Feedback (Riffrec) ------------------------- */
+/* RiffrecRecorder puts our className on a wrapping <span> and inline-styles
+ * the <button> inside it (dark slab by default) — descendant !important
+ * rules are the supported way to reskin it. The wrapper itself stays
+ * unstyled: styling it as a pill drew empty outlines around the button. */
 
 .feedback-button {
-  border: 1px solid var(--line);
-  background: var(--surface-raised);
-  color: var(--ink-faint);
-  font-size: 0.74rem;
-  font-weight: 550;
-  border-radius: 7px;
-  padding: 0.28rem 0.7rem;
-  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+}
+
+.feedback-button > button {
+  border: 1px solid var(--line) !important;
+  background: var(--surface-raised) !important;
+  color: var(--ink-faint) !important;
+  font-family: var(--font-ui) !important;
+  font-size: 0.74rem !important;
+  font-weight: 550 !important;
+  border-radius: 7px !important;
+  padding: 0.28rem 0.7rem !important;
+  box-shadow: none !important;
   transition: border-color 120ms ease, color 120ms ease;
-  font-family: inherit;
 }
 
-.feedback-button:hover {
-  border-color: var(--ink-faint);
-  color: var(--ink);
+.feedback-button > button:hover {
+  border-color: var(--ink-faint) !important;
+  color: var(--ink-soft) !important;
 }
 
-/* Recording in progress — quiet but unmistakable */
-.feedback-button[data-status="recording"] {
-  color: #b3261e;
-  border-color: color-mix(in srgb, #b3261e 40%, var(--line));
+/* Recording — red dot + red text, still quiet (the [aria-live] indicator
+ * only exists while recording). */
+.feedback-button:has(> [aria-live]) > button {
+  background: var(--surface-raised) !important;
+  color: #b3261e !important;
+  border-color: color-mix(in srgb, #b3261e 45%, var(--line)) !important;
+}
+
+.feedback-button > [aria-live] {
+  margin-left: 0.45rem !important;
+  gap: 0.3rem !important;
+  font-size: 0.7rem !important;
+  font-weight: 550 !important;
+  color: #b3261e !important;
+}
+
+/* Consent dialog, re-dressed to the app's idiom. */
+.feedback-button [role='dialog'] {
+  background: var(--surface-raised) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 12px 48px rgb(0 0 0 / 0.16) !important;
+  font-family: var(--font-ui) !important;
+  padding: 1.4rem 1.5rem !important;
+}
+
+.feedback-button [role='dialog'] h2 {
+  font-size: 1.05rem !important;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.feedback-button [role='dialog'] button {
+  border-radius: 8px !important;
+  font-family: var(--font-ui) !important;
+  font-size: 0.8rem !important;
+  font-weight: 550 !important;
+  padding: 0.45rem 0.95rem !important;
+}
+
+.feedback-button [role='dialog'] > div:last-of-type > button:first-child {
+  background: var(--surface-raised) !important;
+  color: var(--ink-soft) !important;
+  border: 1px solid var(--line) !important;
+}
+
+.feedback-button [role='dialog'] > div:last-of-type > button:last-child {
+  background: var(--ink) !important;
+  color: var(--surface) !important;
+  border: 1px solid var(--ink) !important;
+}
+
+/* The header's backdrop-filter is a containing block for position:fixed —
+ * it would trap the consent overlay inside a 44px strip. Release it while
+ * the dialog is open (everything is dimmed behind the overlay anyway). */
+.doc-header:has(.feedback-button [role='dialog']) {
+  backdrop-filter: none;
+  background: var(--surface);
 }
 
 .landing-corner {
@@ -1826,7 +1944,7 @@ a:focus-visible {
 }
 
 @media (max-width: 30rem) {
-  .doc-header .feedback-button {
-    padding: 0.28rem 0.5rem;
+  .doc-header .feedback-button > button {
+    padding: 0.28rem 0.5rem !important;
   }
 }
