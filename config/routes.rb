@@ -10,6 +10,9 @@ Rails.application.routes.draw do
   patch "suggestions/:id/accept", to: "suggestions#accept", as: :accept_suggestion
   patch "suggestions/:id/reject", to: "suggestions#reject", as: :reject_suggestion
 
+  post "d/:slug/comments", to: "comments#create", as: :document_comments
+  patch "comments/:id/resolve", to: "comments#resolve", as: :resolve_comment
+
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
   get "up" => "rails/health#show", as: :rails_health_check
 

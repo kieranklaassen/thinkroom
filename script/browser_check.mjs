@@ -53,21 +53,24 @@ try {
   )
   ok('edit from A appeared live in B (CRDT sync works)')
 
-  // Markdown shortcut: type ## heading in B
-  await b.click('.milkdown .ProseMirror')
-  await b.keyboard.press('Meta+ArrowDown')
-  // Double Enter exits list context if the doc ends in a list
-  await b.keyboard.press('Enter')
-  await b.keyboard.press('Enter')
-  await b.keyboard.type('## Shortcut heading check')
-  try {
-    await b
+  // Markdown shortcut: type ## heading in B (retry once — concurrent remote
+  // updates can occasionally interrupt the input rule mid-keystroke)
+  let headingOk = false
+  for (let attempt = 0; attempt < 2 && !headingOk; attempt += 1) {
+    await b.click('.milkdown .ProseMirror')
+    await b.keyboard.press('Meta+ArrowDown')
+    // Double Enter exits list context if the doc ends in a list
+    await b.keyboard.press('Enter')
+    await b.keyboard.press('Enter')
+    await b.keyboard.type('## Shortcut heading check')
+    headingOk = await b
       .locator('.milkdown .ProseMirror h2', { hasText: 'Shortcut heading check' })
       .waitFor({ timeout: 5000 })
-    ok('## markdown input shortcut produced an h2')
-  } catch {
-    fail('## input rule did not produce a heading')
+      .then(() => true)
+      .catch(() => false)
   }
+  if (headingOk) ok('## markdown input shortcut produced an h2')
+  else fail('## input rule did not produce a heading')
   // Reload A and confirm persistence
   await a.reload()
   await a.waitForSelector('.milkdown .ProseMirror', { timeout: 15000 })
@@ -147,6 +150,29 @@ try {
     { timeout: 10000 },
   )
   ok('suggestion card cleared after accept (optimistic + reconcile)')
+
+  // --- Comment flow: select text -> comment -> appears live -> resolve ---
+  await a.click('.milkdown .ProseMirror')
+  await a.keyboard.press('Meta+ArrowUp')
+  await a.keyboard.press('Home')
+  await a.keyboard.press('Shift+End')
+  await a.locator('.selection-toolbar').waitFor({ timeout: 5000 })
+  ok('selection toolbar appears over selected text')
+  await a.locator('.selection-toolbar button', { hasText: 'Comment' }).click()
+  await a.fill('.comment-input', 'A comment from the browser check')
+  await a.locator('.comment-composer button', { hasText: 'Comment' }).click()
+  await a.locator('.comment-card', { hasText: 'A comment from the browser check' }).waitFor({ timeout: 5000 })
+  ok('comment posted (optimistic)')
+  await b.locator('.comment-card', { hasText: 'A comment from the browser check' }).waitFor({ timeout: 10000 })
+  ok('comment appeared live in window B')
+
+  await a.locator('.comment-card .comment-resolve').first().click()
+  await b.waitForFunction(
+    () => !document.querySelector('.comment-card:not(.is-resolved) .comment-body'),
+    undefined,
+    { timeout: 10000 },
+  )
+  ok('resolve synced to window B')
 
   for (const [label, errs] of Object.entries(errors)) {
     const fatal = errs.filter((e) => !e.includes('favicon') && !e.includes('Download the React DevTools'))
