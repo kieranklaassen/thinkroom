@@ -8,6 +8,7 @@ import { clipboard } from '@milkdown/kit/plugin/clipboard'
 import { cursor } from '@milkdown/kit/plugin/cursor'
 import { indent } from '@milkdown/kit/plugin/indent'
 import { trailing } from '@milkdown/kit/plugin/trailing'
+import { upload, uploadConfig } from '@milkdown/kit/plugin/upload'
 import { getMarkdown } from '@milkdown/kit/utils'
 import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
 import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight'
@@ -16,6 +17,7 @@ import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { CableProvider } from './cable_provider'
 import { loadShikiParser } from './highlighter'
+import { imageUploader } from './upload'
 import type { UserIdentity } from './identity'
 import { provenance, provenanceIdentityCtx, collectSpans, type ProvenanceSpan } from './provenance'
 import { agentCursors } from './agent_cursors'
@@ -119,6 +121,11 @@ function CollabEditor({
             parser,
             languageExtractor: (node) => (node.attrs.language as string) ?? '',
           }))
+          ctx.update(uploadConfig.key, (prev) => ({
+            ...prev,
+            uploader: imageUploader,
+            enableHtmlFileUploader: true,
+          }))
         })
         .use(commonmark)
         .use(gfm)
@@ -128,6 +135,7 @@ function CollabEditor({
         .use(indent)
         .use(trailing)
         .use(highlight)
+        .use(upload)
         .use(provenance)
         .use(selectionWatcher)
         .use(agentCursors)

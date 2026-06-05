@@ -176,6 +176,32 @@ try {
   )
   ok('resolve synced to window B')
 
+  // --- Image upload: paste a PNG -> direct upload -> renders -> syncs ---
+  // (paste exercises the same uploader as drop; synthetic DragEvents don't
+  // route through ProseMirror's drop pipeline, real drops do)
+  await a.click('.milkdown .ProseMirror')
+  await a.evaluate(() => {
+    const pngB64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    const bytes = Uint8Array.from(atob(pngB64), (c) => c.charCodeAt(0))
+    const file = new File([bytes], 'pixel.png', { type: 'image/png' })
+    const dataTransfer = new DataTransfer()
+    dataTransfer.items.add(file)
+    document.querySelector('.milkdown .ProseMirror').dispatchEvent(
+      new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dataTransfer }),
+    )
+  })
+  await a
+    .locator('.milkdown img[src*="/rails/active_storage/blobs/"]')
+    .first()
+    .waitFor({ state: 'attached', timeout: 15000 })
+  ok('pasted image uploaded via Active Storage and rendered inline')
+  await b
+    .locator('.milkdown img[src*="/rails/active_storage/blobs/"]')
+    .first()
+    .waitFor({ state: 'attached', timeout: 10000 })
+  ok('image synced live to window B')
+
   // --- Agent loop: an agent joins over plain HTTP while humans watch ---
   const agentHeaders = { 'X-Agent-Name': 'Scout', 'Content-Type': 'application/json' }
   const api = `${BASE}/api/docs/${SLUG}`
