@@ -1,0 +1,34 @@
+# Dependencies
+/node_modules
+
+# Logs and temp
+/log/*
+/tmp/*
+!/log/.keep
+!/tmp/.keep
+!/tmp/pids
+/tmp/pids/*
+!/tmp/pids/.keep
+
+# Local databases and uploads
+/storage/*
+!/storage/.keep
+/db/*.sqlite3
+/db/*.sqlite3-*
+
+# Vite
+/public/vite*
+/app/frontend/.vite
+
+# Secrets and env
+/config/master.key
+.env*
+
+.DS_Store
+
+# Compound Engineering local config (per-developer)
+.compound-engineering/config.local.yaml
+
+# Ignore key files for decrypting credentials and more.
+/config/*.key
+
