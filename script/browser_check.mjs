@@ -53,6 +53,21 @@ try {
   )
   ok('edit from A appeared live in B (CRDT sync works)')
 
+  // Markdown shortcut: type ## heading in B
+  await b.click('.milkdown .ProseMirror')
+  await b.keyboard.press('Meta+ArrowDown')
+  // Double Enter exits list context if the doc ends in a list
+  await b.keyboard.press('Enter')
+  await b.keyboard.press('Enter')
+  await b.keyboard.type('## Shortcut heading check')
+  try {
+    await b
+      .locator('.milkdown .ProseMirror h2', { hasText: 'Shortcut heading check' })
+      .waitFor({ timeout: 5000 })
+    ok('## markdown input shortcut produced an h2')
+  } catch {
+    fail('## input rule did not produce a heading')
+  }
   // Reload A and confirm persistence
   await a.reload()
   await a.waitForSelector('.milkdown .ProseMirror', { timeout: 15000 })
@@ -63,16 +78,40 @@ try {
   )
   ok('content survived reload (server persistence works)')
 
-  // Markdown shortcut: type ## heading in B
-  await b.click('.milkdown .ProseMirror')
-  await b.keyboard.press('Meta+ArrowDown')
-  await b.keyboard.press('Enter')
-  await b.keyboard.type('## Shortcut heading check')
-  const headingCount = await b
-    .locator('.milkdown .ProseMirror h2:has-text("Shortcut heading check")')
-    .count()
-  if (headingCount > 0) ok('## markdown input shortcut produced an h2')
-  else fail('## input rule did not produce a heading')
+
+  // --- Provenance checks ---
+  const pendingAi = await a.locator('.milkdown .prov--ai.prov--pending').count()
+  if (pendingAi > 0) ok('seeded AI spans render with pending tint')
+  else fail('no pending AI spans found — seed provenance did not round-trip')
+
+  // Typed text gets human attribution in the DOM of the other window
+  const humanSentinel = `human-${Date.now()}`
+  await a.click('.milkdown .ProseMirror')
+  await a.keyboard.press('Meta+ArrowDown')
+  await a.keyboard.press('Enter')
+  await a.keyboard.type(humanSentinel)
+  await b.waitForFunction(
+    (s) =>
+      Array.from(document.querySelectorAll('.milkdown span[data-provenance][data-kind="human"]')).some(
+        (el) => el.textContent?.includes(s),
+      ),
+    humanSentinel,
+    { timeout: 10000 },
+  )
+  ok('typed text carries human provenance across clients')
+
+  // Summary chip reflects mixed provenance
+  const summaryText = await a.locator('.prov-summary').textContent({ timeout: 5000 })
+  if (summaryText?.includes('% human') && summaryText.includes('% AI')) {
+    ok(`provenance summary live: "${summaryText.trim()}"`)
+  } else {
+    fail(`summary chip missing or malformed: "${summaryText}"`)
+  }
+
+  // Reload keeps AI tints (marks persist through the Yjs doc)
+  await b.reload()
+  await b.waitForSelector('.milkdown .prov--ai.prov--pending', { timeout: 15000 })
+  ok('AI provenance tints survive reload')
 
   for (const [label, errs] of Object.entries(errors)) {
     const fatal = errs.filter((e) => !e.includes('favicon') && !e.includes('Download the React DevTools'))

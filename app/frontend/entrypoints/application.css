@@ -346,6 +346,111 @@ body {
   background: var(--accent-soft);
 }
 
+/* ----------------------------- Provenance tints -------------------------- */
+/* Human text renders plain — the absence of decoration IS the design.       */
+.milkdown .prov--ai {
+  border-radius: 2px;
+  transition: background 240ms ease, border-color 240ms ease;
+}
+
+.milkdown .prov--ai.prov--pending {
+  background: var(--prov-pending-bg);
+  box-shadow: inset 0 -2px 0 var(--prov-pending-line);
+}
+
+.milkdown .prov--ai.prov--reviewed {
+  background: var(--prov-reviewed-bg);
+  box-shadow: inset 0 -2px 0 var(--prov-reviewed-line);
+}
+
+.milkdown .prov--ai.prov--endorsed {
+  background: transparent;
+  box-shadow: inset 0 -2px 0 var(--prov-endorsed-line);
+}
+
+/* ----------------------------- Provenance summary ------------------------ */
+.prov-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.prov-summary-sep {
+  color: var(--ink-faint);
+}
+
+.prov-summary-part--unreviewed {
+  color: var(--accent);
+}
+
+/* ------------------------------ Review popover --------------------------- */
+.review-popover {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.08);
+  padding: 0.3rem 0.6rem;
+  font-size: 0.72rem;
+  animation: popover-in 140ms ease;
+}
+
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+.review-popover-author {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.review-popover-states {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.review-popover-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.review-popover-dot.is-active {
+  background: var(--prov-pending-line);
+}
+
+.review-popover-state {
+  color: var(--ink-soft);
+}
+
+.review-popover-action {
+  border: none;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.72rem;
+  font-weight: 550;
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.review-popover-action:hover {
+  background: #000;
+}
+
 /* ----------------------------- Collab cursors ---------------------------- */
 .ProseMirror-yjs-cursor {
   position: relative;
