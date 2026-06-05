@@ -67,7 +67,7 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     }
 
     body = response.parsed_body
-    assert_equal({ "claimed" => true, "owner_name" => "Quiet Falcon" }, body["ownership"])
+    assert_equal({ "claimed" => true, "claimable" => false, "owner_name" => "Quiet Falcon" }, body["ownership"])
     assert body["notes"].any? { |n| n.include?("cannot claim") }
     refute_includes response.body, "tok-owner"
   end

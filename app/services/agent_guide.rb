@@ -10,7 +10,10 @@ class AgentGuide
         slug: document.slug,
         title: document.title,
         share_url: "#{base_url}/d/#{document.slug}",
-        ownership: { claimed: document.claimed?, owner_name: document.owner_name },
+        # Same shape the browser sees minus the viewer-specific `yours` —
+        # `claimable: false` lets agents describe permanently-unclaimable
+        # docs (the demo) accurately.
+        ownership: document.ownership_props(nil).except(:yours),
         markdown: document.content_markdown.presence || document.seed_markdown,
         plain_markdown: document.plain_markdown.presence || document.seed_markdown,
         provenance: {
@@ -61,7 +64,7 @@ class AgentGuide
         "Connected editors see your suggestions, comments, and presence live over WebSocket — no refresh needed on their side.",
         "Reading state: use plain_markdown as your working context for proposals; markdown embeds provenance span HTML. Both reflect the last snapshot pushed by a connected editor and may lag if no human has the document open — the Yjs CRDT state is always authoritative.",
         "Review is human-gated by design: accepting/rejecting suggestions and advancing review states happen in the editor, by humans. Your job is to propose well.",
-        "Ownership: a human can claim a document in the browser; claimed docs show an owner in this payload. Claiming is browser-only (cookie-based) — agents cannot claim, so don't POST to any claim path.",
+        "Ownership: a human can claim a document in the browser; claimed docs show an owner in this payload (claimable: false means nobody can ever claim it, e.g. the demo). Claiming is browser-only (cookie-based) — agents cannot claim, so don't POST to any claim path. When a human claims, a claimed_document activity appears in the event feed with their name.",
         "A claimed document can be deleted by its owner, after which every endpoint here returns 404. Treat a 404 on a previously-working slug as deletion, not an outage to retry."
       ]
     end

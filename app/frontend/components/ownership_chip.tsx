@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { router } from '@inertiajs/react'
 
 export interface OwnershipPayload {
@@ -31,6 +31,11 @@ export function OwnershipChip({ slug, ownership, claimerName }: Props) {
   const [claimFailed, setClaimFailed] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  // Refs guard double-fires synchronously — state updates only take effect
+  // after the next render commit, leaving a same-frame window for a second
+  // click (Enter bounce, mobile double-tap) to dispatch a duplicate request.
+  const claimInFlight = useRef(false)
+  const deleteInFlight = useRef(false)
 
   // A failed claim offers "Try again" for a beat, then settles back.
   useEffect(() => {
@@ -47,8 +52,18 @@ export function OwnershipChip({ slug, ownership, claimerName }: Props) {
             className="chrome-toggle ownership-delete"
             disabled={deleting}
             onClick={() => {
+              if (deleteInFlight.current) return
+              deleteInFlight.current = true
               setDeleting(true)
-              router.delete(`/d/${slug}`)
+              router.delete(`/d/${slug}`, {
+                // Success navigates home and unmounts; only failure needs
+                // recovery — without this the chip froze on 'Deleting…'.
+                onError: () => {
+                  deleteInFlight.current = false
+                  setDeleting(false)
+                  setConfirming(false)
+                },
+              })
             }}
           >
             {deleting ? 'Deleting…' : 'Delete?'}
@@ -86,6 +101,8 @@ export function OwnershipChip({ slug, ownership, claimerName }: Props) {
   if (!ownership.claimable) return null
 
   const claim = () => {
+    if (claimInFlight.current) return
+    claimInFlight.current = true
     setClaimFailed(false)
     router
       .optimistic((props: { ownership?: OwnershipPayload }) => ({
@@ -104,6 +121,9 @@ export function OwnershipChip({ slug, ownership, claimerName }: Props) {
           // chip re-renders to "Owned by ‹winner›" on its own. "Try again"
           // only matters when the doc is still unclaimed (network blip).
           onError: () => setClaimFailed(true),
+          onFinish: () => {
+            claimInFlight.current = false
+          },
         },
       )
   }

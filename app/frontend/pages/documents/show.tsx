@@ -140,22 +140,6 @@ export default function DocumentShow({
     if (isMobile && composerAnchor !== null) setActiveSheet('comments')
   }, [isMobile, composerAnchor])
 
-  // When the doc is deleted (live broadcast, or channel rejection after an
-  // offline delete), leave the editor cleanly instead of 404ing in place.
-  const onDocumentGone = useCallback(() => {
-    router.visit('/')
-  }, [])
-  useMetaChannel(doc.slug, { onDeleted: onDocumentGone })
-
-  // The sync channel rejects its resubscription when the doc is gone —
-  // same exit path.
-  useEffect(() => {
-    if (!handle) return
-    const provider = handle.provider
-    provider.on('rejected', onDocumentGone)
-    return () => provider.off('rejected', onDocumentGone)
-  }, [handle, onDocumentGone])
-
   useEffect(() => writeStoredFlag('pruf:panel', panelOpen), [panelOpen])
   useEffect(() => writeStoredFlag('pruf:focus', focusMode), [focusMode])
 
@@ -222,6 +206,25 @@ export default function DocumentShow({
     if (presences.length > 0) presencePoll.start()
     else presencePoll.stop()
   }, [presences.length, presencePoll])
+
+  // When the doc is deleted (live broadcast, or channel rejection after an
+  // offline delete), leave the editor cleanly instead of 404ing in place.
+  // Stop the presence poll first — Inertia's navigation is async, and a poll
+  // firing in that window would partial-reload the destroyed slug into a 404.
+  const onDocumentGone = useCallback(() => {
+    presencePoll.stop()
+    router.visit('/')
+  }, [presencePoll])
+  useMetaChannel(doc.slug, { onDeleted: onDocumentGone })
+
+  // The sync channel rejects its resubscription when the doc is gone —
+  // same exit path.
+  useEffect(() => {
+    if (!handle) return
+    const provider = handle.provider
+    provider.on('rejected', onDocumentGone)
+    return () => provider.off('rejected', onDocumentGone)
+  }, [handle, onDocumentGone])
 
   const handleSelection = useCallback((view: EditorView) => {
     viewRef.current = view

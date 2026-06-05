@@ -25,6 +25,11 @@ const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
 
 /** Stable per-browser identity so reloads keep the same name and color. */
 export function userIdentity(): UserIdentity {
+  // Render-path callers (useForm initializers) must survive non-browser
+  // environments where localStorage doesn't exist.
+  if (typeof window === 'undefined') {
+    return { name: 'Anonymous', color: COLORS[0] }
+  }
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (stored) return JSON.parse(stored) as UserIdentity
