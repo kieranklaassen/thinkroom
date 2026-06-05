@@ -72,12 +72,3 @@ export function PresenceBar({ humans, agents, compact = false }: Props) {
     </span>
   )
 }
-
-export function AgentsBadge({ agents }: { agents: AgentPresencePayload[] }) {
-  if (agents.length === 0) return null
-  return (
-    <span className="agents-badge" title={agents.map((a) => a.agent_name).join(', ')}>
-      Shared with agents · {agents.length} active
-    </span>
-  )
-}

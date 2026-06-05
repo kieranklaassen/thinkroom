@@ -82,13 +82,12 @@ export function SharePopover({ agentsActive }: { agentsActive: number }) {
               {copied === 'agent' ? 'Copied — paste it to your agent' : 'Copy agent invite'}
             </button>
           </div>
-      {/* The compact header has no room for the picker — it lives here. */}
-      {isMobile && (
-        <div className="share-section share-section--theme">
-          <div className="share-section-title">Theme</div>
-          <ThemePicker />
-        </div>
-      )}
+      {/* The header stays minimal — the reading theme lives here, on every
+          surface (desktop popover and mobile sheet alike). */}
+      <div className="share-section share-section--theme">
+        <div className="share-section-title">Theme</div>
+        <ThemePicker />
+      </div>
     </div>
   )
 

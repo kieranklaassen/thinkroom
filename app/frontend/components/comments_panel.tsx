@@ -84,7 +84,7 @@ export function CommentsPanel({
       )}
 
       {open.length === 0 && composerAnchor === null && (
-        <p className="rail-empty">Select any text in the document to leave a comment.</p>
+        <p className="rail-empty">Select any text to start a conversation.</p>
       )}
 
       <ul className="comment-list">
