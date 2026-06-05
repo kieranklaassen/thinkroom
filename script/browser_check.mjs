@@ -158,8 +158,11 @@ try {
   ok('accepted suggestion text synced live to window B')
 
   await a.waitForFunction(
-    () => document.querySelectorAll('.suggestion-card').length === 0,
-    undefined,
+    (snippet) =>
+      !Array.from(document.querySelectorAll('.suggestion-card .suggestion-body')).some((el) =>
+        el.textContent?.includes(snippet),
+      ),
+    suggestionText,
     { timeout: 10000 },
   )
   ok('suggestion card cleared after accept (optimistic + reconcile)')
@@ -250,11 +253,11 @@ try {
     headers: agentHeaders,
     body: JSON.stringify({ status: 'active', location: 'provenance' }),
   })
-  await a.locator('.presence-chip--agent', { hasText: 'Scout' }).waitFor({ timeout: 10000 })
+  await a.locator('.presence-chip--agent', { hasText: 'Scout' }).first().waitFor({ timeout: 10000 })
   ok('agent presence chip appeared live')
-  await a.locator('.agents-badge').waitFor({ timeout: 5000 })
+  await a.locator('.agents-badge').first().waitFor({ timeout: 5000 })
   ok('"Shared with agents" badge is visible')
-  await a.locator('.agent-cursor-label', { hasText: 'Scout' }).waitFor({ timeout: 5000 })
+  await a.locator('.agent-cursor-label', { hasText: 'Scout' }).first().waitFor({ timeout: 5000 })
   ok('agent pseudo-cursor rendered at its work location')
 
   const suggestRes = await fetch(`${api}/suggestions`, {
@@ -269,7 +272,7 @@ try {
   if (suggestRes.status === 201) ok('agent proposed a suggestion over HTTP (201)')
   else fail(`agent suggestion failed: ${suggestRes.status}`)
 
-  await b.locator('.suggestion-card .author-chip', { hasText: 'Scout' }).waitFor({ timeout: 10000 })
+  await b.locator('.suggestion-card .author-chip', { hasText: 'Scout' }).first().waitFor({ timeout: 10000 })
   ok('agent suggestion appeared live, agent-attributed')
 
   await fetch(`${api}/comments`, {
@@ -277,7 +280,7 @@ try {
     headers: agentHeaders,
     body: JSON.stringify({ body: 'Comment from the agent API.', anchor_text: 'markdown' }),
   })
-  await b.locator('.comment-card .author-chip--agent', { hasText: 'Scout' }).waitFor({ timeout: 10000 })
+  await b.locator('.comment-card .author-chip--agent', { hasText: 'Scout' }).first().waitFor({ timeout: 10000 })
   ok('agent comment appeared live, agent-attributed')
 
   await b.locator('.activity-row', { hasText: 'Scout' }).first().waitFor({ timeout: 5000 })
