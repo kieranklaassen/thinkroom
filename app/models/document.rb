@@ -3,12 +3,24 @@ class Document < ApplicationRecord
 
   attr_readonly :slug
 
+  has_many :suggestions, dependent: :destroy
+  has_many :comments, dependent: :destroy
+  has_many :activities, dependent: :destroy
+  has_many :agent_presences, dependent: :destroy
+
   before_validation :ensure_slug, on: :create
 
   validates :title, presence: true
   validates :slug, presence: true, uniqueness: true
 
   def to_param = slug
+
+  # Markdown without provenance span markup — the human-readable export.
+  def plain_markdown
+    content_markdown.to_s
+      .gsub(/<span data-provenance[^>]*>/, "")
+      .gsub("</span>", "")
+  end
 
   # Percentage breakdown derived from the latest client-pushed provenance snapshot.
   # Spans: [{ "kind" => "human"|"ai", "state" => ..., "chars" => N }, ...]

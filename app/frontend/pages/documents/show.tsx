@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
-import { Head } from '@inertiajs/react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Head, router } from '@inertiajs/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import {
   DocumentEditor,
@@ -14,8 +14,25 @@ import {
   type ProvenanceSpan,
   type ReviewState,
 } from '../../editor/provenance'
+import {
+  applySuggestion,
+  selectedText,
+  type SuggestionPayload,
+} from '../../editor/suggestions'
 import { ProvenanceSummaryChip } from '../../components/provenance_summary'
 import { ReviewPopover } from '../../components/review_popover'
+import { SuggestionsPanel } from '../../components/suggestions_panel'
+import { useMetaChannel } from '../../lib/use_meta_channel'
+import { postJSON } from '../../lib/csrf'
+
+export interface ActivityPayload {
+  id: number
+  actor_name: string
+  actor_kind: string
+  action: string
+  detail: string | null
+  created_at: string
+}
 
 export interface DocumentProps {
   document: {
@@ -31,6 +48,8 @@ export interface DocumentProps {
     ai_pct: number
     unreviewed_pct: number
   }
+  suggestions: SuggestionPayload[]
+  activities: ActivityPayload[]
 }
 
 interface ReviewTarget {
@@ -38,13 +57,21 @@ interface ReviewTarget {
   position: { x: number; y: number }
 }
 
-export default function DocumentShow({ document: doc }: DocumentProps) {
+export default function DocumentShow({ document: doc, suggestions }: DocumentProps) {
   const identity = useMemo(userIdentity, [])
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
-  const [, setHandle] = useState<EditorHandle | null>(null)
   const [spans, setSpans] = useState<ProvenanceSpan[]>([])
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
+  const [aiPending, setAiPending] = useState(false)
+  const handleRef = useRef<EditorHandle | null>(null)
   const viewRef = useRef<EditorView | null>(null)
+
+  useMetaChannel(doc.slug)
+
+  // A new suggestion arriving clears the "thinking" state.
+  useEffect(() => {
+    setAiPending(false)
+  }, [suggestions.length])
 
   const handleSelection = useCallback((view: EditorView) => {
     viewRef.current = view
@@ -67,6 +94,56 @@ export default function DocumentShow({ document: doc }: DocumentProps) {
       applyReviewState(view, reviewTarget.span, state)
     },
     [reviewTarget],
+  )
+
+  const acceptSuggestion = useCallback(
+    (suggestion: SuggestionPayload) => {
+      const handle = handleRef.current
+      if (!handle) return
+      // Local-first: the text lands in the CRDT immediately (AI-attributed,
+      // pending review); the server reconciles the suggestion status.
+      applySuggestion(handle.editor, suggestion)
+      router
+        .optimistic((props: Partial<DocumentProps>) => ({
+          suggestions: (props.suggestions ?? []).filter((s) => s.id !== suggestion.id),
+        }))
+        .patch(
+          `/suggestions/${suggestion.id}/accept`,
+          { by: identity.name },
+          { preserveScroll: true, only: ['suggestions', 'activities'] },
+        )
+    },
+    [identity.name],
+  )
+
+  const rejectSuggestion = useCallback(
+    (suggestion: SuggestionPayload) => {
+      router
+        .optimistic((props: Partial<DocumentProps>) => ({
+          suggestions: (props.suggestions ?? []).filter((s) => s.id !== suggestion.id),
+        }))
+        .patch(
+          `/suggestions/${suggestion.id}/reject`,
+          { by: identity.name },
+          { preserveScroll: true, only: ['suggestions', 'activities'] },
+        )
+    },
+    [identity.name],
+  )
+
+  const askAi = useCallback(
+    (instruction: string) => {
+      const handle = handleRef.current
+      const selection = handle ? selectedText(handle.editor) : ''
+      setAiPending(true)
+      void postJSON(`/d/${doc.slug}/ai_suggestions`, {
+        instruction,
+        context: selection || null,
+        replaces: selection || null,
+        anchor_text: selection || null,
+      }).catch(() => setAiPending(false))
+    },
+    [doc.slug],
   )
 
   return (
@@ -93,12 +170,23 @@ export default function DocumentShow({ document: doc }: DocumentProps) {
             <DocumentEditor
               slug={doc.slug}
               identity={identity}
-              onReady={setHandle}
+              onReady={(handle) => {
+                handleRef.current = handle
+              }}
               onStatus={setStatus}
               onSpans={setSpans}
               onSelection={handleSelection}
             />
           </article>
+          <aside className="doc-rail">
+            <SuggestionsPanel
+              suggestions={suggestions}
+              aiPending={aiPending}
+              onAccept={acceptSuggestion}
+              onReject={rejectSuggestion}
+              onAskAi={askAi}
+            />
+          </aside>
         </main>
         {reviewTarget && (
           <ReviewPopover

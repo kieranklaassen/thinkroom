@@ -13,7 +13,9 @@ class DocumentsController < InertiaController
         seed_markdown: document.seed_markdown,
         has_state: document.yjs_state.present?
       ),
-      summary: document.provenance_summary
+      summary: document.provenance_summary,
+      suggestions: -> { document.suggestions.pending.order(:created_at).map(&:as_props) },
+      activities: -> { document.activities.recent.map(&:as_props) }
     }
   end
 
