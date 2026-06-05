@@ -25,3 +25,6 @@
 .env*
 
 .DS_Store
+
+# Compound Engineering local config (per-developer)
+.compound-engineering/config.local.yaml
