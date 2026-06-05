@@ -2,3 +2,376 @@
 
 @plugin '@tailwindcss/typography';
 @plugin '@tailwindcss/forms';
+
+/* ---------------------------------------------------------------------------
+ * Design tokens. The default ("proof") theme: warm paper, editorial type.
+ * The "whitey" theme (Typora Whitey homage) overrides these on [data-theme].
+ * ------------------------------------------------------------------------- */
+:root {
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-doc: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+
+  --surface: #faf8f4;
+  --surface-raised: #ffffff;
+  --ink: #21201c;
+  --ink-soft: #6f6a60;
+  --ink-faint: #a8a294;
+  --line: #e7e2d8;
+  --accent: #b65c3d;
+  --accent-soft: #b65c3d22;
+
+  --prov-pending-bg: #ead9fb66;
+  --prov-pending-line: #9d4edd99;
+  --prov-reviewed-bg: #ead9fb33;
+  --prov-reviewed-line: #9d4edd55;
+  --prov-endorsed-line: #9d4edd40;
+
+  --code-bg: #f3f0e9;
+  --measure: 44rem;
+}
+
+html,
+body {
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* --------------------------------- Landing ------------------------------- */
+.landing {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+}
+
+.landing-main {
+  max-width: 26rem;
+  text-align: center;
+}
+
+.landing-wordmark {
+  font-family: var(--font-doc);
+  font-size: 2.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.landing-tagline {
+  margin-top: 0.75rem;
+  color: var(--ink-soft);
+  line-height: 1.55;
+  font-size: 0.95rem;
+}
+
+.landing-actions {
+  margin-top: 1.75rem;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.landing-recent {
+  margin-top: 3rem;
+  text-align: left;
+}
+
+.landing-recent-heading {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  margin-bottom: 0.5rem;
+}
+
+.landing-recent ul {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.landing-recent a {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  text-decoration: none;
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  margin: 0 -0.5rem;
+  display: block;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.landing-recent a:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.btn-primary {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.btn-primary:hover {
+  background: #000;
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-ghost {
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  background: transparent;
+}
+
+.btn-ghost:hover {
+  color: var(--ink);
+  border-color: var(--ink-faint);
+}
+
+/* ------------------------------- Doc layout ------------------------------ */
+.doc-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.doc-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  min-height: 2.75rem;
+}
+
+.doc-header-left,
+.doc-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: 0;
+}
+
+.doc-home {
+  font-family: var(--font-doc);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--ink);
+  text-decoration: none;
+  opacity: 0.85;
+}
+
+.doc-home:hover {
+  opacity: 1;
+}
+
+.doc-title {
+  font-size: 0.875rem;
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.doc-status--connecting {
+  background: var(--ink-faint);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.doc-status--live {
+  background: #6a994e;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.doc-body {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.doc-main {
+  width: 100%;
+  max-width: var(--measure);
+  padding: 3rem 2rem 6rem;
+}
+
+.doc-editor-loading {
+  min-height: 50vh;
+}
+
+/* ----------------------------- Editor typography ------------------------- */
+.milkdown {
+  outline: none;
+}
+
+.milkdown .ProseMirror {
+  outline: none;
+  font-family: var(--font-doc);
+  font-size: 1.0625rem;
+  line-height: 1.72;
+  color: var(--ink);
+  caret-color: var(--accent);
+}
+
+.milkdown .ProseMirror > * + * {
+  margin-top: 0.85em;
+}
+
+.milkdown .ProseMirror h1,
+.milkdown .ProseMirror h2,
+.milkdown .ProseMirror h3 {
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+}
+
+.milkdown .ProseMirror h1 {
+  font-size: 2rem;
+  margin-top: 0;
+}
+
+.milkdown .ProseMirror h2 {
+  font-size: 1.45rem;
+  margin-top: 1.6em;
+}
+
+.milkdown .ProseMirror h3 {
+  font-size: 1.15rem;
+  margin-top: 1.3em;
+}
+
+.milkdown .ProseMirror a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-soft);
+  text-underline-offset: 2px;
+}
+
+.milkdown .ProseMirror blockquote {
+  border-left: 3px solid var(--line);
+  padding-left: 1.1em;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.milkdown .ProseMirror ul,
+.milkdown .ProseMirror ol {
+  padding-left: 1.5em;
+}
+
+.milkdown .ProseMirror ul {
+  list-style: disc;
+}
+
+.milkdown .ProseMirror ol {
+  list-style: decimal;
+}
+
+.milkdown .ProseMirror li {
+  margin: 0.25em 0;
+}
+
+.milkdown .ProseMirror code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 0.12em 0.35em;
+}
+
+.milkdown .ProseMirror pre {
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem 1.15rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.milkdown .ProseMirror pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+.milkdown .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 2em 0;
+}
+
+.milkdown .ProseMirror img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.milkdown .ProseMirror ::selection {
+  background: var(--accent-soft);
+}
+
+/* ----------------------------- Collab cursors ---------------------------- */
+.ProseMirror-yjs-cursor {
+  position: relative;
+  border-left: 2px solid var(--user-color, var(--accent));
+  margin-left: -1px;
+  margin-right: -1px;
+  pointer-events: none;
+  word-break: normal;
+}
+
+.ProseMirror-yjs-cursor > div {
+  position: absolute;
+  top: -1.35em;
+  left: -2px;
+  font-family: var(--font-ui);
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px 4px 4px 0;
+  background: var(--user-color, var(--accent));
+  color: #fff;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.ProseMirror-yjs-selection {
+  background: color-mix(in srgb, var(--user-color, var(--accent)) 18%, transparent);
+}
