@@ -28,3 +28,7 @@
 
 # Compound Engineering local config (per-developer)
 .compound-engineering/config.local.yaml
+
+# Ignore key files for decrypting credentials and more.
+/config/*.key
+
