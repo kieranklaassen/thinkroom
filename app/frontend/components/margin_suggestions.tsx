@@ -6,6 +6,7 @@ import type { EditorHandle } from '../editor/milkdown_editor'
 import type { ProvenanceSpan } from '../editor/provenance'
 import { findTextRange, type SuggestionPayload } from '../editor/suggestions'
 import { truncate } from '../lib/truncate'
+import { clearHighlight, domRange, setHighlight, supportsHighlights } from '../lib/highlights'
 
 interface Props {
   suggestions: SuggestionPayload[]
@@ -22,23 +23,7 @@ interface Props {
 
 const CARD_GAP = 10
 
-const supportsHighlights = typeof CSS !== 'undefined' && 'highlights' in CSS
-
 const anchorOf = (s: SuggestionPayload) => s.replaces ?? s.anchor_text
-
-/** A DOM Range for a ProseMirror position span — for the Custom Highlight API. */
-function domRange(view: EditorView, from: number, to: number): Range | null {
-  try {
-    const start = view.domAtPos(from)
-    const end = view.domAtPos(to)
-    const range = document.createRange()
-    range.setStart(start.node, start.offset)
-    range.setEnd(end.node, end.offset)
-    return range
-  } catch {
-    return null
-  }
-}
 
 /**
  * Pending suggestions as cards in the document's right margin, Google-Docs
@@ -157,25 +142,22 @@ export function MarginSuggestions({
       })
     })
 
-    if (supportsHighlights) {
-      CSS.highlights.set('sug-anchor', new Highlight(...rangesRef.current.values()))
-    }
+    setHighlight('sug-anchor', [...rangesRef.current.values()])
     return () => cancelAnimationFrame(raf)
   }, [suggestions, spans, handle, focusMode, resizeTick])
 
   useEffect(() => {
     if (!supportsHighlights) return
     return () => {
-      CSS.highlights.delete('sug-anchor')
-      CSS.highlights.delete('sug-anchor-hot')
+      clearHighlight('sug-anchor')
+      clearHighlight('sug-anchor-hot')
     }
   }, [])
 
   const hover = useCallback((id: number | null) => {
-    if (!supportsHighlights) return
     const range = id === null ? null : rangesRef.current.get(id)
-    if (range) CSS.highlights.set('sug-anchor-hot', new Highlight(range))
-    else CSS.highlights.delete('sug-anchor-hot')
+    if (range) setHighlight('sug-anchor-hot', [range])
+    else clearHighlight('sug-anchor-hot')
   }, [])
 
   const jumpToSuggestion = useCallback(
