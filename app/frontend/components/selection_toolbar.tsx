@@ -3,6 +3,8 @@ import { Fragment } from 'react'
 interface Action {
   label: string
   onClick: () => void
+  disabled?: boolean
+  title?: string
 }
 
 interface Props {
@@ -26,7 +28,9 @@ export function SelectionToolbar({ position, actions }: Props) {
       {actions.map((action, i) => (
         <Fragment key={action.label}>
           {i > 0 && <span className="selection-toolbar-sep" />}
-          <button onClick={action.onClick}>{action.label}</button>
+          <button onClick={action.onClick} disabled={action.disabled} title={action.title}>
+            {action.label}
+          </button>
         </Fragment>
       ))}
     </div>
