@@ -167,6 +167,11 @@ a:focus-visible {
   letter-spacing: -0.02em;
 }
 
+.landing-wordmark-link {
+  color: inherit;
+  text-decoration: none;
+}
+
 .landing-tagline {
   margin-top: 0.75rem;
   color: var(--ink-soft);
@@ -1290,6 +1295,69 @@ a:focus-visible {
 .chrome-toggle[aria-pressed='true'] {
   background: var(--surface-raised);
   color: var(--ink);
+}
+
+/* ------------------------------ Identity chip ------------------------------ */
+.identity-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+}
+
+.identity-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  flex: none;
+}
+
+.identity-name {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity-guest {
+  color: var(--ink-faint);
+  font-weight: 450;
+  flex: none;
+}
+
+.identity-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.identity-input {
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-size: 0.74rem;
+  border-radius: 7px;
+  padding: 0.28rem 0.6rem;
+  width: 10rem;
+}
+
+.identity-input:focus {
+  outline: none;
+  border-color: var(--ink-faint);
+}
+
+.identity-error {
+  font-size: 0.72rem;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+@media (max-width: 64rem) {
+  .identity-name {
+    max-width: 5.5rem;
+  }
+  .identity-input {
+    width: 7.5rem;
+  }
 }
 
 /* ------------------------------ Ownership chip ----------------------------- */
