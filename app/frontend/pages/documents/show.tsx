@@ -32,10 +32,10 @@ import { CommentsPanel, type CommentPayload } from '../../components/comments_pa
 import { SelectionToolbar } from '../../components/selection_toolbar'
 import { PresenceBar, type AgentPresencePayload } from '../../components/presence_bar'
 import { ActivityPanel } from '../../components/activity_panel'
-import { FeedbackButton } from '../../components/feedback_button'
 import { IdentityChip } from '../../components/identity_chip'
-import { OwnershipChip, type OwnershipPayload } from '../../components/ownership_chip'
+import { type OwnershipPayload } from '../../components/ownership_chip'
 import { ClaimBanner } from '../../components/claim_banner'
+import { HeaderMenu } from '../../components/header_menu'
 import { SharePopover } from '../../components/share_popover'
 import {
   MobileDock,
@@ -514,28 +514,22 @@ export default function DocumentShow({
             />
           </div>
           <div className="doc-header-right">
-            <IdentityChip identity={identity} guest={guest} onRenamed={handleRenamed} />
-            <ProvenanceSummaryChip spans={spans} />
-            <PresenceBar humans={peers} agents={presences} compact={isMobile} />
-            <button
-              className="chrome-toggle"
-              aria-pressed={panelOpen}
-              title="Hide/show panel — ⌘\"
-              onClick={() => setPanelOpen((open) => !open)}
-            >
-              Panel
-            </button>
-            <button
-              className="chrome-toggle"
-              aria-pressed={focusMode}
-              title="Suggestion focus — ⌘."
-              onClick={() => setFocusMode((focus) => !focus)}
-            >
-              Focus
-            </button>
-            <OwnershipChip slug={doc.slug} ownership={ownership} claimerName={identity.name} />
-            <FeedbackButton />
+            {/* ≤4 groups: identity/presence · (mode control) · Share · ⋯ menu */}
+            <div className="doc-header-people">
+              <IdentityChip identity={identity} guest={guest} onRenamed={handleRenamed} />
+              <ProvenanceSummaryChip spans={spans} />
+              <PresenceBar humans={peers} agents={presences} compact={isMobile} />
+            </div>
             <SharePopover agentsActive={presences.length} />
+            <HeaderMenu
+              panelOpen={panelOpen}
+              onTogglePanel={() => setPanelOpen((open) => !open)}
+              focusMode={focusMode}
+              onToggleFocus={() => setFocusMode((focus) => !focus)}
+              slug={doc.slug}
+              ownership={ownership}
+              claimerName={identity.name}
+            />
           </div>
         </header>
         <ClaimBanner slug={doc.slug} ownership={ownership} claimerName={identity.name} />

@@ -1437,21 +1437,48 @@ a:focus-visible {
   margin-left: -7px;
 }
 
+/* Share is the header's primary action — inked like btn-primary, sized for
+   the chrome row. Everything secondary lives in the ⋯ menu. */
 .share-button {
-  border: 1px solid var(--line);
-  background: var(--surface-raised);
-  color: var(--ink);
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--surface);
   font-size: 0.74rem;
   font-weight: 550;
   border-radius: 7px;
-  padding: 0.28rem 0.7rem;
+  padding: 0.28rem 0.8rem;
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease;
   min-width: 4rem;
 }
 
 .share-button:hover {
-  border-color: var(--ink-faint);
+  background: #000;
+  border-color: #000;
+}
+
+/* Header right side groups: people cluster · mode · Share · ⋯ menu. */
+.doc-header-people {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.header-menu-trigger {
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.28rem 0.5rem;
+}
+
+.header-menu-popover {
+  width: 13.5rem;
+}
+
+.header-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 /* Header chrome toggles (panel / focus). */
