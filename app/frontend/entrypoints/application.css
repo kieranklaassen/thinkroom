@@ -227,6 +227,48 @@ a:focus-visible {
   line-height: 1.5;
 }
 
+/* Recent rows: title link + optional claim icon / owner label inline. */
+.recent-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.recent-row a {
+  flex: 1;
+  min-width: 0;
+}
+
+.recent-claim {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.recent-claim:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.recent-claim:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.recent-owner {
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
 /* --------------------------- Agent create card ---------------------------- */
 .landing-agent {
   margin-top: 2.5rem;
