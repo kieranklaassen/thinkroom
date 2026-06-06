@@ -480,7 +480,7 @@ try {
     a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 
   // Centered over the selection, fully in-viewport, never covering it.
-  await p.locator('.milkdown .ProseMirror p').nth(1).dblclick()
+  await p.locator('.milkdown .ProseMirror p').nth(1).dblclick({ position: { x: 12, y: 10 } })
   const toolbar = p.locator('.selection-toolbar.is-placed')
   await toolbar.waitFor({ timeout: 5000 })
   await p.waitForTimeout(250) // entrance animation settles
@@ -544,7 +544,7 @@ try {
   await p.keyboard.press('Meta+\\')
   const anchorPara = p.locator('.milkdown .ProseMirror p').nth(5)
   await anchorPara.scrollIntoViewIfNeeded()
-  await anchorPara.dblclick()
+  await anchorPara.dblclick({ position: { x: 12, y: 10 } })
   await p.locator('.selection-toolbar.is-placed').waitFor({ timeout: 5000 })
   await p.locator('.selection-toolbar button', { hasText: 'Comment' }).first().click()
   const composer = p.locator('.comment-composer--anchored.is-placed')
