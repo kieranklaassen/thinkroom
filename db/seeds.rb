@@ -31,6 +31,20 @@ demo_markdown = <<~MARKDOWN
   end
   ```
 
+  Tables, too — hover one to restructure it:
+
+  | Surface | Who writes | Reviewed |
+  | :--- | :---: | ---: |
+  | Editor | Humans | 100% |
+  | Suggestions | AI & agents | 62% |
+  | Comments | Everyone | 87% |
+
+  And task lists with ~~strikethrough~~:
+
+  - [x] Build the editor
+  - [x] Make tables beautiful
+  - [ ] Ship everything else
+
   ## Try it
 
   1. Select any sentence and leave a **comment**
