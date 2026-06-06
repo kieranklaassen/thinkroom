@@ -19,5 +19,16 @@ class InertiaController < ApplicationController
 
   # Share data with all Inertia responses
   # see https://inertia-rails.dev/guide/shared-data
-  #   inertia_share user: -> { Current.user&.as_json(only: [:id, :name, :email]) }
+  # The viewer's chosen display name lives in the session; no name set means
+  # guest mode (the client falls back to its random localStorage identity).
+  inertia_share viewer: -> { { name: session[:display_name], guest: session[:display_name].blank? } }
+
+  private
+
+  # Session name wins over client-posted names on every attribution write —
+  # a stale tab can't sign your old guest name once you've introduced
+  # yourself. Guests keep the client-posted fallback.
+  def preferred_name(fallback)
+    session[:display_name].presence || fallback
+  end
 end

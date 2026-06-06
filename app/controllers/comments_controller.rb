@@ -3,7 +3,7 @@ class CommentsController < InertiaController
     document = Document.find_by!(slug: params[:slug])
     Comment.post!(
       document:,
-      author_name: params[:author_name].presence || "Anonymous",
+      author_name: preferred_name(params[:author_name].presence || "Anonymous"),
       author_kind: "human",
       body: params[:body],
       anchor_text: params[:anchor_text].presence
@@ -22,7 +22,7 @@ class CommentsController < InertiaController
     document = comment.document
     Activity.log!(
       document:,
-      actor_name: params[:by].presence || "Someone",
+      actor_name: preferred_name(params[:by].presence || "Someone"),
       actor_kind: "human",
       action: "resolved_comment",
       detail: comment.body.truncate(80)

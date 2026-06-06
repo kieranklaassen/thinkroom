@@ -3,6 +3,8 @@ Rails.application.routes.draw do
 
   resources :documents, only: :create
 
+  post "identity", to: "identities#update", as: :identity
+
   get "d/:slug", to: "documents#show", as: :document_page
   post "d/:slug/claim", to: "documents#claim", as: :claim_document
   delete "d/:slug", to: "documents#destroy", as: :destroy_document

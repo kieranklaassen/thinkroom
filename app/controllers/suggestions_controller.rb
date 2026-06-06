@@ -2,7 +2,7 @@ class SuggestionsController < InertiaController
   before_action :set_suggestion
 
   def accept
-    @suggestion.accept!(by: params[:by].presence || "human")
+    @suggestion.accept!(by: preferred_name(params[:by].presence || "human"))
     log_and_broadcast("accepted_suggestion", "accepted “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
     redirect_back fallback_location: document_page_path(@suggestion.document.slug), status: :see_other
   rescue ActiveRecord::RecordInvalid
@@ -11,7 +11,7 @@ class SuggestionsController < InertiaController
   end
 
   def reject
-    @suggestion.reject!(by: params[:by].presence || "human")
+    @suggestion.reject!(by: preferred_name(params[:by].presence || "human"))
     log_and_broadcast("rejected_suggestion", "rejected “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
     redirect_back fallback_location: document_page_path(@suggestion.document.slug), status: :see_other
   rescue ActiveRecord::RecordInvalid
@@ -29,7 +29,7 @@ class SuggestionsController < InertiaController
     document = @suggestion.document
     Activity.log!(
       document:,
-      actor_name: params[:by].presence || "Someone",
+      actor_name: preferred_name(params[:by].presence || "Someone"),
       actor_kind: "human",
       action:,
       detail:
