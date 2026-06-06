@@ -1,7 +1,7 @@
 ---
 title: "feat: First-class tables and editorial markdown typography"
 type: feat
-status: active
+status: completed
 date: 2026-06-05
 ---
 
