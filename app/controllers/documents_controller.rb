@@ -11,8 +11,11 @@ class DocumentsController < InertiaController
     docs = Document.where(slug: slugs).index_by(&:slug)
     render inertia: "documents/index", props: {
       yours: yours.map { |d| d.slice(:title, :slug) },
+      # Recent rows carry ownership state so claimable docs can offer an
+      # inline claim affordance. Render-time staleness is fine: the claim
+      # POST is race-tolerant and the scoped reload reconciles the lists.
       recent: slugs.filter_map { |slug| docs[slug] unless your_slugs.include?(slug) }
-                   .map { |d| d.slice(:title, :slug) }
+                   .map { |d| d.slice(:title, :slug).merge(d.ownership_props(owner_token)) }
     }
   end
 

@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { router } from '@inertiajs/react'
+import { useClaim } from '../lib/use_claim'
 
 export interface OwnershipPayload {
   claimed: boolean
@@ -28,21 +29,22 @@ interface Props {
  * as if it were current would mislead.
  */
 export function OwnershipChip({ slug, ownership, claimerName }: Props) {
-  const [claimFailed, setClaimFailed] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  // Refs guard double-fires synchronously — state updates only take effect
+  // Ref guards double-fires synchronously — state updates only take effect
   // after the next render commit, leaving a same-frame window for a second
   // click (Enter bounce, mobile double-tap) to dispatch a duplicate request.
-  const claimInFlight = useRef(false)
   const deleteInFlight = useRef(false)
 
-  // A failed claim offers "Try again" for a beat, then settles back.
-  useEffect(() => {
-    if (!claimFailed) return
-    const timer = setTimeout(() => setClaimFailed(false), 3000)
-    return () => clearTimeout(timer)
-  }, [claimFailed])
+  // Shared claim primitive — same hook as the index rows and claim banner.
+  const { claim, claimFailed } = useClaim(slug, claimerName, {
+    // Scoped like acceptSuggestion — the redirect-back must never re-ship
+    // the document prop's embedded Yjs state.
+    only: ['ownership', 'activities'],
+    optimistic: (props: { ownership?: OwnershipPayload }) => ({
+      ownership: { ...(props.ownership ?? ownership), claimed: true, yours: true },
+    }),
+  })
 
   if (ownership.yours) {
     if (confirming) {
@@ -99,34 +101,6 @@ export function OwnershipChip({ slug, ownership, claimerName }: Props) {
   }
 
   if (!ownership.claimable) return null
-
-  const claim = () => {
-    if (claimInFlight.current) return
-    claimInFlight.current = true
-    setClaimFailed(false)
-    router
-      .optimistic((props: { ownership?: OwnershipPayload }) => ({
-        ownership: { ...(props.ownership ?? ownership), claimed: true, yours: true },
-      }))
-      .post(
-        `/d/${slug}/claim`,
-        { name: claimerName },
-        {
-          preserveScroll: true,
-          // Scoped like acceptSuggestion — the redirect-back must never
-          // re-ship the document prop's embedded Yjs state.
-          only: ['ownership', 'activities'],
-          async: true,
-          // A lost race arrives as an error + refreshed ownership prop; the
-          // chip re-renders to "Owned by ‹winner›" on its own. "Try again"
-          // only matters when the doc is still unclaimed (network blip).
-          onError: () => setClaimFailed(true),
-          onFinish: () => {
-            claimInFlight.current = false
-          },
-        },
-      )
-  }
 
   return (
     <button
