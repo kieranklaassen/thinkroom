@@ -24,6 +24,12 @@ import {
   type SuggestionPayload,
 } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
+import { editorViewCtx } from '@milkdown/kit/core'
+import { collectInlineSuggestions } from '../../editor/suggest_changes'
+import {
+  MarginInlineSuggestions,
+  InlineSuggestionSheetList,
+} from '../../components/margin_inline_suggestions'
 import { ProvenanceSummaryChip } from '../../components/provenance_summary'
 import { ReviewPopover } from '../../components/review_popover'
 import { AskAiPanel } from '../../components/suggestions_panel'
@@ -505,6 +511,21 @@ export default function DocumentShow({
     [identity.name],
   )
 
+  // Doc-native tracked edits (Suggest-mode typing), re-derived from the
+  // marks whenever the doc changes — spans updates on every doc update, so
+  // it doubles as the recompute signal. Every client derives the same list
+  // from the synced document; there are no server rows to reload.
+  const inlineSuggestions = useMemo(() => {
+    if (!handle) return []
+    try {
+      return handle.editor.action((ctx) =>
+        collectInlineSuggestions(ctx.get(editorViewCtx).state.doc),
+      )
+    } catch {
+      return []
+    }
+  }, [handle, spans])
+
   const jumpToAnchor = useCallback((anchorText: string) => {
     const view = viewRef.current
     if (!view) return
@@ -572,6 +593,12 @@ export default function DocumentShow({
               />
             </article>
             <div className="margin-gutter">
+              <MarginInlineSuggestions
+                inline={inlineSuggestions}
+                handle={handle}
+                spans={spans}
+                focusMode={focusMode || isMobile}
+              />
               <MarginSuggestions
                 suggestions={suggestions}
                 handle={handle}
@@ -642,7 +669,7 @@ export default function DocumentShow({
         )}
         {isMobile && (
           <MobileDock
-            suggestionCount={suggestions.length}
+            suggestionCount={suggestions.length + inlineSuggestions.length}
             commentCount={comments.filter((c) => !c.resolved).length}
             aiPending={aiPending}
             active={activeSheet}
@@ -651,12 +678,13 @@ export default function DocumentShow({
         )}
         {isMobile && activeSheet === 'suggestions' && (
           <MobileSheet
-            title={`Suggestions${suggestions.length > 0 ? ` · ${suggestions.length}` : ''}`}
+            title={`Suggestions${suggestions.length + inlineSuggestions.length > 0 ? ` · ${suggestions.length + inlineSuggestions.length}` : ''}`}
             onClose={() => {
               setActiveSheet(null)
               setSheetFocusId(null)
             }}
           >
+            <InlineSuggestionSheetList inline={inlineSuggestions} handle={handle} />
             <SuggestionSheetList
               suggestions={suggestions}
               focusId={sheetFocusId}
