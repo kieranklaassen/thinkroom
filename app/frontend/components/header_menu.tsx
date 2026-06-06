@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useMediaQuery } from '../lib/use_media_query'
+import { useDismissable } from '../lib/use_dismissable'
 import { OwnershipChip, type OwnershipPayload } from './ownership_chip'
 import { FeedbackButton } from './feedback_button'
 
@@ -37,24 +38,7 @@ export function HeaderMenu({
   // the containing block for fixed descendants — the mobile sheet must
   // portal to body.
   const isMobile = useMediaQuery('(max-width: 48rem)')
-
-  useEffect(() => {
-    if (!open) return
-    const close = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (rootRef.current?.contains(target) || popoverRef.current?.contains(target)) return
-      setOpen(false)
-    }
-    const esc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', close)
-    document.addEventListener('keydown', esc)
-    return () => {
-      document.removeEventListener('mousedown', close)
-      document.removeEventListener('keydown', esc)
-    }
-  }, [open])
+  useDismissable(open, () => setOpen(false), [rootRef, popoverRef])
 
   const ownershipLabel = ownership.yours
     ? 'Your document'

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
+import { useDismissable } from '../lib/use_dismissable'
 
 export type EditorMode = 'edit' | 'suggest' | 'comment'
 
@@ -29,23 +30,7 @@ interface Props {
 export function ModeControl({ mode, onChange, locked = false }: Props) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const close = (e: MouseEvent) => {
-      if (rootRef.current?.contains(e.target as Node)) return
-      setOpen(false)
-    }
-    const esc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', close)
-    document.addEventListener('keydown', esc)
-    return () => {
-      document.removeEventListener('mousedown', close)
-      document.removeEventListener('keydown', esc)
-    }
-  }, [open])
+  useDismissable(open, () => setOpen(false), [rootRef])
 
   return (
     <div className="share-root mode-control" ref={rootRef}>
