@@ -81,6 +81,8 @@ export interface DocumentProps {
     title: string
     seed_markdown: string | null
     seed_granted: boolean
+    seed_author_kind: string | null
+    seed_author_name: string | null
     has_state: boolean
     yjs_state_b64: string | null
   }
@@ -658,6 +660,8 @@ export default function DocumentShow({
                 initialStateB64={doc.yjs_state_b64}
                 seedMarkdown={doc.seed_markdown}
                 seedGranted={doc.seed_granted}
+                seedAuthorKind={doc.seed_author_kind}
+                seedAuthorName={doc.seed_author_name}
                 editable={mode !== 'comment'}
                 suggesting={mode === 'suggest'}
                 onReady={setHandle}

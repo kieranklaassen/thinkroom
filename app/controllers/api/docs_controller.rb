@@ -2,9 +2,19 @@ module Api
   class DocsController < BaseController
     # POST /api/docs — create a document from markdown, get back its slug.
     def create
+      markdown = params[:markdown].presence
+      # Authorship is recorded only for agent-supplied markdown: the seeding
+      # client attributes that text as AI prose. DEFAULT_SEED boilerplate
+      # stays unattributed — placeholder text must never be claimed as AI.
+      # Gate on the normalized name so a whitespace-only header can never
+      # produce kind "agent" with a blank author.
+      agent_name = Document.normalize_display_name(current_agent)
+      agent_authored = agent_name.present? && markdown.present?
       doc = Document.create!(
         title: params[:title].presence || "Untitled",
-        seed_markdown: params[:markdown].presence || Document::DEFAULT_SEED
+        seed_markdown: markdown || Document::DEFAULT_SEED,
+        seed_author_kind: agent_authored ? "agent" : nil,
+        seed_author_name: agent_authored ? agent_name : nil
       )
 
       if current_agent
