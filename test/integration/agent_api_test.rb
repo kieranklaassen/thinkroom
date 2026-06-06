@@ -104,6 +104,20 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal @document.seed_markdown, response.parsed_body["markdown"]
   end
 
+  test "cold read reports agent-seeded docs as unreviewed AI with authorship" do
+    post "/api/docs", params: { markdown: "# From an agent" }, headers: AGENT, as: :json
+    slug = response.parsed_body["slug"]
+
+    get "/api/docs/#{slug}", headers: AGENT
+
+    provenance = response.parsed_body["provenance"]
+    assert_equal "agent", provenance["seed_author_kind"]
+    assert_equal "Scout", provenance["seed_author_name"]
+    assert_equal 100, provenance["summary"]["ai_pct"]
+    assert_equal 100, provenance["summary"]["unreviewed_pct"]
+    assert_empty provenance["spans"]
+  end
+
   test "writes without X-Agent-Name are refused with instructive guidance" do
     post "/api/docs/#{@document.slug}/suggestions", params: { body: "Hi" }, as: :json
 

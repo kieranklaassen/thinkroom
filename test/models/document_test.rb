@@ -209,6 +209,21 @@ class DocumentTest < ActiveSupport::TestCase
     assert_includes doc.errors[:owner_name], "is too long (maximum is 255 characters)"
   end
 
+  test "seed_author_name longer than 255 chars is rejected by validation" do
+    doc = Document.new(title: "Long", seed_author_name: "x" * 256)
+    assert_not doc.valid?
+    assert_includes doc.errors[:seed_author_name], "is too long (maximum is 255 characters)"
+  end
+
+  test "seed_author_kind outside human/agent is rejected by validation" do
+    doc = Document.new(title: "Odd", seed_author_kind: "bot")
+    assert_not doc.valid?
+    assert_includes doc.errors[:seed_author_kind], "is not included in the list"
+
+    assert Document.new(title: "OK", seed_author_kind: "agent").valid?
+    assert Document.new(title: "OK", seed_author_kind: nil).valid?
+  end
+
   test "claim truncates oversized names instead of failing" do
     doc = Document.create!(title: "Free")
     doc.claim!(token: "tok-a", name: "y" * 400)

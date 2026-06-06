@@ -22,8 +22,10 @@ class SyncChannel < ApplicationCable::Channel
     if claim_seed?
       message[:seed] = true
       message[:seed_markdown] = @document.seed_markdown
-      message[:seed_author_kind] = @document.seed_author_kind
-      message[:seed_author_name] = @document.seed_author_name
+      # Omitted (not null) for legacy docs without recorded authorship —
+      # keeps the wire format minimal and presence-of-key meaningful.
+      message[:seed_author_kind] = @document.seed_author_kind if @document.seed_author_kind
+      message[:seed_author_name] = @document.seed_author_name if @document.seed_author_name
     end
     transmit(message)
   end

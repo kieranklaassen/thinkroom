@@ -17,6 +17,11 @@ class AgentGuide
         markdown: document.content_markdown.presence || document.seed_markdown,
         plain_markdown: document.plain_markdown.presence || document.seed_markdown,
         provenance: {
+          # Who authored the seed markdown (nil for docs without recorded
+          # authorship) — the same attribution the editor uses to mark
+          # seeded text, exposed so agents see what humans see in the chip.
+          seed_author_kind: document.seed_author_kind,
+          seed_author_name: document.seed_author_name,
           spans: document.provenance_spans,
           summary: document.provenance_summary
         },
@@ -61,6 +66,7 @@ class AgentGuide
         "Identity: send an X-Agent-Name header on every request. That name flows through everything — suggestion attribution, provenance marks when your text is accepted, the presence area, and the activity feed.",
         "All your writes go through the same provenance/suggestion machinery as the human UI. There is no side channel: you propose, humans review.",
         "Text you contribute is marked kind=ai provenance (with your agent name as author) and tinted in the editor until a human advances its review state (pending -> reviewed -> endorsed).",
+        "Documents you create with markdown are pre-attributed as 100% unreviewed AI prose. Before any editor session opens the doc, the provenance summary is derived from your seed markdown — its total counts markdown source characters (syntax included), so it slightly exceeds the rendered character count and is replaced by the first editor snapshot. spans stays empty until that snapshot.",
         "Connected editors see your suggestions, comments, and presence live over WebSocket — no refresh needed on their side.",
         "Reading state: use plain_markdown as your working context for proposals; markdown embeds provenance span HTML. Both reflect the last snapshot pushed by a connected editor and may lag if no human has the document open — the Yjs CRDT state is always authoritative.",
         "Tracked changes: <ins data-suggestion-id> / <del data-suggestion-id> spans in markdown are human-typed suggestions pending human review — not your proposals, and not resolvable through this API. <del> text is still in the document until accepted; plain_markdown unwraps both, so use markdown when you need to reason about pending changes.",
