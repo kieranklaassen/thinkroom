@@ -449,6 +449,132 @@ try {
   else fail(`demo doc mode after tamper: "${demoMode}"`)
   await demoPage.close()
 
+  // --- Floating chrome placement: measured, centered, never covering ---
+  const placeDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Placement check',
+        markdown: Array.from(
+          { length: 12 },
+          (_, i) =>
+            `Placement paragraph number ${i} with enough words to span a comfortable line of prose in the editor.`,
+        ).join('\n\n'),
+      }),
+    })
+  ).json()
+  const p = await makePage('a')
+  await p.goto(`${BASE}/d/${placeDoc.slug}`)
+  await p.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await p.waitForTimeout(1000)
+
+  const selectionRect = () =>
+    p.evaluate(() => {
+      const sel = window.getSelection()
+      if (!sel || sel.rangeCount === 0) return null
+      const r = sel.getRangeAt(0).getBoundingClientRect()
+      return r.width > 0 ? { x: r.x, y: r.y, width: r.width, height: r.height } : null
+    })
+  const boxesOverlap = (a, b) =>
+    a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+
+  // Centered over the selection, fully in-viewport, never covering it.
+  await p.locator('.milkdown .ProseMirror p').nth(1).dblclick()
+  const toolbar = p.locator('.selection-toolbar.is-placed')
+  await toolbar.waitFor({ timeout: 5000 })
+  await p.waitForTimeout(250) // entrance animation settles
+  let tb = await toolbar.boundingBox()
+  let sel = await selectionRect()
+  const vp = p.viewportSize()
+  if (tb && sel && vp) {
+    const drift = Math.abs(tb.x + tb.width / 2 - (sel.x + sel.width / 2))
+    if (drift <= Math.max(40, tb.width / 2)) ok('toolbar centers over the selection')
+    else fail(`toolbar off-center by ${Math.round(drift)}px`)
+    if (tb.x >= 0 && tb.y >= 0 && tb.x + tb.width <= vp.width && tb.y + tb.height <= vp.height) {
+      ok('toolbar fully inside the viewport (measured clamp)')
+    } else fail(`toolbar escapes the viewport: ${JSON.stringify(tb)}`)
+    if (!boxesOverlap(tb, sel)) ok('toolbar does not cover the selected text')
+    else fail('toolbar covers the selection')
+  } else fail('could not measure toolbar/selection geometry')
+
+  // First visible frame is final: position is stable across frames.
+  const tbAgain = await (async () => {
+    await p.evaluate(() => new Promise((r) => requestAnimationFrame(r)))
+    return toolbar.boundingBox()
+  })()
+  if (tb && tbAgain && Math.abs(tb.x - tbAgain.x) < 1 && Math.abs(tb.y - tbAgain.y) < 1) {
+    ok('toolbar placement stable after reveal (no post-paint jump)')
+  } else fail('toolbar moved after reveal')
+
+  // Header flip: with the anchor line tight under the sticky header, the
+  // toolbar moves below the selection instead of covering the header.
+  await p.evaluate(() => {
+    const r = window.getSelection()?.getRangeAt(0)?.getBoundingClientRect()
+    if (r) window.scrollBy(0, r.top - 58)
+  })
+  await p.waitForTimeout(200) // rAF-throttled reposition pass
+  tb = await toolbar.boundingBox()
+  sel = await selectionRect()
+  if (tb && sel && tb.y >= sel.y + sel.height - 1) {
+    ok('toolbar flips below the selection when the header blocks above')
+  } else fail(`toolbar did not flip below: toolbar ${JSON.stringify(tb)} sel ${JSON.stringify(sel)}`)
+
+  // Drag settle: no toolbar chasing the cursor mid-drag; one reveal on release.
+  const dragPara = p.locator('.milkdown .ProseMirror p').nth(3)
+  await dragPara.scrollIntoViewIfNeeded()
+  const dragBox = await dragPara.boundingBox()
+  await p.mouse.move(dragBox.x + 4, dragBox.y + 8)
+  await p.mouse.down()
+  let seenMidDrag = false
+  for (let i = 1; i <= 6; i += 1) {
+    await p.mouse.move(dragBox.x + 4 + i * 30, dragBox.y + 8, { steps: 2 })
+    await p.waitForTimeout(40)
+    if (await p.locator('.selection-toolbar').isVisible().catch(() => false)) seenMidDrag = true
+  }
+  if (!seenMidDrag) ok('toolbar held back while dragging a selection')
+  else fail('toolbar appeared mid-drag')
+  await p.mouse.up()
+  await p.locator('.selection-toolbar.is-placed').waitFor({ timeout: 5000 })
+  ok('toolbar revealed once on release at the settled position')
+
+  // Anchored composer: visible and usable with the side panel hidden (the
+  // old rail composer rendered into display:none), never covering its
+  // anchor, clamped into the viewport even with the anchor near the bottom.
+  await p.keyboard.press('Meta+\\')
+  const anchorPara = p.locator('.milkdown .ProseMirror p').nth(5)
+  await anchorPara.scrollIntoViewIfNeeded()
+  await anchorPara.dblclick()
+  await p.locator('.selection-toolbar.is-placed').waitFor({ timeout: 5000 })
+  await p.locator('.selection-toolbar button', { hasText: 'Comment' }).first().click()
+  const composer = p.locator('.comment-composer--anchored.is-placed')
+  await composer.waitFor({ timeout: 5000 })
+  ok('anchored composer visible with the side panel hidden')
+
+  await p.evaluate(() => {
+    // Push the anchor near the viewport bottom — the composer must clamp
+    // or flip, staying fully visible without covering the anchored text.
+    window.scrollBy(0, -Math.max(0, window.innerHeight * 0.6))
+  })
+  await p.waitForTimeout(200)
+  const composerBox = await composer.boundingBox()
+  const anchorBox = await anchorPara.boundingBox()
+  if (composerBox && anchorBox && vp) {
+    if (composerBox.y >= 0 && composerBox.y + composerBox.height <= vp.height) {
+      ok('composer stays fully inside the viewport near the bottom edge')
+    } else fail(`composer clipped by the viewport: ${JSON.stringify(composerBox)}`)
+    if (!boxesOverlap(composerBox, anchorBox)) ok('composer does not cover its anchor paragraph')
+    else fail('composer covers the anchored text')
+  } else fail('could not measure composer/anchor geometry')
+
+  const hiddenPanelComment = `Hidden panel comment ${Date.now()}`
+  await p.fill('.comment-composer--anchored .comment-input', hiddenPanelComment)
+  await p.locator('.comment-composer--anchored .btn-accept').click()
+  await p.keyboard.press('Meta+\\')
+  await p.locator('.comment-card', { hasText: hiddenPanelComment }).waitFor({ timeout: 10000 })
+  ok('comment posted from the anchored composer landed in the rail')
+  await p.close()
+
   for (const [label, errs] of Object.entries(errors)) {
     const fatal = errs.filter(
       (e) =>
