@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import * as Y from 'yjs'
 import { Editor, editorViewCtx, rootCtx } from '@milkdown/kit/core'
 import { commonmark } from '@milkdown/kit/preset/commonmark'
@@ -19,11 +19,10 @@ import './table_block.css'
 import { getMarkdown } from '@milkdown/kit/utils'
 import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
 import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight'
-import type { Parser } from '@milkdown/plugin-highlight/shiki'
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { CableProvider } from './cable_provider'
-import { loadShikiParser } from './highlighter'
+import { lazyShikiParser, loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
 import type { UserIdentity } from './identity'
 import { provenance, provenanceIdentityCtx, collectSpans, type ProvenanceSpan } from './provenance'
@@ -53,6 +52,12 @@ interface EditorProps {
   /** Server-rendered Yjs state (base64) — hydrates the doc before the
    *  provider syncs, so the first paint is already populated. */
   initialStateB64?: string | null
+  /** Seed template for a never-edited document. Applied at bind time when
+   *  the page response granted this client the seed claim. */
+  seedMarkdown?: string | null
+  /** True when documents#show atomically claimed the seed for this page
+   *  load — the props-first path that skips the WebSocket round-trip. */
+  seedGranted?: boolean
   onReady?: (handle: EditorHandle) => void
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
@@ -61,8 +66,12 @@ interface EditorProps {
 
 const SNAPSHOT_DEBOUNCE_MS = 900
 
-// Start loading shiki at import time so the parser is warm by mount.
-const shikiParserPromise = loadShikiParser()
+// Start loading shiki at import time so it's warm as early as possible. The
+// editor never waits on it: lazyShikiParser highlights synchronously once
+// ready and upgrades already-painted code blocks in place via the plugin's
+// lazy-parser protocol. Content paint is gated on nothing.
+void loadShikiParser()
+const shikiParser = lazyShikiParser()
 
 interface CollabSession {
   ydoc: Y.Doc
@@ -77,10 +86,31 @@ interface CollabSession {
 // the claim times out. Real teardown happens after a short grace period.
 const sessions = new Map<string, CollabSession>()
 
-function acquireSession(slug: string, identity: UserIdentity): CollabSession {
+function acquireSession(
+  slug: string,
+  identity: UserIdentity,
+  initialStateB64?: string | null,
+): CollabSession {
   let session = sessions.get(slug)
   if (!session) {
     const ydoc = new Y.Doc()
+    // Hydrate from the server-rendered state the moment the doc exists, so
+    // the editor binds an already-populated doc and content is in its first
+    // paint; Yjs converges idempotently when the provider's sync lands.
+    // The clients-empty guard is redundant for a just-created Y.Doc but
+    // keeps the hydration idempotent if this block ever runs on a doc
+    // that already carries state.
+    if (initialStateB64 && ydoc.store.clients.size === 0) {
+      try {
+        Y.applyUpdate(
+          ydoc,
+          Uint8Array.from(atob(initialStateB64), (c) => c.charCodeAt(0)),
+          'server-hydrate',
+        )
+      } catch {
+        // corrupt/stale prop — fall back to the wait-for-synced path
+      }
+    }
     const provider = new CableProvider(ydoc, slug)
     provider.awareness.setLocalStateField('user', identity)
     session = { ydoc, provider, refs: 0, destroyTimer: null }
@@ -92,6 +122,30 @@ function acquireSession(slug: string, identity: UserIdentity): CollabSession {
   }
   session.refs += 1
   return session
+}
+
+// History restores replay stale props: a back-navigation remounts the page
+// with the original seed_granted: true long after the template was applied
+// and synced. Re-applying onto a fresh local doc would duplicate the
+// template when the server state merges in, so grant consumption is made
+// durable per tab. sessionStorage is per-tab, which matches the grant's
+// scope — other tabs get fresh props (seed_granted: false once claimed).
+const seedAppliedKey = (slug: string) => `pruf:seed-applied:${slug}`
+
+function seedAlreadyApplied(slug: string): boolean {
+  try {
+    return sessionStorage.getItem(seedAppliedKey(slug)) === '1'
+  } catch {
+    return false
+  }
+}
+
+function markSeedApplied(slug: string): void {
+  try {
+    sessionStorage.setItem(seedAppliedKey(slug), '1')
+  } catch {
+    // best effort — worst case is the pre-fix behavior on history restore
+  }
 }
 
 function releaseSession(slug: string): void {
@@ -106,29 +160,17 @@ function releaseSession(slug: string): void {
   }, 1000)
 }
 
-function EditorInner(props: EditorProps) {
-  const [parser, setParser] = useState<Parser | null>(null)
-
-  useEffect(() => {
-    // Wrap in an updater: passing the parser function directly would make
-    // React call it as a state updater.
-    void shikiParserPromise.then((p) => setParser(() => p))
-  }, [])
-
-  if (!parser) return <div className="doc-editor-loading" aria-hidden />
-  return <CollabEditor {...props} parser={parser} />
-}
-
 function CollabEditor({
   slug,
   identity,
-  parser,
   initialStateB64,
+  seedMarkdown,
+  seedGranted,
   onReady,
   onStatus,
   onSpans,
   onSelection,
-}: EditorProps & { parser: Parser }) {
+}: EditorProps) {
   const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection })
   callbacksRef.current = { onReady, onStatus, onSpans, onSelection }
 
@@ -140,7 +182,7 @@ function CollabEditor({
           ctx.set(provenanceIdentityCtx.key, { name: identity.name })
           ctx.update(highlightPluginConfig.key, (prev) => ({
             ...prev,
-            parser,
+            parser: shikiParser,
             languageExtractor: (node) => (node.attrs.language as string) ?? '',
           }))
           ctx.update(uploadConfig.key, (prev) => ({
@@ -194,22 +236,8 @@ function CollabEditor({
     const editor = get()
     if (!editor) return
 
-    const { ydoc, provider } = acquireSession(slug, identity)
+    const { ydoc, provider } = acquireSession(slug, identity, initialStateB64)
     callbacksRef.current.onStatus?.('connecting')
-
-    // Hydrate from the server-rendered state so the first paint is already
-    // populated; Yjs converges idempotently when the provider's sync lands.
-    if (initialStateB64 && ydoc.store.clients.size === 0) {
-      try {
-        Y.applyUpdate(
-          ydoc,
-          Uint8Array.from(atob(initialStateB64), (c) => c.charCodeAt(0)),
-          'server-hydrate',
-        )
-      } catch {
-        // corrupt/stale prop — fall back to the wait-for-synced path
-      }
-    }
 
     let snapshotTimer: ReturnType<typeof setTimeout> | null = null
     const pushSnapshot = () => {
@@ -254,10 +282,21 @@ function CollabEditor({
       callbacksRef.current.onStatus?.('live')
     }
 
-    // A hydrated doc binds immediately — no visible empty-editor frame. The
-    // first-ever load (no state yet) keeps waiting for the seed-claim sync.
-    if (provider.synced || ydoc.store.clients.size > 0) start()
-    else provider.on('synced', start)
+    // A hydrated doc binds immediately — no visible empty-editor frame. A
+    // fresh doc whose seed claim arrived with the page response also binds
+    // immediately, applying the template from props (the one-shot consume in
+    // start() plus applyTemplate's remote-empty guard keep this race-safe
+    // against a channel-granted seeder). Only a fresh doc with no grant —
+    // someone else holds the claim — waits for the sync handshake.
+    if (provider.synced || ydoc.store.clients.size > 0) {
+      start()
+    } else if (seedGranted && seedMarkdown && !seedAlreadyApplied(slug)) {
+      markSeedApplied(slug)
+      provider.seedMarkdown = seedMarkdown
+      start()
+    } else {
+      provider.on('synced', start)
+    }
 
     return () => {
       cancelled = true
@@ -279,7 +318,7 @@ function CollabEditor({
 export function DocumentEditor(props: EditorProps) {
   return (
     <MilkdownProvider>
-      <EditorInner {...props} />
+      <CollabEditor {...props} />
     </MilkdownProvider>
   )
 }
