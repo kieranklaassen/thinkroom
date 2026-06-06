@@ -103,6 +103,25 @@ interface SelectionTarget {
   text: string
 }
 
+// Click-to-comment (Comment mode): the clicked block's text, anchored at
+// the click's collapsed selection — geometry re-derived live like the
+// other floating chrome.
+interface CommentTarget {
+  text: string
+}
+
+// Server-side anchor cap is 10 KB; a truncated anchor still matches as a
+// prefix within the block (findTextRange matches the exact search string).
+const ANCHOR_BYTE_CAP = 10 * 1024
+const capAnchor = (text: string): string => {
+  if (new TextEncoder().encode(text).length <= ANCHOR_BYTE_CAP) return text
+  let sliced = text.slice(0, 10000)
+  while (sliced.length > 0 && new TextEncoder().encode(sliced).length > ANCHOR_BYTE_CAP) {
+    sliced = sliced.slice(0, sliced.length - 500)
+  }
+  return sliced
+}
+
 // Editor mode persists per doc (Google-Docs semantics: your mode, your
 // browser). Client-side only by design — never server state, never shared.
 const modeKey = (slug: string) => `pruf:mode:${slug}`
@@ -132,6 +151,7 @@ export default function DocumentShow({
   const [peers, setPeers] = useState<UserIdentity[]>([])
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
   const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null)
+  const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null)
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
   const [aiPendingCount, setAiPendingCount] = useState(0)
   const aiPending = aiPendingCount > 0
@@ -146,6 +166,13 @@ export default function DocumentShow({
   const [mode, setMode] = useState<EditorMode>(() =>
     modeLocked ? 'edit' : readStoredMode(doc.slug),
   )
+  // handleSelection is a stable callback — it reads the live mode via ref.
+  const modeRef = useRef(mode)
+  modeRef.current = mode
+  // Leaving Comment mode dismisses any pending click-to-comment affordance.
+  useEffect(() => {
+    if (mode !== 'comment') setCommentTarget(null)
+  }, [mode])
 
   // ≤64rem: rail and margin cards give way to anchor markers, a bottom dock,
   // and sheets — the full product, rearranged for one hand.
@@ -300,6 +327,7 @@ export default function DocumentShow({
       const text = view.state.doc.textBetween(from, to, '\n')
       if (text.trim().length > 0) {
         setSelectionTarget({ text })
+        setCommentTarget(null)
         setReviewTarget(null)
         return
       }
@@ -317,10 +345,26 @@ export default function DocumentShow({
       if (hit) {
         setSheetFocusId(hit.id)
         setActiveSheet('suggestions')
+        setCommentTarget(null)
         setReviewTarget(null)
         return
       }
     }
+
+    // Comment mode: a bare click offers commenting on the clicked block —
+    // no drag-selection needed (Google-Docs click-to-comment). Only
+    // non-empty textblocks; clicks on empty paragraphs, images, or rules
+    // show nothing. Selection-based commenting above keeps working.
+    if (modeRef.current === 'comment' && empty) {
+      const block = view.state.selection.$head.parent
+      const text = block.isTextblock ? block.textContent : ''
+      if (text.trim().length > 0) {
+        setCommentTarget({ text: capAnchor(text) })
+        setReviewTarget(null)
+        return
+      }
+    }
+    setCommentTarget(null)
 
     const span = aiSpanAt(view.state)
     setReviewTarget(span ? { span } : null)
@@ -329,7 +373,7 @@ export default function DocumentShow({
   // While a popover is open, any scroll or resize schedules one rAF-throttled
   // reposition pass (coordsAtPos for a single anchor is cheap).
   const [popoverTick, setPopoverTick] = useState(0)
-  const popoverOpen = Boolean(reviewTarget) || Boolean(selectionTarget)
+  const popoverOpen = Boolean(reviewTarget) || Boolean(selectionTarget) || Boolean(commentTarget)
   useEffect(() => {
     if (!popoverOpen) return
     let raf = 0
@@ -376,6 +420,15 @@ export default function DocumentShow({
     // spans (doc updates) + popoverTick (scroll/resize) drive repositioning.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionTarget, spans, popoverTick, anchorPosition])
+
+  const liveCommentPosition = useMemo(() => {
+    if (!commentTarget) return null
+    const view = viewRef.current
+    if (!view) return null
+    return anchorPosition(view, view.state.selection.head, 190)
+    // spans (doc updates) + popoverTick (scroll/resize) drive repositioning.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [commentTarget, spans, popoverTick, anchorPosition])
 
   const liveReview = useMemo(() => {
     if (!reviewTarget) return null
@@ -657,6 +710,20 @@ export default function DocumentShow({
                     },
                   ]
                 : []),
+            ]}
+          />
+        )}
+        {commentTarget && !selectionTarget && liveCommentPosition && (
+          <SelectionToolbar
+            position={liveCommentPosition}
+            actions={[
+              {
+                label: 'Comment on this paragraph',
+                onClick: () => {
+                  setComposerAnchor(commentTarget.text)
+                  setCommentTarget(null)
+                },
+              },
             ]}
           />
         )}
