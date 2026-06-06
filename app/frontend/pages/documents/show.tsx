@@ -8,6 +8,7 @@ import {
   type EditorHandle,
 } from '../../editor/milkdown_editor'
 import { userIdentity, type UserIdentity } from '../../editor/identity'
+import { provenanceIdentityCtx } from '../../editor/provenance'
 import {
   aiSpanAt,
   applyReviewState,
@@ -32,6 +33,7 @@ import { SelectionToolbar } from '../../components/selection_toolbar'
 import { PresenceBar, type AgentPresencePayload } from '../../components/presence_bar'
 import { ActivityPanel } from '../../components/activity_panel'
 import { FeedbackButton } from '../../components/feedback_button'
+import { IdentityChip } from '../../components/identity_chip'
 import { OwnershipChip, type OwnershipPayload } from '../../components/ownership_chip'
 import { SharePopover } from '../../components/share_popover'
 import {
@@ -53,6 +55,11 @@ export interface ActivityPayload {
   created_at: string
 }
 
+export interface ViewerPayload {
+  name: string | null
+  guest: boolean
+}
+
 export interface DocumentProps {
   document: {
     id: number
@@ -62,6 +69,7 @@ export interface DocumentProps {
     has_state: boolean
     yjs_state_b64: string | null
   }
+  viewer: ViewerPayload
   ownership: OwnershipPayload
   suggestions: SuggestionPayload[]
   comments: CommentPayload[]
@@ -99,13 +107,18 @@ const writeStoredFlag = (key: string, value: boolean): void => {
 
 export default function DocumentShow({
   document: doc,
+  viewer,
   ownership,
   suggestions,
   comments,
   activities,
   presences,
 }: DocumentProps) {
-  const identity = useMemo(userIdentity, [])
+  // Initializer-only state plus an explicit rename handler — NOT a
+  // sync-on-prop-change effect, which a future reload batch listing
+  // `viewer` would silently clobber mid-rename.
+  const [identity, setIdentity] = useState<UserIdentity>(() => userIdentity(viewer.name))
+  const [guest, setGuest] = useState(viewer.guest)
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [handle, setHandle] = useState<EditorHandle | null>(null)
   const [spans, setSpans] = useState<ProvenanceSpan[]>([])
@@ -170,15 +183,18 @@ export default function DocumentShow({
     prevSuggestionCount.current = suggestions.length
   }, [suggestions.length])
 
-  // Human presence from Yjs awareness.
+  // Human presence from Yjs awareness. Self is filtered out — the
+  // IdentityChip represents you; a duplicate avatar next to it is noise.
   useEffect(() => {
     if (!handle) return
     const { awareness } = handle.provider
+    const selfId = handle.provider.doc.clientID
     const update = () => {
-      const states = Array.from(awareness.getStates().values())
+      const states = Array.from(awareness.getStates().entries())
       setPeers(
         states
-          .map((state) => (state as { user?: UserIdentity }).user)
+          .filter(([clientId]) => clientId !== selfId)
+          .map(([, state]) => (state as { user?: UserIdentity }).user)
           .filter((user): user is UserIdentity => Boolean(user)),
       )
     }
@@ -186,6 +202,26 @@ export default function DocumentShow({
     awareness.on('change', update)
     return () => awareness.off('change', update)
   }, [handle])
+
+  // Rename applies here AFTER the server confirms the session write (the
+  // chip's POST onSuccess). The handler only moves React state — the live
+  // side effects ride the effect below, so a rename that completes while
+  // the editor is still connecting (handle null) heals the moment the
+  // handle arrives, and an in-flight POST can never act through a stale
+  // null-handle closure.
+  const handleRenamed = useCallback((name: string | null) => {
+    setIdentity(userIdentity(name))
+    setGuest(name === null)
+  }, [])
+
+  // Identity state is the source of truth for the live editor surfaces:
+  // re-applied whenever the handle arrives or the identity changes.
+  // Idempotent — re-writing the same awareness state is a no-op for peers.
+  useEffect(() => {
+    if (!handle) return
+    handle.provider.awareness.setLocalStateField('user', identity)
+    handle.editor.action((ctx) => ctx.set(provenanceIdentityCtx.key, { name: identity.name }))
+  }, [handle, identity])
 
   // Agent pseudo-cursors track the presences prop.
   useEffect(() => {
@@ -476,6 +512,7 @@ export default function DocumentShow({
             />
           </div>
           <div className="doc-header-right">
+            <IdentityChip identity={identity} guest={guest} onRenamed={handleRenamed} />
             <ProvenanceSummaryChip spans={spans} />
             <PresenceBar humans={peers} agents={presences} compact={isMobile} />
             <button

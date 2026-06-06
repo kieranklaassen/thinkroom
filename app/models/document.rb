@@ -42,10 +42,17 @@ class Document < ApplicationRecord
     token.present? && owner_token == token
   end
 
-  # One normalization rule for owner display names, shared by claim! and the
-  # auto-claim path in documents#create.
+  # One normalization rule for display names: strip, cap, nil for blank.
+  # nil matters — the identity endpoint clears the session on blank rather
+  # than storing a fallback.
+  def self.normalize_display_name(raw)
+    raw.to_s.strip.first(255).presence
+  end
+
+  # Owner names additionally fall back to "Anonymous" (ownership rows always
+  # carry a name).
   def self.normalize_owner_name(raw)
-    raw.to_s.strip.first(255).presence || "Anonymous"
+    normalize_display_name(raw) || "Anonymous"
   end
 
   # Atomic first-claim-wins, mirroring the seed-claim pattern: the conditional
