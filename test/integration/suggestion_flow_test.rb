@@ -64,4 +64,100 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
       props[:suggestions].any? { |s| s[:body] == "New paragraph." }
     end
   end
+
+  # --- U4: browser-facing suggest-a-change (Suggest mode) ---
+
+  test "browser POST creates a pending human suggestion with activity and broadcast" do
+    assert_difference -> { @document.suggestions.pending.count }, 1 do
+      assert_broadcasts(DocumentMetaChannel.broadcasting_for(@document), 2) do
+        # one :activities event from Activity.log!, one :suggestions event
+        post document_suggestions_path(@document.slug), params: {
+          author_name: "Quiet Falcon",
+          body: "Tighter phrasing.",
+          anchor_text: "Original sentence.",
+          replaces: "Original sentence.",
+          intent: "tighten"
+        }
+      end
+    end
+
+    assert_response :see_other
+    suggestion = @document.suggestions.pending.last
+    assert_equal "human", suggestion.author_kind
+    assert_equal "Quiet Falcon", suggestion.author_name
+    assert_equal "Tighter phrasing.", suggestion.body
+    assert_equal "suggested", @document.activities.last.action
+  end
+
+  test "browser POST ignores a client-posted author_kind — always human" do
+    post document_suggestions_path(@document.slug), params: {
+      author_name: "Sneaky", author_kind: "agent", body: "text"
+    }
+    assert_equal "human", @document.suggestions.last.author_kind
+  end
+
+  test "session display name wins over a client-posted author name" do
+    post identity_path, params: { name: "Session Name" }
+
+    post document_suggestions_path(@document.slug), params: {
+      author_name: "Posted Name", body: "text"
+    }
+    assert_equal "Session Name", @document.suggestions.last.author_name
+  end
+
+  test "missing author name falls back to Anonymous" do
+    post document_suggestions_path(@document.slug), params: { body: "text" }
+    assert_equal "Anonymous", @document.suggestions.last.author_name
+  end
+
+  test "oversized body is rejected with a validation error and no record" do
+    assert_no_difference -> { @document.suggestions.count } do
+      post document_suggestions_path(@document.slug), params: {
+        body: "a" * (Suggestion::MAX_BODY_BYTES + 1)
+      }
+    end
+    assert_response :see_other
+  end
+
+  test "oversized replaces and anchor_text are rejected" do
+    assert_no_difference -> { @document.suggestions.count } do
+      post document_suggestions_path(@document.slug), params: {
+        body: "ok", replaces: "a" * (Suggestion::MAX_BODY_BYTES + 1)
+      }
+      post document_suggestions_path(@document.slug), params: {
+        body: "ok", anchor_text: "a" * (Suggestion::MAX_ANCHOR_BYTES + 1)
+      }
+    end
+  end
+
+  test "oversized intent is rejected" do
+    assert_no_difference -> { @document.suggestions.count } do
+      post document_suggestions_path(@document.slug), params: {
+        body: "ok", intent: "a" * (Suggestion::MAX_INTENT_BYTES + 1)
+      }
+    end
+  end
+
+  test "empty body is rejected" do
+    assert_no_difference -> { @document.suggestions.count } do
+      post document_suggestions_path(@document.slug), params: { body: "" }
+    end
+    assert_response :see_other
+  end
+
+  test "browser POST to an unknown doc redirects home without a 500" do
+    post document_suggestions_path("gone-doc"), params: { body: "text" }
+    assert_redirected_to root_path
+  end
+
+  test "a human-authored suggestion flows through the same accept machinery" do
+    suggestion = Suggestion.propose!(
+      document: @document, author_name: "Quiet Falcon", author_kind: "human",
+      body: "Better wording.", replaces: "Old wording."
+    )
+
+    patch accept_suggestion_path(suggestion), params: { by: "Reviewer" }
+    assert_equal "accepted", suggestion.reload.status
+    assert_includes @document.activities.last.detail, "Quiet Falcon"
+  end
 end

@@ -1,11 +1,22 @@
+import { Fragment } from 'react'
+
+interface Action {
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  title?: string
+}
+
 interface Props {
   position: { x: number; y: number }
-  onComment: () => void
-  onAskAi: () => void
+  /** Mode-gated action list (Edit: Comment · Ask AI; Suggest: Suggest a
+   *  change; Comment: Comment). Renders nothing when empty. */
+  actions: Action[]
 }
 
 /** Floating actions over a non-empty text selection. */
-export function SelectionToolbar({ position, onComment, onAskAi }: Props) {
+export function SelectionToolbar({ position, actions }: Props) {
+  if (actions.length === 0) return null
   return (
     <div
       className="selection-toolbar"
@@ -14,9 +25,14 @@ export function SelectionToolbar({ position, onComment, onAskAi }: Props) {
       role="toolbar"
       aria-label="Selection actions"
     >
-      <button onClick={onComment}>Comment</button>
-      <span className="selection-toolbar-sep" />
-      <button onClick={onAskAi}>Ask AI</button>
+      {actions.map((action, i) => (
+        <Fragment key={action.label}>
+          {i > 0 && <span className="selection-toolbar-sep" />}
+          <button onClick={action.onClick} disabled={action.disabled} title={action.title}>
+            {action.label}
+          </button>
+        </Fragment>
+      ))}
     </div>
   )
 }

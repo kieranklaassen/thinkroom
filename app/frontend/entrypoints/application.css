@@ -227,6 +227,48 @@ a:focus-visible {
   line-height: 1.5;
 }
 
+/* Recent rows: title link + optional claim icon / owner label inline. */
+.recent-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.recent-row a {
+  flex: 1;
+  min-width: 0;
+}
+
+.recent-claim {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.recent-claim:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.recent-claim:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.recent-owner {
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
 /* --------------------------- Agent create card ---------------------------- */
 .landing-agent {
   margin-top: 2.5rem;
@@ -307,6 +349,53 @@ a:focus-visible {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+}
+
+/* ------------------------------ Claim banner ------------------------------ */
+/* In normal flow below the sticky header (not sticky itself) so the popover
+   anchor math — which only accounts for the 52px header band — is untouched. */
+.claim-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 1rem;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.claim-banner-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.claim-banner-claim {
+  font-size: 0.8rem;
+  padding: 0.32rem 0.75rem;
+}
+
+.claim-banner-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.claim-banner-dismiss:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
 }
 
 .doc-header {
@@ -1348,21 +1437,153 @@ a:focus-visible {
   margin-left: -7px;
 }
 
+/* Share is the header's primary action — inked like btn-primary, sized for
+   the chrome row. Everything secondary lives in the ⋯ menu. */
 .share-button {
-  border: 1px solid var(--line);
-  background: var(--surface-raised);
-  color: var(--ink);
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--surface);
   font-size: 0.74rem;
   font-weight: 550;
   border-radius: 7px;
-  padding: 0.28rem 0.7rem;
+  padding: 0.28rem 0.8rem;
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease;
   min-width: 4rem;
 }
 
 .share-button:hover {
-  border-color: var(--ink-faint);
+  background: #000;
+  border-color: #000;
+}
+
+/* Header right side groups: people cluster · mode · Share · ⋯ menu. */
+.doc-header-people {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.header-menu-trigger {
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.28rem 0.5rem;
+}
+
+.header-menu-popover {
+  width: 13.5rem;
+}
+
+.header-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+/* Mode switcher (Edit / Suggest / Comment). */
+.mode-control-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.mode-control-trigger:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.mode-control-caret {
+  font-size: 0.6rem;
+}
+
+.mode-control-popover {
+  width: 16rem;
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.mode-control-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  width: 100%;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mode-control-option:hover {
+  background: var(--accent-soft);
+}
+
+.mode-control-option.is-active {
+  background: var(--accent-soft);
+}
+
+.mode-control-option-label {
+  font-size: 0.8rem;
+  font-weight: 550;
+  color: var(--ink);
+}
+
+.mode-control-option-hint {
+  font-size: 0.7rem;
+  color: var(--ink-faint);
+}
+
+/* Suggest-mode composer — floating at the selection on desktop, a fixed
+   bottom sheet on small screens (same shape as the mobile comment sheet). */
+.suggest-composer {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  width: 20rem;
+  max-width: calc(100vw - 1.5rem);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.14);
+  padding: 0.65rem;
+  animation: popover-in 140ms ease;
+}
+
+.suggest-composer-error {
+  font-size: 0.74rem;
+  color: #b3261e;
+  line-height: 1.4;
+}
+
+.suggest-composer-old {
+  font-size: 0.76rem;
+  color: var(--ink-faint);
+  text-decoration: line-through;
+  line-height: 1.4;
+}
+
+@media (max-width: 48rem) {
+  .suggest-composer {
+    left: 0 !important;
+    right: 0;
+    top: auto !important;
+    bottom: 0;
+    width: auto;
+    max-width: none;
+    border-radius: 14px 14px 0 0;
+  }
+}
+
+.selection-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* Header chrome toggles (panel / focus). */

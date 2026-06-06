@@ -66,8 +66,12 @@ export function findTextRange(
 
 /**
  * Merge an accepted suggestion into the live document. The inserted text
- * carries AI provenance (kind: ai, author, state: pending) so accepted
- * machine prose stays visibly machine prose until a human reviews it.
+ * carries provenance matching its author kind: machine authors (ai/agent)
+ * get `kind: ai, state: pending` so accepted machine prose stays visibly
+ * machine prose until a human reviews it; human authors get the same marks
+ * the provenance writer applies to typed text (`kind: human, state:
+ * verbatim`) — human prose must never inflate the AI percentages or enter
+ * the AI review-state machinery (which keys on kind === 'ai').
  *
  * - `replaces` present and found → the matched range is replaced
  * - `anchor_text` present and found → content inserted after that block
@@ -115,14 +119,15 @@ export function applySuggestion(
       insertSize = parsed.content.size
     }
 
+    const human = suggestion.author_kind === 'human'
     tr = tr.addMark(
       insertFrom,
       insertFrom + insertSize,
-      markType.create({
-        kind: 'ai',
-        author: suggestion.author_name,
-        state: 'pending',
-      }),
+      markType.create(
+        human
+          ? { kind: 'human', author: suggestion.author_name, state: 'verbatim' }
+          : { kind: 'ai', author: suggestion.author_name, state: 'pending' },
+      ),
     )
     tr.setMeta(SKIP_PROVENANCE, true)
     tr.setSelection(TextSelection.near(tr.doc.resolve(insertFrom + insertSize)))
