@@ -3,7 +3,7 @@
 # ({ update: <base64> } JSON) so the yrb-actioncable client could be swapped in.
 #
 # Protocol:
-#   server -> joining client : { type: "sync", update, sv, seed?, seed_markdown? }
+#   server -> joining client : { type: "sync", update, sv, seed?, seed_markdown?, seed_author_kind?, seed_author_name? }
 #   client -> server         : { type: "sync-reply", update, cid }   # everything server was missing
 #                              { type: "update", update, cid }       # incremental edit
 #                              { type: "awareness", update, cid }    # presence/cursors, relay-only
@@ -22,6 +22,8 @@ class SyncChannel < ApplicationCable::Channel
     if claim_seed?
       message[:seed] = true
       message[:seed_markdown] = @document.seed_markdown
+      message[:seed_author_kind] = @document.seed_author_kind
+      message[:seed_author_name] = @document.seed_author_name
     end
     transmit(message)
   end

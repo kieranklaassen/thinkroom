@@ -49,6 +49,8 @@ class DocumentsController < InertiaController
       document: document.slice(:id, :slug, :title).merge(
         seed_markdown: document.seed_markdown,
         seed_granted: seed_granted,
+        seed_author_kind: document.seed_author_kind,
+        seed_author_name: document.seed_author_name,
         has_state: document.yjs_state.present?,
         yjs_state_b64: (Base64.strict_encode64(document.yjs_state) if document.yjs_state.present?)
       ),

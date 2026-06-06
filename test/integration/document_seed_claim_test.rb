@@ -20,6 +20,21 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     assert_equal "claimed", @document.reload.seed_state
   end
 
+  test "page render ships seed authorship alongside the grant" do
+    agent_doc = Document.create!(
+      title: "AgentSeed", seed_markdown: "# From an agent",
+      seed_author_kind: "agent", seed_author_name: "Scout"
+    )
+
+    get document_page_path(agent_doc.slug), headers: browser
+
+    assert_inertia_props do |props|
+      props[:document][:seed_granted] == true &&
+        props[:document][:seed_author_kind] == "agent" &&
+        props[:document][:seed_author_name] == "Scout"
+    end
+  end
+
   test "second page load while the claim is fresh gets no grant" do
     get document_page_path(@document.slug), headers: browser
     get document_page_path(@document.slug), headers: browser
