@@ -24,10 +24,15 @@ class SuggestionTest < ActiveSupport::TestCase
     assert_includes suggestion.errors[:author_name], "can't be blank"
   end
 
-  test "author_kind restricted to ai or agent" do
+  test "author_kind restricted to ai, agent, or human" do
     suggestion = build_suggestion
-    suggestion.author_kind = "human"
+    suggestion.author_kind = "robot"
     assert_not suggestion.valid?
+
+    Suggestion::AUTHOR_KINDS.each do |kind|
+      suggestion.author_kind = kind
+      assert suggestion.valid?, "expected #{kind} to be a valid author_kind"
+    end
   end
 
   test "accept! transitions pending to accepted and records resolver" do
