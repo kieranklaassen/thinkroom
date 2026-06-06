@@ -37,7 +37,6 @@ import { type OwnershipPayload } from '../../components/ownership_chip'
 import { ClaimBanner } from '../../components/claim_banner'
 import { HeaderMenu } from '../../components/header_menu'
 import { ModeControl, type EditorMode } from '../../components/mode_control'
-import { SuggestComposer } from '../../components/suggest_composer'
 import { SharePopover } from '../../components/share_popover'
 import {
   MobileDock,
@@ -128,12 +127,6 @@ export default function DocumentShow({
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
   const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null)
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
-  // Suggest-mode composer: the selected text to replace, frozen with the
-  // toolbar position it was opened from (the selection itself collapses).
-  const [suggestTarget, setSuggestTarget] = useState<{
-    text: string
-    position: { x: number; y: number }
-  } | null>(null)
   const [aiPendingCount, setAiPendingCount] = useState(0)
   const aiPending = aiPendingCount > 0
   const prevSuggestionCount = useRef(
@@ -287,10 +280,10 @@ export default function DocumentShow({
     viewRef.current = view
     const { from, to, empty } = view.state.selection
 
-    // Only require focus when the view is editable: in Suggest/Comment mode
-    // the root is contenteditable=false, which browsers never focus, so
+    // Only require focus when the view is editable: in Comment mode the
+    // root is contenteditable=false, which browsers never focus, so
     // hasFocus() is always false and the focus gate would make the selection
-    // toolbar unreachable in read-only modes.
+    // toolbar unreachable in the read-only mode.
     if (view.editable && !view.hasFocus()) {
       setReviewTarget(null)
       setSelectionTarget(null)
@@ -330,7 +323,7 @@ export default function DocumentShow({
   // While a popover is open, any scroll or resize schedules one rAF-throttled
   // reposition pass (coordsAtPos for a single anchor is cheap).
   const [popoverTick, setPopoverTick] = useState(0)
-  const popoverOpen = Boolean(reviewTarget) || Boolean(selectionTarget) || Boolean(suggestTarget)
+  const popoverOpen = Boolean(reviewTarget) || Boolean(selectionTarget)
   useEffect(() => {
     if (!popoverOpen) return
     let raf = 0
@@ -377,20 +370,6 @@ export default function DocumentShow({
     // spans (doc updates) + popoverTick (scroll/resize) drive repositioning.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionTarget, spans, popoverTick, anchorPosition])
-
-  // Composer tracks its anchor text live (scroll/resize/doc edits) instead
-  // of freezing at open-time viewport coords; falls back to the frozen
-  // position when the anchor text is currently unmatchable (edited away).
-  const liveSuggestPosition = useMemo(() => {
-    if (!suggestTarget) return null
-    const view = viewRef.current
-    if (!view) return suggestTarget.position
-    const range = findTextRange(view.state.doc, suggestTarget.text)
-    if (!range) return suggestTarget.position
-    return anchorPosition(view, range.from, 320) ?? suggestTarget.position
-    // spans (doc updates) + popoverTick (scroll/resize) drive repositioning.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [suggestTarget, spans, popoverTick, anchorPosition])
 
   const liveReview = useMemo(() => {
     if (!reviewTarget) return null
@@ -482,43 +461,6 @@ export default function DocumentShow({
         .catch(release)
     },
     [doc.slug, handle, aiPendingCount],
-  )
-
-  // The composer stays open until the server confirms — closing eagerly
-  // would destroy the typed replacement on a validation failure with no
-  // feedback. The margin card arrives via the suggestions broadcast/reload,
-  // so no optimistic placeholder is needed (a placeholder would also render
-  // accept/reject against a row that has no server id yet).
-  const [suggestError, setSuggestError] = useState<string | null>(null)
-  const [suggestSubmitting, setSuggestSubmitting] = useState(false)
-  const submitSuggestion = useCallback(
-    (target: string, replacement: string) => {
-      setSuggestError(null)
-      setSuggestSubmitting(true)
-      router.post(
-        `/d/${doc.slug}/suggestions`,
-        {
-          body: replacement,
-          replaces: target,
-          anchor_text: target,
-          author_name: identity.name,
-        },
-        {
-          preserveScroll: true,
-          only: ['suggestions', 'activities'],
-          async: true,
-          onSuccess: () => setSuggestTarget(null),
-          onError: (errors) =>
-            setSuggestError(
-              typeof errors?.suggestion === 'string'
-                ? errors.suggestion
-                : 'Could not save the suggestion — please try again',
-            ),
-          onFinish: () => setSuggestSubmitting(false),
-        },
-      )
-    },
-    [doc.slug, identity.name],
   )
 
   const submitComment = useCallback(
@@ -621,7 +563,8 @@ export default function DocumentShow({
                 initialStateB64={doc.yjs_state_b64}
                 seedMarkdown={doc.seed_markdown}
                 seedGranted={doc.seed_granted}
-                editable={mode === 'edit'}
+                editable={mode !== 'comment'}
+                suggesting={mode === 'suggest'}
                 onReady={setHandle}
                 onStatus={setStatus}
                 onSpans={setSpans}
@@ -667,45 +610,15 @@ export default function DocumentShow({
             position={liveSelectionPosition}
             actions={[
               // Per-mode capability matrix — Edit: Comment · Ask AI;
-              // Suggest: Suggest a change; Comment: Comment.
-              ...(mode === 'suggest'
-                ? [
-                    {
-                      label: 'Suggest a change',
-                      // textBetween joins blocks with '\n' — a newline means
-                      // the selection spans blocks, which the per-block
-                      // anchor matching in suggestions.ts can't replace.
-                      // The byte guard mirrors the server's anchor cap so an
-                      // oversized selection fails here, not after typing.
-                      disabled:
-                        selectionTarget.text.includes('\n') ||
-                        new TextEncoder().encode(selectionTarget.text).length > 10 * 1024,
-                      title: selectionTarget.text.includes('\n')
-                        ? 'Suggestions work on single paragraphs — narrow your selection'
-                        : new TextEncoder().encode(selectionTarget.text).length > 10 * 1024
-                          ? 'Selection is too long to suggest against — narrow your selection'
-                          : undefined,
-                      onClick: () => {
-                        setSuggestTarget({
-                          text: selectionTarget.text,
-                          position: liveSelectionPosition,
-                        })
-                        setSelectionTarget(null)
-                      },
-                    },
-                  ]
-                : []),
-              ...(mode !== 'suggest'
-                ? [
-                    {
-                      label: 'Comment',
-                      onClick: () => {
-                        setComposerAnchor(selectionTarget.text)
-                        setSelectionTarget(null)
-                      },
-                    },
-                  ]
-                : []),
+              // Suggest: Comment (typing IS the suggestion mechanism);
+              // Comment: Comment.
+              {
+                label: 'Comment',
+                onClick: () => {
+                  setComposerAnchor(selectionTarget.text)
+                  setSelectionTarget(null)
+                },
+              },
               ...(mode === 'edit'
                 ? [
                     {
@@ -718,19 +631,6 @@ export default function DocumentShow({
                   ]
                 : []),
             ]}
-          />
-        )}
-        {suggestTarget && (
-          <SuggestComposer
-            target={suggestTarget.text}
-            position={liveSuggestPosition ?? suggestTarget.position}
-            error={suggestError}
-            submitting={suggestSubmitting}
-            onSubmit={(replacement) => submitSuggestion(suggestTarget.text, replacement)}
-            onCancel={() => {
-              setSuggestTarget(null)
-              setSuggestError(null)
-            }}
           />
         )}
         {reviewTarget && liveReview && (
