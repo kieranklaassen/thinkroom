@@ -660,7 +660,7 @@ export default function DocumentShow({
       return findTextRange(view.state.doc, composerAnchor)
     },
     preferBelow: true,
-    freezeWhenLost: true,
+    persistent: true,
     gap: popoverGap,
     deps: [composerAnchor, spans, popoverTick, docTick],
   })

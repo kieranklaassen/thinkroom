@@ -24,10 +24,11 @@ interface Options {
    *  default to above the first line. Either way the popover never covers
    *  the anchored text. */
   preferBelow?: boolean
-  /** Keep the last good position when the anchor stops resolving instead of
-   *  hiding — for stateful chrome (an open composer) that must not vanish
-   *  mid-draft. */
-  freezeWhenLost?: boolean
+  /** Stateful chrome (an open composer) must never be invisible: when the
+   *  anchor stops resolving it freezes at the last good position, and when
+   *  the anchor is offscreen it clamps into the viewport edge nearest the
+   *  anchor instead of hiding. */
+  persistent?: boolean
   /** Distance between anchor line and popover edge. */
   gap?: number
   /** Invalidation signals: scroll/resize tick, doc tick, anchor identity. */
@@ -60,7 +61,7 @@ export function useAnchoredPopover<T extends HTMLElement>({
   getView,
   getRange,
   preferBelow = false,
-  freezeWhenLost = false,
+  persistent = false,
   gap = 8,
   deps,
 }: Options): { ref: RefObject<T | null>; position: AnchoredPosition | null } {
@@ -100,7 +101,7 @@ export function useAnchoredPopover<T extends HTMLElement>({
     const range = getRange()
     if (!range) {
       // Anchor gone: stateful chrome freezes where it was; stateless hides.
-      place(freezeWhenLost && lastGood.current ? { ...lastGood.current, detached: true } : null)
+      place(persistent && lastGood.current ? { ...lastGood.current, detached: true } : null)
       return
     }
 
@@ -115,11 +116,13 @@ export function useAnchoredPopover<T extends HTMLElement>({
       return
     }
 
-    // Hide while the placement anchor line is scrolled out of view.
+    // Stateless chrome hides while the placement anchor line is scrolled out
+    // of view; persistent chrome stays visible (clamped below) instead.
     const anchorLine = preferBelow ? end : start
     if (
-      anchorLine.top < -OFFSCREEN_SLACK ||
-      anchorLine.top > window.innerHeight + OFFSCREEN_SLACK
+      !persistent &&
+      (anchorLine.top < -OFFSCREEN_SLACK ||
+        anchorLine.top > window.innerHeight + OFFSCREEN_SLACK)
     ) {
       place(null)
       return
@@ -152,6 +155,11 @@ export function useAnchoredPopover<T extends HTMLElement>({
       if (y + height > window.innerHeight - VIEWPORT_PAD && y === above) {
         y = Math.max(HEADER_CLEARANCE, window.innerHeight - height - VIEWPORT_PAD)
       }
+    }
+    if (persistent) {
+      // A form must stay reachable even when its anchor is far offscreen —
+      // pin it inside the viewport, toward the anchor's direction.
+      y = clamp(y, HEADER_CLEARANCE, Math.max(HEADER_CLEARANCE, window.innerHeight - height - VIEWPORT_PAD))
     }
 
     const next = { x, y, detached: false }
