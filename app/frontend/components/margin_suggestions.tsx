@@ -235,6 +235,7 @@ export function MarginSuggestions({
           <div
             key={suggestion.id}
             ref={setCardRef(suggestion.id)}
+            data-suggestion-id={suggestion.id}
             className={`margin-card ${placed.has(suggestion.id) ? 'is-placed' : ''}`}
             style={{ top: tops.get(suggestion.id) ?? 0 }}
             onMouseEnter={() => hover(suggestion.id)}

@@ -1001,10 +1001,14 @@ a:focus-visible {
 .margin-suggestions {
   position: absolute;
   inset: 0;
+  /* Two card stacks (server-row + inline tracked edits) share the gutter;
+   * the containers must not shadow each other's cards from clicks. */
+  pointer-events: none;
 }
 
 .margin-card {
   position: absolute;
+  pointer-events: auto;
   left: 0.9rem;
   right: 0.4rem;
   background: var(--surface-raised);
@@ -1054,6 +1058,7 @@ a:focus-visible {
 /* Focus mode: a quiet dot per suggestion instead of a card. */
 .margin-marker {
   position: absolute;
+  pointer-events: auto;
   left: 50%;
   width: 10px;
   height: 10px;
