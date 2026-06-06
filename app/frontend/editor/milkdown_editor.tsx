@@ -15,6 +15,7 @@ import type { RenderType } from '@milkdown/kit/component/table-block'
 // .ProseMirror ancestor and the prosemirror-tables fixed-layout/selection CSS.
 import '@milkdown/kit/prose/view/style/prosemirror.css'
 import '@milkdown/kit/prose/tables/style/tables.css'
+import './table_block.css'
 import { getMarkdown } from '@milkdown/kit/utils'
 import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
 import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight'
