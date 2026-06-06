@@ -16,3 +16,5 @@ export const suggestChangesMarks: MilkdownPlugin[] = [
 ].flat()
 
 export * from './marks'
+export * from './scan'
+export * from './commands'

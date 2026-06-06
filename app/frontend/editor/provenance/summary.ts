@@ -18,15 +18,34 @@ export interface ProvenanceSummary {
 
 const SPAN_TEXT_LIMIT = 280
 
+export interface CollectSpansOptions {
+  /**
+   * Display-only exclusion for the header chip: skip text carrying a pending
+   * `insertion` suggestion mark so unaccepted suggestions don't inflate the
+   * human percentage. The snapshot path must NOT set this — the persisted
+   * provenance record stays complete while suggestions are pending.
+   * Deletion-marked text always counts (it is still document content).
+   */
+  excludePendingInsertions?: boolean
+}
+
 /**
  * Walk the document and collect ordered provenance spans, merging adjacent
  * text runs with identical attribution. Unmarked text counts as human.
  */
-export function collectSpans(doc: Node): ProvenanceSpan[] {
+export function collectSpans(doc: Node, options: CollectSpansOptions = {}): ProvenanceSpan[] {
   const spans: ProvenanceSpan[] = []
 
   doc.descendants((node) => {
     if (!node.isText || !node.text) return
+    // Suggestion-mark guard precedes the provenance lookup — text nodes carry
+    // both marks simultaneously, and a provenance-only lookup would miss it.
+    if (
+      options.excludePendingInsertions &&
+      node.marks.some((m) => m.type.name === 'insertion')
+    ) {
+      return
+    }
     const mark = node.marks.find((m) => m.type.name === 'provenance')
     const attrs: ProvenanceAttrs = mark
       ? (mark.attrs as ProvenanceAttrs)
