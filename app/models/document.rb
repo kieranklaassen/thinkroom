@@ -33,6 +33,9 @@ class Document < ApplicationRecord
   # names are an amplification vector, so cap it (deliberate exception to the
   # no-validation convention on author_name).
   validates :owner_name, length: { maximum: 255 }, allow_nil: true
+  # seed_author_name travels to every doc opener via props and the channel
+  # seed grant — same amplification surface as owner_name, same cap.
+  validates :seed_author_name, length: { maximum: 255 }, allow_nil: true
 
   def to_param = slug
 
