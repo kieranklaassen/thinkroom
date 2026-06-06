@@ -1,6 +1,10 @@
 class Document < ApplicationRecord
   DEFAULT_SEED = "# Untitled\n\nStart writing — everything you type is attributed to you.\n"
 
+  # A stale seed claim (seeder crashed or never connected before its first
+  # update persisted) is reclaimable after this window.
+  SEED_CLAIM_TIMEOUT = 30.seconds
+
   # Docs that must never be claimed: claiming's only power is delete, and
   # deleting the demo would take it away from everyone.
   UNCLAIMABLE_SLUGS = %w[demo].freeze
@@ -90,6 +94,24 @@ class Document < ApplicationRecord
     DocumentMetaChannel.broadcast_event(self, :activities) if activity
     DocumentMetaChannel.broadcast_event(self, :ownership)
     self
+  end
+
+  # Exactly one client seeds an empty document from its markdown template.
+  # The atomic UPDATE claims it; the affected-row count picks exactly one
+  # winner under concurrency. Shared by both grant paths — the HTTP page
+  # render (documents#show, so a fresh doc seeds from props without waiting
+  # for the WebSocket) and the SyncChannel subscribe handshake (fallback for
+  # stale-claim reclaim when an HTTP-granted seeder never applied).
+  def try_claim_seed
+    return false if yjs_state.present? || seed_markdown.blank?
+
+    self.class
+      .where(id: id)
+      .where(
+        "seed_state = 'pending' OR (seed_state = 'claimed' AND seed_claimed_at < ?)",
+        SEED_CLAIM_TIMEOUT.ago
+      )
+      .update_all(seed_state: "claimed", seed_claimed_at: Time.current) == 1
   end
 
   def ownership_props(viewer_token)

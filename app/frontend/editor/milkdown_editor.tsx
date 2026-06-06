@@ -52,6 +52,12 @@ interface EditorProps {
   /** Server-rendered Yjs state (base64) — hydrates the doc before the
    *  provider syncs, so the first paint is already populated. */
   initialStateB64?: string | null
+  /** Seed template for a never-edited document. Applied at bind time when
+   *  the page response granted this client the seed claim. */
+  seedMarkdown?: string | null
+  /** True when documents#show atomically claimed the seed for this page
+   *  load — the props-first path that skips the WebSocket round-trip. */
+  seedGranted?: boolean
   onReady?: (handle: EditorHandle) => void
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
@@ -131,6 +137,8 @@ function CollabEditor({
   slug,
   identity,
   initialStateB64,
+  seedMarkdown,
+  seedGranted,
   onReady,
   onStatus,
   onSpans,
@@ -247,10 +255,20 @@ function CollabEditor({
       callbacksRef.current.onStatus?.('live')
     }
 
-    // A hydrated doc binds immediately — no visible empty-editor frame. The
-    // first-ever load (no state yet) keeps waiting for the seed-claim sync.
-    if (provider.synced || ydoc.store.clients.size > 0) start()
-    else provider.on('synced', start)
+    // A hydrated doc binds immediately — no visible empty-editor frame. A
+    // fresh doc whose seed claim arrived with the page response also binds
+    // immediately, applying the template from props (the one-shot consume in
+    // start() plus applyTemplate's remote-empty guard keep this race-safe
+    // against a channel-granted seeder). Only a fresh doc with no grant —
+    // someone else holds the claim — waits for the sync handshake.
+    if (provider.synced || ydoc.store.clients.size > 0) {
+      start()
+    } else if (seedGranted && seedMarkdown) {
+      provider.seedMarkdown = seedMarkdown
+      start()
+    } else {
+      provider.on('synced', start)
+    }
 
     return () => {
       cancelled = true
