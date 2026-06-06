@@ -127,11 +127,16 @@ class Document < ApplicationRecord
     }
   end
 
-  # Markdown without provenance span markup — the human-readable export.
+  # Markdown without provenance span or suggestion-mark markup — the
+  # human-readable export. Suggestion tags unwrap keeping content: pending
+  # insertions are in the doc, pending deletions are still in the doc until
+  # accepted (document-as-is view).
   def plain_markdown
     content_markdown.to_s
       .gsub(/<span data-provenance[^>]*>/, "")
       .gsub("</span>", "")
+      .gsub(/<(?:ins|del)\s+data-suggestion-id[^>]*>/, "")
+      .gsub(%r{</(?:ins|del)>}, "")
   end
 
   # Percentage breakdown derived from the latest client-pushed provenance snapshot.
