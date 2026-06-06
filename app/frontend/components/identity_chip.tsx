@@ -53,6 +53,7 @@ export function IdentityChip({ identity, guest, onRenamed }: Props) {
     setSaving(true)
     setFailed(false)
     const name = draft.trim()
+    let succeeded = false
     router.post(
       '/identity',
       { name },
@@ -61,15 +62,19 @@ export function IdentityChip({ identity, guest, onRenamed }: Props) {
         preserveScroll: true,
         async: true,
         onSuccess: () => {
+          succeeded = true
           onRenamed(name.length > 0 ? name : null)
           close()
         },
-        onError: () => {
-          setSaving(false)
-          setFailed(true)
-        },
+        // Inertia's onError only covers validation errors; CSRF/network/5xx
+        // failures land only in onFinish — recover there or the disabled
+        // input (which can't receive Escape) locks forever.
         onFinish: () => {
           inFlight.current = false
+          if (!succeeded) {
+            setSaving(false)
+            setFailed(true)
+          }
         },
       },
     )

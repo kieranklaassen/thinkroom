@@ -167,6 +167,11 @@ a:focus-visible {
   letter-spacing: -0.02em;
 }
 
+.landing-wordmark-link {
+  color: inherit;
+  text-decoration: none;
+}
+
 .landing-tagline {
   margin-top: 0.75rem;
   color: var(--ink-soft);
@@ -1353,11 +1358,6 @@ a:focus-visible {
   .identity-input {
     width: 7.5rem;
   }
-}
-
-.landing-wordmark-link {
-  color: inherit;
-  text-decoration: none;
 }
 
 /* ------------------------------ Ownership chip ----------------------------- */

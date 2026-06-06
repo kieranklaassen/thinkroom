@@ -27,8 +27,10 @@ class InertiaController < ApplicationController
 
   # Session name wins over client-posted names on every attribution write —
   # a stale tab can't sign your old guest name once you've introduced
-  # yourself. Guests keep the client-posted fallback.
-  def preferred_name(fallback)
-    session[:display_name].presence || fallback
+  # yourself. Guests keep the client-posted value, then the fallback.
+  # Non-string params (name[x]=1 produces ActionController::Parameters) are
+  # treated as absent rather than stringified into garbage attribution.
+  def preferred_name(raw, fallback:)
+    session[:display_name].presence || (raw.presence if raw.is_a?(String)) || fallback
   end
 end

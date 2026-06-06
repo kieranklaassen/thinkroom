@@ -4,7 +4,9 @@ class IdentitiesController < InertiaController
   # Blank means "go back to guest": delete the key entirely, never store a
   # fallback like "Anonymous" (that would break the return-to-guest flow).
   def update
-    name = Document.normalize_display_name(params[:name])
+    # Non-string params (name[x]=1) must clear, not stringify into garbage.
+    raw = params[:name].is_a?(String) ? params[:name] : nil
+    name = Document.normalize_display_name(raw)
     if name
       session[:display_name] = name
     else
