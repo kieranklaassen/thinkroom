@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import * as Y from 'yjs'
 import { Editor, editorViewCtx, rootCtx } from '@milkdown/kit/core'
 import { commonmark } from '@milkdown/kit/preset/commonmark'
@@ -19,11 +19,10 @@ import './table_block.css'
 import { getMarkdown } from '@milkdown/kit/utils'
 import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
 import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight'
-import type { Parser } from '@milkdown/plugin-highlight/shiki'
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { CableProvider } from './cable_provider'
-import { loadShikiParser } from './highlighter'
+import { lazyShikiParser, loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
 import type { UserIdentity } from './identity'
 import { provenance, provenanceIdentityCtx, collectSpans, type ProvenanceSpan } from './provenance'
@@ -61,8 +60,12 @@ interface EditorProps {
 
 const SNAPSHOT_DEBOUNCE_MS = 900
 
-// Start loading shiki at import time so the parser is warm by mount.
-const shikiParserPromise = loadShikiParser()
+// Start loading shiki at import time so it's warm as early as possible. The
+// editor never waits on it: lazyShikiParser highlights synchronously once
+// ready and upgrades already-painted code blocks in place via the plugin's
+// lazy-parser protocol. Content paint is gated on nothing.
+void loadShikiParser()
+const shikiParser = lazyShikiParser()
 
 interface CollabSession {
   ydoc: Y.Doc
@@ -77,10 +80,28 @@ interface CollabSession {
 // the claim times out. Real teardown happens after a short grace period.
 const sessions = new Map<string, CollabSession>()
 
-function acquireSession(slug: string, identity: UserIdentity): CollabSession {
+function acquireSession(
+  slug: string,
+  identity: UserIdentity,
+  initialStateB64?: string | null,
+): CollabSession {
   let session = sessions.get(slug)
   if (!session) {
     const ydoc = new Y.Doc()
+    // Hydrate from the server-rendered state the moment the doc exists, so
+    // the editor binds an already-populated doc and content is in its first
+    // paint; Yjs converges idempotently when the provider's sync lands.
+    if (initialStateB64) {
+      try {
+        Y.applyUpdate(
+          ydoc,
+          Uint8Array.from(atob(initialStateB64), (c) => c.charCodeAt(0)),
+          'server-hydrate',
+        )
+      } catch {
+        // corrupt/stale prop — fall back to the wait-for-synced path
+      }
+    }
     const provider = new CableProvider(ydoc, slug)
     provider.awareness.setLocalStateField('user', identity)
     session = { ydoc, provider, refs: 0, destroyTimer: null }
@@ -106,29 +127,15 @@ function releaseSession(slug: string): void {
   }, 1000)
 }
 
-function EditorInner(props: EditorProps) {
-  const [parser, setParser] = useState<Parser | null>(null)
-
-  useEffect(() => {
-    // Wrap in an updater: passing the parser function directly would make
-    // React call it as a state updater.
-    void shikiParserPromise.then((p) => setParser(() => p))
-  }, [])
-
-  if (!parser) return <div className="doc-editor-loading" aria-hidden />
-  return <CollabEditor {...props} parser={parser} />
-}
-
 function CollabEditor({
   slug,
   identity,
-  parser,
   initialStateB64,
   onReady,
   onStatus,
   onSpans,
   onSelection,
-}: EditorProps & { parser: Parser }) {
+}: EditorProps) {
   const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection })
   callbacksRef.current = { onReady, onStatus, onSpans, onSelection }
 
@@ -140,7 +147,7 @@ function CollabEditor({
           ctx.set(provenanceIdentityCtx.key, { name: identity.name })
           ctx.update(highlightPluginConfig.key, (prev) => ({
             ...prev,
-            parser,
+            parser: shikiParser,
             languageExtractor: (node) => (node.attrs.language as string) ?? '',
           }))
           ctx.update(uploadConfig.key, (prev) => ({
@@ -194,22 +201,8 @@ function CollabEditor({
     const editor = get()
     if (!editor) return
 
-    const { ydoc, provider } = acquireSession(slug, identity)
+    const { ydoc, provider } = acquireSession(slug, identity, initialStateB64)
     callbacksRef.current.onStatus?.('connecting')
-
-    // Hydrate from the server-rendered state so the first paint is already
-    // populated; Yjs converges idempotently when the provider's sync lands.
-    if (initialStateB64 && ydoc.store.clients.size === 0) {
-      try {
-        Y.applyUpdate(
-          ydoc,
-          Uint8Array.from(atob(initialStateB64), (c) => c.charCodeAt(0)),
-          'server-hydrate',
-        )
-      } catch {
-        // corrupt/stale prop — fall back to the wait-for-synced path
-      }
-    }
 
     let snapshotTimer: ReturnType<typeof setTimeout> | null = null
     const pushSnapshot = () => {
@@ -279,7 +272,7 @@ function CollabEditor({
 export function DocumentEditor(props: EditorProps) {
   return (
     <MilkdownProvider>
-      <EditorInner {...props} />
+      <CollabEditor {...props} />
     </MilkdownProvider>
   )
 }
