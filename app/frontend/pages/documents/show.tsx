@@ -565,9 +565,29 @@ export default function DocumentShow({
   )
 
   // Doc-native tracked edits (Suggest-mode typing), re-derived from the
-  // marks whenever the doc changes — spans updates on every doc update, so
-  // it doubles as the recompute signal. Every client derives the same list
-  // from the synced document; there are no server rows to reload.
+  // marks whenever the Yjs doc changes. The Yjs 'update' event is the
+  // recompute signal — NOT the Milkdown listener, which skips
+  // addToHistory:false transactions and therefore never fires for remote
+  // collaborators' changes (a passive window would never see new cards).
+  // rAF-coalesced so a burst of keystrokes triggers one recompute.
+  const [docTick, setDocTick] = useState(0)
+  useEffect(() => {
+    if (!handle) return
+    let raf = 0
+    const bump = () => {
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        setDocTick((tick) => tick + 1)
+      })
+    }
+    handle.ydoc.on('update', bump)
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+      handle.ydoc.off('update', bump)
+    }
+  }, [handle])
+
   const inlineSuggestions = useMemo(() => {
     if (!handle) return []
     try {
@@ -577,7 +597,9 @@ export default function DocumentShow({
     } catch {
       return []
     }
-  }, [handle, spans])
+    // docTick (local + remote Yjs updates) drives the re-derivation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handle, docTick])
 
   const jumpToAnchor = useCallback((anchorText: string) => {
     const view = viewRef.current
