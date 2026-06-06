@@ -33,9 +33,16 @@ class DocumentsController < InertiaController
     remember_recent(document)
     @agent_guide = AgentGuide.text(document, request.base_url)
 
+    # Claim the seed at page-render time so a fresh document paints its
+    # template from props instead of waiting for the WebSocket round-trip.
+    # Only the HTML editor path may claim — agent/JSON fetches above never
+    # reach here, so a programmatic read can't burn the claim.
+    seed_granted = document.try_claim_seed
+
     render inertia: "documents/show", props: {
       document: document.slice(:id, :slug, :title).merge(
         seed_markdown: document.seed_markdown,
+        seed_granted: seed_granted,
         has_state: document.yjs_state.present?,
         yjs_state_b64: (Base64.strict_encode64(document.yjs_state) if document.yjs_state.present?)
       ),

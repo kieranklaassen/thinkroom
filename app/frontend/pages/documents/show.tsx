@@ -66,6 +66,7 @@ export interface DocumentProps {
     slug: string
     title: string
     seed_markdown: string | null
+    seed_granted: boolean
     has_state: boolean
     yjs_state_b64: string | null
   }
@@ -543,6 +544,8 @@ export default function DocumentShow({
                 slug={doc.slug}
                 identity={identity}
                 initialStateB64={doc.yjs_state_b64}
+                seedMarkdown={doc.seed_markdown}
+                seedGranted={doc.seed_granted}
                 onReady={setHandle}
                 onStatus={setStatus}
                 onSpans={setSpans}
