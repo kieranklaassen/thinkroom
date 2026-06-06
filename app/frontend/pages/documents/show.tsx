@@ -35,6 +35,7 @@ import { ReviewPopover } from '../../components/review_popover'
 import { AskAiPanel } from '../../components/suggestions_panel'
 import { MarginSuggestions } from '../../components/margin_suggestions'
 import { CommentsPanel, type CommentPayload } from '../../components/comments_panel'
+import { AnchoredComposer } from '../../components/anchored_composer'
 import { SelectionToolbar } from '../../components/selection_toolbar'
 import { PresenceBar, type AgentPresencePayload } from '../../components/presence_bar'
 import { ActivityPanel } from '../../components/activity_panel'
@@ -52,6 +53,8 @@ import {
 } from '../../components/mobile_dock'
 import { useMetaChannel } from '../../lib/use_meta_channel'
 import { useMediaQuery } from '../../lib/use_media_query'
+import { useAnchoredPopover } from '../../lib/use_anchored_popover'
+import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
 import { postJSON } from '../../lib/csrf'
 import {
   getStoredFlag,
@@ -374,7 +377,11 @@ export default function DocumentShow({
   // While a popover is open, any scroll or resize schedules one rAF-throttled
   // reposition pass (coordsAtPos for a single anchor is cheap).
   const [popoverTick, setPopoverTick] = useState(0)
-  const popoverOpen = Boolean(reviewTarget) || Boolean(selectionTarget) || Boolean(commentTarget)
+  const popoverOpen =
+    Boolean(reviewTarget) ||
+    Boolean(selectionTarget) ||
+    Boolean(commentTarget) ||
+    composerAnchor !== null
   useEffect(() => {
     if (!popoverOpen) return
     let raf = 0
@@ -393,56 +400,6 @@ export default function DocumentShow({
       window.removeEventListener('resize', schedule)
     }
   }, [popoverOpen])
-
-  // Anchor geometry in viewport coords — null while the anchor is off-screen
-  // or gone, hiding the popover until the text scrolls back into view.
-  // Prefers above the anchor (clear of the on-screen keyboard on touch),
-  // flips below when that would cover the sticky header, and clamps x into
-  // the viewport using the popover's estimated width.
-  const anchorPosition = useCallback((view: EditorView, pos: number, estWidth = 200) => {
-    try {
-      const coords = view.coordsAtPos(pos)
-      if (coords.top < -24 || coords.top > window.innerHeight + 24) return null
-      const offset = isMobileRef.current ? 60 : 44
-      const above = coords.top - offset
-      const y = above < 52 ? coords.bottom + 8 : above
-      const x = Math.max(8, Math.min(coords.left, window.innerWidth - estWidth - 8))
-      return { x, y }
-    } catch {
-      return null
-    }
-  }, [])
-
-  const liveSelectionPosition = useMemo(() => {
-    if (!selectionTarget) return null
-    const view = viewRef.current
-    if (!view || view.state.selection.empty) return null
-    return anchorPosition(view, view.state.selection.from, 190)
-    // spans (doc updates) + popoverTick (scroll/resize) drive repositioning.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectionTarget, spans, popoverTick, anchorPosition])
-
-  const liveCommentPosition = useMemo(() => {
-    if (!commentTarget) return null
-    const view = viewRef.current
-    if (!view) return null
-    return anchorPosition(view, view.state.selection.head, 190)
-    // spans (doc updates) + popoverTick (scroll/resize) drive repositioning.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [commentTarget, spans, popoverTick, anchorPosition])
-
-  const liveReview = useMemo(() => {
-    if (!reviewTarget) return null
-    const view = viewRef.current
-    if (!view) return null
-    // Re-derive the span from current state: edits shift positions, and
-    // advancing the review state changes the attrs the popover renders.
-    const span = aiSpanAt(view.state)
-    if (!span) return null
-    const position = anchorPosition(view, span.from, 320)
-    return position ? { span, position } : null
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reviewTarget, spans, popoverTick, anchorPosition])
 
   const handleAdvance = useCallback((state: ReviewState) => {
     const view = viewRef.current
@@ -602,6 +559,144 @@ export default function DocumentShow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handle, docTick])
 
+  // ---- Floating chrome placement (measured, selection-centered) ----
+
+  // Mouse-drag gating: selection chrome stays hidden while the primary
+  // button is down so the toolbar doesn't chase the cursor mid-drag; it
+  // reveals once on release at the settled position. Keyboard selections
+  // reveal immediately (no pointer down). Pointerdowns on the chrome itself
+  // are exempt so pressing a toolbar button doesn't hide it mid-click.
+  const [pointerHeld, setPointerHeld] = useState(false)
+  useEffect(() => {
+    const onChrome = (target: EventTarget | null) =>
+      target instanceof Element &&
+      Boolean(target.closest('.selection-toolbar, .review-popover, .comment-composer--anchored'))
+    const down = (event: PointerEvent) => {
+      if (event.button !== 0 || onChrome(event.target)) return
+      setPointerHeld(true)
+    }
+    const up = () => setPointerHeld(false)
+    window.addEventListener('pointerdown', down, true)
+    window.addEventListener('pointerup', up, true)
+    window.addEventListener('pointercancel', up, true)
+    window.addEventListener('blur', up)
+    return () => {
+      window.removeEventListener('pointerdown', down, true)
+      window.removeEventListener('pointerup', up, true)
+      window.removeEventListener('pointercancel', up, true)
+      window.removeEventListener('blur', up)
+    }
+  }, [])
+
+  // One floating form at a time: an open composer suppresses the selection
+  // chrome, and so does the share popover (z-60, above the chrome's z-50).
+  const [shareOpen, setShareOpen] = useState(false)
+  const composerOpen = !isMobile && composerAnchor !== null
+  const chromeSuppressed = composerOpen || shareOpen
+
+  const popoverGap = isMobile ? 20 : 8
+
+  const selectionToolbarActive =
+    Boolean(selectionTarget) && !pointerHeld && !chromeSuppressed
+  const selectionPopover = useAnchoredPopover<HTMLDivElement>({
+    active: selectionToolbarActive,
+    getView: () => viewRef.current,
+    getRange: () => {
+      const view = viewRef.current
+      if (!view || view.state.selection.empty) return null
+      return { from: view.state.selection.from, to: view.state.selection.to }
+    },
+    gap: popoverGap,
+    deps: [selectionTarget, spans, popoverTick],
+  })
+
+  const commentAffordanceActive =
+    Boolean(commentTarget) && !selectionTarget && !pointerHeld && !chromeSuppressed
+  const commentAffordance = useAnchoredPopover<HTMLDivElement>({
+    active: commentAffordanceActive,
+    getView: () => viewRef.current,
+    getRange: () => {
+      const view = viewRef.current
+      if (!view) return null
+      const head = view.state.selection.head
+      return { from: head, to: head }
+    },
+    gap: popoverGap,
+    deps: [commentTarget, spans, popoverTick],
+  })
+
+  // Re-derive the span from current state: edits shift positions, and
+  // advancing the review state changes the attrs the popover renders.
+  const liveReviewSpan = useMemo(() => {
+    if (!reviewTarget) return null
+    const view = viewRef.current
+    if (!view) return null
+    return aiSpanAt(view.state)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewTarget, spans, popoverTick])
+  const reviewActive = Boolean(liveReviewSpan) && !pointerHeld && !chromeSuppressed
+  const reviewPopover = useAnchoredPopover<HTMLDivElement>({
+    active: reviewActive,
+    getView: () => viewRef.current,
+    getRange: () => {
+      const view = viewRef.current
+      if (!view) return null
+      const span = aiSpanAt(view.state)
+      return span ? { from: span.from, to: span.to } : null
+    },
+    gap: popoverGap,
+    deps: [reviewTarget, spans, popoverTick],
+  })
+
+  // The composer anchors below the selection's last line and never overlaps
+  // the anchored text; if a remote edit removes the anchor it freezes in
+  // place (detached) instead of vanishing mid-draft.
+  const composerPopover = useAnchoredPopover<HTMLFormElement>({
+    active: composerOpen,
+    getView: () => viewRef.current,
+    getRange: () => {
+      const view = viewRef.current
+      if (!view || composerAnchor === null) return null
+      return findTextRange(view.state.doc, composerAnchor)
+    },
+    preferBelow: true,
+    persistent: true,
+    gap: popoverGap,
+    deps: [composerAnchor, spans, popoverTick, docTick],
+  })
+
+  // Mode switches close the composer without posting (same as Cancel).
+  useEffect(() => {
+    setComposerAnchor(null)
+  }, [mode])
+
+  // The anchored text stays visibly marked while the composer is open —
+  // the editor selection itself collapses when focus moves to the textarea.
+  useEffect(() => {
+    if (!composerOpen || composerAnchor === null) return
+    const view = viewRef.current
+    if (!view) return
+    const range = findTextRange(view.state.doc, composerAnchor)
+    const dom = range ? domRange(view, range.from, range.to) : null
+    setHighlight('comment-anchor', dom ? [dom] : [])
+    return () => clearHighlight('comment-anchor')
+    // docTick keeps the highlight tracking edits around the anchor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composerOpen, composerAnchor, docTick])
+
+  const closeComposer = useCallback(() => {
+    setComposerAnchor(null)
+    viewRef.current?.focus()
+  }, [])
+
+  const submitAnchoredComment = useCallback(
+    (body: string) => {
+      submitComment(body, composerAnchor)
+      viewRef.current?.focus()
+    },
+    [submitComment, composerAnchor],
+  )
+
   const jumpToAnchor = useCallback((anchorText: string) => {
     const view = viewRef.current
     if (!view) return
@@ -638,7 +733,7 @@ export default function DocumentShow({
               <PresenceBar humans={peers} agents={presences} compact={isMobile} />
             </div>
             <ModeControl mode={mode} onChange={setMode} locked={modeLocked} />
-            <SharePopover agentsActive={presences.length} />
+            <SharePopover agentsActive={presences.length} onOpenChange={setShareOpen} />
             <HeaderMenu
               panelOpen={panelOpen}
               onTogglePanel={() => setPanelOpen((open) => !open)}
@@ -700,9 +795,11 @@ export default function DocumentShow({
               <AskAiPanel aiPending={aiPending} onAskAi={(instruction) => askAi(instruction)} />
               <CommentsPanel
                 comments={comments}
-                composerAnchor={composerAnchor}
+                // The desktop composer is the anchored card next to the
+                // selection — the rail keeps the list only.
+                composerAnchor={null}
                 onSubmit={submitComment}
-                onCancelComposer={() => setComposerAnchor(null)}
+                onCancelComposer={closeComposer}
                 onResolve={resolveComment}
                 onJumpTo={jumpToAnchor}
               />
@@ -710,9 +807,10 @@ export default function DocumentShow({
             </aside>
           )}
         </main>
-        {selectionTarget && liveSelectionPosition && (
+        {selectionTarget && selectionToolbarActive && (
           <SelectionToolbar
-            position={liveSelectionPosition}
+            rootRef={selectionPopover.ref}
+            position={selectionPopover.position}
             actions={[
               // Per-mode capability matrix — Edit: Comment · Ask AI;
               // Suggest: Comment (typing IS the suggestion mechanism);
@@ -738,9 +836,10 @@ export default function DocumentShow({
             ]}
           />
         )}
-        {commentTarget && !selectionTarget && liveCommentPosition && (
+        {commentTarget && commentAffordanceActive && (
           <SelectionToolbar
-            position={liveCommentPosition}
+            rootRef={commentAffordance.ref}
+            position={commentAffordance.position}
             actions={[
               {
                 label: 'Comment on this paragraph',
@@ -752,11 +851,22 @@ export default function DocumentShow({
             ]}
           />
         )}
-        {reviewTarget && liveReview && (
+        {liveReviewSpan && reviewActive && (
           <ReviewPopover
-            span={liveReview.span}
-            position={liveReview.position}
+            rootRef={reviewPopover.ref}
+            span={liveReviewSpan}
+            position={reviewPopover.position}
             onAdvance={handleAdvance}
+          />
+        )}
+        {composerOpen && composerAnchor !== null && (
+          <AnchoredComposer
+            key={composerAnchor}
+            rootRef={composerPopover.ref}
+            anchor={composerAnchor}
+            position={composerPopover.position}
+            onSubmit={submitAnchoredComment}
+            onCancel={closeComposer}
           />
         )}
         {isMobile && (

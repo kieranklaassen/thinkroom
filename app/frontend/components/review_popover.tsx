@@ -1,8 +1,12 @@
+import { type RefObject } from 'react'
 import { REVIEW_ORDER, nextReviewState, type AiSpan, type ReviewState } from '../editor/provenance'
 
 interface Props {
+  /** Placement ref from useAnchoredPopover — measured for real-width clamping. */
+  rootRef: RefObject<HTMLDivElement | null>
   span: AiSpan
-  position: { x: number; y: number }
+  /** Measured position; null during the pre-measure hidden phase. */
+  position: { x: number; y: number } | null
   onAdvance: (state: ReviewState) => void
 }
 
@@ -17,13 +21,16 @@ const ADVANCE_LABELS: Record<string, string> = {
   endorsed: 'Endorse',
 }
 
-export function ReviewPopover({ span, position, onAdvance }: Props) {
+export function ReviewPopover({ rootRef, span, position, onAdvance }: Props) {
   const next = nextReviewState(span.attrs.state)
+  const placed = position !== null
 
   return (
     <div
-      className="review-popover"
-      style={{ left: position.x, top: position.y }}
+      ref={rootRef}
+      className={`review-popover ${placed ? 'is-placed' : ''}`}
+      style={position ? { left: position.x, top: position.y } : undefined}
+      inert={!placed}
       // Keep the editor selection alive while interacting.
       onMouseDown={(event) => event.preventDefault()}
       role="toolbar"

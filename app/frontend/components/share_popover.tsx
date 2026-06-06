@@ -7,14 +7,32 @@ import { ThemePicker } from './theme_picker'
 /** Share is two audiences, one URL: humans get the editor, agents fetching the
  *  same link discover the API. The popover teaches both — copy the link for a
  *  person, or copy an agent invite that tells an agent exactly how to join. */
-export function SharePopover({ agentsActive }: { agentsActive: number }) {
-  const [open, setOpen] = useState(false)
+export function SharePopover({
+  agentsActive,
+  onOpenChange,
+}: {
+  agentsActive: number
+  /** Lets the page suppress selection chrome while the popover is open. */
+  onOpenChange?: (open: boolean) => void
+}) {
+  const [open, setOpenState] = useState(false)
   const [copied, setCopied] = useState<'link' | 'agent' | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
   // The sticky header's backdrop-filter makes it the containing block for
   // fixed descendants — so the mobile full-width sheet must portal to body.
   const isMobile = useMediaQuery('(max-width: 48rem)')
+
+  const setOpen = useCallback(
+    (next: boolean | ((value: boolean) => boolean)) => {
+      setOpenState((value) => {
+        const resolved = typeof next === 'function' ? next(value) : next
+        if (resolved !== value) onOpenChange?.(resolved)
+        return resolved
+      })
+    },
+    [onOpenChange],
+  )
 
   const url = typeof window === 'undefined' ? '' : window.location.href
 
