@@ -35,6 +35,7 @@ import { ActivityPanel } from '../../components/activity_panel'
 import { FeedbackButton } from '../../components/feedback_button'
 import { IdentityChip } from '../../components/identity_chip'
 import { OwnershipChip, type OwnershipPayload } from '../../components/ownership_chip'
+import { ClaimBanner } from '../../components/claim_banner'
 import { SharePopover } from '../../components/share_popover'
 import {
   MobileDock,
@@ -537,6 +538,7 @@ export default function DocumentShow({
             <SharePopover agentsActive={presences.length} />
           </div>
         </header>
+        <ClaimBanner slug={doc.slug} ownership={ownership} claimerName={identity.name} />
         <main className="doc-body">
           <div className={`doc-canvas ${focusMode ? 'is-focus' : ''}`}>
             <article className="doc-main">
