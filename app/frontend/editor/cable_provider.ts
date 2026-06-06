@@ -127,6 +127,11 @@ export class CableProvider {
           update: toBase64(Y.encodeStateAsUpdate(this.doc, serverVector)),
         })
         if (data.seed && data.seed_markdown) {
+          // No one listens to 'seed' by design: the editor reads
+          // provider.seedMarkdown directly inside its bind step, which runs
+          // on the 'synced' emit below — this assignment is ordered before
+          // it on purpose. Handling the seed in a 'seed' listener instead
+          // would double-apply the template.
           this.seedMarkdown = data.seed_markdown
           this.emit('seed')
         }

@@ -37,7 +37,27 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
       assert_inertia_props do |props|
         props[:document][:seed_granted] == true
       end
+      assert_equal "claimed", @document.reload.seed_state
     end
+  end
+
+  test "Inertia partial reloads never touch the seed claim" do
+    get document_page_path(@document.slug), headers: browser.merge(
+      "X-Inertia" => "true",
+      "X-Inertia-Partial-Component" => "documents/show",
+      "X-Inertia-Partial-Data" => "presences"
+    )
+
+    assert_equal "pending", @document.reload.seed_state,
+                 "a partial reload must not burn or refresh the claim"
+  end
+
+  test "prefetch-shaped requests never claim the seed" do
+    get document_page_path(@document.slug), headers: browser.merge("Sec-Purpose" => "prefetch")
+    assert_equal "pending", @document.reload.seed_state
+
+    get document_page_path(@document.slug), headers: browser.merge("Purpose" => "prefetch")
+    assert_equal "pending", @document.reload.seed_state
   end
 
   test "documents with existing state never grant the seed" do
@@ -75,10 +95,15 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     assert_equal "pending", @document.reload.seed_state
   end
 
-  test "exactly one of two concurrent claims wins at the model level" do
-    results = [ @document.try_claim_seed, Document.find(@document.id).try_claim_seed ]
+  # Exercises the conditional-UPDATE guard with two independent record
+  # instances loaded before either claim runs. In-process calls can't
+  # reproduce a true DB-level race — the WHERE clause's affected-row count
+  # is the atomicity authority under real concurrency.
+  test "exactly one of two competing claims wins at the model level" do
+    first = Document.find(@document.id)
+    second = Document.find(@document.id)
 
-    assert_equal [ true, false ], results
+    assert_equal [ true, false ], [ first.try_claim_seed, second.try_claim_seed ]
   end
 
   test "an HTML grant blocks the channel grant while fresh" do
