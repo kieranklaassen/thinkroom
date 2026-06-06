@@ -430,13 +430,14 @@ a:focus-visible {
   padding: 3rem 2rem 6rem;
 }
 
-.doc-editor-loading {
-  min-height: 50vh;
-}
-
 /* ----------------------------- Editor typography ------------------------- */
+/* The height reservation lives on the persistent editor mount (not a
+   transient placeholder) so the layout below the editor never shifts while
+   Milkdown finishes binding — any residual pre-content frames are blank
+   within a stable layout, never a pop. */
 .milkdown {
   outline: none;
+  min-height: 50vh;
 }
 
 .milkdown .ProseMirror {
