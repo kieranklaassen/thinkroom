@@ -49,6 +49,8 @@ class DocumentsController < InertiaController
       document: document.slice(:id, :slug, :title).merge(
         seed_markdown: document.seed_markdown,
         seed_granted: seed_granted,
+        seed_author_kind: document.seed_author_kind,
+        seed_author_name: document.seed_author_name,
         has_state: document.yjs_state.present?,
         yjs_state_b64: (Base64.strict_encode64(document.yjs_state) if document.yjs_state.present?)
       ),
@@ -66,11 +68,14 @@ class DocumentsController < InertiaController
     # UI-created docs are owned by their creator from the same INSERT — a UI
     # doc never exists momentarily unclaimed, and no claim activity is logged
     # (the doc was never up for grabs).
+    creator_name = Document.normalize_owner_name(preferred_name(params[:name], fallback: nil))
     document = Document.create!(
       title: params[:title].presence || "Untitled",
       seed_markdown: params[:markdown].presence || Document::DEFAULT_SEED,
       owner_token: owner_token,
-      owner_name: Document.normalize_owner_name(preferred_name(params[:name], fallback: nil)),
+      owner_name: creator_name,
+      seed_author_kind: "human",
+      seed_author_name: creator_name,
       claimed_at: Time.current
     )
     remember_recent(document)

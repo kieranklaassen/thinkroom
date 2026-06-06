@@ -57,6 +57,45 @@ class DocumentTest < ActiveSupport::TestCase
     assert_equal({ total: 0, human_pct: 0, ai_pct: 0, unreviewed_pct: 0 }, doc.provenance_summary)
   end
 
+  test "provenance_summary cold read reports agent-seeded docs as unreviewed AI" do
+    doc = Document.create!(
+      title: "AgentSeed", seed_markdown: "# From an agent",
+      seed_author_kind: "agent", seed_author_name: "Scout"
+    )
+    summary = doc.provenance_summary
+    assert_equal "# From an agent".length, summary[:total]
+    assert_equal 0, summary[:human_pct]
+    assert_equal 100, summary[:ai_pct]
+    assert_equal 100, summary[:unreviewed_pct]
+  end
+
+  test "provenance_summary cold read stays zeros for human-seeded docs" do
+    doc = Document.create!(
+      title: "HumanSeed", seed_markdown: "# Mine",
+      seed_author_kind: "human", seed_author_name: "Quiet Falcon"
+    )
+    assert_equal({ total: 0, human_pct: 0, ai_pct: 0, unreviewed_pct: 0 }, doc.provenance_summary)
+  end
+
+  test "provenance_summary cold read stays zeros for legacy docs without authorship" do
+    doc = Document.create!(title: "Legacy", seed_markdown: "# Old")
+    assert_equal({ total: 0, human_pct: 0, ai_pct: 0, unreviewed_pct: 0 }, doc.provenance_summary)
+  end
+
+  test "provenance_summary prefers pushed spans over the seed fallback" do
+    doc = Document.create!(
+      title: "Snapshotted", seed_markdown: "# From an agent",
+      seed_author_kind: "agent", seed_author_name: "Scout",
+      provenance_spans: [
+        { "kind" => "human", "state" => "verbatim", "chars" => 50 },
+        { "kind" => "ai", "state" => "pending", "chars" => 50 }
+      ]
+    )
+    summary = doc.provenance_summary
+    assert_equal 100, summary[:total]
+    assert_equal 50, summary[:human_pct]
+  end
+
   test "provenance_summary computes percentages from spans" do
     doc = Document.create!(
       title: "Mixed",
@@ -168,6 +207,21 @@ class DocumentTest < ActiveSupport::TestCase
     doc = Document.new(title: "Long", owner_name: "x" * 256)
     assert_not doc.valid?
     assert_includes doc.errors[:owner_name], "is too long (maximum is 255 characters)"
+  end
+
+  test "seed_author_name longer than 255 chars is rejected by validation" do
+    doc = Document.new(title: "Long", seed_author_name: "x" * 256)
+    assert_not doc.valid?
+    assert_includes doc.errors[:seed_author_name], "is too long (maximum is 255 characters)"
+  end
+
+  test "seed_author_kind outside human/agent is rejected by validation" do
+    doc = Document.new(title: "Odd", seed_author_kind: "bot")
+    assert_not doc.valid?
+    assert_includes doc.errors[:seed_author_kind], "is not included in the list"
+
+    assert Document.new(title: "OK", seed_author_kind: "agent").valid?
+    assert Document.new(title: "OK", seed_author_kind: nil).valid?
   end
 
   test "claim truncates oversized names instead of failing" do

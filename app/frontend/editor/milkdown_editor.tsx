@@ -25,7 +25,13 @@ import { CableProvider } from './cable_provider'
 import { lazyShikiParser, loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
 import type { UserIdentity } from './identity'
-import { provenance, provenanceIdentityCtx, collectSpans, type ProvenanceSpan } from './provenance'
+import {
+  provenance,
+  provenanceIdentityCtx,
+  collectSpans,
+  SKIP_PROVENANCE,
+  type ProvenanceSpan,
+} from './provenance'
 import { suggestChangesMarks } from './suggest_changes'
 import { suggestState, suggestDispatch } from './suggest_changes/intercept'
 import { suggestGuard } from './suggest_changes/normalize'
@@ -65,6 +71,12 @@ interface EditorProps {
   /** True when documents#show atomically claimed the seed for this page
    *  load — the props-first path that skips the WebSocket round-trip. */
   seedGranted?: boolean
+  /** Who authored the seed markdown ('human' | 'agent' | null). Non-human
+   *  seeds get their text explicitly AI-attributed after the collab
+   *  connection renders them — otherwise seeded text is unmarked and
+   *  counts as human in the provenance summary. */
+  seedAuthorKind?: string | null
+  seedAuthorName?: string | null
   /** Read-only gate for Comment mode. Implemented EXCLUSIVELY as
    *  ProseMirror `editable: () => false` — provider connection, Yjs sync,
    *  agent edits, programmatic dispatch, and seed application stay
@@ -167,6 +179,38 @@ function markSeedApplied(slug: string): void {
   }
 }
 
+// Attributes a freshly seeded document to its agent author. applyTemplate
+// writes the Yjs fragment directly; the content reaches the ProseMirror view
+// via ySyncPlugin's init render (a remote-tagged transaction the provenance
+// writer skips), so seeded text lands unmarked — and collectSpans counts
+// unmarked text as human. This mirrors applySuggestion's explicit-attribution
+// + SKIP_PROVENANCE pattern, doc-wide. Only unmarked text is touched: if
+// applyTemplate no-opped against another seeder's content, that content
+// already carries marks and this dispatches nothing.
+function attributeSeedToAgent(view: EditorView, author: string): void {
+  const markType = view.state.schema.marks.provenance
+  if (!markType) return
+
+  let tr = view.state.tr
+  let changed = false
+  view.state.doc.descendants((node, pos, parent) => {
+    if (!node.isText) return
+    if (parent && !parent.type.allowsMarkType(markType)) return
+    if (markType.isInSet(node.marks)) return
+    tr = tr.addMark(
+      pos,
+      pos + node.nodeSize,
+      markType.create({ kind: 'ai', author, state: 'pending' }),
+    )
+    changed = true
+  })
+
+  if (!changed) return
+  tr.setMeta(SKIP_PROVENANCE, true)
+  tr.setMeta('addToHistory', false)
+  view.dispatch(tr)
+}
+
 function releaseSession(slug: string): void {
   const session = sessions.get(slug)
   if (!session) return
@@ -185,6 +229,8 @@ function CollabEditor({
   initialStateB64,
   seedMarkdown,
   seedGranted,
+  seedAuthorKind,
+  seedAuthorName,
   editable = true,
   suggesting = false,
   onReady,
@@ -291,7 +337,11 @@ function CollabEditor({
         const markdown = getMarkdown()(ctx)
         const view = ctx.get(editorViewCtx)
         const spans = collectSpans(view.state.doc)
-        void postJSON(`/d/${slug}/snapshot`, { markdown, spans }).catch(() => {})
+        void postJSON(`/d/${slug}/snapshot`, { markdown, spans }).catch((error) => {
+          // Best-effort persistence, but never silent: the agent API serves
+          // these spans, so a permanently failing push must be observable.
+          console.warn('pruf: snapshot push failed', error)
+        })
       })
     }
 
@@ -314,14 +364,34 @@ function CollabEditor({
       editor.action((ctx) => {
         const service = ctx.get(collabServiceCtx)
         service.bindDoc(ydoc).setAwareness(provider.awareness)
-        if (provider.seedMarkdown) {
+        // Consume the seed one-shot: capture to locals before nulling so a
+        // remounted editor never re-applies or re-attributes, and a later
+        // refactor can't clear the author fields out from under the re-mark.
+        const seed = provider.seedMarkdown
+        const seedKind = provider.seedAuthorKind
+        const seedAuthor = provider.seedAuthorName
+        provider.seedMarkdown = null
+        provider.seedAuthorKind = null
+        provider.seedAuthorName = null
+        if (seed) {
           // Server granted this client the seed claim; the default condition
           // (remote doc empty) double-guards against racing another seeder.
-          // Consume one-shot so a remounted editor never re-applies.
-          service.applyTemplate(provider.seedMarkdown)
-          provider.seedMarkdown = null
+          service.applyTemplate(seed)
         }
         service.connect()
+        if (seed && seedKind && seedKind !== 'human') {
+          // Must run after connect(): only then has ySyncPlugin rendered the
+          // seeded Yjs content into the view. The dispatched marks flow back
+          // through the binding, so peers receive attributed content.
+          attributeSeedToAgent(ctx.get(editorViewCtx), seedAuthor ?? '')
+          // The updated listener skips addToHistory:false transactions, so
+          // the chip never sees the marked doc on its own — push it directly.
+          callbacksRef.current.onSpans?.(
+            collectSpans(ctx.get(editorViewCtx).state.doc, {
+              excludePendingInsertions: true,
+            }),
+          )
+        }
 
         ctx.set(selectionCallbackCtx.key, {
           fn: (view) => callbacksRef.current.onSelection?.(view),
@@ -357,6 +427,8 @@ function CollabEditor({
     } else if (seedGranted && seedMarkdown && !seedAlreadyApplied(slug)) {
       markSeedApplied(slug)
       provider.seedMarkdown = seedMarkdown
+      provider.seedAuthorKind = seedAuthorKind ?? null
+      provider.seedAuthorName = seedAuthorName ?? null
       start()
     } else {
       provider.on('synced', start)

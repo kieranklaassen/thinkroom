@@ -29,8 +29,44 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_not doc.claimed?
     assert_includes body["note"], "claim"
 
+    # Agent-supplied markdown records agent seed authorship — the seeding
+    # client uses it to attribute the seeded text as AI prose.
+    assert_equal "agent", doc.seed_author_kind
+    assert_equal "Scout", doc.seed_author_name
+
     get "/d/#{body['slug']}"
     assert_response :success
+  end
+
+  test "agent doc without markdown gets DEFAULT_SEED with no seed authorship" do
+    post "/api/docs", params: { title: "Empty Doc" }, headers: AGENT, as: :json
+
+    assert_response :created
+    doc = Document.find_by!(slug: response.parsed_body["slug"])
+    assert_equal Document::DEFAULT_SEED, doc.seed_markdown
+    # Placeholder boilerplate must never be claimed as AI prose.
+    assert_nil doc.seed_author_kind
+    assert_nil doc.seed_author_name
+  end
+
+  test "doc created without X-Agent-Name records no seed authorship" do
+    post "/api/docs", params: { markdown: "# Anonymous" }, as: :json
+
+    assert_response :created
+    doc = Document.find_by!(slug: response.parsed_body["slug"])
+    assert_nil doc.seed_author_kind
+    assert_nil doc.seed_author_name
+  end
+
+  test "oversized agent name is capped at 255 chars in seed authorship" do
+    post "/api/docs",
+         params: { markdown: "# Big name" },
+         headers: { "X-Agent-Name" => "A" * 300 }, as: :json
+
+    assert_response :created
+    doc = Document.find_by!(slug: response.parsed_body["slug"])
+    assert_equal "agent", doc.seed_author_kind
+    assert_equal 255, doc.seed_author_name.length
   end
 
   test "state read exposes ownership without leaking the token" do
@@ -66,6 +102,20 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   test "state read falls back to seed markdown before any editor session" do
     get "/api/docs/#{@document.slug}", headers: AGENT
     assert_equal @document.seed_markdown, response.parsed_body["markdown"]
+  end
+
+  test "cold read reports agent-seeded docs as unreviewed AI with authorship" do
+    post "/api/docs", params: { markdown: "# From an agent" }, headers: AGENT, as: :json
+    slug = response.parsed_body["slug"]
+
+    get "/api/docs/#{slug}", headers: AGENT
+
+    provenance = response.parsed_body["provenance"]
+    assert_equal "agent", provenance["seed_author_kind"]
+    assert_equal "Scout", provenance["seed_author_name"]
+    assert_equal 100, provenance["summary"]["ai_pct"]
+    assert_equal 100, provenance["summary"]["unreviewed_pct"]
+    assert_empty provenance["spans"]
   end
 
   test "writes without X-Agent-Name are refused with instructive guidance" do

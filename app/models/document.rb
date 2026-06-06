@@ -33,6 +33,13 @@ class Document < ApplicationRecord
   # names are an amplification vector, so cap it (deliberate exception to the
   # no-validation convention on author_name).
   validates :owner_name, length: { maximum: 255 }, allow_nil: true
+  # seed_author_name travels to every doc opener via props and the channel
+  # seed grant — same amplification surface as owner_name, same cap.
+  validates :seed_author_name, length: { maximum: 255 }, allow_nil: true
+  # The editor AI-attributes any non-nil, non-"human" kind, so an unrecognized
+  # value written by a future code path would silently claim text as AI —
+  # constrain the vocabulary at the model.
+  validates :seed_author_kind, inclusion: { in: %w[human agent] }, allow_nil: true
 
   def to_param = slug
 
@@ -144,6 +151,9 @@ class Document < ApplicationRecord
   def provenance_summary
     spans = Array(provenance_spans)
     total = spans.sum { |s| s["chars"].to_i }
+    # Fallback only when no snapshot was ever pushed — a pushed snapshot with
+    # degenerate zero-char spans must not resurrect the seed-based claim.
+    return seed_authorship_summary if spans.empty?
     return { total: 0, human_pct: 0, ai_pct: 0, unreviewed_pct: 0 } if total.zero?
 
     human = spans.select { |s| s["kind"] == "human" }.sum { |s| s["chars"].to_i }
@@ -159,6 +169,18 @@ class Document < ApplicationRecord
   end
 
   private
+
+  # Cold-read fallback: before any editor session pushes a snapshot, an
+  # agent-seeded doc is 100% unreviewed AI prose — report that instead of
+  # zeros. The total approximates rendered length from the markdown source
+  # (syntax overhead inflates it); the first real snapshot replaces it.
+  # Human and legacy seeds keep returning zeros (no behavior change).
+  def seed_authorship_summary
+    zeros = { total: 0, human_pct: 0, ai_pct: 0, unreviewed_pct: 0 }
+    return zeros unless seed_author_kind == "agent" && seed_markdown.present?
+
+    { total: seed_markdown.length, human_pct: 0, ai_pct: 100, unreviewed_pct: 100 }
+  end
 
   def ensure_slug
     self.slug ||= SecureRandom.base58(10)
