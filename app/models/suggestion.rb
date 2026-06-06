@@ -1,9 +1,17 @@
 # A proposed edit awaiting human review. Suggestions live in the database —
 # not the Yjs doc — until a human accepts one, at which point the accepting
-# client inserts the text into the CRDT carrying AI provenance marks.
+# client inserts the text into the CRDT carrying provenance marks matching
+# the author kind (AI marks for ai/agent authors, human marks for human).
 class Suggestion < ApplicationRecord
   STATUSES = %w[pending accepted rejected].freeze
-  AUTHOR_KINDS = %w[ai agent].freeze
+  AUTHOR_KINDS = %w[ai agent human].freeze
+
+  # Suggestion text is parsed into every connected client's editor on accept,
+  # so the unauthenticated create surfaces must not relay megabyte payloads.
+  # Body/replaces share one generous cap; the anchor is tighter — it has to
+  # match a real span already in the document.
+  MAX_BODY_BYTES = 64.kilobytes
+  MAX_ANCHOR_BYTES = 10.kilobytes
 
   belongs_to :document
 
@@ -11,6 +19,7 @@ class Suggestion < ApplicationRecord
   validates :author_kind, inclusion: { in: AUTHOR_KINDS }
   validates :body, presence: true
   validates :status, inclusion: { in: STATUSES }
+  validate :payloads_within_caps
 
   scope :pending, -> { where(status: "pending") }
 
@@ -47,6 +56,12 @@ class Suggestion < ApplicationRecord
   end
 
   private
+
+  def payloads_within_caps
+    errors.add(:body, "is too long") if body.to_s.bytesize > MAX_BODY_BYTES
+    errors.add(:replaces, "is too long") if replaces.to_s.bytesize > MAX_BODY_BYTES
+    errors.add(:anchor_text, "is too long") if anchor_text.to_s.bytesize > MAX_ANCHOR_BYTES
+  end
 
   def transition!(new_status, by:)
     raise ActiveRecord::RecordInvalid.new(self), "already #{status}" unless status == "pending"

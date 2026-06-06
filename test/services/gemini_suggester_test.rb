@@ -24,7 +24,7 @@ class GeminiSuggesterTest < ActiveSupport::TestCase
     end
     activity = @document.activities.last
     assert_equal "suggested", activity.action
-    assert_equal "agent", Suggestion::AUTHOR_KINDS.last
+    assert_includes Suggestion::AUTHOR_KINDS, "agent"
     assert_equal "add a summary", @document.suggestions.last.intent
   end
 
