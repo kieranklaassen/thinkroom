@@ -19,6 +19,7 @@ void createInertiaApp({
   // Custom setup so every page mounts inside RiffrecProvider — the
   // header's Feedback button records screen/voice/event sessions anywhere.
   setup({ el, App, props }) {
+    if (!el) return
     createRoot(el).render(
       <StrictMode>
         <RiffrecProvider forceEnable>
