@@ -1,7 +1,7 @@
 ---
 title: "fix: Eliminate document-load flicker — content at first paint"
 type: fix
-status: active
+status: completed
 date: 2026-06-05
 ---
 
