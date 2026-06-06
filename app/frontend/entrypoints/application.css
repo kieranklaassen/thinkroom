@@ -1266,7 +1266,45 @@ a:focus-visible {
   gap: 0.5rem;
 }
 
+/* The desktop composer floats anchored below the selected text (the rail
+ * keeps the comment list; the mobile sheet keeps the inline composer). */
+.comment-composer--anchored {
+  position: fixed;
+  z-index: 50;
+  width: min(20rem, calc(100vw - 16px));
+  box-shadow: 0 8px 28px rgb(0 0 0 / 0.12);
+  visibility: hidden;
+  animation: none;
+}
+
+.comment-composer--anchored.is-placed {
+  visibility: visible;
+  animation: popover-in 140ms ease;
+}
+
+.comment-composer-note {
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+/* The anchored text stays tinted while its composer is open. */
+::highlight(comment-anchor) {
+  background-color: rgb(157 78 221 / 0.18);
+}
+
+[data-theme='whitey'] ::highlight(comment-anchor) {
+  background-color: rgb(65 131 196 / 0.18);
+}
+
 /* --------------------------- Selection toolbar ---------------------------- */
+/* Fixed-chrome z-index ladder: header 30 · selection chrome (toolbar,
+ * review popover, anchored composer) 50 · share popover / mobile dock 60 ·
+ * sheets 70+. Selection chrome is also suppressed in React while the share
+ * popover or the anchored composer is open — one floating form at a time. */
+/* Floating chrome renders hidden for one measuring pass, then `is-placed`
+ * reveals it at its final measured position — the entrance animation plays
+ * on reveal, never at an unmeasured spot. */
 .selection-toolbar {
   position: fixed;
   z-index: 50;
@@ -1276,6 +1314,11 @@ a:focus-visible {
   border-radius: 8px;
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
   padding: 0.2rem 0.25rem;
+  visibility: hidden;
+}
+
+.selection-toolbar.is-placed {
+  visibility: visible;
   animation: popover-in 140ms ease;
 }
 
@@ -1413,6 +1456,11 @@ a:focus-visible {
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.08);
   padding: 0.3rem 0.6rem;
   font-size: 0.72rem;
+  visibility: hidden;
+}
+
+.review-popover.is-placed {
+  visibility: visible;
   animation: popover-in 140ms ease;
 }
 

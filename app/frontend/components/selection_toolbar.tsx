@@ -1,4 +1,4 @@
-import { Fragment } from 'react'
+import { Fragment, type RefObject } from 'react'
 
 interface Action {
   label: string
@@ -8,19 +8,25 @@ interface Action {
 }
 
 interface Props {
-  position: { x: number; y: number }
+  /** Placement ref from useAnchoredPopover — measured for real-width clamping. */
+  rootRef: RefObject<HTMLDivElement | null>
+  /** Measured position; null during the pre-measure hidden phase. */
+  position: { x: number; y: number } | null
   /** Mode-gated action list (Edit: Comment · Ask AI; Suggest: Suggest a
    *  change; Comment: Comment). Renders nothing when empty. */
   actions: Action[]
 }
 
 /** Floating actions over a non-empty text selection. */
-export function SelectionToolbar({ position, actions }: Props) {
+export function SelectionToolbar({ rootRef, position, actions }: Props) {
   if (actions.length === 0) return null
+  const placed = position !== null
   return (
     <div
-      className="selection-toolbar"
-      style={{ left: position.x, top: position.y }}
+      ref={rootRef}
+      className={`selection-toolbar ${placed ? 'is-placed' : ''}`}
+      style={position ? { left: position.x, top: position.y } : undefined}
+      inert={!placed}
       onMouseDown={(event) => event.preventDefault()}
       role="toolbar"
       aria-label="Selection actions"
