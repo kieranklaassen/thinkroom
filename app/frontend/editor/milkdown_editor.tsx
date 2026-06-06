@@ -337,7 +337,11 @@ function CollabEditor({
         const markdown = getMarkdown()(ctx)
         const view = ctx.get(editorViewCtx)
         const spans = collectSpans(view.state.doc)
-        void postJSON(`/d/${slug}/snapshot`, { markdown, spans }).catch(() => {})
+        void postJSON(`/d/${slug}/snapshot`, { markdown, spans }).catch((error) => {
+          // Best-effort persistence, but never silent: the agent API serves
+          // these spans, so a permanently failing push must be observable.
+          console.warn('pruf: snapshot push failed', error)
+        })
       })
     }
 
@@ -380,6 +384,13 @@ function CollabEditor({
           // seeded Yjs content into the view. The dispatched marks flow back
           // through the binding, so peers receive attributed content.
           attributeSeedToAgent(ctx.get(editorViewCtx), seedAuthor ?? '')
+          // The updated listener skips addToHistory:false transactions, so
+          // the chip never sees the marked doc on its own — push it directly.
+          callbacksRef.current.onSpans?.(
+            collectSpans(ctx.get(editorViewCtx).state.doc, {
+              excludePendingInsertions: true,
+            }),
+          )
         }
 
         ctx.set(selectionCallbackCtx.key, {

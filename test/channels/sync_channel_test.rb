@@ -50,6 +50,23 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert_equal "Scout", message["seed_author_name"]
   end
 
+  test "stale-claim reclaim still carries agent authorship" do
+    doc = Document.create!(
+      title: "Reclaimed", seed_markdown: "# From an agent",
+      seed_author_kind: "agent", seed_author_name: "Scout"
+    )
+    assert doc.try_claim_seed, "HTTP path wins the fresh claim"
+
+    travel Document::SEED_CLAIM_TIMEOUT + 1.second do
+      subscribe slug: doc.slug
+
+      message = transmissions.last
+      assert_equal true, message["seed"]
+      assert_equal "agent", message["seed_author_kind"]
+      assert_equal "Scout", message["seed_author_name"]
+    end
+  end
+
   test "no-grant sync carries no seed authorship fields" do
     doc = Document.create!(title: "Hydrated", seed_markdown: "# Template",
                            seed_author_kind: "agent", seed_author_name: "Scout")

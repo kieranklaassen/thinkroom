@@ -36,6 +36,10 @@ class Document < ApplicationRecord
   # seed_author_name travels to every doc opener via props and the channel
   # seed grant — same amplification surface as owner_name, same cap.
   validates :seed_author_name, length: { maximum: 255 }, allow_nil: true
+  # The editor AI-attributes any non-nil, non-"human" kind, so an unrecognized
+  # value written by a future code path would silently claim text as AI —
+  # constrain the vocabulary at the model.
+  validates :seed_author_kind, inclusion: { in: %w[human agent] }, allow_nil: true
 
   def to_param = slug
 
@@ -147,7 +151,10 @@ class Document < ApplicationRecord
   def provenance_summary
     spans = Array(provenance_spans)
     total = spans.sum { |s| s["chars"].to_i }
-    return seed_authorship_summary if total.zero?
+    # Fallback only when no snapshot was ever pushed — a pushed snapshot with
+    # degenerate zero-char spans must not resurrect the seed-based claim.
+    return seed_authorship_summary if spans.empty?
+    return { total: 0, human_pct: 0, ai_pct: 0, unreviewed_pct: 0 } if total.zero?
 
     human = spans.select { |s| s["kind"] == "human" }.sum { |s| s["chars"].to_i }
     ai = total - human
