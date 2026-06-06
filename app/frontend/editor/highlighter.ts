@@ -7,6 +7,7 @@ const LANGS = [
 ]
 
 let parserPromise: Promise<Parser> | null = null
+let readyParser: Parser | null = null
 
 /** Singleton shiki-backed parser for code block highlighting. */
 export function loadShikiParser(): Promise<Parser> {
@@ -21,8 +22,24 @@ export function loadShikiParser(): Promise<Parser> {
           return []
         }
       }
+      readyParser = safe
       return safe
     },
   )
   return parserPromise
+}
+
+/**
+ * Non-blocking parser so the editor never waits on shiki to paint.
+ * While the highlighter loads, it returns the in-flight promise —
+ * prosemirror-highlight's documented lazy protocol — and the plugin
+ * re-renders decorations when it resolves. Once ready, it highlights
+ * synchronously. If shiki fails to load, code blocks stay plain text.
+ */
+let loadedPromise: Promise<void> | null = null
+
+export function lazyShikiParser(): Parser {
+  loadedPromise ??= loadShikiParser().then(() => undefined)
+  const loaded = loadedPromise
+  return (options) => (readyParser ? readyParser(options) : loaded)
 }
