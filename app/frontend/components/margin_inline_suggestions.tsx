@@ -117,7 +117,10 @@ export function MarginInlineSuggestions({ inline, handle, spans, focusMode }: Pr
           const acted = accept
             ? acceptInlineSuggestion(view, s.id)
             : rejectInlineSuggestion(view, s.id)
-          if (acted && accept) {
+          // Flash only the pure-insertion accept: mark removal preserves
+          // positions, so the snapshot range is still valid. Deletion and
+          // mixed accepts remove text, leaving s.from/s.to stale.
+          if (acted && accept && s.insertedText && !s.deletedText) {
             const max = view.state.doc.content.size
             flashMergedRange(handle.editor, {
               from: Math.min(s.from, max),

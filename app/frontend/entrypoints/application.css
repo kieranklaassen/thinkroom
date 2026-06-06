@@ -1324,6 +1324,13 @@ a:focus-visible {
   background: var(--sug-ins-line);
 }
 
+/* Container modifiers — structural discriminators for the tracked-edit
+ * stacks; no extra styles beyond the base classes today. */
+.margin-suggestions--inline,
+.sheet-suggestions--inline {
+  /* intentionally empty */
+}
+
 /* ----------------------------- Provenance summary ------------------------ */
 .prov-summary {
   display: inline-flex;

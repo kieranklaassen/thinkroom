@@ -1,4 +1,5 @@
 import type { Node } from '@milkdown/kit/prose/model'
+import { INSERTION_MARK } from '../suggest_changes/marks'
 import type { ProvenanceAttrs, ProvenanceKind, ReviewState } from './mark'
 
 export interface ProvenanceSpan {
@@ -42,7 +43,7 @@ export function collectSpans(doc: Node, options: CollectSpansOptions = {}): Prov
     // both marks simultaneously, and a provenance-only lookup would miss it.
     if (
       options.excludePendingInsertions &&
-      node.marks.some((m) => m.type.name === 'insertion')
+      node.marks.some((m) => m.type.name === INSERTION_MARK)
     ) {
       return
     }

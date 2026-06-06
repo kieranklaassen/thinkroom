@@ -112,14 +112,13 @@ interface CommentTarget {
 
 // Server-side anchor cap is 10 KB; a truncated anchor still matches as a
 // prefix within the block (findTextRange matches the exact search string).
+// Single encode + byte slice; a byte-boundary cut mid-codepoint decodes to
+// a trailing U+FFFD that would break prefix matching, so strip it.
 const ANCHOR_BYTE_CAP = 10 * 1024
 const capAnchor = (text: string): string => {
-  if (new TextEncoder().encode(text).length <= ANCHOR_BYTE_CAP) return text
-  let sliced = text.slice(0, 10000)
-  while (sliced.length > 0 && new TextEncoder().encode(sliced).length > ANCHOR_BYTE_CAP) {
-    sliced = sliced.slice(0, sliced.length - 500)
-  }
-  return sliced
+  const bytes = new TextEncoder().encode(text)
+  if (bytes.length <= ANCHOR_BYTE_CAP) return text
+  return new TextDecoder().decode(bytes.slice(0, ANCHOR_BYTE_CAP)).replace(/�+$/, '')
 }
 
 // Editor mode persists per doc (Google-Docs semantics: your mode, your

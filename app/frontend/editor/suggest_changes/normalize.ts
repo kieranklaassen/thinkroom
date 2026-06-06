@@ -7,17 +7,16 @@ import { ySyncPluginKey } from 'y-prosemirror'
 import { isSuggestChangesEnabled } from '@handlewithcare/prosemirror-suggest-changes'
 import { provenanceIdentityCtx } from '../provenance/mark'
 import { SKIP_PROVENANCE } from '../provenance/writer'
+import { SUGGESTION_MARK_NAMES } from './marks'
 
 export const suggestGuardKey = new PluginKey('SUGGEST_GUARD')
 
 const isRemote = (tr: Transaction): boolean => Boolean(tr.getMeta(ySyncPluginKey))
 
-const SUGGESTION_MARKS = ['insertion', 'deletion', 'modification']
-
 const stripFragment = (fragment: Fragment): Fragment => {
   const children: Node[] = []
   fragment.forEach((child) => {
-    let node = child.mark(child.marks.filter((m) => !SUGGESTION_MARKS.includes(m.type.name)))
+    let node = child.mark(child.marks.filter((m) => !SUGGESTION_MARK_NAMES.includes(m.type.name)))
     if (node.content.childCount > 0) {
       node = node.copy(stripFragment(node.content))
     }
@@ -58,7 +57,7 @@ export const suggestGuard = $prose((ctx) => {
       transformPasted: (slice: Slice): Slice => {
         let dirty = false
         const scan = (node: Node): void => {
-          if (node.marks.some((m) => SUGGESTION_MARKS.includes(m.type.name))) dirty = true
+          if (node.marks.some((m) => SUGGESTION_MARK_NAMES.includes(m.type.name))) dirty = true
           node.forEach(scan)
         }
         slice.content.forEach(scan)
@@ -84,7 +83,7 @@ export const suggestGuard = $prose((ctx) => {
           // Deletion marks land via AddMarkStep on existing text — no doc
           // size change, so getMap() yields no ranges. Collect them
           // explicitly or deletions would never get author-stamped.
-          if (step instanceof AddMarkStep && SUGGESTION_MARKS.includes(step.mark.type.name)) {
+          if (step instanceof AddMarkStep && SUGGESTION_MARK_NAMES.includes(step.mark.type.name)) {
             ranges.push({ from: step.from, to: step.to })
           }
           map.forEach((_oldStart, _oldEnd, newStart, newEnd) => {

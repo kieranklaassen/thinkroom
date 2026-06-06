@@ -4,15 +4,15 @@ import {
   revertSuggestion,
 } from '@handlewithcare/prosemirror-suggest-changes'
 import { SKIP_PROVENANCE } from '../provenance'
-import { collectInlineSuggestions } from './scan'
 
 /**
  * Accept = insertion keeps its text (mark removed; human provenance is
  * already on it from type time) / deletion's text is removed. Reject inverts.
  *
- * Idempotent under cross-client races: the id is re-checked at execution
- * time and the library command itself no-ops (returns false) when the marks
- * are already gone — the CRDT converges, the loser's click does nothing.
+ * Idempotent under cross-client races with no pre-scan: the library command
+ * builds its transform from the marks present at execution time and returns
+ * false without dispatching when none with this id remain — the CRDT
+ * converges, the loser's click does nothing.
  *
  * Resolve transactions skip history (an undo must not resurrect a resolved
  * suggestion) and skip the provenance writer (no re-attribution — accepted
@@ -25,9 +25,6 @@ function resolve(
   id: string,
   command: typeof applySuggestion,
 ): boolean {
-  const exists = collectInlineSuggestions(view.state.doc).some((s) => s.id === id)
-  if (!exists) return false
-
   return command(id)(view.state, (tr) => {
     tr.setMeta('addToHistory', false)
     tr.setMeta(SKIP_PROVENANCE, true)

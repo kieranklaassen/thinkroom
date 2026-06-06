@@ -1,4 +1,5 @@
 import type { Node } from '@milkdown/kit/prose/model'
+import { INSERTION_MARK, DELETION_MARK } from './marks'
 
 export interface InlineSuggestion {
   id: string
@@ -27,7 +28,7 @@ export function collectInlineSuggestions(doc: Node): InlineSuggestion[] {
     if (!node.isText || !node.text) return
     for (const mark of node.marks) {
       const name = mark.type.name
-      if (name !== 'insertion' && name !== 'deletion') continue
+      if (name !== INSERTION_MARK && name !== DELETION_MARK) continue
 
       const id = String(mark.attrs.id)
       const author = (mark.attrs.author as string) ?? ''
@@ -42,9 +43,9 @@ export function collectInlineSuggestions(doc: Node): InlineSuggestion[] {
 
       // Strip the zero-width spaces the library inserts at block boundaries.
       const text = node.text.replace(/​/g, '')
-      if (name === 'insertion' && entry.insertedText.length < TEXT_LIMIT) {
+      if (name === INSERTION_MARK && entry.insertedText.length < TEXT_LIMIT) {
         entry.insertedText = (entry.insertedText + text).slice(0, TEXT_LIMIT)
-      } else if (name === 'deletion' && entry.deletedText.length < TEXT_LIMIT) {
+      } else if (name === DELETION_MARK && entry.deletedText.length < TEXT_LIMIT) {
         entry.deletedText = (entry.deletedText + text).slice(0, TEXT_LIMIT)
       }
     }
