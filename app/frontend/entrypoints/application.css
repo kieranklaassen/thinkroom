@@ -1481,6 +1481,63 @@ a:focus-visible {
   flex-wrap: wrap;
 }
 
+/* Mode switcher (Edit / Suggest / Comment). */
+.mode-control-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.mode-control-trigger:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.mode-control-caret {
+  font-size: 0.6rem;
+}
+
+.mode-control-popover {
+  width: 16rem;
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.mode-control-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  width: 100%;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  padding: 0.45rem 0.55rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mode-control-option:hover {
+  background: var(--accent-soft);
+}
+
+.mode-control-option.is-active {
+  background: var(--accent-soft);
+}
+
+.mode-control-option-label {
+  font-size: 0.8rem;
+  font-weight: 550;
+  color: var(--ink);
+}
+
+.mode-control-option-hint {
+  font-size: 0.7rem;
+  color: var(--ink-faint);
+}
+
 /* Header chrome toggles (panel / focus). */
 .chrome-toggle {
   border: 1px solid var(--line);

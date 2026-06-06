@@ -36,6 +36,7 @@ import { IdentityChip } from '../../components/identity_chip'
 import { type OwnershipPayload } from '../../components/ownership_chip'
 import { ClaimBanner } from '../../components/claim_banner'
 import { HeaderMenu } from '../../components/header_menu'
+import { ModeControl, type EditorMode } from '../../components/mode_control'
 import { SharePopover } from '../../components/share_popover'
 import {
   MobileDock,
@@ -107,6 +108,27 @@ const writeStoredFlag = (key: string, value: boolean): void => {
   }
 }
 
+// Editor mode persists per doc (Google-Docs semantics: your mode, your
+// browser). Client-side only by design — never server state, never shared.
+const modeKey = (slug: string) => `pruf:mode:${slug}`
+
+const readStoredMode = (slug: string): EditorMode => {
+  try {
+    const raw = localStorage.getItem(modeKey(slug))
+    return raw === 'suggest' || raw === 'comment' ? raw : 'edit'
+  } catch {
+    return 'edit'
+  }
+}
+
+const writeStoredMode = (slug: string, mode: EditorMode): void => {
+  try {
+    localStorage.setItem(modeKey(slug), mode)
+  } catch {
+    // private mode — the mode just won't persist
+  }
+}
+
 export default function DocumentShow({
   document: doc,
   viewer,
@@ -134,6 +156,11 @@ export default function DocumentShow({
   const viewRef = useRef<EditorView | null>(null)
   const [panelOpen, setPanelOpen] = useState(() => readStoredFlag('pruf:panel', true))
   const [focusMode, setFocusMode] = useState(() => readStoredFlag('pruf:focus', false))
+  // Demo doc always opens in Edit and stays locked there.
+  const modeLocked = doc.slug === 'demo'
+  const [mode, setMode] = useState<EditorMode>(() =>
+    modeLocked ? 'edit' : readStoredMode(doc.slug),
+  )
 
   // ≤64rem: rail and margin cards give way to anchor markers, a bottom dock,
   // and sheets — the full product, rearranged for one hand.
@@ -157,6 +184,9 @@ export default function DocumentShow({
 
   useEffect(() => writeStoredFlag('pruf:panel', panelOpen), [panelOpen])
   useEffect(() => writeStoredFlag('pruf:focus', focusMode), [focusMode])
+  useEffect(() => {
+    if (!modeLocked) writeStoredMode(doc.slug, mode)
+  }, [mode, modeLocked, doc.slug])
 
   // ⌘\ toggles the side panel, ⌘. toggles suggestion focus.
   useEffect(() => {
@@ -520,6 +550,7 @@ export default function DocumentShow({
               <ProvenanceSummaryChip spans={spans} />
               <PresenceBar humans={peers} agents={presences} compact={isMobile} />
             </div>
+            <ModeControl mode={mode} onChange={setMode} locked={modeLocked} />
             <SharePopover agentsActive={presences.length} />
             <HeaderMenu
               panelOpen={panelOpen}
@@ -542,6 +573,7 @@ export default function DocumentShow({
                 initialStateB64={doc.yjs_state_b64}
                 seedMarkdown={doc.seed_markdown}
                 seedGranted={doc.seed_granted}
+                editable={mode === 'edit'}
                 onReady={setHandle}
                 onStatus={setStatus}
                 onSpans={setSpans}
@@ -585,14 +617,32 @@ export default function DocumentShow({
         {selectionTarget && liveSelectionPosition && (
           <SelectionToolbar
             position={liveSelectionPosition}
-            onComment={() => {
-              setComposerAnchor(selectionTarget.text)
-              setSelectionTarget(null)
-            }}
-            onAskAi={() => {
-              askAi('', selectionTarget.text)
-              setSelectionTarget(null)
-            }}
+            actions={[
+              // Per-mode capability matrix — Edit: Comment · Ask AI;
+              // Suggest: Suggest a change (wired in U6); Comment: Comment.
+              ...(mode !== 'suggest'
+                ? [
+                    {
+                      label: 'Comment',
+                      onClick: () => {
+                        setComposerAnchor(selectionTarget.text)
+                        setSelectionTarget(null)
+                      },
+                    },
+                  ]
+                : []),
+              ...(mode === 'edit'
+                ? [
+                    {
+                      label: 'Ask AI',
+                      onClick: () => {
+                        askAi('', selectionTarget.text)
+                        setSelectionTarget(null)
+                      },
+                    },
+                  ]
+                : []),
+            ]}
           />
         )}
         {reviewTarget && liveReview && (

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import * as Y from 'yjs'
-import { Editor, editorViewCtx, rootCtx } from '@milkdown/kit/core'
+import { Editor, editorViewCtx, editorViewOptionsCtx, rootCtx } from '@milkdown/kit/core'
 import { commonmark } from '@milkdown/kit/preset/commonmark'
 import { gfm } from '@milkdown/kit/preset/gfm'
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
@@ -58,6 +58,12 @@ interface EditorProps {
   /** True when documents#show atomically claimed the seed for this page
    *  load — the props-first path that skips the WebSocket round-trip. */
   seedGranted?: boolean
+  /** Read-only gate for Suggest/Comment modes. Implemented EXCLUSIVELY as
+   *  ProseMirror `editable: () => false` — provider connection, Yjs sync,
+   *  agent edits, programmatic dispatch, and seed application stay
+   *  mode-independent (a restored read-only mode must never burn the seed
+   *  claim). Defaults to editable. */
+  editable?: boolean
   onReady?: (handle: EditorHandle) => void
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
@@ -166,6 +172,7 @@ function CollabEditor({
   initialStateB64,
   seedMarkdown,
   seedGranted,
+  editable = true,
   onReady,
   onStatus,
   onSpans,
@@ -173,6 +180,10 @@ function CollabEditor({
 }: EditorProps) {
   const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection })
   callbacksRef.current = { onReady, onStatus, onSpans, onSelection }
+  // Ref so the editable() closure always reads the live value; the effect
+  // below nudges ProseMirror to re-read it when the mode changes.
+  const editableRef = useRef(editable)
+  editableRef.current = editable
 
   const { get, loading } = useEditor(
     (root) =>
@@ -180,6 +191,12 @@ function CollabEditor({
         .config((ctx) => {
           ctx.set(rootCtx, root)
           ctx.set(provenanceIdentityCtx.key, { name: identity.name })
+          // Read-only modes gate USER input only — ProseMirror still accepts
+          // programmatic transactions (Yjs sync, seeding, suggestion accept).
+          ctx.update(editorViewOptionsCtx, (prev) => ({
+            ...prev,
+            editable: () => editableRef.current,
+          }))
           ctx.update(highlightPluginConfig.key, (prev) => ({
             ...prev,
             parser: shikiParser,
@@ -311,6 +328,24 @@ function CollabEditor({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, slug])
+
+  // ProseMirror caches editable at each state update; an empty transaction
+  // makes it re-read the prop when the mode flips. Safe pre-bind: the action
+  // no-ops until the view exists.
+  useEffect(() => {
+    if (loading) return
+    const editor = get()
+    if (!editor) return
+    try {
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        view.dispatch(view.state.tr)
+      })
+    } catch {
+      // view not mounted yet — the initial editable value applies at bind
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editable, loading])
 
   return <Milkdown />
 }
