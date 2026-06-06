@@ -23,13 +23,27 @@ const STORAGE_KEY = 'proof:identity'
 
 const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
 
-/** Stable per-browser identity so reloads keep the same name and color. */
-export function userIdentity(): UserIdentity {
+/**
+ * Stable per-browser identity so reloads keep the same name and color.
+ *
+ * `serverName` is the session-stored chosen display name (the `viewer`
+ * shared prop). When present it wins over the stored random name — but the
+ * color always comes from the stored guest identity, and the localStorage
+ * record is never overwritten by a chosen name, so clearing the session
+ * name falls back to the same guest identity as before.
+ */
+export function userIdentity(serverName?: string | null): UserIdentity {
   // Render-path callers (useForm initializers) must survive non-browser
   // environments where localStorage doesn't exist.
   if (typeof window === 'undefined') {
-    return { name: 'Anonymous', color: COLORS[0] }
+    return { name: serverName ?? 'Anonymous', color: COLORS[0] }
   }
+  const guest = guestIdentity()
+  return serverName ? { ...guest, name: serverName } : guest
+}
+
+/** The random localStorage identity — what you are with no chosen name. */
+function guestIdentity(): UserIdentity {
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (stored) return JSON.parse(stored) as UserIdentity

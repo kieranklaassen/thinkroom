@@ -11,13 +11,15 @@ interface DocLink {
 interface Props {
   yours: DocLink[]
   recent: DocLink[]
+  viewer: { name: string | null; guest: boolean }
 }
 
-export default function DocumentsIndex({ yours, recent }: Props) {
-  // Lazy initializer: reads the localStorage identity at first render so the
-  // creator's display name rides along and the new doc is owned from birth.
-  // Staying on useForm keeps the `processing` double-submit guard.
-  const { post, processing } = useForm(() => ({ name: userIdentity().name }))
+export default function DocumentsIndex({ yours, recent, viewer }: Props) {
+  // Lazy initializer: the chosen session name wins; guests post their
+  // random localStorage name as the fallback (the server prefers the
+  // session name on create anyway). Staying on useForm keeps the
+  // `processing` double-submit guard.
+  const { post, processing } = useForm(() => ({ name: userIdentity(viewer.name).name }))
   const [copied, setCopied] = useState(false)
 
   const origin = typeof window === 'undefined' ? '' : window.location.origin
@@ -40,7 +42,11 @@ export default function DocumentsIndex({ yours, recent }: Props) {
       <div className="landing">
         <div className="landing-corner"><FeedbackButton /></div>
         <main className="landing-main">
-          <h1 className="landing-wordmark">Pruf</h1>
+          <h1 className="landing-wordmark">
+            <Link href="/" className="landing-wordmark-link">
+              Pruf
+            </Link>
+          </h1>
           <p className="landing-tagline">
             A collaborative editor that remembers who wrote what — humans and AI,
             side by side, every word attributed.
