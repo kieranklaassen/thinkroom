@@ -141,4 +141,15 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
     post document_suggestions_path("gone-doc"), params: { body: "text" }
     assert_redirected_to root_path
   end
+
+  test "a human-authored suggestion flows through the same accept machinery" do
+    suggestion = Suggestion.propose!(
+      document: @document, author_name: "Quiet Falcon", author_kind: "human",
+      body: "Better wording.", replaces: "Old wording."
+    )
+
+    patch accept_suggestion_path(suggestion), params: { by: "Reviewer" }
+    assert_equal "accepted", suggestion.reload.status
+    assert_includes @document.activities.last.detail, "Quiet Falcon"
+  end
 end

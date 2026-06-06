@@ -37,6 +37,7 @@ import { type OwnershipPayload } from '../../components/ownership_chip'
 import { ClaimBanner } from '../../components/claim_banner'
 import { HeaderMenu } from '../../components/header_menu'
 import { ModeControl, type EditorMode } from '../../components/mode_control'
+import { SuggestComposer } from '../../components/suggest_composer'
 import { SharePopover } from '../../components/share_popover'
 import {
   MobileDock,
@@ -150,9 +151,17 @@ export default function DocumentShow({
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
   const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null)
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
+  // Suggest-mode composer: the selected text to replace, frozen with the
+  // toolbar position it was opened from (the selection itself collapses).
+  const [suggestTarget, setSuggestTarget] = useState<{
+    text: string
+    position: { x: number; y: number }
+  } | null>(null)
   const [aiPendingCount, setAiPendingCount] = useState(0)
   const aiPending = aiPendingCount > 0
-  const prevSuggestionCount = useRef(suggestions.length)
+  const prevSuggestionCount = useRef(
+    suggestions.filter((s) => s.author_kind !== 'human').length,
+  )
   const viewRef = useRef<EditorView | null>(null)
   const [panelOpen, setPanelOpen] = useState(() => readStoredFlag('pruf:panel', true))
   const [focusMode, setFocusMode] = useState(() => readStoredFlag('pruf:focus', false))
@@ -206,14 +215,17 @@ export default function DocumentShow({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  // Only a suggestion ARRIVING clears the thinking state — accept/reject
-  // shrink the list and must not re-enable Ask AI while a request is live.
+  // Only a MACHINE suggestion ARRIVING clears the thinking state —
+  // accept/reject shrink the list and must not re-enable Ask AI while a
+  // request is live, and a human suggestion (yours or a collaborator's)
+  // landing mid-request must not release the button early.
+  const machineSuggestionCount = suggestions.filter((s) => s.author_kind !== 'human').length
   useEffect(() => {
-    if (suggestions.length > prevSuggestionCount.current) {
+    if (machineSuggestionCount > prevSuggestionCount.current) {
       setAiPendingCount((count) => Math.max(0, count - 1))
     }
-    prevSuggestionCount.current = suggestions.length
-  }, [suggestions.length])
+    prevSuggestionCount.current = machineSuggestionCount
+  }, [machineSuggestionCount])
 
   // Human presence from Yjs awareness. Self is filtered out — the
   // IdentityChip represents you; a duplicate avatar next to it is noise.
@@ -473,6 +485,38 @@ export default function DocumentShow({
     [doc.slug, handle, aiPendingCount],
   )
 
+  const submitSuggestion = useCallback(
+    (target: string, replacement: string) => {
+      setSuggestTarget(null)
+      const optimisticSuggestion: SuggestionPayload = {
+        id: -Date.now(),
+        author_name: identity.name,
+        author_kind: 'human',
+        intent: null,
+        body: replacement,
+        anchor_text: target,
+        replaces: target,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+      }
+      router
+        .optimistic((props: Partial<DocumentProps>) => ({
+          suggestions: [...(props.suggestions ?? []), optimisticSuggestion],
+        }))
+        .post(
+          `/d/${doc.slug}/suggestions`,
+          {
+            body: replacement,
+            replaces: target,
+            anchor_text: target,
+            author_name: identity.name,
+          },
+          { preserveScroll: true, only: ['suggestions', 'activities'], async: true },
+        )
+    },
+    [doc.slug, identity.name],
+  )
+
   const submitComment = useCallback(
     (body: string, anchorText: string | null) => {
       setComposerAnchor(null)
@@ -619,7 +663,28 @@ export default function DocumentShow({
             position={liveSelectionPosition}
             actions={[
               // Per-mode capability matrix — Edit: Comment · Ask AI;
-              // Suggest: Suggest a change (wired in U6); Comment: Comment.
+              // Suggest: Suggest a change; Comment: Comment.
+              ...(mode === 'suggest'
+                ? [
+                    {
+                      label: 'Suggest a change',
+                      // textBetween joins blocks with '\n' — a newline means
+                      // the selection spans blocks, which the per-block
+                      // anchor matching in suggestions.ts can't replace.
+                      disabled: selectionTarget.text.includes('\n'),
+                      title: selectionTarget.text.includes('\n')
+                        ? 'Suggestions work on single paragraphs — narrow your selection'
+                        : undefined,
+                      onClick: () => {
+                        setSuggestTarget({
+                          text: selectionTarget.text,
+                          position: liveSelectionPosition,
+                        })
+                        setSelectionTarget(null)
+                      },
+                    },
+                  ]
+                : []),
               ...(mode !== 'suggest'
                 ? [
                     {
@@ -643,6 +708,14 @@ export default function DocumentShow({
                   ]
                 : []),
             ]}
+          />
+        )}
+        {suggestTarget && (
+          <SuggestComposer
+            target={suggestTarget.text}
+            position={suggestTarget.position}
+            onSubmit={(replacement) => submitSuggestion(suggestTarget.text, replacement)}
+            onCancel={() => setSuggestTarget(null)}
           />
         )}
         {reviewTarget && liveReview && (
