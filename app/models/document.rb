@@ -147,7 +147,7 @@ class Document < ApplicationRecord
   def provenance_summary
     spans = Array(provenance_spans)
     total = spans.sum { |s| s["chars"].to_i }
-    return { total: 0, human_pct: 0, ai_pct: 0, unreviewed_pct: 0 } if total.zero?
+    return seed_authorship_summary if total.zero?
 
     human = spans.select { |s| s["kind"] == "human" }.sum { |s| s["chars"].to_i }
     ai = total - human
@@ -162,6 +162,18 @@ class Document < ApplicationRecord
   end
 
   private
+
+  # Cold-read fallback: before any editor session pushes a snapshot, an
+  # agent-seeded doc is 100% unreviewed AI prose — report that instead of
+  # zeros. The total approximates rendered length from the markdown source
+  # (syntax overhead inflates it); the first real snapshot replaces it.
+  # Human and legacy seeds keep returning zeros (no behavior change).
+  def seed_authorship_summary
+    zeros = { total: 0, human_pct: 0, ai_pct: 0, unreviewed_pct: 0 }
+    return zeros unless seed_author_kind == "agent" && seed_markdown.present?
+
+    { total: seed_markdown.length, human_pct: 0, ai_pct: 100, unreviewed_pct: 100 }
+  end
 
   def ensure_slug
     self.slug ||= SecureRandom.base58(10)
