@@ -290,7 +290,10 @@ function CollabEditor({
         })
 
         ctx.get(listenerCtx).updated((_listenerCtx, doc) => {
-          callbacksRef.current.onSpans?.(collectSpans(doc))
+          // Chip path: display-only exclusion of pending insertions. The
+          // snapshot path below stays unfiltered — persisted provenance must
+          // remain complete while suggestions are pending.
+          callbacksRef.current.onSpans?.(collectSpans(doc, { excludePendingInsertions: true }))
           if (snapshotTimer) clearTimeout(snapshotTimer)
           snapshotTimer = setTimeout(pushSnapshot, SNAPSHOT_DEBOUNCE_MS)
         })
