@@ -452,12 +452,25 @@ a:focus-visible {
   margin-top: 0.85em;
 }
 
+.milkdown .ProseMirror > :first-child {
+  margin-top: 0;
+}
+
 .milkdown .ProseMirror h1,
 .milkdown .ProseMirror h2,
 .milkdown .ProseMirror h3 {
   font-weight: 700;
   letter-spacing: -0.015em;
   line-height: 1.25;
+  text-wrap: balance;
+}
+
+/* Headings bind to their section: generous space above (set per level
+   below), tight below — the element FOLLOWING a heading sits close. */
+.milkdown .ProseMirror h1 + *,
+.milkdown .ProseMirror h2 + *,
+.milkdown .ProseMirror h3 + * {
+  margin-top: 0.5em;
 }
 
 .milkdown .ProseMirror h1 {
@@ -479,14 +492,21 @@ a:focus-visible {
   color: var(--accent);
   text-decoration: underline;
   text-decoration-color: var(--accent-soft);
+  text-decoration-thickness: 1px;
   text-underline-offset: 2px;
 }
 
+.milkdown .ProseMirror a:hover {
+  text-decoration-color: var(--accent);
+}
+
+/* No forced italic: long italic serif passages tire the eye — the ink
+   shift + border carry the quote (this also unifies proof with whitey,
+   which already overrode the italic). */
 .milkdown .ProseMirror blockquote {
   border-left: 3px solid var(--line);
   padding-left: 1.1em;
   color: var(--ink-soft);
-  font-style: italic;
 }
 
 .milkdown .ProseMirror ul,
@@ -504,6 +524,60 @@ a:focus-visible {
 
 .milkdown .ProseMirror li {
   margin: 0.25em 0;
+  padding-left: 0.2em;
+}
+
+/* Muted markers — full-ink bullets shout (Tailwind Typography's move). */
+.milkdown .ProseMirror li::marker {
+  color: var(--ink-faint);
+}
+
+/* Task lists. The gfm preset renders task items as bare
+   li[data-item-type='task'][data-checked] — no input element — so the
+   checkbox is drawn in the marker gutter with ::before. Toggling happens
+   by editing the [x] markdown; an interactive checkbox component is a
+   deferred follow-up. */
+.milkdown .ProseMirror li[data-item-type='task'] {
+  list-style: none;
+  position: relative;
+}
+
+.milkdown .ProseMirror li[data-item-type='task']::before {
+  content: '';
+  position: absolute;
+  left: -1.45em;
+  top: 0.3em;
+  width: 0.95em;
+  height: 0.95em;
+  border: 1.5px solid var(--ink-faint);
+  border-radius: 4px;
+  background: var(--surface-raised);
+}
+
+.milkdown .ProseMirror li[data-item-type='task'][data-checked='true']::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.milkdown .ProseMirror li[data-item-type='task'][data-checked='true']::after {
+  content: '';
+  position: absolute;
+  left: calc(-1.45em + 0.26em);
+  top: calc(0.3em + 0.2em);
+  width: 0.43em;
+  height: 0.24em;
+  border-left: 2px solid var(--surface-raised);
+  border-bottom: 2px solid var(--surface-raised);
+  transform: rotate(-45deg);
+}
+
+.milkdown .ProseMirror li[data-item-type='task'][data-checked='true'] {
+  color: var(--ink-soft);
+}
+
+.milkdown .ProseMirror del {
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  color: var(--ink-soft);
 }
 
 .milkdown .ProseMirror code {
@@ -530,10 +604,19 @@ a:focus-visible {
   font-size: inherit;
 }
 
+/* A section break deserves air — owl-conformant: extra space comes from
+   margin-top on the rule and on whatever follows it. */
 .milkdown .ProseMirror hr {
   border: none;
   border-top: 1px solid var(--line);
-  margin: 2em 0;
+}
+
+.milkdown .ProseMirror > hr {
+  margin-top: 3em;
+}
+
+.milkdown .ProseMirror > hr + * {
+  margin-top: 3em;
 }
 
 .milkdown .ProseMirror img {
