@@ -57,7 +57,7 @@ class DocumentsController < InertiaController
       title: params[:title].presence || "Untitled",
       seed_markdown: params[:markdown].presence || Document::DEFAULT_SEED,
       owner_token: owner_token,
-      owner_name: Document.normalize_owner_name(preferred_name(params[:name])),
+      owner_name: Document.normalize_owner_name(preferred_name(params[:name], fallback: nil)),
       claimed_at: Time.current
     )
     remember_recent(document)
@@ -68,7 +68,7 @@ class DocumentsController < InertiaController
   # prefetchers and unfurlers can't claim. First claim wins atomically.
   def claim
     document = Document.find_by!(slug: params[:slug])
-    document.claim!(token: owner_token, name: preferred_name(params[:name]))
+    document.claim!(token: owner_token, name: preferred_name(params[:name], fallback: nil))
     redirect_back fallback_location: document_page_path(document.slug), status: :see_other
   rescue Document::UnclaimableError
     redirect_back fallback_location: document_page_path(document.slug), status: :see_other,

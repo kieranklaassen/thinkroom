@@ -118,7 +118,7 @@ export default function DocumentShow({
   // sync-on-prop-change effect, which a future reload batch listing
   // `viewer` would silently clobber mid-rename.
   const [identity, setIdentity] = useState<UserIdentity>(() => userIdentity(viewer.name))
-  const [isGuest, setIsGuest] = useState(viewer.guest)
+  const [guest, setGuest] = useState(viewer.guest)
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [handle, setHandle] = useState<EditorHandle | null>(null)
   const [spans, setSpans] = useState<ProvenanceSpan[]>([])
@@ -204,21 +204,24 @@ export default function DocumentShow({
   }, [handle])
 
   // Rename applies here AFTER the server confirms the session write (the
-  // chip's POST onSuccess) — awareness and the provenance identity ctx are
-  // live side effects Inertia's optimistic rollback can't touch, so they
-  // only flip once the name is durably stored.
-  const handleRenamed = useCallback(
-    (name: string | null) => {
-      const next = userIdentity(name)
-      setIdentity(next)
-      setIsGuest(name === null)
-      if (handle) {
-        handle.provider.awareness.setLocalStateField('user', next)
-        handle.editor.action((ctx) => ctx.set(provenanceIdentityCtx.key, { name: next.name }))
-      }
-    },
-    [handle],
-  )
+  // chip's POST onSuccess). The handler only moves React state — the live
+  // side effects ride the effect below, so a rename that completes while
+  // the editor is still connecting (handle null) heals the moment the
+  // handle arrives, and an in-flight POST can never act through a stale
+  // null-handle closure.
+  const handleRenamed = useCallback((name: string | null) => {
+    setIdentity(userIdentity(name))
+    setGuest(name === null)
+  }, [])
+
+  // Identity state is the source of truth for the live editor surfaces:
+  // re-applied whenever the handle arrives or the identity changes.
+  // Idempotent — re-writing the same awareness state is a no-op for peers.
+  useEffect(() => {
+    if (!handle) return
+    handle.provider.awareness.setLocalStateField('user', identity)
+    handle.editor.action((ctx) => ctx.set(provenanceIdentityCtx.key, { name: identity.name }))
+  }, [handle, identity])
 
   // Agent pseudo-cursors track the presences prop.
   useEffect(() => {
@@ -509,7 +512,7 @@ export default function DocumentShow({
             />
           </div>
           <div className="doc-header-right">
-            <IdentityChip identity={identity} guest={isGuest} onRenamed={handleRenamed} />
+            <IdentityChip identity={identity} guest={guest} onRenamed={handleRenamed} />
             <ProvenanceSummaryChip spans={spans} />
             <PresenceBar humans={peers} agents={presences} compact={isMobile} />
             <button

@@ -23,7 +23,48 @@ class IdentityFlowTest < ActionDispatch::IntegrationTest
     assert_response :see_other
 
     get root_path
-    assert_equal({ name: "Kieran", guest: false }, viewer_props.symbolize_keys.transform_values { |v| v })
+    viewer = viewer_props
+    assert_equal "Kieran", viewer[:name]
+    assert_equal false, viewer[:guest]
+  end
+
+  test "viewer is delivered on a partial reload" do
+    post identity_path, params: { name: "Kieran" }
+    get root_path # establish the page + version
+
+    get root_path, headers: {
+      "X-Inertia" => "true",
+      "X-Inertia-Version" => InertiaController.safe_vite_digest.to_s,
+      "X-Inertia-Partial-Component" => "documents/index",
+      "X-Inertia-Partial-Data" => "viewer"
+    }
+    assert_response :success
+    props = response.parsed_body.fetch("props")
+    assert_equal "Kieran", props.dig("viewer", "name")
+  end
+
+  test "forged identity POST without CSRF token is rejected when protection is active" do
+    original = ActionController::Base.allow_forgery_protection
+    ActionController::Base.allow_forgery_protection = true
+    begin
+      get root_path # mint cookies, discard the token
+
+      post identity_path, params: { name: "Forger" }
+
+      assert_response :unprocessable_entity
+      get root_path
+      assert viewer_props[:guest]
+    ensure
+      ActionController::Base.allow_forgery_protection = original
+    end
+  end
+
+  test "non-string name params clear rather than stringify" do
+    post identity_path, params: { name: "Kieran" }
+    post identity_path, params: { name: { x: "1" } }
+
+    get root_path
+    assert viewer_props[:guest]
   end
 
   test "name persists across requests in the same session" do
