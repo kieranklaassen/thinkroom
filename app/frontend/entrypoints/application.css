@@ -1308,6 +1308,17 @@ a:focus-visible {
   color: color-mix(in srgb, var(--ink) 72%, transparent);
 }
 
+/* Tracked-edit cards: distinct from agent/AI proposal cards — a green
+ * accent edge ties the card to the inline insertion tint. */
+.margin-card--inline,
+.sheet-card--inline {
+  border-left: 3px solid var(--sug-ins-line);
+}
+
+.margin-marker--inline {
+  background: var(--sug-ins-line);
+}
+
 /* ----------------------------- Provenance summary ------------------------ */
 .prov-summary {
   display: inline-flex;
