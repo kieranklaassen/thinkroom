@@ -27,6 +27,11 @@
   --prov-reviewed-line: #9d4edd55;
   --prov-endorsed-line: #9d4edd40;
 
+  --sug-ins-bg: #d4edda88;
+  --sug-ins-line: #2e9e4fbb;
+  --sug-del-bg: #fadbd888;
+  --sug-del-line: #c0392bbb;
+
   --code-bg: #f3f0e9;
   --measure: 44rem;
 }
@@ -51,6 +56,11 @@
   --prov-reviewed-bg: #dce9f733;
   --prov-reviewed-line: #4183c455;
   --prov-endorsed-line: #4183c440;
+
+  --sug-ins-bg: #d4edda88;
+  --sug-ins-line: #2e9e4fbb;
+  --sug-del-bg: #fadbd888;
+  --sug-del-line: #c0392bbb;
 
   --code-bg: #f8f8f8;
   --measure: 47rem;
@@ -1276,6 +1286,26 @@ a:focus-visible {
 .milkdown .prov--ai.prov--endorsed {
   background: transparent;
   box-shadow: inset 0 -2px 0 var(--prov-endorsed-line);
+}
+
+/* --------------------------- Suggestion tracking -------------------------- */
+/* Pending track-changes marks (Suggest mode). Green = proposed insertion,
+ * red strikethrough = proposed deletion (text stays until accepted). The
+ * suggestion tint deliberately dominates provenance tints while pending. */
+.milkdown ins.sug-ins {
+  text-decoration: none;
+  background: var(--sug-ins-bg);
+  box-shadow: inset 0 -2px 0 var(--sug-ins-line);
+  border-radius: 2px;
+}
+
+.milkdown del.sug-del {
+  text-decoration: line-through;
+  text-decoration-color: var(--sug-del-line);
+  text-decoration-thickness: 2px;
+  background: var(--sug-del-bg);
+  border-radius: 2px;
+  color: color-mix(in srgb, var(--ink) 72%, transparent);
 }
 
 /* ----------------------------- Provenance summary ------------------------ */

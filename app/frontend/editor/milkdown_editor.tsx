@@ -26,6 +26,7 @@ import { lazyShikiParser, loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
 import type { UserIdentity } from './identity'
 import { provenance, provenanceIdentityCtx, collectSpans, type ProvenanceSpan } from './provenance'
+import { suggestChangesMarks } from './suggest_changes'
 import {
   alignCenterIcon,
   alignLeftIcon,
@@ -242,6 +243,7 @@ function CollabEditor({
         .use(highlight)
         .use(upload)
         .use(provenance)
+        .use(suggestChangesMarks)
         .use(selectionWatcher)
         .use(agentCursors)
         .use(collab),
