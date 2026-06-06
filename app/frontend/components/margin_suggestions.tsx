@@ -254,6 +254,9 @@ export function MarginSuggestions({
               <del className="margin-old">{truncate(suggestion.replaces, 120)}</del>
             )}
             <p className="margin-new">{truncate(suggestion.body, 280)}</p>
+            {/* Optimistic placeholders (negative id) have no server row yet —
+                hide actions until the real id arrives from the reload. */}
+            {suggestion.id > 0 && (
             <div className="suggestion-actions">
               <button
                 className="btn-accept"
@@ -276,6 +279,7 @@ export function MarginSuggestions({
                 Reject
               </button>
             </div>
+            )}
           </div>
         )
       })}

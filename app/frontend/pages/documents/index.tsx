@@ -3,18 +3,14 @@ import { Head, Link, useForm } from '@inertiajs/react'
 import { FeedbackButton } from '../../components/feedback_button'
 import { userIdentity } from '../../editor/identity'
 import { useClaim } from '../../lib/use_claim'
+import type { OwnershipPayload } from '../../components/ownership_chip'
 
 interface DocLink {
   title: string
   slug: string
 }
 
-interface RecentDoc extends DocLink {
-  claimed: boolean
-  claimable: boolean
-  owner_name: string | null
-  yours: boolean
-}
+interface RecentDoc extends DocLink, OwnershipPayload {}
 
 interface Props {
   yours: DocLink[]

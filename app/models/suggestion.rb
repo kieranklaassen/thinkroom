@@ -12,6 +12,7 @@ class Suggestion < ApplicationRecord
   # match a real span already in the document.
   MAX_BODY_BYTES = 64.kilobytes
   MAX_ANCHOR_BYTES = 10.kilobytes
+  MAX_INTENT_BYTES = 1.kilobyte
 
   belongs_to :document
 
@@ -61,6 +62,7 @@ class Suggestion < ApplicationRecord
     errors.add(:body, "is too long") if body.to_s.bytesize > MAX_BODY_BYTES
     errors.add(:replaces, "is too long") if replaces.to_s.bytesize > MAX_BODY_BYTES
     errors.add(:anchor_text, "is too long") if anchor_text.to_s.bytesize > MAX_ANCHOR_BYTES
+    errors.add(:intent, "is too long") if intent.to_s.bytesize > MAX_INTENT_BYTES
   end
 
   def transition!(new_status, by:)
