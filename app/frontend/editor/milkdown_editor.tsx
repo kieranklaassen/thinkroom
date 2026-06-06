@@ -9,6 +9,13 @@ import { cursor } from '@milkdown/kit/plugin/cursor'
 import { indent } from '@milkdown/kit/plugin/indent'
 import { trailing } from '@milkdown/kit/plugin/trailing'
 import { upload, uploadConfig } from '@milkdown/kit/plugin/upload'
+import { tableBlock, tableBlockConfig } from '@milkdown/kit/component/table-block'
+import type { RenderType } from '@milkdown/kit/component/table-block'
+// Base ProseMirror styles the table-block chrome depends on: a positioned
+// .ProseMirror ancestor and the prosemirror-tables fixed-layout/selection CSS.
+import '@milkdown/kit/prose/view/style/prosemirror.css'
+import '@milkdown/kit/prose/tables/style/tables.css'
+import './table_block.css'
 import { getMarkdown } from '@milkdown/kit/utils'
 import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
 import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight'
@@ -20,6 +27,14 @@ import { loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
 import type { UserIdentity } from './identity'
 import { provenance, provenanceIdentityCtx, collectSpans, type ProvenanceSpan } from './provenance'
+import {
+  alignCenterIcon,
+  alignLeftIcon,
+  alignRightIcon,
+  gripIcon,
+  plusIcon,
+  trashIcon,
+} from './table_icons'
 import { agentCursors } from './agent_cursors'
 import { selectionCallbackCtx, selectionWatcher } from './selection_watcher'
 import { postJSON } from '../lib/csrf'
@@ -133,9 +148,33 @@ function CollabEditor({
             uploader: imageUploader,
             enableHtmlFileUploader: true,
           }))
+          // The defaults are bare text ('+', 'left', …) — real icons required.
+          ctx.update(tableBlockConfig.key, (prev) => ({
+            ...prev,
+            renderButton: (renderType: RenderType): string => {
+              switch (renderType) {
+                case 'add_row':
+                case 'add_col':
+                  return plusIcon
+                case 'delete_row':
+                case 'delete_col':
+                  return trashIcon
+                case 'align_col_left':
+                  return alignLeftIcon
+                case 'align_col_center':
+                  return alignCenterIcon
+                case 'align_col_right':
+                  return alignRightIcon
+                case 'col_drag_handle':
+                case 'row_drag_handle':
+                  return gripIcon
+              }
+            },
+          }))
         })
         .use(commonmark)
         .use(gfm)
+        .use(tableBlock)
         .use(listener)
         .use(clipboard)
         .use(cursor)
