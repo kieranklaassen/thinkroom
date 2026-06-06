@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useClaim } from '../lib/use_claim'
+import { getStoredFlag, setStoredFlag } from '../lib/local_storage'
 import type { OwnershipPayload } from './ownership_chip'
 
 interface Props {
@@ -10,22 +11,6 @@ interface Props {
 
 const dismissKey = (slug: string) => `pruf:claim-banner:${slug}`
 
-const readDismissed = (slug: string): boolean => {
-  try {
-    return localStorage.getItem(dismissKey(slug)) === '1'
-  } catch {
-    return false
-  }
-}
-
-const writeDismissed = (slug: string): void => {
-  try {
-    localStorage.setItem(dismissKey(slug), '1')
-  } catch {
-    // private mode — the dismissal just won't persist
-  }
-}
-
 /**
  * Prominent claim CTA for unclaimed claimable docs — the primary claim
  * surface (the header menu keeps a fallback item). The per-slug dismiss
@@ -35,7 +20,7 @@ const writeDismissed = (slug: string): void => {
  * a doomed claim.
  */
 export function ClaimBanner({ slug, ownership, claimerName }: Props) {
-  const [dismissed, setDismissed] = useState(() => readDismissed(slug))
+  const [dismissed, setDismissed] = useState(() => getStoredFlag(dismissKey(slug), false))
   const { claim, claiming, claimFailed } = useClaim(slug, claimerName, {
     only: ['ownership', 'activities'],
     optimistic: (props: { ownership?: OwnershipPayload }) => ({
@@ -61,7 +46,7 @@ export function ClaimBanner({ slug, ownership, claimerName }: Props) {
           aria-label="Dismiss"
           title="Dismiss — you can still claim from the header menu"
           onClick={() => {
-            writeDismissed(slug)
+            setStoredFlag(dismissKey(slug), true)
             setDismissed(true)
           }}
         >

@@ -130,6 +130,14 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "oversized intent is rejected" do
+    assert_no_difference -> { @document.suggestions.count } do
+      post document_suggestions_path(@document.slug), params: {
+        body: "ok", intent: "a" * (Suggestion::MAX_INTENT_BYTES + 1)
+      }
+    end
+  end
+
   test "empty body is rejected" do
     assert_no_difference -> { @document.suggestions.count } do
       post document_suggestions_path(@document.slug), params: { body: "" }

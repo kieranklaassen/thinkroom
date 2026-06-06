@@ -32,8 +32,8 @@ class SuggestionsController < InertiaController
     log_and_broadcast("accepted_suggestion", "accepted “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
     redirect_back fallback_location: document_page_path(@suggestion.document.slug), status: :see_other
   rescue ActiveRecord::RecordInvalid
-    redirect_back fallback_location: document_page_path(@suggestion.document.slug),
-                  inertia: { errors: { suggestion: "is no longer pending" }, status: :see_other }
+    redirect_back fallback_location: document_page_path(@suggestion.document.slug), status: :see_other,
+                  inertia: { errors: { suggestion: "is no longer pending" } }
   end
 
   def reject
@@ -41,14 +41,19 @@ class SuggestionsController < InertiaController
     log_and_broadcast("rejected_suggestion", "rejected “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
     redirect_back fallback_location: document_page_path(@suggestion.document.slug), status: :see_other
   rescue ActiveRecord::RecordInvalid
-    redirect_back fallback_location: document_page_path(@suggestion.document.slug),
-                  inertia: { errors: { suggestion: "is no longer pending" }, status: :see_other }
+    redirect_back fallback_location: document_page_path(@suggestion.document.slug), status: :see_other,
+                  inertia: { errors: { suggestion: "is no longer pending" } }
   end
 
   private
 
   def set_suggestion
     @suggestion = Suggestion.find(params[:id])
+  rescue ActiveRecord::RecordNotFound
+    # The suggestion (or its doc) was deleted while the card was on screen —
+    # redirect back cleanly instead of a 404 modal over the editor.
+    redirect_back fallback_location: root_path, status: :see_other,
+                  inertia: { errors: { suggestion: "is no longer available" } }
   end
 
   def log_and_broadcast(action, detail)

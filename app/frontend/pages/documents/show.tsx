@@ -48,6 +48,12 @@ import {
 import { useMetaChannel } from '../../lib/use_meta_channel'
 import { useMediaQuery } from '../../lib/use_media_query'
 import { postJSON } from '../../lib/csrf'
+import {
+  getStoredFlag,
+  getStoredString,
+  setStoredFlag,
+  setStoredString,
+} from '../../lib/local_storage'
 
 export interface ActivityPayload {
   id: number
@@ -92,42 +98,13 @@ interface SelectionTarget {
   text: string
 }
 
-const readStoredFlag = (key: string, fallback: boolean): boolean => {
-  try {
-    const raw = localStorage.getItem(key)
-    return raw === null ? fallback : raw === '1'
-  } catch {
-    return fallback
-  }
-}
-
-const writeStoredFlag = (key: string, value: boolean): void => {
-  try {
-    localStorage.setItem(key, value ? '1' : '0')
-  } catch {
-    // private mode — the toggle just won't persist
-  }
-}
-
 // Editor mode persists per doc (Google-Docs semantics: your mode, your
 // browser). Client-side only by design — never server state, never shared.
 const modeKey = (slug: string) => `pruf:mode:${slug}`
 
 const readStoredMode = (slug: string): EditorMode => {
-  try {
-    const raw = localStorage.getItem(modeKey(slug))
-    return raw === 'suggest' || raw === 'comment' ? raw : 'edit'
-  } catch {
-    return 'edit'
-  }
-}
-
-const writeStoredMode = (slug: string, mode: EditorMode): void => {
-  try {
-    localStorage.setItem(modeKey(slug), mode)
-  } catch {
-    // private mode — the mode just won't persist
-  }
+  const raw = getStoredString(modeKey(slug))
+  return raw === 'suggest' || raw === 'comment' ? raw : 'edit'
 }
 
 export default function DocumentShow({
@@ -163,8 +140,8 @@ export default function DocumentShow({
     suggestions.filter((s) => s.author_kind !== 'human').length,
   )
   const viewRef = useRef<EditorView | null>(null)
-  const [panelOpen, setPanelOpen] = useState(() => readStoredFlag('pruf:panel', true))
-  const [focusMode, setFocusMode] = useState(() => readStoredFlag('pruf:focus', false))
+  const [panelOpen, setPanelOpen] = useState(() => getStoredFlag('pruf:panel', true))
+  const [focusMode, setFocusMode] = useState(() => getStoredFlag('pruf:focus', false))
   // Demo doc always opens in Edit and stays locked there.
   const modeLocked = doc.slug === 'demo'
   const [mode, setMode] = useState<EditorMode>(() =>
@@ -191,10 +168,10 @@ export default function DocumentShow({
     if (isMobile && composerAnchor !== null) setActiveSheet('comments')
   }, [isMobile, composerAnchor])
 
-  useEffect(() => writeStoredFlag('pruf:panel', panelOpen), [panelOpen])
-  useEffect(() => writeStoredFlag('pruf:focus', focusMode), [focusMode])
+  useEffect(() => setStoredFlag('pruf:panel', panelOpen), [panelOpen])
+  useEffect(() => setStoredFlag('pruf:focus', focusMode), [focusMode])
   useEffect(() => {
-    if (!modeLocked) writeStoredMode(doc.slug, mode)
+    if (!modeLocked) setStoredString(modeKey(doc.slug), mode)
   }, [mode, modeLocked, doc.slug])
 
   // ⌘\ toggles the side panel, ⌘. toggles suggestion focus.
@@ -310,7 +287,11 @@ export default function DocumentShow({
     viewRef.current = view
     const { from, to, empty } = view.state.selection
 
-    if (!view.hasFocus()) {
+    // Only require focus when the view is editable: in Suggest/Comment mode
+    // the root is contenteditable=false, which browsers never focus, so
+    // hasFocus() is always false and the focus gate would make the selection
+    // toolbar unreachable in read-only modes.
+    if (view.editable && !view.hasFocus()) {
       setReviewTarget(null)
       setSelectionTarget(null)
       return
@@ -349,7 +330,7 @@ export default function DocumentShow({
   // While a popover is open, any scroll or resize schedules one rAF-throttled
   // reposition pass (coordsAtPos for a single anchor is cheap).
   const [popoverTick, setPopoverTick] = useState(0)
-  const popoverOpen = Boolean(reviewTarget) || Boolean(selectionTarget)
+  const popoverOpen = Boolean(reviewTarget) || Boolean(selectionTarget) || Boolean(suggestTarget)
   useEffect(() => {
     if (!popoverOpen) return
     let raf = 0
@@ -397,6 +378,20 @@ export default function DocumentShow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionTarget, spans, popoverTick, anchorPosition])
 
+  // Composer tracks its anchor text live (scroll/resize/doc edits) instead
+  // of freezing at open-time viewport coords; falls back to the frozen
+  // position when the anchor text is currently unmatchable (edited away).
+  const liveSuggestPosition = useMemo(() => {
+    if (!suggestTarget) return null
+    const view = viewRef.current
+    if (!view) return suggestTarget.position
+    const range = findTextRange(view.state.doc, suggestTarget.text)
+    if (!range) return suggestTarget.position
+    return anchorPosition(view, range.from, 320) ?? suggestTarget.position
+    // spans (doc updates) + popoverTick (scroll/resize) drive repositioning.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggestTarget, spans, popoverTick, anchorPosition])
+
   const liveReview = useMemo(() => {
     if (!reviewTarget) return null
     const view = viewRef.current
@@ -421,6 +416,9 @@ export default function DocumentShow({
   const acceptSuggestion = useCallback(
     (suggestion: SuggestionPayload) => {
       if (!handle) return
+      // Optimistic placeholders (negative id) have no server row yet —
+      // a PATCH against them would 404.
+      if (suggestion.id < 0) return
       // The card clears optimistically, but the CRDT insert waits for the
       // server to confirm THIS client won the accept — otherwise two windows
       // accepting concurrently would each insert the text (the loser's PATCH
@@ -449,6 +447,7 @@ export default function DocumentShow({
 
   const rejectSuggestion = useCallback(
     (suggestion: SuggestionPayload) => {
+      if (suggestion.id < 0) return
       router
         .optimistic((props: Partial<DocumentProps>) => ({
           suggestions: (props.suggestions ?? []).filter((s) => s.id !== suggestion.id),
@@ -485,34 +484,39 @@ export default function DocumentShow({
     [doc.slug, handle, aiPendingCount],
   )
 
+  // The composer stays open until the server confirms — closing eagerly
+  // would destroy the typed replacement on a validation failure with no
+  // feedback. The margin card arrives via the suggestions broadcast/reload,
+  // so no optimistic placeholder is needed (a placeholder would also render
+  // accept/reject against a row that has no server id yet).
+  const [suggestError, setSuggestError] = useState<string | null>(null)
+  const [suggestSubmitting, setSuggestSubmitting] = useState(false)
   const submitSuggestion = useCallback(
     (target: string, replacement: string) => {
-      setSuggestTarget(null)
-      const optimisticSuggestion: SuggestionPayload = {
-        id: -Date.now(),
-        author_name: identity.name,
-        author_kind: 'human',
-        intent: null,
-        body: replacement,
-        anchor_text: target,
-        replaces: target,
-        status: 'pending',
-        created_at: new Date().toISOString(),
-      }
-      router
-        .optimistic((props: Partial<DocumentProps>) => ({
-          suggestions: [...(props.suggestions ?? []), optimisticSuggestion],
-        }))
-        .post(
-          `/d/${doc.slug}/suggestions`,
-          {
-            body: replacement,
-            replaces: target,
-            anchor_text: target,
-            author_name: identity.name,
-          },
-          { preserveScroll: true, only: ['suggestions', 'activities'], async: true },
-        )
+      setSuggestError(null)
+      setSuggestSubmitting(true)
+      router.post(
+        `/d/${doc.slug}/suggestions`,
+        {
+          body: replacement,
+          replaces: target,
+          anchor_text: target,
+          author_name: identity.name,
+        },
+        {
+          preserveScroll: true,
+          only: ['suggestions', 'activities'],
+          async: true,
+          onSuccess: () => setSuggestTarget(null),
+          onError: (errors) =>
+            setSuggestError(
+              typeof errors?.suggestion === 'string'
+                ? errors.suggestion
+                : 'Could not save the suggestion — please try again',
+            ),
+          onFinish: () => setSuggestSubmitting(false),
+        },
+      )
     },
     [doc.slug, identity.name],
   )
@@ -671,10 +675,16 @@ export default function DocumentShow({
                       // textBetween joins blocks with '\n' — a newline means
                       // the selection spans blocks, which the per-block
                       // anchor matching in suggestions.ts can't replace.
-                      disabled: selectionTarget.text.includes('\n'),
+                      // The byte guard mirrors the server's anchor cap so an
+                      // oversized selection fails here, not after typing.
+                      disabled:
+                        selectionTarget.text.includes('\n') ||
+                        new TextEncoder().encode(selectionTarget.text).length > 10 * 1024,
                       title: selectionTarget.text.includes('\n')
                         ? 'Suggestions work on single paragraphs — narrow your selection'
-                        : undefined,
+                        : new TextEncoder().encode(selectionTarget.text).length > 10 * 1024
+                          ? 'Selection is too long to suggest against — narrow your selection'
+                          : undefined,
                       onClick: () => {
                         setSuggestTarget({
                           text: selectionTarget.text,
@@ -713,9 +723,14 @@ export default function DocumentShow({
         {suggestTarget && (
           <SuggestComposer
             target={suggestTarget.text}
-            position={suggestTarget.position}
+            position={liveSuggestPosition ?? suggestTarget.position}
+            error={suggestError}
+            submitting={suggestSubmitting}
             onSubmit={(replacement) => submitSuggestion(suggestTarget.text, replacement)}
-            onCancel={() => setSuggestTarget(null)}
+            onCancel={() => {
+              setSuggestTarget(null)
+              setSuggestError(null)
+            }}
           />
         )}
         {reviewTarget && liveReview && (

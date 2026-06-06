@@ -5,6 +5,10 @@ interface Props {
   /** The selected text the suggestion proposes to replace. */
   target: string
   position: { x: number; y: number }
+  /** Server validation/network error — rendered inline; the composer stays
+   *  open so the typed replacement is never destroyed. */
+  error?: string | null
+  submitting?: boolean
   onSubmit: (replacement: string) => void
   onCancel: () => void
 }
@@ -23,7 +27,14 @@ interface Props {
  * errors (size caps) surface via the Inertia error shape and redirect_back,
  * mirroring comments.
  */
-export function SuggestComposer({ target, position, onSubmit, onCancel }: Props) {
+export function SuggestComposer({
+  target,
+  position,
+  error = null,
+  submitting = false,
+  onSubmit,
+  onCancel,
+}: Props) {
   const [body, setBody] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -34,7 +45,7 @@ export function SuggestComposer({ target, position, onSubmit, onCancel }: Props)
   const submit = (event: FormEvent) => {
     event.preventDefault()
     const trimmed = body.trim()
-    if (!trimmed) return
+    if (!trimmed || submitting) return
     onSubmit(trimmed)
   }
 
@@ -59,9 +70,10 @@ export function SuggestComposer({ target, position, onSubmit, onCancel }: Props)
           if (event.key === 'Escape') onCancel()
         }}
       />
+      {error && <p className="suggest-composer-error">{error}</p>}
       <div className="comment-composer-actions">
-        <button type="submit" className="btn-accept" disabled={!body.trim()}>
-          Suggest
+        <button type="submit" className="btn-accept" disabled={!body.trim() || submitting}>
+          {submitting ? 'Suggesting…' : 'Suggest'}
         </button>
         <button type="button" className="btn-reject" onClick={onCancel}>
           Cancel

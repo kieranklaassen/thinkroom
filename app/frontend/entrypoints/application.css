@@ -1556,6 +1556,12 @@ a:focus-visible {
   animation: popover-in 140ms ease;
 }
 
+.suggest-composer-error {
+  font-size: 0.74rem;
+  color: #b3261e;
+  line-height: 1.4;
+}
+
 .suggest-composer-old {
   font-size: 0.76rem;
   color: var(--ink-faint);
