@@ -1,7 +1,7 @@
 ---
 title: "feat: Claim visibility, header cleanup, and editor modes"
 type: feat
-status: active
+status: completed
 date: 2026-06-05
 origin: docs/brainstorms/riffrec-feedback/2026-06-05-1854/requirements-kickoff.md
 ---
