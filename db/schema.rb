@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_05_200000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_06_090000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -83,6 +83,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_05_200000) do
     t.string "owner_name", limit: 255
     t.string "owner_token"
     t.json "provenance_spans", default: []
+    t.string "seed_author_kind"
+    t.string "seed_author_name", limit: 255
     t.datetime "seed_claimed_at"
     t.text "seed_markdown"
     t.string "seed_state", default: "pending", null: false

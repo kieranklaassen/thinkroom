@@ -66,11 +66,14 @@ class DocumentsController < InertiaController
     # UI-created docs are owned by their creator from the same INSERT — a UI
     # doc never exists momentarily unclaimed, and no claim activity is logged
     # (the doc was never up for grabs).
+    creator_name = Document.normalize_owner_name(preferred_name(params[:name], fallback: nil))
     document = Document.create!(
       title: params[:title].presence || "Untitled",
       seed_markdown: params[:markdown].presence || Document::DEFAULT_SEED,
       owner_token: owner_token,
-      owner_name: Document.normalize_owner_name(preferred_name(params[:name], fallback: nil)),
+      owner_name: creator_name,
+      seed_author_kind: "human",
+      seed_author_name: creator_name,
       claimed_at: Time.current
     )
     remember_recent(document)
