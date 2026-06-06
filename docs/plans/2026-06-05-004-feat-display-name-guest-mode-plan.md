@@ -1,7 +1,7 @@
 ---
 title: "feat: Set your display name — session-stored, random names become guest mode"
 type: feat
-status: active
+status: completed
 date: 2026-06-05
 ---
 
