@@ -65,6 +65,12 @@ interface EditorProps {
   /** True when documents#show atomically claimed the seed for this page
    *  load — the props-first path that skips the WebSocket round-trip. */
   seedGranted?: boolean
+  /** Who authored the seed markdown ('human' | 'agent' | null). Non-human
+   *  seeds get their text explicitly AI-attributed after the collab
+   *  connection renders them — otherwise seeded text is unmarked and
+   *  counts as human in the provenance summary. */
+  seedAuthorKind?: string | null
+  seedAuthorName?: string | null
   /** Read-only gate for Comment mode. Implemented EXCLUSIVELY as
    *  ProseMirror `editable: () => false` — provider connection, Yjs sync,
    *  agent edits, programmatic dispatch, and seed application stay
@@ -185,6 +191,8 @@ function CollabEditor({
   initialStateB64,
   seedMarkdown,
   seedGranted,
+  seedAuthorKind,
+  seedAuthorName,
   editable = true,
   suggesting = false,
   onReady,
@@ -357,6 +365,8 @@ function CollabEditor({
     } else if (seedGranted && seedMarkdown && !seedAlreadyApplied(slug)) {
       markSeedApplied(slug)
       provider.seedMarkdown = seedMarkdown
+      provider.seedAuthorKind = seedAuthorKind ?? null
+      provider.seedAuthorName = seedAuthorName ?? null
       start()
     } else {
       provider.on('synced', start)

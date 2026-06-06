@@ -14,6 +14,8 @@ type SyncMessage = {
   sv?: string
   seed?: boolean
   seed_markdown?: string
+  seed_author_kind?: string | null
+  seed_author_name?: string | null
   cid?: string
 }
 
@@ -40,6 +42,11 @@ export class CableProvider {
   readonly clientId = crypto.randomUUID()
   synced = false
   seedMarkdown: string | null = null
+  // Seed authorship rides alongside seedMarkdown with the same one-shot
+  // consume semantics: the editor reads and nulls all three together so a
+  // remount can never re-attribute.
+  seedAuthorKind: string | null = null
+  seedAuthorName: string | null = null
 
   private subscription: Subscription
   private consumer: Consumer
@@ -133,6 +140,8 @@ export class CableProvider {
           // it on purpose. Handling the seed in a 'seed' listener instead
           // would double-apply the template.
           this.seedMarkdown = data.seed_markdown
+          this.seedAuthorKind = data.seed_author_kind ?? null
+          this.seedAuthorName = data.seed_author_name ?? null
           this.emit('seed')
         }
         this.synced = true

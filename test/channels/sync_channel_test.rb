@@ -36,6 +36,33 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert_nil transmissions.last["seed"]
   end
 
+  test "seed grant carries agent authorship for agent-seeded docs" do
+    doc = Document.create!(
+      title: "AgentSeed", seed_markdown: "# From an agent",
+      seed_author_kind: "agent", seed_author_name: "Scout"
+    )
+
+    subscribe slug: doc.slug
+
+    message = transmissions.last
+    assert_equal true, message["seed"]
+    assert_equal "agent", message["seed_author_kind"]
+    assert_equal "Scout", message["seed_author_name"]
+  end
+
+  test "no-grant sync carries no seed authorship fields" do
+    doc = Document.create!(title: "Hydrated", seed_markdown: "# Template",
+                           seed_author_kind: "agent", seed_author_name: "Scout")
+    YjsPersistence.merge(doc, build_update_b64("already here"))
+
+    subscribe slug: doc.slug
+
+    message = transmissions.last
+    assert_nil message["seed"]
+    assert_not message.key?("seed_author_kind")
+    assert_not message.key?("seed_author_name")
+  end
+
   test "an HTTP page-render claim blocks the channel grant while fresh" do
     doc = Document.create!(title: "PreClaimed", seed_markdown: "# Template")
     assert doc.try_claim_seed, "HTTP path should win the fresh claim"
