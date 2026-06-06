@@ -40,13 +40,7 @@ export function HeaderMenu({
   const isMobile = useMediaQuery('(max-width: 48rem)')
   useDismissable(open, () => setOpen(false), [rootRef, popoverRef])
 
-  const ownershipLabel = ownership.yours
-    ? 'Your document'
-    : ownership.claimed
-      ? 'Ownership'
-      : ownership.claimable
-        ? 'Claim'
-        : null
+  const showOwnership = ownership.yours || ownership.claimed || ownership.claimable
 
   return (
     <div className="share-root header-menu-root" ref={rootRef}>
@@ -66,45 +60,42 @@ export function HeaderMenu({
             <div
               className="share-popover header-menu-popover"
               ref={popoverRef}
-              role="dialog"
+              role="menu"
               aria-label="Document options"
               onClick={(event) => event.stopPropagation()}
             >
-          <div className="share-section">
-            <div className="share-section-title">View</div>
-            <div className="header-menu-row">
               <button
-                className="chrome-toggle"
-                aria-pressed={panelOpen}
-                title="Hide/show panel — ⌘\"
+                className="header-menu-item"
+                role="menuitemcheckbox"
+                aria-checked={panelOpen}
                 onClick={onTogglePanel}
               >
-                Panel
+                <span className="header-menu-check" aria-hidden>
+                  {panelOpen ? '✓' : ''}
+                </span>
+                Side panel
+                <span className="header-menu-hint">⌘\</span>
               </button>
               <button
-                className="chrome-toggle"
-                aria-pressed={focusMode}
-                title="Suggestion focus — ⌘."
+                className="header-menu-item"
+                role="menuitemcheckbox"
+                aria-checked={focusMode}
                 onClick={onToggleFocus}
               >
-                Focus
+                <span className="header-menu-check" aria-hidden>
+                  {focusMode ? '✓' : ''}
+                </span>
+                Suggestion focus
+                <span className="header-menu-hint">⌘.</span>
               </button>
-            </div>
-          </div>
-          {ownershipLabel && (
-            <div className="share-section">
-              <div className="share-section-title">{ownershipLabel}</div>
-              <div className="header-menu-row">
-                <OwnershipChip slug={slug} ownership={ownership} claimerName={claimerName} />
-              </div>
-            </div>
-          )}
-          <div className="share-section">
-            <div className="share-section-title">Feedback</div>
-            <div className="header-menu-row">
+              {showOwnership && (
+                <>
+                  <div className="header-menu-sep" role="separator" />
+                  <OwnershipChip slug={slug} ownership={ownership} claimerName={claimerName} />
+                </>
+              )}
+              <div className="header-menu-sep" role="separator" />
               <FeedbackButton />
-            </div>
-          </div>
             </div>
           )
           return isMobile

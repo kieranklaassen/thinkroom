@@ -383,9 +383,33 @@ a:focus-visible {
   gap: 0.35rem;
 }
 
+/* Contextual action, not the page primary — Share keeps the solid-ink
+ * treatment; the banner's CTA is an accent-tinted outline. */
 .claim-banner-claim {
   font-size: 0.8rem;
   padding: 0.32rem 0.75rem;
+  background: var(--surface-raised);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: color-mix(in srgb, var(--accent) 80%, var(--ink));
+}
+
+.claim-banner-claim:hover {
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-raised));
+  border-color: var(--accent);
+}
+
+@media (max-width: 48rem) {
+  .claim-banner {
+    justify-content: space-between;
+    text-align: left;
+    gap: 0.5rem;
+    flex-wrap: nowrap;
+  }
+
+  .claim-banner-text {
+    flex: 1;
+    min-width: 0;
+  }
 }
 
 .claim-banner-dismiss {
@@ -495,12 +519,17 @@ a:focus-visible {
 }
 
 /* The copy and its margin gutter share one scroll context — suggestion cards
- * positioned against the gutter stay glued to their anchors while scrolling. */
+ * positioned against the gutter stay glued to their anchors while scrolling.
+ * The canvas claims the flexible space (capped at measure + gutter) so the
+ * reading column is a stable, centered width — never sized by however much
+ * text happens to be in the document. */
 .doc-canvas {
   position: relative;
   display: flex;
   align-items: stretch;
   min-width: 0;
+  flex: 1;
+  max-width: calc(var(--measure) + 15rem);
 }
 
 .margin-gutter {
@@ -524,7 +553,8 @@ a:focus-visible {
 }
 
 .doc-main {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   max-width: var(--measure);
   padding: 3rem 2rem 6rem;
 }
@@ -1331,6 +1361,26 @@ a:focus-visible {
   /* intentionally empty */
 }
 
+/* Tracked-edit cards speak the insertion (green) family end-to-end —
+ * the purple/lavender family stays reserved for AI text under review. */
+.margin-card--inline .margin-new,
+.sheet-card--inline .margin-new {
+  background: var(--sug-ins-bg);
+}
+
+.margin-card--inline .btn-accept,
+.sheet-card--inline .btn-accept {
+  background: color-mix(in srgb, var(--sug-ins-line) 14%, var(--surface-raised));
+  color: color-mix(in srgb, var(--sug-ins-line) 80%, var(--ink));
+  border: 1px solid color-mix(in srgb, var(--sug-ins-line) 45%, var(--line));
+}
+
+.margin-card--inline .btn-accept:hover,
+.sheet-card--inline .btn-accept:hover {
+  background: color-mix(in srgb, var(--sug-ins-line) 24%, var(--surface-raised));
+  border-color: color-mix(in srgb, var(--sug-ins-line) 65%, var(--line));
+}
+
 /* ----------------------------- Provenance summary ------------------------ */
 .prov-summary {
   display: inline-flex;
@@ -1500,6 +1550,7 @@ a:focus-visible {
   font-weight: 550;
   border-radius: 7px;
   padding: 0.28rem 0.8rem;
+  min-height: 1.8rem;
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease;
   min-width: 4rem;
@@ -1523,15 +1574,101 @@ a:focus-visible {
   padding: 0.28rem 0.5rem;
 }
 
+/* The ⋯ menu is a real menu: full-width rows, hover, no nested buttons.
+ * OwnershipChip's chrome-toggles and the riffrec feedback button are
+ * restyled into the same row register by scope. */
 .header-menu-popover {
-  width: 13.5rem;
+  width: 14.5rem;
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
 }
 
-.header-menu-row {
+.header-menu-item,
+.header-menu-popover .chrome-toggle,
+.header-menu-popover .feedback-button {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  flex-wrap: wrap;
+  gap: 0.45rem;
+  width: 100%;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.header-menu-item:hover,
+.header-menu-popover .chrome-toggle:hover,
+.header-menu-popover .feedback-button:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.header-menu-check {
+  width: 0.9rem;
+  flex: none;
+  color: var(--accent);
+  font-size: 0.72rem;
+}
+
+.header-menu-hint {
+  margin-left: auto;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.header-menu-sep {
+  height: 1px;
+  background: var(--line);
+  margin: 0.3rem 0.35rem;
+}
+
+.header-menu-popover .ownership-owner {
+  display: block;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+}
+
+.header-menu-popover .ownership-confirm {
+  display: flex;
+  gap: 0.2rem;
+}
+
+.header-menu-popover .ownership-delete {
+  color: #c0392b;
+}
+
+/* Riffrec wraps our className on a <span> and inline-styles its inner
+ * <button>; the descendant !important override is its supported reskin
+ * path (see the Feedback section below). In the menu it reads as a row. */
+.header-menu-popover .feedback-button {
+  padding: 0;
+}
+
+.header-menu-popover .feedback-button > button {
+  width: 100% !important;
+  border: none !important;
+  background: transparent !important;
+  color: var(--ink) !important;
+  font-size: 0.8rem !important;
+  font-weight: 500 !important;
+  padding: 0.45rem 0.55rem !important;
+  border-radius: 7px !important;
+  text-align: left !important;
+  justify-content: flex-start !important;
+}
+
+.header-menu-popover .feedback-button > button:hover {
+  background: var(--accent-soft) !important;
+  color: var(--ink) !important;
 }
 
 /* Mode switcher (Edit / Suggest / Comment). */
@@ -1600,18 +1737,19 @@ a:focus-visible {
 .chrome-toggle {
   border: 1px solid var(--line);
   background: transparent;
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   font-size: 0.74rem;
   font-weight: 550;
   border-radius: 7px;
   padding: 0.28rem 0.6rem;
+  min-height: 1.8rem;
   cursor: pointer;
   transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
 }
 
 .chrome-toggle:hover {
   border-color: var(--ink-faint);
-  color: var(--ink-soft);
+  color: var(--ink);
 }
 
 .chrome-toggle[aria-pressed='true'] {

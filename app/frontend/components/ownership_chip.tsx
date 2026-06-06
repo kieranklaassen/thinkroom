@@ -87,7 +87,7 @@ export function OwnershipChip({ slug, ownership, claimerName }: Props) {
         title="You own this document — click to delete it"
         onClick={() => setConfirming(true)}
       >
-        Yours
+        Yours — delete…
       </button>
     )
   }
@@ -108,7 +108,7 @@ export function OwnershipChip({ slug, ownership, claimerName }: Props) {
       title="Claim this document to your browser — claiming lets you delete it"
       onClick={claim}
     >
-      {claimFailed ? 'Try again' : 'Claim'}
+      {claimFailed ? 'Claim failed — try again' : 'Claim this doc'}
     </button>
   )
 }
