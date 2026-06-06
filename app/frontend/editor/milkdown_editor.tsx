@@ -97,7 +97,10 @@ function acquireSession(
     // Hydrate from the server-rendered state the moment the doc exists, so
     // the editor binds an already-populated doc and content is in its first
     // paint; Yjs converges idempotently when the provider's sync lands.
-    if (initialStateB64) {
+    // The clients-empty guard is redundant for a just-created Y.Doc but
+    // keeps the hydration idempotent if this block ever runs on a doc
+    // that already carries state.
+    if (initialStateB64 && ydoc.store.clients.size === 0) {
       try {
         Y.applyUpdate(
           ydoc,
@@ -119,6 +122,30 @@ function acquireSession(
   }
   session.refs += 1
   return session
+}
+
+// History restores replay stale props: a back-navigation remounts the page
+// with the original seed_granted: true long after the template was applied
+// and synced. Re-applying onto a fresh local doc would duplicate the
+// template when the server state merges in, so grant consumption is made
+// durable per tab. sessionStorage is per-tab, which matches the grant's
+// scope — other tabs get fresh props (seed_granted: false once claimed).
+const seedAppliedKey = (slug: string) => `pruf:seed-applied:${slug}`
+
+function seedAlreadyApplied(slug: string): boolean {
+  try {
+    return sessionStorage.getItem(seedAppliedKey(slug)) === '1'
+  } catch {
+    return false
+  }
+}
+
+function markSeedApplied(slug: string): void {
+  try {
+    sessionStorage.setItem(seedAppliedKey(slug), '1')
+  } catch {
+    // best effort — worst case is the pre-fix behavior on history restore
+  }
 }
 
 function releaseSession(slug: string): void {
@@ -263,7 +290,8 @@ function CollabEditor({
     // someone else holds the claim — waits for the sync handshake.
     if (provider.synced || ydoc.store.clients.size > 0) {
       start()
-    } else if (seedGranted && seedMarkdown) {
+    } else if (seedGranted && seedMarkdown && !seedAlreadyApplied(slug)) {
+      markSeedApplied(slug)
       provider.seedMarkdown = seedMarkdown
       start()
     } else {

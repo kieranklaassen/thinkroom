@@ -36,6 +36,17 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert_nil transmissions.last["seed"]
   end
 
+  test "an HTTP page-render claim blocks the channel grant while fresh" do
+    doc = Document.create!(title: "PreClaimed", seed_markdown: "# Template")
+    assert doc.try_claim_seed, "HTTP path should win the fresh claim"
+
+    subscribe slug: doc.slug
+
+    assert subscription.confirmed?
+    assert_nil transmissions.last["seed"],
+               "channel must not re-grant a seed freshly claimed by documents#show"
+  end
+
   test "documents with existing state never seed" do
     doc = Document.create!(title: "Existing", seed_markdown: "# Template")
     YjsPersistence.merge(doc, build_update_b64("already here"))
@@ -80,7 +91,7 @@ class SyncChannelTest < ActionCable::Channel::TestCase
 
     # The claim is consumed but reclaimable after timeout because the no-op
     # merge did not flip seed_state to "seeded".
-    travel SyncChannel::SEED_CLAIM_TIMEOUT + 1.second do
+    travel Document::SEED_CLAIM_TIMEOUT + 1.second do
       unsubscribe
       subscribe slug: doc.slug
       assert_equal true, transmissions.last["seed"], "doc must remain seedable after a no-op merge"

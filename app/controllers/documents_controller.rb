@@ -36,8 +36,11 @@ class DocumentsController < InertiaController
     # Claim the seed at page-render time so a fresh document paints its
     # template from props instead of waiting for the WebSocket round-trip.
     # Only the HTML editor path may claim — agent/JSON fetches above never
-    # reach here, so a programmatic read can't burn the claim.
-    seed_granted = document.try_claim_seed
+    # reach here, so a programmatic read can't burn the claim. Partial
+    # reloads and prefetch-shaped requests are also excluded: only an
+    # initial render mounts an editor that will actually apply the grant,
+    # and a burned grant blocks the channel fallback for SEED_CLAIM_TIMEOUT.
+    seed_granted = initial_render? && !prefetch_request? && document.try_claim_seed
 
     render inertia: "documents/show", props: {
       document: document.slice(:id, :slug, :title).merge(
@@ -140,5 +143,20 @@ class DocumentsController < InertiaController
   def agent_user_agent?
     ua = request.user_agent.to_s
     ua.blank? || !ua.include?("Mozilla")
+  end
+
+  # Inertia partial reloads (presence polls, ownership events, …) re-run
+  # this action but never remount the editor — they must not touch the
+  # seed claim.
+  def initial_render?
+    request.headers["X-Inertia-Partial-Component"].blank?
+  end
+
+  # Link prefetchers fetch pages no editor will mount in. Sec-Purpose is
+  # the standard header; Purpose is the legacy spelling still sent by
+  # some browsers and proxies.
+  def prefetch_request?
+    request.headers["Sec-Purpose"].to_s.include?("prefetch") ||
+      request.headers["Purpose"].to_s == "prefetch"
   end
 end

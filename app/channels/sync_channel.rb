@@ -11,8 +11,6 @@
 # All client messages are broadcast to every subscriber (sender filters its own
 # via cid); update/sync-reply are additionally merged into persistent storage.
 class SyncChannel < ApplicationCable::Channel
-  SEED_CLAIM_TIMEOUT = Document::SEED_CLAIM_TIMEOUT
-
   def subscribed
     @document = Document.find_by(slug: params[:slug])
     return reject unless @document

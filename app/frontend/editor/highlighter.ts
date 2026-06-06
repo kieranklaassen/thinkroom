@@ -36,7 +36,10 @@ export function loadShikiParser(): Promise<Parser> {
  * re-renders decorations when it resolves. Once ready, it highlights
  * synchronously. If shiki fails to load, code blocks stay plain text.
  */
+let loadedPromise: Promise<void> | null = null
+
 export function lazyShikiParser(): Parser {
-  const loaded = loadShikiParser().then(() => undefined)
+  loadedPromise ??= loadShikiParser().then(() => undefined)
+  const loaded = loadedPromise
   return (options) => (readyParser ? readyParser(options) : loaded)
 }

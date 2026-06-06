@@ -104,6 +104,10 @@ class Document < ApplicationRecord
   # stale-claim reclaim when an HTTP-granted seeder never applied).
   def try_claim_seed
     return false if yjs_state.present? || seed_markdown.blank?
+    # Read-side short-circuit: a fresh claim can't be won, so don't issue
+    # a write per page load of a just-claimed doc. The conditional UPDATE
+    # below remains the single source of truth under concurrency.
+    return false if seed_state == "claimed" && seed_claimed_at&.after?(SEED_CLAIM_TIMEOUT.ago)
 
     self.class
       .where(id: id)
