@@ -10,6 +10,14 @@ export interface SuggestionMarkAttrs {
   author: string
 }
 
+/** Single source of truth for the track-changes mark type names — consumed
+ *  by the guard plugin, the doc scan, and the provenance summary so a rename
+ *  or addition never needs hunting through call sites. */
+export const INSERTION_MARK = 'insertion'
+export const DELETION_MARK = 'deletion'
+export const MODIFICATION_MARK = 'modification'
+export const SUGGESTION_MARK_NAMES: string[] = [INSERTION_MARK, DELETION_MARK, MODIFICATION_MARK]
+
 /**
  * Track-changes marks for Suggest mode, extending the library specs with an
  * `author` attr so attribution syncs through y-prosemirror as part of the

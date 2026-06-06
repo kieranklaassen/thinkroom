@@ -36,6 +36,14 @@ class DocumentTest < ActiveSupport::TestCase
     assert_equal "Before new and old after", doc.plain_markdown
   end
 
+  test "plain_markdown leaves semantic ins/del without suggestion ids untouched" do
+    doc = Document.create!(
+      title: "Semantic",
+      content_markdown: "Price was <del>$100</del> but <ins>now $80</ins> today"
+    )
+    assert_equal "Price was <del>$100</del> but <ins>now $80</ins> today", doc.plain_markdown
+  end
+
   test "plain_markdown still strips provenance spans" do
     doc = Document.create!(
       title: "Attributed",
