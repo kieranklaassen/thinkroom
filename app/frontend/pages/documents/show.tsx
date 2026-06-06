@@ -24,6 +24,12 @@ import {
   type SuggestionPayload,
 } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
+import { editorViewCtx } from '@milkdown/kit/core'
+import { collectInlineSuggestions } from '../../editor/suggest_changes'
+import {
+  MarginInlineSuggestions,
+  InlineSuggestionSheetList,
+} from '../../components/margin_inline_suggestions'
 import { ProvenanceSummaryChip } from '../../components/provenance_summary'
 import { ReviewPopover } from '../../components/review_popover'
 import { AskAiPanel } from '../../components/suggestions_panel'
@@ -37,7 +43,6 @@ import { type OwnershipPayload } from '../../components/ownership_chip'
 import { ClaimBanner } from '../../components/claim_banner'
 import { HeaderMenu } from '../../components/header_menu'
 import { ModeControl, type EditorMode } from '../../components/mode_control'
-import { SuggestComposer } from '../../components/suggest_composer'
 import { SharePopover } from '../../components/share_popover'
 import {
   MobileDock,
@@ -98,6 +103,24 @@ interface SelectionTarget {
   text: string
 }
 
+// Click-to-comment (Comment mode): the clicked block's text, anchored at
+// the click's collapsed selection — geometry re-derived live like the
+// other floating chrome.
+interface CommentTarget {
+  text: string
+}
+
+// Server-side anchor cap is 10 KB; a truncated anchor still matches as a
+// prefix within the block (findTextRange matches the exact search string).
+// Single encode + byte slice; a byte-boundary cut mid-codepoint decodes to
+// a trailing U+FFFD that would break prefix matching, so strip it.
+const ANCHOR_BYTE_CAP = 10 * 1024
+const capAnchor = (text: string): string => {
+  const bytes = new TextEncoder().encode(text)
+  if (bytes.length <= ANCHOR_BYTE_CAP) return text
+  return new TextDecoder().decode(bytes.slice(0, ANCHOR_BYTE_CAP)).replace(/�+$/, '')
+}
+
 // Editor mode persists per doc (Google-Docs semantics: your mode, your
 // browser). Client-side only by design — never server state, never shared.
 const modeKey = (slug: string) => `pruf:mode:${slug}`
@@ -127,13 +150,8 @@ export default function DocumentShow({
   const [peers, setPeers] = useState<UserIdentity[]>([])
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
   const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null)
+  const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null)
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
-  // Suggest-mode composer: the selected text to replace, frozen with the
-  // toolbar position it was opened from (the selection itself collapses).
-  const [suggestTarget, setSuggestTarget] = useState<{
-    text: string
-    position: { x: number; y: number }
-  } | null>(null)
   const [aiPendingCount, setAiPendingCount] = useState(0)
   const aiPending = aiPendingCount > 0
   const prevSuggestionCount = useRef(
@@ -147,6 +165,13 @@ export default function DocumentShow({
   const [mode, setMode] = useState<EditorMode>(() =>
     modeLocked ? 'edit' : readStoredMode(doc.slug),
   )
+  // handleSelection is a stable callback — it reads the live mode via ref.
+  const modeRef = useRef(mode)
+  modeRef.current = mode
+  // Leaving Comment mode dismisses any pending click-to-comment affordance.
+  useEffect(() => {
+    if (mode !== 'comment') setCommentTarget(null)
+  }, [mode])
 
   // ≤64rem: rail and margin cards give way to anchor markers, a bottom dock,
   // and sheets — the full product, rearranged for one hand.
@@ -287,10 +312,10 @@ export default function DocumentShow({
     viewRef.current = view
     const { from, to, empty } = view.state.selection
 
-    // Only require focus when the view is editable: in Suggest/Comment mode
-    // the root is contenteditable=false, which browsers never focus, so
+    // Only require focus when the view is editable: in Comment mode the
+    // root is contenteditable=false, which browsers never focus, so
     // hasFocus() is always false and the focus gate would make the selection
-    // toolbar unreachable in read-only modes.
+    // toolbar unreachable in the read-only mode.
     if (view.editable && !view.hasFocus()) {
       setReviewTarget(null)
       setSelectionTarget(null)
@@ -301,6 +326,7 @@ export default function DocumentShow({
       const text = view.state.doc.textBetween(from, to, '\n')
       if (text.trim().length > 0) {
         setSelectionTarget({ text })
+        setCommentTarget(null)
         setReviewTarget(null)
         return
       }
@@ -318,10 +344,26 @@ export default function DocumentShow({
       if (hit) {
         setSheetFocusId(hit.id)
         setActiveSheet('suggestions')
+        setCommentTarget(null)
         setReviewTarget(null)
         return
       }
     }
+
+    // Comment mode: a bare click offers commenting on the clicked block —
+    // no drag-selection needed (Google-Docs click-to-comment). Only
+    // non-empty textblocks; clicks on empty paragraphs, images, or rules
+    // show nothing. Selection-based commenting above keeps working.
+    if (modeRef.current === 'comment' && empty) {
+      const block = view.state.selection.$head.parent
+      const text = block.isTextblock ? block.textContent : ''
+      if (text.trim().length > 0) {
+        setCommentTarget({ text: capAnchor(text) })
+        setReviewTarget(null)
+        return
+      }
+    }
+    setCommentTarget(null)
 
     const span = aiSpanAt(view.state)
     setReviewTarget(span ? { span } : null)
@@ -330,7 +372,7 @@ export default function DocumentShow({
   // While a popover is open, any scroll or resize schedules one rAF-throttled
   // reposition pass (coordsAtPos for a single anchor is cheap).
   const [popoverTick, setPopoverTick] = useState(0)
-  const popoverOpen = Boolean(reviewTarget) || Boolean(selectionTarget) || Boolean(suggestTarget)
+  const popoverOpen = Boolean(reviewTarget) || Boolean(selectionTarget) || Boolean(commentTarget)
   useEffect(() => {
     if (!popoverOpen) return
     let raf = 0
@@ -378,19 +420,14 @@ export default function DocumentShow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectionTarget, spans, popoverTick, anchorPosition])
 
-  // Composer tracks its anchor text live (scroll/resize/doc edits) instead
-  // of freezing at open-time viewport coords; falls back to the frozen
-  // position when the anchor text is currently unmatchable (edited away).
-  const liveSuggestPosition = useMemo(() => {
-    if (!suggestTarget) return null
+  const liveCommentPosition = useMemo(() => {
+    if (!commentTarget) return null
     const view = viewRef.current
-    if (!view) return suggestTarget.position
-    const range = findTextRange(view.state.doc, suggestTarget.text)
-    if (!range) return suggestTarget.position
-    return anchorPosition(view, range.from, 320) ?? suggestTarget.position
+    if (!view) return null
+    return anchorPosition(view, view.state.selection.head, 190)
     // spans (doc updates) + popoverTick (scroll/resize) drive repositioning.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [suggestTarget, spans, popoverTick, anchorPosition])
+  }, [commentTarget, spans, popoverTick, anchorPosition])
 
   const liveReview = useMemo(() => {
     if (!reviewTarget) return null
@@ -484,43 +521,6 @@ export default function DocumentShow({
     [doc.slug, handle, aiPendingCount],
   )
 
-  // The composer stays open until the server confirms — closing eagerly
-  // would destroy the typed replacement on a validation failure with no
-  // feedback. The margin card arrives via the suggestions broadcast/reload,
-  // so no optimistic placeholder is needed (a placeholder would also render
-  // accept/reject against a row that has no server id yet).
-  const [suggestError, setSuggestError] = useState<string | null>(null)
-  const [suggestSubmitting, setSuggestSubmitting] = useState(false)
-  const submitSuggestion = useCallback(
-    (target: string, replacement: string) => {
-      setSuggestError(null)
-      setSuggestSubmitting(true)
-      router.post(
-        `/d/${doc.slug}/suggestions`,
-        {
-          body: replacement,
-          replaces: target,
-          anchor_text: target,
-          author_name: identity.name,
-        },
-        {
-          preserveScroll: true,
-          only: ['suggestions', 'activities'],
-          async: true,
-          onSuccess: () => setSuggestTarget(null),
-          onError: (errors) =>
-            setSuggestError(
-              typeof errors?.suggestion === 'string'
-                ? errors.suggestion
-                : 'Could not save the suggestion — please try again',
-            ),
-          onFinish: () => setSuggestSubmitting(false),
-        },
-      )
-    },
-    [doc.slug, identity.name],
-  )
-
   const submitComment = useCallback(
     (body: string, anchorText: string | null) => {
       setComposerAnchor(null)
@@ -562,6 +562,43 @@ export default function DocumentShow({
     },
     [identity.name],
   )
+
+  // Doc-native tracked edits (Suggest-mode typing), re-derived from the
+  // marks whenever the Yjs doc changes. The Yjs 'update' event is the
+  // recompute signal — NOT the Milkdown listener, which skips
+  // addToHistory:false transactions and therefore never fires for remote
+  // collaborators' changes (a passive window would never see new cards).
+  // rAF-coalesced so a burst of keystrokes triggers one recompute.
+  const [docTick, setDocTick] = useState(0)
+  useEffect(() => {
+    if (!handle) return
+    let raf = 0
+    const bump = () => {
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        setDocTick((tick) => tick + 1)
+      })
+    }
+    handle.ydoc.on('update', bump)
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+      handle.ydoc.off('update', bump)
+    }
+  }, [handle])
+
+  const inlineSuggestions = useMemo(() => {
+    if (!handle) return []
+    try {
+      return handle.editor.action((ctx) =>
+        collectInlineSuggestions(ctx.get(editorViewCtx).state.doc),
+      )
+    } catch {
+      return []
+    }
+    // docTick (local + remote Yjs updates) drives the re-derivation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handle, docTick])
 
   const jumpToAnchor = useCallback((anchorText: string) => {
     const view = viewRef.current
@@ -621,7 +658,8 @@ export default function DocumentShow({
                 initialStateB64={doc.yjs_state_b64}
                 seedMarkdown={doc.seed_markdown}
                 seedGranted={doc.seed_granted}
-                editable={mode === 'edit'}
+                editable={mode !== 'comment'}
+                suggesting={mode === 'suggest'}
                 onReady={setHandle}
                 onStatus={setStatus}
                 onSpans={setSpans}
@@ -629,6 +667,12 @@ export default function DocumentShow({
               />
             </article>
             <div className="margin-gutter">
+              <MarginInlineSuggestions
+                inline={inlineSuggestions}
+                handle={handle}
+                spans={spans}
+                focusMode={focusMode || isMobile}
+              />
               <MarginSuggestions
                 suggestions={suggestions}
                 handle={handle}
@@ -667,45 +711,15 @@ export default function DocumentShow({
             position={liveSelectionPosition}
             actions={[
               // Per-mode capability matrix — Edit: Comment · Ask AI;
-              // Suggest: Suggest a change; Comment: Comment.
-              ...(mode === 'suggest'
-                ? [
-                    {
-                      label: 'Suggest a change',
-                      // textBetween joins blocks with '\n' — a newline means
-                      // the selection spans blocks, which the per-block
-                      // anchor matching in suggestions.ts can't replace.
-                      // The byte guard mirrors the server's anchor cap so an
-                      // oversized selection fails here, not after typing.
-                      disabled:
-                        selectionTarget.text.includes('\n') ||
-                        new TextEncoder().encode(selectionTarget.text).length > 10 * 1024,
-                      title: selectionTarget.text.includes('\n')
-                        ? 'Suggestions work on single paragraphs — narrow your selection'
-                        : new TextEncoder().encode(selectionTarget.text).length > 10 * 1024
-                          ? 'Selection is too long to suggest against — narrow your selection'
-                          : undefined,
-                      onClick: () => {
-                        setSuggestTarget({
-                          text: selectionTarget.text,
-                          position: liveSelectionPosition,
-                        })
-                        setSelectionTarget(null)
-                      },
-                    },
-                  ]
-                : []),
-              ...(mode !== 'suggest'
-                ? [
-                    {
-                      label: 'Comment',
-                      onClick: () => {
-                        setComposerAnchor(selectionTarget.text)
-                        setSelectionTarget(null)
-                      },
-                    },
-                  ]
-                : []),
+              // Suggest: Comment (typing IS the suggestion mechanism);
+              // Comment: Comment.
+              {
+                label: 'Comment',
+                onClick: () => {
+                  setComposerAnchor(selectionTarget.text)
+                  setSelectionTarget(null)
+                },
+              },
               ...(mode === 'edit'
                 ? [
                     {
@@ -720,17 +734,18 @@ export default function DocumentShow({
             ]}
           />
         )}
-        {suggestTarget && (
-          <SuggestComposer
-            target={suggestTarget.text}
-            position={liveSuggestPosition ?? suggestTarget.position}
-            error={suggestError}
-            submitting={suggestSubmitting}
-            onSubmit={(replacement) => submitSuggestion(suggestTarget.text, replacement)}
-            onCancel={() => {
-              setSuggestTarget(null)
-              setSuggestError(null)
-            }}
+        {commentTarget && !selectionTarget && liveCommentPosition && (
+          <SelectionToolbar
+            position={liveCommentPosition}
+            actions={[
+              {
+                label: 'Comment on this paragraph',
+                onClick: () => {
+                  setComposerAnchor(commentTarget.text)
+                  setCommentTarget(null)
+                },
+              },
+            ]}
           />
         )}
         {reviewTarget && liveReview && (
@@ -742,7 +757,7 @@ export default function DocumentShow({
         )}
         {isMobile && (
           <MobileDock
-            suggestionCount={suggestions.length}
+            suggestionCount={suggestions.length + inlineSuggestions.length}
             commentCount={comments.filter((c) => !c.resolved).length}
             aiPending={aiPending}
             active={activeSheet}
@@ -751,12 +766,13 @@ export default function DocumentShow({
         )}
         {isMobile && activeSheet === 'suggestions' && (
           <MobileSheet
-            title={`Suggestions${suggestions.length > 0 ? ` · ${suggestions.length}` : ''}`}
+            title={`Suggestions${suggestions.length + inlineSuggestions.length > 0 ? ` · ${suggestions.length + inlineSuggestions.length}` : ''}`}
             onClose={() => {
               setActiveSheet(null)
               setSheetFocusId(null)
             }}
           >
+            <InlineSuggestionSheetList inline={inlineSuggestions} handle={handle} />
             <SuggestionSheetList
               suggestions={suggestions}
               focusId={sheetFocusId}

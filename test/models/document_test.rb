@@ -27,6 +27,31 @@ class DocumentTest < ActiveSupport::TestCase
     assert_equal doc.slug, doc.to_param
   end
 
+  test "plain_markdown unwraps suggestion ins/del tags keeping content" do
+    doc = Document.create!(
+      title: "Tracked",
+      content_markdown: 'Before <ins data-suggestion-id="a-1" data-author="Kieran">new</ins> ' \
+        'and <del data-suggestion-id="a-2" data-author="Kieran">old</del> after'
+    )
+    assert_equal "Before new and old after", doc.plain_markdown
+  end
+
+  test "plain_markdown leaves semantic ins/del without suggestion ids untouched" do
+    doc = Document.create!(
+      title: "Semantic",
+      content_markdown: "Price was <del>$100</del> but <ins>now $80</ins> today"
+    )
+    assert_equal "Price was <del>$100</del> but <ins>now $80</ins> today", doc.plain_markdown
+  end
+
+  test "plain_markdown still strips provenance spans" do
+    doc = Document.create!(
+      title: "Attributed",
+      content_markdown: '<span data-provenance data-kind="ai" data-author="Scout" data-state="pending">robot</span> text'
+    )
+    assert_equal "robot text", doc.plain_markdown
+  end
+
   test "provenance_summary with no spans is all zeros" do
     doc = Document.create!(title: "Empty")
     assert_equal({ total: 0, human_pct: 0, ai_pct: 0, unreviewed_pct: 0 }, doc.provenance_summary)

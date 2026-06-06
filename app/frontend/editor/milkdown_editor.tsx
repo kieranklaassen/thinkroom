@@ -26,6 +26,13 @@ import { lazyShikiParser, loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
 import type { UserIdentity } from './identity'
 import { provenance, provenanceIdentityCtx, collectSpans, type ProvenanceSpan } from './provenance'
+import { suggestChangesMarks } from './suggest_changes'
+import { suggestState, suggestDispatch } from './suggest_changes/intercept'
+import { suggestGuard } from './suggest_changes/normalize'
+import {
+  enableSuggestChanges,
+  disableSuggestChanges,
+} from '@handlewithcare/prosemirror-suggest-changes'
 import {
   alignCenterIcon,
   alignLeftIcon,
@@ -58,12 +65,18 @@ interface EditorProps {
   /** True when documents#show atomically claimed the seed for this page
    *  load — the props-first path that skips the WebSocket round-trip. */
   seedGranted?: boolean
-  /** Read-only gate for Suggest/Comment modes. Implemented EXCLUSIVELY as
+  /** Read-only gate for Comment mode. Implemented EXCLUSIVELY as
    *  ProseMirror `editable: () => false` — provider connection, Yjs sync,
    *  agent edits, programmatic dispatch, and seed application stay
    *  mode-independent (a restored read-only mode must never burn the seed
    *  claim). Defaults to editable. */
   editable?: boolean
+  /** Suggest mode: typing is intercepted into tracked insertion/deletion
+   *  marks. Synced into the suggest-changes plugin state only after the
+   *  editor has started — seeding and initial sync always run with
+   *  suggesting off, so a pre-stored suggest mode can never wrap the seed
+   *  template into suggestion marks. */
+  suggesting?: boolean
   onReady?: (handle: EditorHandle) => void
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
@@ -173,6 +186,7 @@ function CollabEditor({
   seedMarkdown,
   seedGranted,
   editable = true,
+  suggesting = false,
   onReady,
   onStatus,
   onSpans,
@@ -184,6 +198,11 @@ function CollabEditor({
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
   editableRef.current = editable
+  const suggestingRef = useRef(suggesting)
+  suggestingRef.current = suggesting
+  // Suggesting only syncs into plugin state after start() — the gate that
+  // keeps seed/initial-sync transactions out of the dispatch transform.
+  const startedRef = useRef(false)
 
   const { get, loading } = useEditor(
     (root) =>
@@ -193,9 +212,13 @@ function CollabEditor({
           ctx.set(provenanceIdentityCtx.key, { name: identity.name })
           // Read-only modes gate USER input only — ProseMirror still accepts
           // programmatic transactions (Yjs sync, seeding, suggestion accept).
+          // dispatchTransaction is the suggest-changes wrapper: a pass-through
+          // unless the suggestState plugin says suggesting is enabled, with
+          // remote/undo/resolve transactions never re-intercepted.
           ctx.update(editorViewOptionsCtx, (prev) => ({
             ...prev,
             editable: () => editableRef.current,
+            dispatchTransaction: suggestDispatch,
           }))
           ctx.update(highlightPluginConfig.key, (prev) => ({
             ...prev,
@@ -242,6 +265,12 @@ function CollabEditor({
         .use(highlight)
         .use(upload)
         .use(provenance)
+        .use(suggestChangesMarks)
+        // Order matters: provenanceWriter (inside provenance) runs its
+        // appendTransaction before suggestGuard's — the guard observes
+        // already-attributed text (KTD 6 registration order).
+        .use(suggestState)
+        .use(suggestGuard)
         .use(selectionWatcher)
         .use(agentCursors)
         .use(collab),
@@ -268,6 +297,17 @@ function CollabEditor({
 
     let started = false
     let cancelled = false
+    const syncSuggesting = (instance: Editor) => {
+      try {
+        instance.action((ctx) => {
+          const view = ctx.get(editorViewCtx)
+          if (suggestingRef.current) enableSuggestChanges(view.state, view.dispatch)
+          else disableSuggestChanges(view.state, view.dispatch)
+        })
+      } catch {
+        // view not mounted yet — start() applies the current value
+      }
+    }
     const start = () => {
       if (started || cancelled) return
       started = true
@@ -288,13 +328,20 @@ function CollabEditor({
         })
 
         ctx.get(listenerCtx).updated((_listenerCtx, doc) => {
-          callbacksRef.current.onSpans?.(collectSpans(doc))
+          // Chip path: display-only exclusion of pending insertions. The
+          // snapshot path below stays unfiltered — persisted provenance must
+          // remain complete while suggestions are pending.
+          callbacksRef.current.onSpans?.(collectSpans(doc, { excludePendingInsertions: true }))
           if (snapshotTimer) clearTimeout(snapshotTimer)
           snapshotTimer = setTimeout(pushSnapshot, SNAPSHOT_DEBOUNCE_MS)
         })
       })
 
       const handle = { editor, ydoc, provider }
+      startedRef.current = true
+      // Seed/initial sync ran with suggesting off; apply a pre-stored
+      // suggest mode only now that the document content is settled.
+      syncSuggesting(editor)
       callbacksRef.current.onReady?.(handle)
       callbacksRef.current.onStatus?.('live')
     }
@@ -346,6 +393,24 @@ function CollabEditor({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editable, loading])
+
+  // Mode flips after start: sync suggesting into the plugin state. Before
+  // start, the ref alone carries the value — start() applies it post-seed.
+  useEffect(() => {
+    if (loading || !startedRef.current) return
+    const editor = get()
+    if (!editor) return
+    try {
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        if (suggesting) enableSuggestChanges(view.state, view.dispatch)
+        else disableSuggestChanges(view.state, view.dispatch)
+      })
+    } catch {
+      // view not mounted yet — start() applies the current ref value
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [suggesting, loading])
 
   return <Milkdown />
 }

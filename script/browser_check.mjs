@@ -19,7 +19,7 @@ const makePage = async (label) => {
   const page = await context.newPage()
   page.on('pageerror', (err) => errors[label].push(String(err)))
   page.on('console', (msg) => {
-    if (msg.type() === 'error') errors[label].push(msg.text())
+    if (msg.type() === 'error') errors[label].push(`${msg.text()} [${msg.location()?.url ?? ''}]`)
   })
   await page.goto(`${BASE}/d/${SLUG}`)
   return page
@@ -133,19 +133,19 @@ try {
   const beforeAiSpans = await a.locator('.milkdown [data-kind="ai"]').count()
   await a.fill('.ask-ai-input', 'add a closing thought')
   await a.click('.ask-ai-button')
-  await a.locator('.suggestion-card').first().waitFor({ timeout: 15000 })
+  await a.locator('.margin-card').first().waitFor({ timeout: 15000 })
   ok('Ask AI produced a pending suggestion card in window A')
-  await b.locator('.suggestion-card').first().waitFor({ timeout: 10000 })
+  await b.locator('.margin-card').first().waitFor({ timeout: 10000 })
   ok('suggestion card appeared live in window B')
 
-  const suggestionText = (await a.locator('.suggestion-card .suggestion-body').first().textContent())
+  const suggestionText = (await a.locator('.margin-card .margin-new').first().textContent())
     ?.trim()
     .slice(0, 40)
   const acceptedId = await a
-    .locator('.suggestion-card')
+    .locator('.margin-card')
     .first()
     .getAttribute('data-suggestion-id')
-  await a.locator('.suggestion-card .btn-accept').first().click()
+  await a.locator('.margin-card .btn-accept').first().click()
   await a.waitForFunction(
     (n) => document.querySelectorAll('.milkdown [data-kind="ai"]').length > n,
     beforeAiSpans,
@@ -162,17 +162,17 @@ try {
   ok('accepted suggestion text synced live to window B')
 
   await a.waitForFunction(
-    (id) => !document.querySelector(`.suggestion-card[data-suggestion-id="${id}"]`),
+    (id) => !document.querySelector(`.margin-card[data-suggestion-id="${id}"]`),
     acceptedId,
     { timeout: 10000 },
   )
   ok('suggestion card cleared after accept (optimistic + reconcile)')
 
   // --- Comment flow: select text -> comment -> appears live -> resolve ---
-  await a.click('.milkdown .ProseMirror')
-  await a.keyboard.press('Meta+ArrowUp')
-  await a.keyboard.press('Home')
-  await a.keyboard.press('Shift+End')
+  // Mouse-select a word in the sentinel paragraph typed above — keyboard
+  // line-selection is brittle against demo-doc pollution from prior runs
+  // (images and empty lines at the doc edges yield empty selections).
+  await a.locator('.milkdown .ProseMirror p', { hasText: humanSentinel }).first().dblclick({ position: { x: 12, y: 10 } })
   await a.locator('.selection-toolbar').waitFor({ timeout: 5000 })
   ok('selection toolbar appears over selected text')
   await a.locator('.selection-toolbar button', { hasText: 'Comment' }).click()
@@ -225,6 +225,9 @@ try {
   ok('image synced live to window B')
 
   // --- Theme switch: instant, persistent ---
+  // The theme picker lives inside the Share popover since the header
+  // consolidation — open it first.
+  await a.locator('.share-button').click()
   await a.locator('.theme-option', { hasText: 'Whitey' }).click()
   const themeNow = await a.evaluate(() => document.documentElement.dataset.theme)
   if (themeNow === 'whitey') ok('theme switched instantly (optimistic, no reload)')
@@ -234,7 +237,9 @@ try {
   const themeAfter = await a.evaluate(() => document.documentElement.dataset.theme)
   if (themeAfter === 'whitey') ok('theme persisted across reload')
   else fail(`theme lost on reload: ${themeAfter}`)
-  await a.locator('.theme-option', { hasText: 'Proof' }).click()
+  await a.locator('.share-button').click()
+  await a.locator('.theme-option', { hasText: 'Pruf' }).click()
+  await a.keyboard.press('Escape')
 
   // --- Agent loop: an agent joins over plain HTTP while humans watch ---
   const agentHeaders = { 'X-Agent-Name': 'Scout', 'Content-Type': 'application/json' }
@@ -254,10 +259,14 @@ try {
     headers: agentHeaders,
     body: JSON.stringify({ status: 'active', location: 'provenance' }),
   })
-  await a.locator('.presence-chip--agent', { hasText: 'Scout' }).first().waitFor({ timeout: 10000 })
+  await a.locator('.presence-agent', { hasText: 'Scout' }).first().waitFor({ timeout: 10000 })
   ok('agent presence chip appeared live')
-  await a.locator('.agents-badge').first().waitFor({ timeout: 5000 })
-  ok('"Shared with agents" badge is visible')
+  // Agent activity signal lives in the Share popover since the header
+  // consolidation (the old standalone badge is gone).
+  await a.locator('.share-button').click()
+  await a.locator('.share-agent-dot.is-on').first().waitFor({ timeout: 5000 })
+  await a.keyboard.press('Escape')
+  ok('share popover shows the agent-active signal')
   await a.locator('.agent-cursor-label', { hasText: 'Scout' }).first().waitFor({ timeout: 5000 })
   ok('agent pseudo-cursor rendered at its work location')
 
@@ -273,7 +282,7 @@ try {
   if (suggestRes.status === 201) ok('agent proposed a suggestion over HTTP (201)')
   else fail(`agent suggestion failed: ${suggestRes.status}`)
 
-  await b.locator('.suggestion-card .author-chip', { hasText: 'Scout' }).first().waitFor({ timeout: 10000 })
+  await b.locator('.margin-card .author-chip', { hasText: 'Scout' }).first().waitFor({ timeout: 10000 })
   ok('agent suggestion appeared live, agent-attributed')
 
   await fetch(`${api}/comments`, {
@@ -288,7 +297,7 @@ try {
   ok('activity feed logged the agent actions')
 
   // Human accepts the agent suggestion; agent provenance lands in the doc
-  await b.locator('.suggestion-card .btn-accept').first().click()
+  await b.locator('.margin-card .btn-accept').first().click()
   await a.waitForFunction(
     () =>
       Array.from(document.querySelectorAll('.milkdown [data-provenance][data-kind="ai"]')).some(
@@ -318,14 +327,137 @@ try {
     body: JSON.stringify({ status: 'done' }),
   })
   await a.waitForFunction(
-    () => !document.querySelector('.presence-chip--agent'),
+    () =>
+      !Array.from(document.querySelectorAll('.presence-agent')).some((el) =>
+        el.textContent?.includes('Scout'),
+      ),
     undefined,
     { timeout: 10000 },
   )
   ok('agent sign-off cleared its presence')
 
+  // --- Suggest mode: type-to-suggest tracked changes (Google Docs parity) ---
+  const trackDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Track changes check', markdown: 'Suggest target alpha beta gamma.' }),
+    })
+  ).json()
+  const winA = await makePage('a')
+  await winA.goto(`${BASE}/d/${trackDoc.slug}`)
+  await winA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  const winB = await makePage('b')
+  await winB.goto(`${BASE}/d/${trackDoc.slug}`)
+  await winB.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await winA.waitForTimeout(1500)
+
+  await winA.click('.mode-control-trigger')
+  await winA.locator('.mode-control-option', { hasText: 'Suggest' }).click()
+  const sugSentinel = `tracked-${Date.now()}`
+  await winA.click('.milkdown .ProseMirror')
+  await winA.keyboard.press('Meta+ArrowDown')
+  await winA.keyboard.press('End')
+  await winA.keyboard.type(` ${sugSentinel}`)
+
+  const insLocal = await winA
+    .locator('.milkdown ins.sug-ins', { hasText: sugSentinel })
+    .first()
+    .waitFor({ timeout: 5000 })
+    .then(() => true)
+    .catch(() => false)
+  if (insLocal) ok('suggest-mode typing rendered as a tracked insertion (not a direct edit)')
+  else fail('suggest-mode typing did not produce an insertion mark')
+
+  await winB.waitForFunction(
+    (s) =>
+      Array.from(document.querySelectorAll('.milkdown ins.sug-ins')).some(
+        (el) => el.textContent?.includes(s) && el.dataset.author,
+      ),
+    sugSentinel,
+    { timeout: 10000 },
+  )
+  ok('tracked insertion synced live to window B with author attribution')
+
+  // Remote client reviews the tracked edit from its margin card.
+  // (Chip exclusion of pending insertions is display-only and exercised by
+  // the accept assertions below — an all-human doc can't discriminate it.)
+  await winB.locator('.margin-card--inline .btn-accept').first().click()
+  await winB.waitForFunction(
+    (s) => {
+      const root = document.querySelector('.milkdown .ProseMirror')
+      if (!root?.textContent?.includes(s)) return false
+      const stillMarked = Array.from(document.querySelectorAll('.milkdown ins.sug-ins')).some(
+        (el) => el.textContent?.includes(s),
+      )
+      const attributed = Array.from(
+        document.querySelectorAll('.milkdown span[data-provenance][data-kind="human"]'),
+      ).some((el) => el.textContent?.includes(s))
+      return !stillMarked && attributed
+    },
+    sugSentinel,
+    { timeout: 10000 },
+  )
+  ok('remote accept kept the text, dropped the tracking, and attributed it human')
+
+  // Deletion: text stays struck-through until resolved; reject restores it.
+  await winA.click('.milkdown .ProseMirror')
+  await winA.keyboard.press('Meta+ArrowUp')
+  await winA.keyboard.press('Home')
+  for (let i = 0; i < 7; i += 1) await winA.keyboard.press('Shift+ArrowRight')
+  await winA.keyboard.press('Backspace')
+  await winA.locator('.milkdown del.sug-del', { hasText: 'Suggest' }).first().waitFor({ timeout: 5000 })
+  ok('suggest-mode delete kept the text with a strikethrough deletion mark')
+  await winB.locator('.milkdown del.sug-del', { hasText: 'Suggest' }).first().waitFor({ timeout: 10000 })
+  await winB.locator('.margin-card--inline .btn-reject').first().click()
+  await winB.waitForFunction(
+    () =>
+      !document.querySelector('.milkdown del.sug-del') &&
+      document.querySelector('.milkdown .ProseMirror')?.textContent?.includes('Suggest target'),
+    undefined,
+    { timeout: 10000 },
+  )
+  ok('rejecting the deletion restored the text unmarked')
+
+  // --- Comment mode: click-to-comment ---
+  await winB.click('.mode-control-trigger')
+  await winB.locator('.mode-control-option', { hasText: 'Comment' }).click()
+  await winB.locator('.milkdown .ProseMirror p').first().click()
+  await winB
+    .locator('.selection-toolbar button', { hasText: 'Comment on this paragraph' })
+    .waitFor({ timeout: 5000 })
+  ok('comment-mode click on a paragraph offered the comment affordance')
+  await winB.locator('.selection-toolbar button', { hasText: 'Comment on this paragraph' }).click()
+  const clickComment = `Click-to-comment ${Date.now()}`
+  await winB.fill('.comment-input', clickComment)
+  await winB.locator('.comment-composer button', { hasText: 'Comment' }).click()
+  await winA.locator('.comment-card', { hasText: clickComment }).waitFor({ timeout: 10000 })
+  ok('click-to-comment posted and synced to the other window')
+
+  await winA.close()
+  await winB.close()
+
+  // --- Demo doc: localStorage tampering cannot unlock suggest mode ---
+  const demoPage = await browser.newPage()
+  await demoPage.goto(`${BASE}/d/${SLUG}`)
+  await demoPage.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await demoPage.evaluate((slug) => localStorage.setItem(`pruf:mode:${slug}`, 'suggest'), SLUG)
+  await demoPage.reload()
+  await demoPage.waitForSelector('.doc-status--live', { timeout: 15000 })
+  const demoMode = (await demoPage.locator('.mode-control-trigger').textContent())?.trim()
+  if (demoMode?.startsWith('Edit')) ok('demo doc ignored a tampered stored mode (locked to Edit)')
+  else fail(`demo doc mode after tamper: "${demoMode}"`)
+  await demoPage.close()
+
   for (const [label, errs] of Object.entries(errors)) {
-    const fatal = errs.filter((e) => !e.includes('favicon') && !e.includes('Download the React DevTools'))
+    const fatal = errs.filter(
+      (e) =>
+        !e.includes('favicon') &&
+        !e.includes('Download the React DevTools') &&
+        // Stale Active Storage blobs: prior runs paste images into the demo
+        // doc whose blobs/variants no longer resolve — pollution, not a bug.
+        !(e.includes('status of 404') && e.includes('/rails/active_storage/')),
+    )
     if (fatal.length > 0) fail(`console errors in window ${label}:\n  ${fatal.join('\n  ')}`)
   }
   if (process.exitCode !== 1) console.log('\nAll browser checks passed.')

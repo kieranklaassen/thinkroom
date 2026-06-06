@@ -11,8 +11,8 @@ export const MODE_LABELS: Record<EditorMode, string> = {
 
 const MODE_HINTS: Record<EditorMode, string> = {
   edit: 'Type directly into the document',
-  suggest: 'Propose changes for review — nothing edits the doc directly',
-  comment: 'Read-only — select text to comment',
+  suggest: 'Type directly — edits appear as tracked suggestions for review',
+  comment: 'Read-only — click or select text to comment',
 }
 
 interface Props {
