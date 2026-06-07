@@ -30,5 +30,11 @@ class CommentsController < InertiaController
     DocumentMetaChannel.broadcast_event(document, :comments)
 
     redirect_back fallback_location: document_page_path(document.slug), status: :see_other
+  rescue ActiveRecord::RecordNotFound
+    # The comment (or its doc) was deleted while the card was on screen, or a
+    # stale optimistic id reached the server — redirect back cleanly instead
+    # of a 404 modal over the editor.
+    redirect_back fallback_location: root_path, status: :see_other,
+                  inertia: { errors: { comment: "is no longer available" } }
   end
 end
