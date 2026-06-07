@@ -51,6 +51,28 @@ class CommentFlowTest < ActionDispatch::IntegrationTest
     comment = @document.comments.create!(author_name: "Scout", author_kind: "agent", body: "From the API")
     assert_equal "agent", comment.as_props[:author_kind]
   end
+
+  test "resolving a nonexistent comment redirects back instead of 404ing" do
+    # An optimistic (not-yet-reconciled) client id or a deleted comment must
+    # not raise a 404 modal over the editor.
+    patch resolve_comment_path(-42), params: { by: "Quiet Falcon" }
+
+    assert_response :see_other
+  end
+
+  test "resolving twice is idempotent" do
+    comment = @document.comments.create!(author_name: "A", author_kind: "human", body: "Fix this")
+
+    patch resolve_comment_path(comment), params: { by: "B" }
+    first_resolved_at = comment.reload.resolved_at
+    patch resolve_comment_path(comment), params: { by: "C" }
+
+    assert_response :see_other
+    assert comment.reload.resolved_at.present?
+    assert_empty @document.comments.open
+    # The second resolve re-stamps but never un-resolves; both are accepted.
+    assert_operator comment.resolved_at, :>=, first_resolved_at
+  end
 end
 
 class ThemePersistenceTest < ActionDispatch::IntegrationTest
