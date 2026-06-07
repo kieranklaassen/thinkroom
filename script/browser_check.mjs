@@ -12,7 +12,7 @@ const fail = (msg) => {
 const ok = (msg) => console.log(`✓ ${msg}`)
 
 const browser = await chromium.launch()
-const errors = { a: [], b: [] }
+const errors = { a: [], b: [], persist: [] }
 
 const makePage = async (label) => {
   const context = await browser.newContext()
@@ -596,10 +596,10 @@ try {
   await seedSuggestion('alpha')
   await seedSuggestion('bravo')
 
-  const q = await makePage('a')
+  const q = await makePage('persist')
   await q.goto(`${BASE}/d/${persistDoc.slug}`)
   await q.waitForSelector('.doc-status--live', { timeout: 15000 })
-  await q.waitForTimeout(800)
+  await q.waitForTimeout(800) // initial Yjs bind + margin card placement settle
 
   // Accept one, reject the other; both decisions must survive a reload.
   await q.locator('.margin-card .btn-accept').first().click()
@@ -612,21 +612,26 @@ try {
   })
   await q.reload()
   await q.waitForSelector('.doc-status--live', { timeout: 15000 })
-  await q.waitForTimeout(800)
+  await q.waitForTimeout(800) // post-reload card re-derivation settle
   const cardsBack = await q.locator('.margin-card').count()
   if (cardsBack === 0) ok('accepted and rejected suggestions stayed resolved across reload')
   else fail(`${cardsBack} resolved suggestion card(s) reappeared after reload`)
 
   // A freshly posted (optimistic) comment must not offer Resolve until the
   // server id arrives — hold the POST open to keep the optimistic window.
-  await q.route(
-    '**/comments',
-    async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1500))
+  let commentPostHeld = false
+  await q.route('**/comments', async (route) => {
+    // Hold only the FIRST comment-creation POST; anything else (and any
+    // later POST) passes through untouched so a background request can't
+    // consume the delay meant for the optimistic window.
+    if (route.request().method() !== 'POST' || commentPostHeld) {
       await route.continue()
-    },
-    { times: 1 },
-  )
+      return
+    }
+    commentPostHeld = true
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await route.continue()
+  })
   await q.locator('.milkdown .ProseMirror p').first().dblclick({ position: { x: 12, y: 10 } })
   await q.locator('.selection-toolbar.is-placed').waitFor({ timeout: 5000 })
   await q.locator('.selection-toolbar button', { hasText: 'Comment' }).first().click()
@@ -657,7 +662,7 @@ try {
   )
   await q.reload()
   await q.waitForSelector('.doc-status--live', { timeout: 15000 })
-  await q.waitForTimeout(800)
+  await q.waitForTimeout(800) // post-reload comment list settle
   const resolvedCameBack = await q
     .locator('.comment-card:not(.is-resolved)', { hasText: persistComment })
     .count()
