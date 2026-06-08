@@ -1,7 +1,7 @@
 ---
 title: "fix: Preserve soft line breaks so metadata blocks render as separate lines"
 type: fix
-status: active
+status: completed
 date: 2026-06-07
 ---
 
