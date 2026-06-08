@@ -16,6 +16,7 @@ import type { RenderType } from '@milkdown/kit/component/table-block'
 import '@milkdown/kit/prose/view/style/prosemirror.css'
 import '@milkdown/kit/prose/tables/style/tables.css'
 import './table_block.css'
+import './frontmatter/frontmatter.css'
 import { getMarkdown } from '@milkdown/kit/utils'
 import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
 import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight'
@@ -32,6 +33,7 @@ import {
   SKIP_PROVENANCE,
   type ProvenanceSpan,
 } from './provenance'
+import { frontmatter } from './frontmatter'
 import { suggestChangesMarks } from './suggest_changes'
 import { suggestState, suggestDispatch } from './suggest_changes/intercept'
 import { suggestGuard } from './suggest_changes/normalize'
@@ -313,6 +315,7 @@ function CollabEditor({
         .use(highlight)
         .use(upload)
         .use(provenance)
+        .use(frontmatter)
         .use(suggestChangesMarks)
         // Order matters: provenanceWriter (inside provenance) runs its
         // appendTransaction before suggestGuard's — the guard observes
