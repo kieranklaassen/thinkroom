@@ -155,6 +155,81 @@ try {
   await assertSoftBreakRender(sb, 'after reload')
   await sb.close()
 
+  // Frontmatter: a leading YAML block must render as the metadata card (not
+  // a thematic break + loose paragraphs), serialize back to a `---` fence at
+  // the very top of the snapshot, and stay pinned to the top when content is
+  // typed above it (the frontmatterGuard normalization).
+  const fmDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Frontmatter check',
+        markdown:
+          '---\ndate: 2026-06-08\ntopic: frontmatter-check\ntags:\n  - alpha\n  - beta\n---\n\n# Frontmatter doc\n\nBody paragraph.\n',
+      }),
+    })
+  ).json()
+  const inspectFrontmatter = () => {
+    const block = document.querySelector('.milkdown .frontmatter-block')
+    if (!block) return { found: false }
+    return {
+      found: true,
+      isFirst: block.parentElement?.firstElementChild === block,
+      rows: Array.from(block.querySelectorAll('tr')).map((tr) => [
+        tr.querySelector('th')?.textContent,
+        tr.querySelector('td')?.textContent,
+      ]),
+      chips: block.querySelectorAll('.frontmatter-chip').length,
+    }
+  }
+  const assertFrontmatterRender = async (page, label) => {
+    await page
+      .waitForFunction(() => document.querySelector('.milkdown .frontmatter-block tr'), {
+        timeout: 10000,
+      })
+      .catch(() => null)
+    const fm = await page.evaluate(inspectFrontmatter)
+    if (
+      fm.found &&
+      fm.isFirst &&
+      fm.rows.length === 3 &&
+      fm.rows[0][0] === 'date' &&
+      fm.rows[0][1] === '2026-06-08' &&
+      fm.chips === 2
+    ) {
+      ok(`frontmatter renders as a key/value card at the top (${label})`)
+    } else {
+      fail(`frontmatter card wrong (${label}): ${JSON.stringify(fm)}`)
+    }
+  }
+  const fmPage = await browser.newPage()
+  await fmPage.goto(`${BASE}/d/${fmDoc.slug}`)
+  await fmPage.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await assertFrontmatterRender(fmPage, 'initial render')
+  // Typing at the very top of the doc displaces the frontmatter; the guard
+  // must move it back above the typed paragraph before the snapshot lands.
+  await fmPage.click('.milkdown .ProseMirror')
+  await fmPage.keyboard.press('Meta+ArrowDown')
+  await fmPage.keyboard.press('Enter')
+  await fmPage.keyboard.type('Typed after seed.')
+  let fmSnapshot = ''
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const fmState = await (await fetch(`${BASE}/api/docs/${fmDoc.slug}`)).json()
+    fmSnapshot = stripMarkup(fmState.markdown)
+    if (fmSnapshot.includes('Typed after seed.')) break
+    await fmPage.waitForTimeout(300)
+  }
+  if (fmSnapshot.startsWith('---\ndate: 2026-06-08\ntopic: frontmatter-check\ntags:\n  - alpha\n  - beta\n---\n')) {
+    ok('frontmatter round-trips to a leading --- fence in the snapshot')
+  } else {
+    fail(`frontmatter serialization drifted: ${JSON.stringify(fmSnapshot.slice(0, 120))}`)
+  }
+  await fmPage.reload()
+  await fmPage.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await assertFrontmatterRender(fmPage, 'after reload')
+  await fmPage.close()
+
   // Type a unique sentinel at the start of the doc in A
   const sentinel = `sync-${Date.now()}`
   await a.click('.milkdown .ProseMirror')
