@@ -152,4 +152,61 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
     assert_equal "accepted", suggestion.reload.status
     assert_includes @document.activities.last.detail, "Quiet Falcon"
   end
+
+  # --- Bulk accept (Accept all) ---
+
+  test "accept_all transitions every pending suggestion and returns winners in id order" do
+    second = @document.suggestions.create!(author_name: "Scout", author_kind: "agent", body: "b")
+    third = @document.suggestions.create!(author_name: "Scout", author_kind: "agent", body: "c")
+
+    assert_difference -> { @document.activities.count }, 1 do
+      patch accept_all_document_suggestions_path(@document.slug),
+            params: { by: "Quiet Falcon" }, as: :json
+    end
+
+    assert_response :success
+    accepted = response.parsed_body["accepted"]
+    assert_equal [ @suggestion.id, second.id, third.id ], accepted.map { |s| s["id"] }
+    assert_equal %w[accepted accepted accepted],
+                 [ @suggestion, second, third ].map { |s| s.reload.status }
+    assert_equal "Quiet Falcon", @suggestion.reload.resolved_by
+    assert_includes @document.activities.last.detail, "3 suggestions"
+  end
+
+  test "accept_all excludes suggestions already resolved before the call" do
+    second = @document.suggestions.create!(author_name: "Scout", author_kind: "agent", body: "b")
+    @suggestion.accept!(by: "Earlier Window")
+
+    patch accept_all_document_suggestions_path(@document.slug), as: :json
+
+    accepted = response.parsed_body["accepted"]
+    assert_equal [ second.id ], accepted.map { |s| s["id"] }
+    assert_equal "Earlier Window", @suggestion.reload.resolved_by
+  end
+
+  test "accept_all with nothing pending returns an empty list and logs no activity" do
+    @suggestion.reject!
+
+    assert_no_difference -> { @document.activities.count } do
+      patch accept_all_document_suggestions_path(@document.slug), as: :json
+    end
+
+    assert_response :success
+    assert_empty response.parsed_body["accepted"]
+  end
+
+  test "accept_all broadcasts one suggestions event for the whole batch" do
+    @document.suggestions.create!(author_name: "Scout", author_kind: "agent", body: "b")
+
+    # one :activities event from Activity.log!, one :suggestions event —
+    # regardless of how many suggestions transitioned
+    assert_broadcasts(DocumentMetaChannel.broadcasting_for(@document), 2) do
+      patch accept_all_document_suggestions_path(@document.slug), as: :json
+    end
+  end
+
+  test "accept_all on an unknown doc returns 404" do
+    patch accept_all_document_suggestions_path("gone-doc"), as: :json
+    assert_response :not_found
+  end
 end
