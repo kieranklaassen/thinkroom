@@ -829,72 +829,6 @@ a:focus-visible {
   color: var(--ink-faint);
 }
 
-/* ------------------------------- Ask AI ----------------------------------- */
-.ask-ai {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.ask-ai-input {
-  flex: 1;
-  font-size: 0.8rem;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 0.45rem 0.6rem;
-  background: var(--surface-raised);
-  color: var(--ink);
-  transition: border-color 120ms ease;
-}
-
-.ask-ai-input:focus {
-  outline: none;
-  border-color: var(--ink-faint);
-  box-shadow: none;
-}
-
-.ask-ai-input::placeholder {
-  color: var(--ink-faint);
-}
-
-.ask-ai-button {
-  border: none;
-  background: var(--ink);
-  color: var(--surface);
-  font-size: 0.78rem;
-  font-weight: 550;
-  border-radius: 8px;
-  padding: 0 0.8rem;
-  cursor: pointer;
-  min-width: 3.2rem;
-  transition: background 120ms ease;
-}
-
-.ask-ai-button:hover:not(:disabled) {
-  background: #000;
-}
-
-.ask-ai-button:disabled {
-  opacity: 0.7;
-  cursor: default;
-}
-
-.ask-ai-spinner {
-  display: inline-block;
-  width: 0.8rem;
-  height: 0.8rem;
-  border: 2px solid color-mix(in srgb, var(--surface) 40%, transparent);
-  border-top-color: var(--surface);
-  border-radius: 50%;
-  animation: spin 700ms linear infinite;
-  vertical-align: middle;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* --------------------------- Suggestion cards ----------------------------- */
 .suggestion-list {
   display: flex;
@@ -2202,14 +2136,6 @@ a:focus-visible {
   justify-content: center;
 }
 
-.dock-busy {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--prov-pending-line);
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
 /* ------------------------------ Bottom sheets ----------------------------- */
 .sheet-backdrop {
   position: fixed;
@@ -2324,12 +2250,6 @@ a:focus-visible {
   padding: 0 1.1rem;
   font-size: 0.85rem;
   flex: 1;
-}
-
-.sheet-body .ask-ai-input,
-.sheet-body .ask-ai-button {
-  min-height: 44px;
-  font-size: 0.9rem;
 }
 
 .sheet-body .comment-input {

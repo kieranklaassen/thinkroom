@@ -42,7 +42,7 @@ interface ActivityGroup {
 }
 
 // Consecutive entries by the same actor doing the same thing within a minute
-// of each other collapse into one row ("Gemini proposed 3 edits").
+// of each other collapse into one row ("Scout proposed 3 edits").
 function groupActivities(activities: ActivityPayload[]): ActivityGroup[] {
   const groups: ActivityGroup[] = []
   for (const activity of activities) {
