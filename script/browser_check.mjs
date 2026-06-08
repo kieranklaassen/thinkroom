@@ -69,6 +69,55 @@ try {
   else fail('## input rule did not produce a heading')
   await c.close()
 
+  // Soft breaks: single newlines in seeded markdown must render as visible
+  // line breaks (metadata blocks like **Date:** / **Source:** / **Goal:**),
+  // and the snapshot must round-trip them back to plain newlines unchanged.
+  const softDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Soft break check',
+        markdown: '# Soft breaks\n\n**Date:** 2026-06-07\n**Source:** transcripts\n**Goal:** sharper plugin\n',
+      }),
+    })
+  ).json()
+  const sb = await browser.newPage()
+  await sb.goto(`${BASE}/d/${softDoc.slug}`)
+  await sb.waitForSelector('.doc-status--live', { timeout: 15000 })
+  const metaLines = await sb
+    .waitForFunction(
+      () => {
+        const p = Array.from(document.querySelectorAll('.milkdown .ProseMirror p')).find((el) =>
+          el.textContent?.includes('Date:'),
+        )
+        if (!p) return null
+        const brs = p.querySelectorAll('br[data-type="hardbreak"]').length
+        return brs === 2 ? p.innerText.split('\n') : null
+      },
+      { timeout: 10000 },
+    )
+    .then((handle) => handle.jsonValue())
+    .catch(() => null)
+  if (
+    metaLines?.length === 3 &&
+    metaLines[0].endsWith('2026-06-07') &&
+    metaLines[2].startsWith('Goal:')
+  ) {
+    ok('soft-break metadata block renders as three separate lines')
+  } else {
+    fail(`soft breaks collapsed: ${JSON.stringify(metaLines)}`)
+  }
+  await sb.waitForTimeout(1500) // snapshot debounce (900ms) + margin
+  const softState = await (await fetch(`${BASE}/api/docs/${softDoc.slug}`)).json()
+  const softPlain = (softState.markdown ?? '').replace(/<\/?span[^>]*>/g, '')
+  if (softPlain.includes('**Date:** 2026-06-07\n**Source:** transcripts\n**Goal:** sharper plugin')) {
+    ok('soft breaks round-trip to plain newlines in the snapshot')
+  } else {
+    fail(`soft-break serialization drifted: ${JSON.stringify(softPlain.slice(0, 160))}`)
+  }
+  await sb.close()
+
   // Type a unique sentinel at the start of the doc in A
   const sentinel = `sync-${Date.now()}`
   await a.click('.milkdown .ProseMirror')
