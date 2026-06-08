@@ -20,7 +20,6 @@ import {
   applySuggestion,
   findTextRange,
   flashMergedRange,
-  selectedText,
   type SuggestionPayload,
 } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
@@ -32,7 +31,6 @@ import {
 } from '../../components/margin_inline_suggestions'
 import { ProvenanceSummaryChip } from '../../components/provenance_summary'
 import { ReviewPopover } from '../../components/review_popover'
-import { AskAiPanel } from '../../components/suggestions_panel'
 import { MarginSuggestions } from '../../components/margin_suggestions'
 import { CommentsPanel, type CommentPayload } from '../../components/comments_panel'
 import { AnchoredComposer } from '../../components/anchored_composer'
@@ -55,7 +53,6 @@ import { useMetaChannel } from '../../lib/use_meta_channel'
 import { useMediaQuery } from '../../lib/use_media_query'
 import { useAnchoredPopover } from '../../lib/use_anchored_popover'
 import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
-import { postJSON } from '../../lib/csrf'
 import {
   getStoredFlag,
   getStoredString,
@@ -157,11 +154,6 @@ export default function DocumentShow({
   const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null)
   const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null)
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
-  const [aiPendingCount, setAiPendingCount] = useState(0)
-  const aiPending = aiPendingCount > 0
-  const prevSuggestionCount = useRef(
-    suggestions.filter((s) => s.author_kind !== 'human').length,
-  )
   const viewRef = useRef<EditorView | null>(null)
   const [panelOpen, setPanelOpen] = useState(() => getStoredFlag('pruf:panel', true))
   const [focusMode, setFocusMode] = useState(() => getStoredFlag('pruf:focus', false))
@@ -221,18 +213,6 @@ export default function DocumentShow({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
-
-  // Only a MACHINE suggestion ARRIVING clears the thinking state —
-  // accept/reject shrink the list and must not re-enable Ask AI while a
-  // request is live, and a human suggestion (yours or a collaborator's)
-  // landing mid-request must not release the button early.
-  const machineSuggestionCount = suggestions.filter((s) => s.author_kind !== 'human').length
-  useEffect(() => {
-    if (machineSuggestionCount > prevSuggestionCount.current) {
-      setAiPendingCount((count) => Math.max(0, count - 1))
-    }
-    prevSuggestionCount.current = machineSuggestionCount
-  }, [machineSuggestionCount])
 
   // Human presence from Yjs awareness. Self is filtered out — the
   // IdentityChip represents you; a duplicate avatar next to it is noise.
@@ -455,29 +435,6 @@ export default function DocumentShow({
         )
     },
     [identity.name],
-  )
-
-  const askAi = useCallback(
-    (instruction: string, selection?: string) => {
-      // One in-flight request at a time — the selection toolbar has no
-      // disabled state, so the guard lives here.
-      if (aiPendingCount > 0) return
-      const context = selection ?? (handle ? selectedText(handle.editor) : '')
-      setAiPendingCount((count) => count + 1)
-      const release = () => setAiPendingCount((count) => Math.max(0, count - 1))
-      void postJSON(`/d/${doc.slug}/ai_suggestions`, {
-        instruction,
-        context: context || null,
-        replaces: context || null,
-        anchor_text: context || null,
-      })
-        .then((response) => {
-          // fetch resolves on 4xx/5xx — release the button on server errors.
-          if (!response.ok) release()
-        })
-        .catch(release)
-    },
-    [doc.slug, handle, aiPendingCount],
   )
 
   const submitComment = useCallback(
@@ -795,7 +752,6 @@ export default function DocumentShow({
           </div>
           {!isMobile && (
             <aside className="doc-rail">
-              <AskAiPanel aiPending={aiPending} onAskAi={(instruction) => askAi(instruction)} />
               <CommentsPanel
                 comments={comments}
                 // The desktop composer is the anchored card next to the
@@ -815,9 +771,6 @@ export default function DocumentShow({
             rootRef={selectionPopover.ref}
             position={selectionPopover.position}
             actions={[
-              // Per-mode capability matrix — Edit: Comment · Ask AI;
-              // Suggest: Comment (typing IS the suggestion mechanism);
-              // Comment: Comment.
               {
                 label: 'Comment',
                 onClick: () => {
@@ -825,17 +778,6 @@ export default function DocumentShow({
                   setSelectionTarget(null)
                 },
               },
-              ...(mode === 'edit'
-                ? [
-                    {
-                      label: 'Ask AI',
-                      onClick: () => {
-                        askAi('', selectionTarget.text)
-                        setSelectionTarget(null)
-                      },
-                    },
-                  ]
-                : []),
             ]}
           />
         )}
@@ -876,7 +818,6 @@ export default function DocumentShow({
           <MobileDock
             suggestionCount={suggestions.length + inlineSuggestions.length}
             commentCount={comments.filter((c) => !c.resolved).length}
-            aiPending={aiPending}
             active={activeSheet}
             onOpen={(kind) => setActiveSheet((current) => (current === kind ? null : kind))}
           />
@@ -908,18 +849,6 @@ export default function DocumentShow({
               onResolve={resolveComment}
               onJumpTo={(anchorText) => {
                 jumpToAnchor(anchorText)
-                setActiveSheet(null)
-              }}
-            />
-          </MobileSheet>
-        )}
-        {isMobile && activeSheet === 'ask' && (
-          <MobileSheet title="Ask AI" onClose={() => setActiveSheet(null)}>
-            <AskAiPanel
-              aiPending={aiPending}
-              onAskAi={(instruction) => {
-                askAi(instruction)
-                // Close so the dock's badge tells the story when it lands.
                 setActiveSheet(null)
               }}
             />

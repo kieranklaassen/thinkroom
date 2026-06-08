@@ -44,21 +44,6 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
     assert_equal "is no longer pending", session[:inertia_errors][:suggestion]
   end
 
-  test "ask AI endpoint creates a pending ai suggestion" do
-    original = ENV.delete("GEMINI_API_KEY")
-    assert_difference -> { @document.suggestions.pending.count }, 1 do
-      post document_ai_suggestions_path(@document.slug),
-           params: { instruction: "expand the intro" },
-           as: :json
-    end
-    assert_response :created
-    suggestion = @document.suggestions.pending.last
-    assert_equal "ai", suggestion.author_kind
-    assert_equal "expand the intro", suggestion.intent
-  ensure
-    ENV["GEMINI_API_KEY"] = original if original
-  end
-
   test "document show exposes pending suggestions as props" do
     get document_page_path(@document.slug), headers: { "User-Agent" => "Mozilla/5.0" }
     assert_response :success

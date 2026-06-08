@@ -29,8 +29,6 @@ registry:
 env:
   secret:
     - RAILS_MASTER_KEY
-    # Optional: AI suggestions fall back to canned text when absent/empty.
-    - GEMINI_API_KEY
   clear:
     # SQLite: single Puma worker process avoids multi-process contention on the same DB files.
     # NOTE: app/services/yjs_persistence.rb also assumes single-process (in-process per-doc lock) —
