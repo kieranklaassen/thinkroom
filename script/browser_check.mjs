@@ -71,51 +71,88 @@ try {
 
   // Soft breaks: single newlines in seeded markdown must render as visible
   // line breaks (metadata blocks like **Date:** / **Source:** / **Goal:**),
-  // and the snapshot must round-trip them back to plain newlines unchanged.
+  // the snapshot must round-trip them back to plain newlines unchanged, and
+  // literal contexts (fenced code) must keep their newlines untouched.
   const softDoc = await (
     await fetch(`${BASE}/api/docs`, {
       method: 'POST',
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: 'Soft break check',
-        markdown: '# Soft breaks\n\n**Date:** 2026-06-07\n**Source:** transcripts\n**Goal:** sharper plugin\n',
+        markdown:
+          '# Soft breaks\n\n**Date:** 2026-06-07\n**Source:** transcripts\n**Goal:** sharper plugin\n\n```\ncode line one\ncode line two\n```\n',
       }),
     })
   ).json()
+  // br[data-type="hardbreak"] comes from Milkdown's hardbreakAttr; update the
+  // selector if a Milkdown upgrade renames it.
+  const inspectSoftBreaks = () => {
+    const p = Array.from(document.querySelectorAll('.milkdown .ProseMirror p')).find((el) =>
+      el.textContent?.includes('Date:'),
+    )
+    const code = document.querySelectorAll('.milkdown .ProseMirror pre')
+    return {
+      brs: p ? p.querySelectorAll('br[data-type="hardbreak"]').length : -1,
+      lines: p ? p.innerText.split('\n') : [],
+      html: p ? p.innerHTML.slice(0, 200) : '(no metadata paragraph found)',
+      codeBlocks: code.length,
+      codeText: code[0]?.textContent ?? '',
+    }
+  }
+  const assertSoftBreakRender = async (page, label) => {
+    await page
+      .waitForFunction(
+        () => {
+          const p = Array.from(document.querySelectorAll('.milkdown .ProseMirror p')).find((el) =>
+            el.textContent?.includes('Date:'),
+          )
+          return p && p.querySelectorAll('br[data-type="hardbreak"]').length === 2
+        },
+        { timeout: 10000 },
+      )
+      .catch(() => null)
+    const state = await page.evaluate(inspectSoftBreaks)
+    if (
+      state.brs === 2 &&
+      state.lines.length === 3 &&
+      state.lines[0].endsWith('2026-06-07') &&
+      state.lines[2].startsWith('Goal:')
+    ) {
+      ok(`soft-break metadata block renders as three separate lines (${label})`)
+    } else {
+      fail(`soft breaks collapsed (${label}): brs=${state.brs} lines=${JSON.stringify(state.lines)} html=${state.html}`)
+    }
+    if (state.codeBlocks === 1 && state.codeText.includes('code line one') && state.codeText.includes('code line two')) {
+      ok(`fenced code block kept literal newlines (${label})`)
+    } else {
+      fail(`code block mangled (${label}): blocks=${state.codeBlocks} text=${JSON.stringify(state.codeText.slice(0, 80))}`)
+    }
+  }
   const sb = await browser.newPage()
   await sb.goto(`${BASE}/d/${softDoc.slug}`)
   await sb.waitForSelector('.doc-status--live', { timeout: 15000 })
-  const metaLines = await sb
-    .waitForFunction(
-      () => {
-        const p = Array.from(document.querySelectorAll('.milkdown .ProseMirror p')).find((el) =>
-          el.textContent?.includes('Date:'),
-        )
-        if (!p) return null
-        const brs = p.querySelectorAll('br[data-type="hardbreak"]').length
-        return brs === 2 ? p.innerText.split('\n') : null
-      },
-      { timeout: 10000 },
-    )
-    .then((handle) => handle.jsonValue())
-    .catch(() => null)
-  if (
-    metaLines?.length === 3 &&
-    metaLines[0].endsWith('2026-06-07') &&
-    metaLines[2].startsWith('Goal:')
-  ) {
-    ok('soft-break metadata block renders as three separate lines')
-  } else {
-    fail(`soft breaks collapsed: ${JSON.stringify(metaLines)}`)
+  await assertSoftBreakRender(sb, 'initial render')
+  // The 900ms snapshot debounce resets on every update — poll the API until
+  // the snapshot lands instead of gambling on a fixed sleep.
+  const stripMarkup = (md) => (md ?? '').replace(/<\/?(?:span|ins|del)[^>]*>/g, '')
+  const expectedMeta = '**Date:** 2026-06-07\n**Source:** transcripts\n**Goal:** sharper plugin'
+  let softPlain = ''
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const softState = await (await fetch(`${BASE}/api/docs/${softDoc.slug}`)).json()
+    softPlain = stripMarkup(softState.markdown)
+    if (softPlain.includes(expectedMeta)) break
+    await sb.waitForTimeout(300)
   }
-  await sb.waitForTimeout(1500) // snapshot debounce (900ms) + margin
-  const softState = await (await fetch(`${BASE}/api/docs/${softDoc.slug}`)).json()
-  const softPlain = (softState.markdown ?? '').replace(/<\/?span[^>]*>/g, '')
-  if (softPlain.includes('**Date:** 2026-06-07\n**Source:** transcripts\n**Goal:** sharper plugin')) {
+  if (softPlain.includes(expectedMeta)) {
     ok('soft breaks round-trip to plain newlines in the snapshot')
   } else {
     fail(`soft-break serialization drifted: ${JSON.stringify(softPlain.slice(0, 160))}`)
   }
+  // Reload exercises the persisted-state reparse path (no drift on repeated
+  // open/serialize cycles).
+  await sb.reload()
+  await sb.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await assertSoftBreakRender(sb, 'after reload')
   await sb.close()
 
   // Type a unique sentinel at the start of the doc in A
@@ -323,7 +360,9 @@ try {
     method: 'POST',
     headers: agentHeaders,
     body: JSON.stringify({
-      body: 'An agent-proposed closing paragraph.',
+      // Soft break in the body: acceptance parses through the same Milkdown
+      // parser as seeding, so the two lines must render with a <br> between.
+      body: 'An agent-proposed closing paragraph.\nWith a second proposed line.',
       intent: 'Add a closing',
       anchor_text: 'provenance',
     }),
@@ -356,6 +395,26 @@ try {
     { timeout: 10000 },
   )
   ok('accepted agent text carries agent attribution in the document')
+
+  const acceptedSoftBreakOk = await a
+    .waitForFunction(
+      () => {
+        const p = Array.from(document.querySelectorAll('.milkdown .ProseMirror p')).find((el) =>
+          el.textContent?.includes('An agent-proposed closing paragraph.'),
+        )
+        return (
+          p &&
+          p.querySelectorAll('br[data-type="hardbreak"]').length >= 1 &&
+          p.innerText.split('\n').some((line) => line.startsWith('With a second proposed line.'))
+        )
+      },
+      undefined,
+      { timeout: 10000 },
+    )
+    .then(() => true)
+    .catch(() => false)
+  if (acceptedSoftBreakOk) ok('accepted suggestion soft break renders as a separate line')
+  else fail('soft break in accepted suggestion body collapsed into one line')
 
   // Agent reacts to the human: poll + ack events
   const events = await (await fetch(`${api}/events/pending`, { headers: agentHeaders })).json()
