@@ -106,9 +106,15 @@ export function CommentsPanel({
               </blockquote>
             )}
             <p className="comment-body">{comment.body}</p>
-            <button className="comment-resolve" onClick={() => onResolve(comment)}>
-              Resolve
-            </button>
+            {/* Optimistic placeholders (negative id) have no server row yet —
+                a resolve PATCH against them would 404. The button appears
+                when the reload delivers the real id (same gate as the
+                suggestion cards' accept/reject). */}
+            {comment.id > 0 && (
+              <button className="comment-resolve" onClick={() => onResolve(comment)}>
+                Resolve
+              </button>
+            )}
           </li>
         ))}
       </ul>

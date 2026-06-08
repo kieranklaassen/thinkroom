@@ -20,7 +20,12 @@ class SuggestionsController < InertiaController
 
     redirect_back fallback_location: document_page_path(document.slug), status: :see_other
   rescue ActiveRecord::RecordInvalid => e
-    redirect_back fallback_location: document_page_path(params[:slug]), status: :see_other,
+    # No explicit `status:` on error-bag redirects: InertiaRails' middleware
+    # only preserves staged `inertia: { errors: }` session data across 301/302
+    # responses (it upgrades Inertia PATCH/PUT/DELETE redirects to 303 itself).
+    # An explicit 303 here makes the middleware delete the errors before the
+    # follow-up request can render them.
+    redirect_back fallback_location: document_page_path(params[:slug]),
                   inertia: { errors: { suggestion: e.record.errors.full_messages.to_sentence } }
   rescue ActiveRecord::RecordNotFound
     # The doc was deleted while the composer was open — go home cleanly.
@@ -32,7 +37,8 @@ class SuggestionsController < InertiaController
     log_and_broadcast("accepted_suggestion", "accepted “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
     redirect_back fallback_location: document_page_path(@suggestion.document.slug), status: :see_other
   rescue ActiveRecord::RecordInvalid
-    redirect_back fallback_location: document_page_path(@suggestion.document.slug), status: :see_other,
+    # No `status:` on error-bag redirects — see create's rescue.
+    redirect_back fallback_location: document_page_path(@suggestion.document.slug),
                   inertia: { errors: { suggestion: "is no longer pending" } }
   end
 
@@ -41,7 +47,8 @@ class SuggestionsController < InertiaController
     log_and_broadcast("rejected_suggestion", "rejected “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
     redirect_back fallback_location: document_page_path(@suggestion.document.slug), status: :see_other
   rescue ActiveRecord::RecordInvalid
-    redirect_back fallback_location: document_page_path(@suggestion.document.slug), status: :see_other,
+    # No `status:` on error-bag redirects — see create's rescue.
+    redirect_back fallback_location: document_page_path(@suggestion.document.slug),
                   inertia: { errors: { suggestion: "is no longer pending" } }
   end
 
@@ -52,7 +59,8 @@ class SuggestionsController < InertiaController
   rescue ActiveRecord::RecordNotFound
     # The suggestion (or its doc) was deleted while the card was on screen —
     # redirect back cleanly instead of a 404 modal over the editor.
-    redirect_back fallback_location: root_path, status: :see_other,
+    # No `status:` on error-bag redirects — see create's rescue.
+    redirect_back fallback_location: root_path,
                   inertia: { errors: { suggestion: "is no longer available" } }
   end
 
