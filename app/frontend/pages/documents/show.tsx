@@ -18,12 +18,13 @@ import {
 } from '../../editor/provenance'
 import {
   applySuggestion,
+  findSuggestionTarget,
   findTextRange,
   flashMergedRange,
   type SuggestionPayload,
 } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
-import { editorViewCtx } from '@milkdown/kit/core'
+import { editorViewCtx, parserCtx } from '@milkdown/kit/core'
 import { collectInlineSuggestions } from '../../editor/suggest_changes'
 import {
   MarginInlineSuggestions,
@@ -156,6 +157,10 @@ export default function DocumentShow({
   const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null)
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
   const viewRef = useRef<EditorView | null>(null)
+  // Live handle for code that runs after awaits or inside stable callbacks —
+  // a closure-captured handle goes stale when the editor remounts mid-flight.
+  const handleRef = useRef<EditorHandle | null>(null)
+  handleRef.current = handle
   const [panelOpen, setPanelOpen] = useState(() => getStoredFlag('pruf:panel', true))
   const [focusMode, setFocusMode] = useState(() => getStoredFlag('pruf:focus', false))
   // Demo doc always opens in Edit and stays locked there.
@@ -320,13 +325,20 @@ export default function DocumentShow({
     setSelectionTarget(null)
 
     // Mobile: tapping inside a pending suggestion's tinted anchor opens its
-    // sheet card — the touch equivalent of glancing at the margin.
+    // sheet card — the touch equivalent of glancing at the margin. Same
+    // parser-aware matcher the cards anchor with, so markdown-quoting
+    // suggestions hit-test at their real ranges.
     if (isMobileRef.current && empty) {
       const pos = view.state.selection.head
-      const hit = suggestionsRef.current.find((s) => {
-        const range = findTextRange(view.state.doc, s.replaces ?? s.anchor_text)
-        return range !== null && pos >= range.from && pos <= range.to
-      })
+      const parser = handleRef.current
+        ? handleRef.current.editor.action((ctx) => ctx.get(parserCtx))
+        : null
+      const hit = parser
+        ? suggestionsRef.current.find((s) => {
+            const range = findSuggestionTarget(view.state.doc, parser, s.replaces ?? s.anchor_text)
+            return range !== null && pos >= range.from && pos <= range.to
+          })
+        : undefined
       if (hit) {
         setSheetFocusId(hit.id)
         setActiveSheet('suggestions')
@@ -445,27 +457,52 @@ export default function DocumentShow({
   // clearing durable, and a failed request lets the cards reappear.
   const [acceptingAll, setAcceptingAll] = useState(false)
   const acceptAllSuggestions = useCallback(async () => {
-    if (acceptingAll || !handle) return
+    if (acceptingAll || !handleRef.current) return
     if (suggestionsRef.current.filter((s) => s.id > 0).length === 0) return
     setAcceptingAll(true)
+    let succeeded = false
     try {
       const response = await patchJSON(`/d/${doc.slug}/suggestions/accept_all`, {
         by: identity.name,
       })
-      if (!response.ok) return
-      const { accepted } = (await response.json()) as { accepted: SuggestionPayload[] }
-      for (const suggestion of accepted) {
-        const merged = applySuggestion(handle.editor, suggestion)
-        if (merged) flashMergedRange(handle.editor, merged)
+      if (response.ok) {
+        const { accepted } = (await response.json()) as { accepted: SuggestionPayload[] }
+        for (const suggestion of accepted) {
+          // Live handle: the editor can remount during the awaits above.
+          const live = handleRef.current
+          if (!live) break
+          // One failing merge must not strand the rest of the batch — every
+          // winner is already accepted server-side.
+          try {
+            const merged = applySuggestion(live.editor, suggestion)
+            if (merged) flashMergedRange(live.editor, merged)
+          } catch (error) {
+            console.warn('pruf: bulk merge failed for suggestion', suggestion.id, error)
+          }
+        }
+        succeeded = true
+      } else {
+        console.warn('pruf: accept all rejected', response.status)
       }
-      // The broadcast already schedules every client's debounced reload;
-      // this explicit one guarantees the acceptor's own cards clear even
-      // with the cable momentarily down.
-      router.reload({ only: ['suggestions', 'activities'], async: true })
+    } catch (error) {
+      console.warn('pruf: accept all failed', error)
     } finally {
-      setAcceptingAll(false)
+      if (succeeded) {
+        // Hold the optimistic clearing until fresh props land — releasing
+        // before the reload finishes flashes the accepted cards (and the
+        // header button) back for a full round trip. The broadcast-driven
+        // debounced reload still covers every other client.
+        router.reload({
+          only: ['suggestions', 'activities'],
+          async: true,
+          onFinish: () => setAcceptingAll(false),
+        })
+      } else {
+        // Failure: release immediately so the cards reappear (rollback).
+        setAcceptingAll(false)
+      }
     }
-  }, [acceptingAll, handle, doc.slug, identity.name])
+  }, [acceptingAll, doc.slug, identity.name])
 
   // Optimistic clearing for the bulk path: server-backed cards vanish the
   // moment Accept all is clicked; optimistic placeholders (negative ids,
