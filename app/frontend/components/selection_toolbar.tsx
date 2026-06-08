@@ -12,8 +12,7 @@ interface Props {
   rootRef: RefObject<HTMLDivElement | null>
   /** Measured position; null during the pre-measure hidden phase. */
   position: { x: number; y: number } | null
-  /** Mode-gated action list (Edit: Comment · Ask AI; Suggest: Suggest a
-   *  change; Comment: Comment). Renders nothing when empty. */
+  /** Action list for the current selection. Renders nothing when empty. */
   actions: Action[]
 }
 

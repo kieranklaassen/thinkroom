@@ -16,7 +16,6 @@ bin/dev       # Rails on :3000 + Vite dev server
 Open **http://localhost:3000/d/demo** in two windows side by side: edits sync
 live, AI spans render tinted, the provenance summary updates as you type.
 Requires Ruby 3.4, Node 20+ (22+ for `script/sync_check.mjs`), SQLite.
-`GEMINI_API_KEY` is optional — Ask AI falls back to canned passages without it.
 
 ## Architecture
 
@@ -180,10 +179,10 @@ the captured run:
 
 **Browser check** (`script/browser_check.mjs`): two real Chromium windows —
 live typing sync, reload persistence, markdown input shortcuts, seeded AI
-tints, human attribution of typed text, live summary, Ask AI → suggestion →
+tints, human attribution of typed text, live summary, agent suggestion →
 accept → AI-provenance merge, comments with resolve, image paste through
 Active Storage direct upload, instant + persistent theme switching, and the
-full agent loop described above. All 33 checks pass.
+full agent loop described above. All checks pass.
 
 ## Design notes & critique pass
 

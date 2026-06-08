@@ -165,14 +165,3 @@ export function flashMergedRange(editor: Editor, range: { from: number; to: numb
     }
   })
 }
-
-/** Selected text in the editor, for Ask AI context / rewrite mode. */
-export function selectedText(editor: Editor): string {
-  let text = ''
-  editor.action((ctx) => {
-    const view = ctx.get(editorViewCtx)
-    const { from, to } = view.state.selection
-    text = view.state.doc.textBetween(from, to, '\n')
-  })
-  return text
-}
