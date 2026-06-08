@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { editorViewCtx } from '@milkdown/kit/core'
+import { editorViewCtx, parserCtx } from '@milkdown/kit/core'
 import { TextSelection } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import type { EditorHandle } from '../editor/milkdown_editor'
 import type { ProvenanceSpan } from '../editor/provenance'
-import { findTextRange, type SuggestionPayload } from '../editor/suggestions'
+import { findSuggestionTarget, type SuggestionPayload } from '../editor/suggestions'
 import { truncate } from '../lib/truncate'
 import { clearHighlight, domRange, setHighlight, supportsHighlights } from '../lib/highlights'
 
@@ -91,8 +91,12 @@ export function MarginSuggestions({
     if (!container || !handle) return
 
     let view: EditorView
+    let parser: Parameters<typeof findSuggestionTarget>[1]
     try {
-      view = handle.editor.action((ctx) => ctx.get(editorViewCtx))
+      ;({ view, parser } = handle.editor.action((ctx) => ({
+        view: ctx.get(editorViewCtx),
+        parser: ctx.get(parserCtx),
+      })))
     } catch {
       return // editor torn down mid-navigation
     }
@@ -102,7 +106,7 @@ export function MarginSuggestions({
     rangesRef.current = new Map()
 
     const entries = suggestions.map((s) => {
-      const range = findTextRange(view.state.doc, anchorOf(s))
+      const range = findSuggestionTarget(view.state.doc, parser, anchorOf(s))
       if (range) {
         const dom = domRange(view, range.from, range.to)
         if (dom) rangesRef.current.set(s.id, dom)
@@ -166,7 +170,7 @@ export function MarginSuggestions({
       try {
         handle.editor.action((ctx) => {
           const view = ctx.get(editorViewCtx)
-          const range = findTextRange(view.state.doc, anchorOf(suggestion))
+          const range = findSuggestionTarget(view.state.doc, ctx.get(parserCtx), anchorOf(suggestion))
           if (!range) return
           const tr = view.state.tr.setSelection(
             TextSelection.create(view.state.doc, range.from, range.to),
