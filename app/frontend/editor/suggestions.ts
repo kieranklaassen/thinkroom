@@ -113,6 +113,31 @@ interface MatchedRange {
   kind: 'inline' | 'block'
 }
 
+// Parsing a quote is deterministic for a given source string, and the margin
+// measure pass re-matches every suggestion on each document change — caching
+// makes the per-keystroke cost a Map lookup instead of a markdown parse.
+// Cached nodes are only read for textContent/shape, so a cache entry from a
+// torn-down editor's schema is still valid data.
+const PARSE_CACHE_MAX = 200
+const parseCache = new Map<string, Node | null>()
+
+const parseQuote = (parser: MarkdownParser, search: string): Node | null => {
+  const cached = parseCache.get(search)
+  if (cached !== undefined) return cached
+  let parsed: Node | null = null
+  try {
+    parsed = parser(search) ?? null
+  } catch {
+    parsed = null
+  }
+  if (parseCache.size >= PARSE_CACHE_MAX) {
+    const oldest = parseCache.keys().next().value
+    if (oldest !== undefined) parseCache.delete(oldest)
+  }
+  parseCache.set(search, parsed)
+  return parsed
+}
+
 /**
  * Locate suggestion-quoted text in the document. Agents quote the markdown
  * SOURCE they read from the API (`### Heading`, `**bold**`, `\~` escapes),
@@ -133,12 +158,7 @@ function matchQuotedText(
   const raw = findTextRange(doc, search)
   if (raw) return { ...raw, kind: 'inline' }
 
-  let parsed: Node | undefined
-  try {
-    parsed = parser(search)
-  } catch {
-    return null
-  }
+  const parsed = parseQuote(parser, search)
   if (!parsed || parsed.content.size === 0) return null
 
   const block = findBlockRange(doc, blockTexts(parsed))

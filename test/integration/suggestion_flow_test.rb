@@ -170,7 +170,28 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
     assert_equal %w[accepted accepted accepted],
                  [ @suggestion, second, third ].map { |s| s.reload.status }
     assert_equal "Quiet Falcon", @suggestion.reload.resolved_by
+    assert_equal "Quiet Falcon", @document.activities.last.actor_name
     assert_includes @document.activities.last.detail, "3 suggestions"
+  end
+
+  test "accept_all without a name uses one fallback for resolver and actor alike" do
+    patch accept_all_document_suggestions_path(@document.slug), as: :json
+
+    assert_equal "Someone", @suggestion.reload.resolved_by
+    assert_equal "Someone", @document.activities.last.actor_name
+  end
+
+  test "transition! is compare-and-set: a stale in-memory record cannot double-accept" do
+    fresh = Suggestion.find(@suggestion.id)
+    stale = Suggestion.find(@suggestion.id)
+
+    fresh.accept!(by: "First Window")
+    # The stale copy still believes it is pending — the DB must be the arbiter,
+    # or both windows would merge the same body into the shared document.
+    assert_raises(ActiveRecord::RecordInvalid) { stale.accept!(by: "Second Window") }
+
+    assert_equal "First Window", @suggestion.reload.resolved_by
+    assert_equal "accepted", @suggestion.status
   end
 
   test "accept_all excludes suggestions already resolved before the call" do
@@ -205,8 +226,10 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "accept_all on an unknown doc returns 404" do
+  test "accept_all on an unknown doc returns a JSON 404, not an HTML error page" do
     patch accept_all_document_suggestions_path("gone-doc"), as: :json
     assert_response :not_found
+    assert_includes response.content_type, "application/json"
+    assert_equal "No document with that slug.", response.parsed_body["error"]
   end
 end

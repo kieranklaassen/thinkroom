@@ -40,13 +40,15 @@ class SuggestionsController < InertiaController
   # client's debounced props reload anyway.
   def accept_all
     document = Document.find_by!(slug: params[:slug])
-    by = preferred_name(params[:by], fallback: "human")
+    # One name for both resolved_by and the activity row — two lookups with
+    # different fallbacks silently diverge when no session name is set.
+    by = preferred_name(params[:by], fallback: "Someone")
     accepted = Suggestion.accept_all!(document:, by:)
 
     if accepted.any?
       Activity.log!(
         document:,
-        actor_name: preferred_name(params[:by], fallback: "Someone"),
+        actor_name: by,
         actor_kind: "human",
         action: "accepted_suggestion",
         detail: "accepted #{accepted.size} suggestions in one batch"
@@ -55,6 +57,9 @@ class SuggestionsController < InertiaController
     end
 
     render json: { accepted: accepted.map(&:as_props) }
+  rescue ActiveRecord::RecordNotFound
+    # JSON in, JSON out — an HTML 404 page here is unparseable to the client.
+    render json: { error: "No document with that slug." }, status: :not_found
   end
 
   def accept
