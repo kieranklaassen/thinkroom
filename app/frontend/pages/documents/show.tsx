@@ -18,12 +18,13 @@ import {
 } from '../../editor/provenance'
 import {
   applySuggestion,
+  findSuggestionTarget,
   findTextRange,
   flashMergedRange,
   type SuggestionPayload,
 } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
-import { editorViewCtx } from '@milkdown/kit/core'
+import { editorViewCtx, parserCtx } from '@milkdown/kit/core'
 import { collectInlineSuggestions } from '../../editor/suggest_changes'
 import {
   MarginInlineSuggestions,
@@ -53,6 +54,7 @@ import { useMetaChannel } from '../../lib/use_meta_channel'
 import { useMediaQuery } from '../../lib/use_media_query'
 import { useAnchoredPopover } from '../../lib/use_anchored_popover'
 import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
+import { patchJSON } from '../../lib/csrf'
 import {
   getStoredFlag,
   getStoredString,
@@ -155,6 +157,10 @@ export default function DocumentShow({
   const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null)
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
   const viewRef = useRef<EditorView | null>(null)
+  // Live handle for code that runs after awaits or inside stable callbacks —
+  // a closure-captured handle goes stale when the editor remounts mid-flight.
+  const handleRef = useRef<EditorHandle | null>(null)
+  handleRef.current = handle
   const [panelOpen, setPanelOpen] = useState(() => getStoredFlag('pruf:panel', true))
   const [focusMode, setFocusMode] = useState(() => getStoredFlag('pruf:focus', false))
   // Demo doc always opens in Edit and stays locked there.
@@ -319,13 +325,20 @@ export default function DocumentShow({
     setSelectionTarget(null)
 
     // Mobile: tapping inside a pending suggestion's tinted anchor opens its
-    // sheet card — the touch equivalent of glancing at the margin.
+    // sheet card — the touch equivalent of glancing at the margin. Same
+    // parser-aware matcher the cards anchor with, so markdown-quoting
+    // suggestions hit-test at their real ranges.
     if (isMobileRef.current && empty) {
       const pos = view.state.selection.head
-      const hit = suggestionsRef.current.find((s) => {
-        const range = findTextRange(view.state.doc, s.replaces ?? s.anchor_text)
-        return range !== null && pos >= range.from && pos <= range.to
-      })
+      const parser = handleRef.current
+        ? handleRef.current.editor.action((ctx) => ctx.get(parserCtx))
+        : null
+      const hit = parser
+        ? suggestionsRef.current.find((s) => {
+            const range = findSuggestionTarget(view.state.doc, parser, s.replaces ?? s.anchor_text)
+            return range !== null && pos >= range.from && pos <= range.to
+          })
+        : undefined
       if (hit) {
         setSheetFocusId(hit.id)
         setActiveSheet('suggestions')
@@ -435,22 +448,68 @@ export default function DocumentShow({
     [acceptOne],
   )
 
-  // Accept every pending server-backed suggestion, strictly in sequence:
-  // each merge re-anchors against the post-merge document, exactly as if
-  // the cards were clicked one by one. Suggestions resolved elsewhere
-  // mid-loop 422 and are skipped.
+  // Accept all pending suggestions in ONE round trip: the server flips the
+  // batch atomically and returns the winners, then the bodies merge into
+  // the CRDT locally in id order — each merge re-anchors against the
+  // post-merge document, exactly as if the cards were clicked one by one,
+  // minus the per-card network wait. Cards hide optimistically while the
+  // request is in flight; the broadcast-driven props reload makes the
+  // clearing durable, and a failed request lets the cards reappear.
   const [acceptingAll, setAcceptingAll] = useState(false)
   const acceptAllSuggestions = useCallback(async () => {
-    if (acceptingAll) return
-    const pending = suggestionsRef.current.filter((s) => s.id > 0)
-    if (pending.length === 0) return
+    if (acceptingAll || !handleRef.current) return
+    if (suggestionsRef.current.filter((s) => s.id > 0).length === 0) return
     setAcceptingAll(true)
+    let succeeded = false
     try {
-      for (const suggestion of pending) await acceptOne(suggestion)
+      const response = await patchJSON(`/d/${doc.slug}/suggestions/accept_all`, {
+        by: identity.name,
+      })
+      if (response.ok) {
+        const { accepted } = (await response.json()) as { accepted: SuggestionPayload[] }
+        for (const suggestion of accepted) {
+          // Live handle: the editor can remount during the awaits above.
+          const live = handleRef.current
+          if (!live) break
+          // One failing merge must not strand the rest of the batch — every
+          // winner is already accepted server-side.
+          try {
+            const merged = applySuggestion(live.editor, suggestion)
+            if (merged) flashMergedRange(live.editor, merged)
+          } catch (error) {
+            console.warn('pruf: bulk merge failed for suggestion', suggestion.id, error)
+          }
+        }
+        succeeded = true
+      } else {
+        console.warn('pruf: accept all rejected', response.status)
+      }
+    } catch (error) {
+      console.warn('pruf: accept all failed', error)
     } finally {
-      setAcceptingAll(false)
+      if (succeeded) {
+        // Hold the optimistic clearing until fresh props land — releasing
+        // before the reload finishes flashes the accepted cards (and the
+        // header button) back for a full round trip. The broadcast-driven
+        // debounced reload still covers every other client.
+        router.reload({
+          only: ['suggestions', 'activities'],
+          async: true,
+          onFinish: () => setAcceptingAll(false),
+        })
+      } else {
+        // Failure: release immediately so the cards reappear (rollback).
+        setAcceptingAll(false)
+      }
     }
-  }, [acceptingAll, acceptOne])
+  }, [acceptingAll, doc.slug, identity.name])
+
+  // Optimistic clearing for the bulk path: server-backed cards vanish the
+  // moment Accept all is clicked; optimistic placeholders (negative ids,
+  // not part of the batch) stay visible.
+  const visibleSuggestions = acceptingAll
+    ? suggestions.filter((s) => s.id < 0)
+    : suggestions
 
   const rejectSuggestion = useCallback(
     (suggestion: SuggestionPayload) => {
@@ -776,7 +835,7 @@ export default function DocumentShow({
                 focusMode={focusMode || isMobile}
               />
               <MarginSuggestions
-                suggestions={suggestions}
+                suggestions={visibleSuggestions}
                 handle={handle}
                 spans={spans}
                 focusMode={focusMode || isMobile}
@@ -859,7 +918,7 @@ export default function DocumentShow({
         )}
         {isMobile && (
           <MobileDock
-            suggestionCount={suggestions.length + inlineSuggestions.length}
+            suggestionCount={visibleSuggestions.length + inlineSuggestions.length}
             commentCount={comments.filter((c) => !c.resolved).length}
             active={activeSheet}
             onOpen={(kind) => setActiveSheet((current) => (current === kind ? null : kind))}
@@ -867,7 +926,7 @@ export default function DocumentShow({
         )}
         {isMobile && activeSheet === 'suggestions' && (
           <MobileSheet
-            title={`Suggestions${suggestions.length + inlineSuggestions.length > 0 ? ` · ${suggestions.length + inlineSuggestions.length}` : ''}`}
+            title={`Suggestions${visibleSuggestions.length + inlineSuggestions.length > 0 ? ` · ${visibleSuggestions.length + inlineSuggestions.length}` : ''}`}
             onClose={() => {
               setActiveSheet(null)
               setSheetFocusId(null)
@@ -875,7 +934,7 @@ export default function DocumentShow({
           >
             <InlineSuggestionSheetList inline={inlineSuggestions} handle={handle} />
             <SuggestionSheetList
-              suggestions={suggestions}
+              suggestions={visibleSuggestions}
               focusId={sheetFocusId}
               onAccept={acceptSuggestion}
               onReject={rejectSuggestion}

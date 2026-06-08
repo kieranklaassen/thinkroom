@@ -47,6 +47,24 @@ class Suggestion < ApplicationRecord
     transition!("accepted", by:)
   end
 
+  # Batch accept for the Accept-all button: flips every pending suggestion
+  # in one transaction (one fsync instead of N round-trips) and returns the
+  # rows that actually transitioned, in id order. A suggestion resolved
+  # concurrently by a single accept loses its pending status and is simply
+  # excluded — the caller only merges winners, so no text applies twice.
+  def self.accept_all!(document:, by: nil)
+    winners = []
+    document.transaction do
+      document.suggestions.pending.order(:id).each do |suggestion|
+        suggestion.accept!(by:)
+        winners << suggestion
+      rescue ActiveRecord::RecordInvalid
+        # lost to a concurrent resolve between the scope read and this row
+      end
+    end
+    winners
+  end
+
   def reject!(by: nil)
     transition!("rejected", by:)
   end
@@ -65,9 +83,17 @@ class Suggestion < ApplicationRecord
     errors.add(:intent, "is too long") if intent.to_s.bytesize > MAX_INTENT_BYTES
   end
 
+  # Compare-and-set at the DB, mirroring Document#claim!: only a row still
+  # pending transitions, so two concurrent accepts (single-vs-single,
+  # single-vs-bulk, bulk-vs-bulk across Puma threads) produce exactly one
+  # winner — the loser raises and its client never merges, which is the
+  # guarantee the whole accept flow's no-duplicate promise rests on. An
+  # in-memory status check would pass in BOTH racing requests.
   def transition!(new_status, by:)
-    raise ActiveRecord::RecordInvalid.new(self), "already #{status}" unless status == "pending"
+    updated = self.class.where(id:, status: "pending")
+                  .update_all(status: new_status, resolved_by: by, updated_at: Time.current)
+    raise ActiveRecord::RecordInvalid.new(self), "already #{status}" if updated.zero?
 
-    update!(status: new_status, resolved_by: by)
+    reload
   end
 end
