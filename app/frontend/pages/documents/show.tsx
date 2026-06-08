@@ -53,6 +53,7 @@ import { useMetaChannel } from '../../lib/use_meta_channel'
 import { useMediaQuery } from '../../lib/use_media_query'
 import { useAnchoredPopover } from '../../lib/use_anchored_popover'
 import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
+import { patchJSON } from '../../lib/csrf'
 import {
   getStoredFlag,
   getStoredString,
@@ -435,22 +436,43 @@ export default function DocumentShow({
     [acceptOne],
   )
 
-  // Accept every pending server-backed suggestion, strictly in sequence:
-  // each merge re-anchors against the post-merge document, exactly as if
-  // the cards were clicked one by one. Suggestions resolved elsewhere
-  // mid-loop 422 and are skipped.
+  // Accept all pending suggestions in ONE round trip: the server flips the
+  // batch atomically and returns the winners, then the bodies merge into
+  // the CRDT locally in id order — each merge re-anchors against the
+  // post-merge document, exactly as if the cards were clicked one by one,
+  // minus the per-card network wait. Cards hide optimistically while the
+  // request is in flight; the broadcast-driven props reload makes the
+  // clearing durable, and a failed request lets the cards reappear.
   const [acceptingAll, setAcceptingAll] = useState(false)
   const acceptAllSuggestions = useCallback(async () => {
-    if (acceptingAll) return
-    const pending = suggestionsRef.current.filter((s) => s.id > 0)
-    if (pending.length === 0) return
+    if (acceptingAll || !handle) return
+    if (suggestionsRef.current.filter((s) => s.id > 0).length === 0) return
     setAcceptingAll(true)
     try {
-      for (const suggestion of pending) await acceptOne(suggestion)
+      const response = await patchJSON(`/d/${doc.slug}/suggestions/accept_all`, {
+        by: identity.name,
+      })
+      if (!response.ok) return
+      const { accepted } = (await response.json()) as { accepted: SuggestionPayload[] }
+      for (const suggestion of accepted) {
+        const merged = applySuggestion(handle.editor, suggestion)
+        if (merged) flashMergedRange(handle.editor, merged)
+      }
+      // The broadcast already schedules every client's debounced reload;
+      // this explicit one guarantees the acceptor's own cards clear even
+      // with the cable momentarily down.
+      router.reload({ only: ['suggestions', 'activities'], async: true })
     } finally {
       setAcceptingAll(false)
     }
-  }, [acceptingAll, acceptOne])
+  }, [acceptingAll, handle, doc.slug, identity.name])
+
+  // Optimistic clearing for the bulk path: server-backed cards vanish the
+  // moment Accept all is clicked; optimistic placeholders (negative ids,
+  // not part of the batch) stay visible.
+  const visibleSuggestions = acceptingAll
+    ? suggestions.filter((s) => s.id < 0)
+    : suggestions
 
   const rejectSuggestion = useCallback(
     (suggestion: SuggestionPayload) => {
@@ -776,7 +798,7 @@ export default function DocumentShow({
                 focusMode={focusMode || isMobile}
               />
               <MarginSuggestions
-                suggestions={suggestions}
+                suggestions={visibleSuggestions}
                 handle={handle}
                 spans={spans}
                 focusMode={focusMode || isMobile}
@@ -859,7 +881,7 @@ export default function DocumentShow({
         )}
         {isMobile && (
           <MobileDock
-            suggestionCount={suggestions.length + inlineSuggestions.length}
+            suggestionCount={visibleSuggestions.length + inlineSuggestions.length}
             commentCount={comments.filter((c) => !c.resolved).length}
             active={activeSheet}
             onOpen={(kind) => setActiveSheet((current) => (current === kind ? null : kind))}
@@ -867,7 +889,7 @@ export default function DocumentShow({
         )}
         {isMobile && activeSheet === 'suggestions' && (
           <MobileSheet
-            title={`Suggestions${suggestions.length + inlineSuggestions.length > 0 ? ` · ${suggestions.length + inlineSuggestions.length}` : ''}`}
+            title={`Suggestions${visibleSuggestions.length + inlineSuggestions.length > 0 ? ` · ${visibleSuggestions.length + inlineSuggestions.length}` : ''}`}
             onClose={() => {
               setActiveSheet(null)
               setSheetFocusId(null)
@@ -875,7 +897,7 @@ export default function DocumentShow({
           >
             <InlineSuggestionSheetList inline={inlineSuggestions} handle={handle} />
             <SuggestionSheetList
-              suggestions={suggestions}
+              suggestions={visibleSuggestions}
               focusId={sheetFocusId}
               onAccept={acceptSuggestion}
               onReject={rejectSuggestion}
