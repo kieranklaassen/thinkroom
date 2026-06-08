@@ -1550,6 +1550,40 @@ a:focus-visible {
   gap: 0.625rem;
 }
 
+/* Bulk accept for agent suggestion batches — appears beside the mode
+   control only while two or more server-backed suggestions are pending. */
+.accept-all-button {
+  border: 1px solid var(--sug-ins-line);
+  background: var(--sug-ins-bg);
+  color: var(--ink);
+  font-size: 0.74rem;
+  font-weight: 550;
+  border-radius: 7px;
+  padding: 0.28rem 0.8rem;
+  min-height: 1.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.accept-all-button:hover:not(:disabled) {
+  background: var(--sug-ins-line);
+  color: var(--surface);
+}
+
+.accept-all-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.accept-all-button--sheet {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+}
+
 .header-menu-trigger {
   font-size: 0.9rem;
   line-height: 1;

@@ -844,6 +844,70 @@ try {
   }
   await q.close()
 
+  // --- Accept all: an agent suggestion batch merges with one click ---
+  const bulkDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Accept all check',
+        markdown: 'Alpha paragraph here.\n\nBravo paragraph here.\n\nCharlie paragraph here.\n',
+      }),
+    })
+  ).json()
+  const bulkBodies = ['First proposed line.', 'Second proposed line.', 'Third proposed line.']
+  const bulkAnchors = ['Alpha paragraph here.', 'Bravo paragraph here.', 'Charlie paragraph here.']
+  for (let i = 0; i < 3; i += 1) {
+    await fetch(`${BASE}/api/docs/${bulkDoc.slug}/suggestions`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'Scout', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: bulkBodies[i], intent: 'bulk', anchor_text: bulkAnchors[i] }),
+    })
+  }
+  const bulk = await makePage('a')
+  await bulk.goto(`${BASE}/d/${bulkDoc.slug}`)
+  await bulk.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await bulk.waitForTimeout(1000)
+  const bulkBtnText = (await bulk.locator('.accept-all-button').textContent().catch(() => null))?.trim()
+  if (bulkBtnText === 'Accept all 3') ok('Accept all button appears in the header with the count')
+  else fail(`Accept all button wrong or missing: "${bulkBtnText}"`)
+  await bulk.locator('.accept-all-button').click()
+  // Cards clear optimistically per accept; the merged text lands on each
+  // PATCH's success — wait for BOTH before judging.
+  const bulkMerged = await bulk
+    .waitForFunction(
+      (bodies) => {
+        const text = document.querySelector('.milkdown .ProseMirror')?.textContent ?? ''
+        return (
+          document.querySelectorAll('.margin-card').length === 0 &&
+          bodies.every((b) => text.includes(b))
+        )
+      },
+      bulkBodies,
+      { timeout: 15000 },
+    )
+    .then(() => true)
+    .catch(() => false)
+  if (bulkMerged) ok('Accept all merged every suggestion and cleared the cards')
+  else fail('Accept all left cards or unmerged text behind')
+  if ((await bulk.locator('.accept-all-button').count()) === 0) {
+    ok('Accept all button retired itself once nothing is pending')
+  } else {
+    fail('Accept all button still visible with no pending suggestions')
+  }
+  await bulk.waitForTimeout(1500) // let the snapshot debounce flush
+  await bulk.reload()
+  await bulk.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await bulk.waitForTimeout(800)
+  const bulkAfter = await bulk.locator('.milkdown .ProseMirror').innerText()
+  const bulkCardsBack = await bulk.locator('.margin-card').count()
+  if (bulkBodies.every((b) => bulkAfter.includes(b)) && bulkCardsBack === 0) {
+    ok('bulk-accepted suggestions persisted across reload')
+  } else {
+    fail(`bulk accept did not persist: cards=${bulkCardsBack}`)
+  }
+  await bulk.close()
+
   for (const [label, errs] of Object.entries(errors)) {
     const fatal = errs.filter(
       (e) =>

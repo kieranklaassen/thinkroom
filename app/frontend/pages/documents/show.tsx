@@ -389,37 +389,68 @@ export default function DocumentShow({
     applyReviewState(view, span, state)
   }, [])
 
-  const acceptSuggestion = useCallback(
-    (suggestion: SuggestionPayload) => {
-      if (!handle) return
-      // Optimistic placeholders (negative id) have no server row yet —
-      // a PATCH against them would 404.
-      if (suggestion.id < 0) return
-      // The card clears optimistically, but the CRDT insert waits for the
-      // server to confirm THIS client won the accept — otherwise two windows
-      // accepting concurrently would each insert the text (the loser's PATCH
-      // 422s, but a local-first insert could not be rolled back).
-      router
-        .optimistic((props: Partial<DocumentProps>) => ({
-          suggestions: (props.suggestions ?? []).filter((s) => s.id !== suggestion.id),
-        }))
-        .patch(
-          `/suggestions/${suggestion.id}/accept`,
-          { by: identity.name },
-          {
-            preserveScroll: true,
-            only: ['suggestions', 'activities'],
-            async: true,
-            onSuccess: () => {
-              const merged = applySuggestion(handle.editor, suggestion)
-              // A one-beat pulse on the merged text — the reward for review.
-              if (merged) flashMergedRange(handle.editor, merged)
+  // Promise-based single accept, shared by the per-card button and Accept
+  // all. The card clears optimistically, but the CRDT insert waits for the
+  // server to confirm THIS client won the accept — otherwise two windows
+  // accepting concurrently would each insert the text (the loser's PATCH
+  // 422s, but a local-first insert could not be rolled back). The promise
+  // settles on finish regardless of outcome so a bulk loop never stalls on
+  // a suggestion someone else resolved first.
+  const acceptOne = useCallback(
+    (suggestion: SuggestionPayload) =>
+      new Promise<void>((resolve) => {
+        // Optimistic placeholders (negative id) have no server row yet —
+        // a PATCH against them would 404.
+        if (!handle || suggestion.id < 0) {
+          resolve()
+          return
+        }
+        router
+          .optimistic((props: Partial<DocumentProps>) => ({
+            suggestions: (props.suggestions ?? []).filter((s) => s.id !== suggestion.id),
+          }))
+          .patch(
+            `/suggestions/${suggestion.id}/accept`,
+            { by: identity.name },
+            {
+              preserveScroll: true,
+              only: ['suggestions', 'activities'],
+              async: true,
+              onSuccess: () => {
+                const merged = applySuggestion(handle.editor, suggestion)
+                // A one-beat pulse on the merged text — the reward for review.
+                if (merged) flashMergedRange(handle.editor, merged)
+              },
+              onFinish: () => resolve(),
             },
-          },
-        )
-    },
+          )
+      }),
     [handle, identity.name],
   )
+
+  const acceptSuggestion = useCallback(
+    (suggestion: SuggestionPayload) => {
+      void acceptOne(suggestion)
+    },
+    [acceptOne],
+  )
+
+  // Accept every pending server-backed suggestion, strictly in sequence:
+  // each merge re-anchors against the post-merge document, exactly as if
+  // the cards were clicked one by one. Suggestions resolved elsewhere
+  // mid-loop 422 and are skipped.
+  const [acceptingAll, setAcceptingAll] = useState(false)
+  const acceptAllSuggestions = useCallback(async () => {
+    if (acceptingAll) return
+    const pending = suggestionsRef.current.filter((s) => s.id > 0)
+    if (pending.length === 0) return
+    setAcceptingAll(true)
+    try {
+      for (const suggestion of pending) await acceptOne(suggestion)
+    } finally {
+      setAcceptingAll(false)
+    }
+  }, [acceptingAll, acceptOne])
 
   const rejectSuggestion = useCallback(
     (suggestion: SuggestionPayload) => {
@@ -657,6 +688,9 @@ export default function DocumentShow({
     [submitComment, composerAnchor],
   )
 
+  // Server-backed pending suggestions — the population Accept all covers.
+  const pendingSuggestionCount = suggestions.filter((s) => s.id > 0).length
+
   const jumpToAnchor = useCallback((anchorText: string) => {
     const view = viewRef.current
     if (!view) return
@@ -692,6 +726,15 @@ export default function DocumentShow({
               <ProvenanceSummaryChip spans={spans} />
               <PresenceBar humans={peers} agents={presences} compact={isMobile} />
             </div>
+            {pendingSuggestionCount > 1 && (
+              <button
+                className="accept-all-button"
+                disabled={acceptingAll}
+                onClick={() => void acceptAllSuggestions()}
+              >
+                {acceptingAll ? 'Accepting…' : `Accept all ${pendingSuggestionCount}`}
+              </button>
+            )}
             <ModeControl mode={mode} onChange={setMode} locked={modeLocked} />
             <SharePopover agentsActive={presences.length} onOpenChange={setShareOpen} />
             <HeaderMenu
@@ -836,6 +879,8 @@ export default function DocumentShow({
               focusId={sheetFocusId}
               onAccept={acceptSuggestion}
               onReject={rejectSuggestion}
+              onAcceptAll={pendingSuggestionCount > 1 ? acceptAllSuggestions : undefined}
+              acceptingAll={acceptingAll}
             />
           </MobileSheet>
         )}
