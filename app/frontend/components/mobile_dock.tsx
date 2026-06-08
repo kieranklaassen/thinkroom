@@ -82,6 +82,9 @@ interface SuggestionSheetProps {
   focusId: number | null
   onAccept: (suggestion: SuggestionPayload) => void
   onReject: (suggestion: SuggestionPayload) => void
+  /** Present only when several server-backed suggestions are pending. */
+  onAcceptAll?: () => Promise<void>
+  acceptingAll?: boolean
 }
 
 /** The suggestion review surface on mobile — full cards in a scrollable
@@ -91,6 +94,8 @@ export function SuggestionSheetList({
   focusId,
   onAccept,
   onReject,
+  onAcceptAll,
+  acceptingAll = false,
 }: SuggestionSheetProps) {
   const listRef = useRef<HTMLUListElement>(null)
   const [resolving, setResolving] = useState<Set<number>>(new Set())
@@ -127,7 +132,17 @@ export function SuggestionSheetList({
   }
 
   return (
-    <ul className="sheet-suggestions" ref={listRef}>
+    <>
+      {onAcceptAll && (
+        <button
+          className="accept-all-button accept-all-button--sheet"
+          disabled={acceptingAll}
+          onClick={() => void onAcceptAll()}
+        >
+          {acceptingAll ? 'Accepting…' : `Accept all ${suggestions.filter((s) => s.id > 0).length}`}
+        </button>
+      )}
+      <ul className="sheet-suggestions" ref={listRef}>
       {suggestions.map((suggestion) => {
         const machine = suggestion.author_kind !== 'human'
         return (
@@ -168,6 +183,7 @@ export function SuggestionSheetList({
           </li>
         )
       })}
-    </ul>
+      </ul>
+    </>
   )
 }
