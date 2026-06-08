@@ -844,52 +844,101 @@ try {
   }
   await q.close()
 
-  // --- Accept all: an agent suggestion batch merges with one click ---
+  // --- Accept all + replace semantics ---
+  // Mirrors the J3YVc161mb double-outline incident: agents quote markdown
+  // SOURCE in `replaces` (heading markers, backslash escapes), and accepted
+  // replacements must actually replace — never leave the old text behind.
   const bulkDoc = await (
     await fetch(`${BASE}/api/docs`, {
       method: 'POST',
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: 'Accept all check',
-        markdown: 'Alpha paragraph here.\n\nBravo paragraph here.\n\nCharlie paragraph here.\n',
+        markdown:
+          '# Bulk doc\n\n## Talk outline (~60 minutes: 45 talk + Q&A)\n\nIntro paragraph stays.\n\n### 1. Cold open (3 min)\n\nOriginal cold open copy.\n\n### 2. Receipts (5 min)\n\nOriginal receipts copy.\n',
       }),
     })
   ).json()
-  const bulkBodies = ['First proposed line.', 'Second proposed line.', 'Third proposed line.']
-  const bulkAnchors = ['Alpha paragraph here.', 'Bravo paragraph here.', 'Charlie paragraph here.']
-  for (let i = 0; i < 3; i += 1) {
-    await fetch(`${BASE}/api/docs/${bulkDoc.slug}/suggestions`, {
+  const bulkSuggest = (payload) =>
+    fetch(`${BASE}/api/docs/${bulkDoc.slug}/suggestions`, {
       method: 'POST',
       headers: { 'X-Agent-Name': 'Scout', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body: bulkBodies[i], intent: 'bulk', anchor_text: bulkAnchors[i] }),
+      body: JSON.stringify(payload),
     })
-  }
+  // (a) heading quoted as markdown source with escapes — the exact
+  //     production payload shape that used to silently append
+  await bulkSuggest({
+    body: '## Talk outline (30 min talk + Q\\&A separate)',
+    intent: 'retime',
+    replaces: '## Talk outline (\\~60 minutes: 45 talk + Q\\&A)',
+  })
+  // (b) multi-block replaces (heading + paragraph) with a multi-block body
+  await bulkSuggest({
+    body: '### 1. Cold open (2 min)\n\nTighter cold open copy.',
+    intent: 'tighten',
+    replaces: '### 1. Cold open (3 min)\n\nOriginal cold open copy.',
+  })
+  // (c) plain-text inline replace — the path that always worked
+  await bulkSuggest({
+    body: 'Sharper receipts copy.',
+    intent: 'sharpen',
+    replaces: 'Original receipts copy.',
+  })
   const bulk = await makePage('a')
   await bulk.goto(`${BASE}/d/${bulkDoc.slug}`)
   await bulk.waitForSelector('.doc-status--live', { timeout: 15000 })
   await bulk.waitForTimeout(1000)
-  const bulkBtnText = (await bulk.locator('.accept-all-button').textContent().catch(() => null))?.trim()
-  if (bulkBtnText === 'Accept all 3') ok('Accept all button appears in the header with the count')
-  else fail(`Accept all button wrong or missing: "${bulkBtnText}"`)
-  await bulk.locator('.accept-all-button').click()
-  // Cards clear optimistically per accept; the merged text lands on each
-  // PATCH's success — wait for BOTH before judging.
-  const bulkMerged = await bulk
+
+  // Per-card accept of the multi-block suggestion first — exercises the
+  // single-accept path and accept_all's already-resolved exclusion.
+  const multiBlockCard = bulk.locator('.margin-card', { hasText: 'tighten' })
+  await multiBlockCard.locator('.btn-accept').click()
+  const perCardReplaced = await bulk
     .waitForFunction(
-      (bodies) => {
+      () => {
         const text = document.querySelector('.milkdown .ProseMirror')?.textContent ?? ''
         return (
-          document.querySelectorAll('.margin-card').length === 0 &&
-          bodies.every((b) => text.includes(b))
+          text.includes('Tighter cold open copy.') &&
+          !text.includes('Original cold open copy.') &&
+          text.includes('Cold open (2 min)') &&
+          !text.includes('Cold open (3 min)')
         )
       },
-      bulkBodies,
-      { timeout: 15000 },
+      undefined,
+      { timeout: 10000 },
     )
     .then(() => true)
     .catch(() => false)
-  if (bulkMerged) ok('Accept all merged every suggestion and cleared the cards')
-  else fail('Accept all left cards or unmerged text behind')
+  if (perCardReplaced) ok('per-card accept replaced a multi-block markdown-quoted section exactly')
+  else fail('multi-block replace left old text behind or did not merge')
+
+  const bulkBtnText = (await bulk.locator('.accept-all-button').textContent().catch(() => null))?.trim()
+  if (bulkBtnText === 'Accept all 2') ok('Accept all button shows the remaining pending count')
+  else fail(`Accept all button wrong or missing: "${bulkBtnText}"`)
+  await bulk.locator('.accept-all-button').click()
+  const assertBulkDocState = () => {
+    const text = document.querySelector('.milkdown .ProseMirror')?.textContent ?? ''
+    const once = (s) => text.split(s).length === 2
+    const never = (s) => !text.includes(s)
+    return (
+      document.querySelectorAll('.margin-card').length === 0 &&
+      once('Talk outline (30 min talk + Q&A separate)') &&
+      never('60 minutes') &&
+      once('Sharper receipts copy.') &&
+      never('Original receipts copy.') &&
+      once('Intro paragraph stays.') &&
+      once('Tighter cold open copy.')
+    )
+  }
+  const bulkMerged = await bulk
+    .waitForFunction(assertBulkDocState, undefined, { timeout: 15000 })
+    .then(() => true)
+    .catch(() => false)
+  if (bulkMerged) ok('Accept all replaced every quoted section exactly once (no duplication)')
+  else {
+    const debugText = await bulk.locator('.milkdown .ProseMirror').innerText()
+    fail(`Accept all duplicated or dropped content:\n${debugText.slice(0, 400)}`)
+  }
   if ((await bulk.locator('.accept-all-button').count()) === 0) {
     ok('Accept all button retired itself once nothing is pending')
   } else {
@@ -899,13 +948,12 @@ try {
   await bulk.reload()
   await bulk.waitForSelector('.doc-status--live', { timeout: 15000 })
   await bulk.waitForTimeout(800)
-  const bulkAfter = await bulk.locator('.milkdown .ProseMirror').innerText()
-  const bulkCardsBack = await bulk.locator('.margin-card').count()
-  if (bulkBodies.every((b) => bulkAfter.includes(b)) && bulkCardsBack === 0) {
-    ok('bulk-accepted suggestions persisted across reload')
-  } else {
-    fail(`bulk accept did not persist: cards=${bulkCardsBack}`)
-  }
+  const bulkPersisted = await bulk
+    .waitForFunction(assertBulkDocState, undefined, { timeout: 10000 })
+    .then(() => true)
+    .catch(() => false)
+  if (bulkPersisted) ok('bulk-accepted replacements persisted across reload')
+  else fail('bulk accept state drifted after reload')
   await bulk.close()
 
   for (const [label, errs] of Object.entries(errors)) {
