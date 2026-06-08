@@ -51,6 +51,34 @@ class CommentFlowTest < ActionDispatch::IntegrationTest
     comment = @document.comments.create!(author_name: "Scout", author_kind: "agent", body: "From the API")
     assert_equal "agent", comment.as_props[:author_kind]
   end
+
+  test "resolving a nonexistent comment redirects back with an error instead of 404ing" do
+    # An optimistic (not-yet-reconciled) client id or a deleted comment must
+    # not raise a 404 modal over the editor.
+    patch resolve_comment_path(-42), params: { by: "Quiet Falcon" }
+
+    # 302, not 303: error-bag redirects carry no explicit status so the
+    # InertiaRails middleware preserves the staged errors (it deletes them on
+    # anything but 301/302, and upgrades Inertia non-GET redirects itself).
+    assert_response :redirect
+    # The errors bag must carry the message — the client's onError path (and
+    # optimistic revert) depends on it being present on the follow-up render.
+    assert_equal "is no longer available", session[:inertia_errors][:comment]
+  end
+
+  test "resolving an already-resolved comment re-stamps but does not reopen it" do
+    comment = @document.comments.create!(author_name: "A", author_kind: "human", body: "Fix this")
+
+    patch resolve_comment_path(comment), params: { by: "B" }
+    first_resolved_at = comment.reload.resolved_at
+    patch resolve_comment_path(comment), params: { by: "C" }
+
+    assert_response :see_other
+    assert comment.reload.resolved_at.present?
+    assert_empty @document.comments.open
+    # The second resolve re-stamps but never un-resolves; both are accepted.
+    assert_operator comment.resolved_at, :>=, first_resolved_at
+  end
 end
 
 class ThemePersistenceTest < ActionDispatch::IntegrationTest

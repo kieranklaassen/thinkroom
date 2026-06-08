@@ -39,6 +39,9 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
     patch accept_suggestion_path(@suggestion)
     assert_response :redirect
     assert_equal "rejected", @suggestion.reload.status
+    # The errors bag must actually survive to the follow-up render — staging
+    # is silently discarded by the middleware when the redirect is 303.
+    assert_equal "is no longer pending", session[:inertia_errors][:suggestion]
   end
 
   test "ask AI endpoint creates a pending ai suggestion" do
@@ -116,7 +119,11 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
         body: "a" * (Suggestion::MAX_BODY_BYTES + 1)
       }
     end
-    assert_response :see_other
+    # 302, not 303: error-bag redirects carry no explicit status so the
+    # InertiaRails middleware preserves the staged errors (it only keeps
+    # them across 301/302 and upgrades Inertia non-GET redirects itself).
+    assert_response :redirect
+    assert_includes session[:inertia_errors][:suggestion], "Body is too long"
   end
 
   test "oversized replaces and anchor_text are rejected" do
@@ -142,7 +149,7 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
     assert_no_difference -> { @document.suggestions.count } do
       post document_suggestions_path(@document.slug), params: { body: "" }
     end
-    assert_response :see_other
+    assert_response :redirect
   end
 
   test "browser POST to an unknown doc redirects home without a 500" do

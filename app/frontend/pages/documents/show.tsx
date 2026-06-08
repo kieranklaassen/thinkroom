@@ -507,6 +507,9 @@ export default function DocumentShow({
 
   const resolveComment = useCallback(
     (comment: CommentPayload) => {
+      // Optimistic placeholders (negative id) have no server row yet — a
+      // PATCH against them would 404 (the panel also hides the button).
+      if (comment.id < 0) return
       router
         .optimistic((props: Partial<DocumentProps>) => ({
           comments: (props.comments ?? []).map((c) =>

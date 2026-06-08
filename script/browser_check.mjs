@@ -12,7 +12,7 @@ const fail = (msg) => {
 const ok = (msg) => console.log(`✓ ${msg}`)
 
 const browser = await chromium.launch()
-const errors = { a: [], b: [] }
+const errors = { a: [], b: [], persist: [] }
 
 const makePage = async (label) => {
   const context = await browser.newContext()
@@ -574,6 +574,131 @@ try {
   await p.locator('.comment-card', { hasText: hiddenPanelComment }).waitFor({ timeout: 10000 })
   ok('comment posted from the anchored composer landed in the rail')
   await p.close()
+
+  // --- Resolve persistence: accept/reject/resolve must survive a refresh ---
+  // (regression for the optimistic-id resolve 404 and silent non-persistence)
+  const persistDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Persistence check',
+        markdown: 'Persistence paragraph alpha bravo charlie delta echo foxtrot golf hotel.',
+      }),
+    })
+  ).json()
+  const seedSuggestion = (anchor) =>
+    fetch(`${BASE}/api/docs/${persistDoc.slug}/suggestions`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: 'persistence rewrite', intent: 'check', anchor_text: anchor }),
+    })
+  await seedSuggestion('alpha')
+  await seedSuggestion('bravo')
+
+  const q = await makePage('persist')
+  await q.goto(`${BASE}/d/${persistDoc.slug}`)
+  await q.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await q.waitForTimeout(800) // initial Yjs bind + margin card placement settle
+
+  // Accept one, reject the other; both decisions must survive a reload.
+  await q.locator('.margin-card .btn-accept').first().click()
+  await q.waitForFunction(() => document.querySelectorAll('.margin-card').length === 1, undefined, {
+    timeout: 10000,
+  })
+  await q.locator('.margin-card .btn-reject').first().click()
+  await q.waitForFunction(() => document.querySelectorAll('.margin-card').length === 0, undefined, {
+    timeout: 10000,
+  })
+  await q.reload()
+  await q.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await q.waitForTimeout(800) // post-reload card re-derivation settle
+  const cardsBack = await q.locator('.margin-card').count()
+  if (cardsBack === 0) ok('accepted and rejected suggestions stayed resolved across reload')
+  else fail(`${cardsBack} resolved suggestion card(s) reappeared after reload`)
+
+  // A freshly posted (optimistic) comment must not offer Resolve until the
+  // server id arrives — hold the POST open to keep the optimistic window.
+  let commentPostHeld = false
+  await q.route('**/comments', async (route) => {
+    // Hold only the FIRST comment-creation POST; anything else (and any
+    // later POST) passes through untouched so a background request can't
+    // consume the delay meant for the optimistic window.
+    if (route.request().method() !== 'POST' || commentPostHeld) {
+      await route.continue()
+      return
+    }
+    commentPostHeld = true
+    await new Promise((resolve) => setTimeout(resolve, 1500))
+    await route.continue()
+  })
+  await q.locator('.milkdown .ProseMirror p').first().dblclick({ position: { x: 12, y: 10 } })
+  await q.locator('.selection-toolbar.is-placed').waitFor({ timeout: 5000 })
+  await q.locator('.selection-toolbar button', { hasText: 'Comment' }).first().click()
+  const persistComment = `Persistence comment ${Date.now()}`
+  await q.fill('.comment-composer--anchored .comment-input', persistComment)
+  await q.locator('.comment-composer--anchored .btn-accept').click()
+  await q.locator('.comment-card', { hasText: persistComment }).waitFor({ timeout: 2000 })
+  const resolveDuringWindow = await q
+    .locator('.comment-card', { hasText: persistComment })
+    .locator('.comment-resolve')
+    .count()
+  if (resolveDuringWindow === 0) ok('optimistic comment hides Resolve until the server id arrives')
+  else fail('Resolve offered on an optimistic comment (would PATCH a negative id)')
+
+  // After reconciliation the button appears; resolving must persist.
+  await q
+    .locator('.comment-card', { hasText: persistComment })
+    .locator('.comment-resolve')
+    .waitFor({ timeout: 10000 })
+  await q.locator('.comment-card', { hasText: persistComment }).locator('.comment-resolve').click()
+  await q.waitForFunction(
+    (text) =>
+      !Array.from(document.querySelectorAll('.comment-card:not(.is-resolved)')).some((card) =>
+        card.textContent?.includes(text),
+      ),
+    persistComment,
+    { timeout: 10000 },
+  )
+  await q.reload()
+  await q.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await q.waitForTimeout(800) // post-reload comment list settle
+  const resolvedCameBack = await q
+    .locator('.comment-card:not(.is-resolved)', { hasText: persistComment })
+    .count()
+  if (resolvedCameBack === 0) ok('resolved comment stayed resolved across reload')
+  else fail('resolved comment reappeared open after reload')
+
+  // Inline tracked edit: accept then reload immediately — the resolve syncs
+  // through Yjs and must already be on the server. (Boundary note: local
+  // updates made while the cable is disconnected are only re-sent at the
+  // next reconnect handshake — a refresh inside that window loses them.
+  // Not simulated here; see docs/plans/2026-06-07-001 R3.)
+  await q.click('.mode-control-trigger')
+  await q.locator('.mode-control-option', { hasText: 'Suggest' }).click()
+  await q.click('.milkdown .ProseMirror')
+  await q.keyboard.press('Meta+ArrowDown')
+  await q.keyboard.press('End')
+  const trackedSentinel = `persist-${Date.now()}`
+  await q.keyboard.type(` ${trackedSentinel}`)
+  await q.locator('.milkdown ins.sug-ins', { hasText: trackedSentinel }).first().waitFor({ timeout: 5000 })
+  await q.waitForTimeout(1200) // let the insertion itself persist first
+  await q.locator('.margin-card--inline .btn-accept').first().click()
+  await q.reload()
+  await q.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await q.waitForTimeout(1200)
+  const trackedStillMarked = await q
+    .locator('.milkdown ins.sug-ins', { hasText: trackedSentinel })
+    .count()
+  const trackedTextKept = await q
+    .locator('.milkdown .ProseMirror', { hasText: trackedSentinel })
+    .count()
+  if (trackedStillMarked === 0 && trackedTextKept > 0) {
+    ok('inline tracked-edit accept persisted across an immediate reload')
+  } else {
+    fail(`inline accept did not persist: marks=${trackedStillMarked} text=${trackedTextKept}`)
+  }
+  await q.close()
 
   for (const [label, errs] of Object.entries(errors)) {
     const fatal = errs.filter(
