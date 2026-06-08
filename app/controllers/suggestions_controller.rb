@@ -32,6 +32,31 @@ class SuggestionsController < InertiaController
     redirect_to root_path, status: :see_other
   end
 
+  # Bulk accept for the Accept-all button. JSON in/out rather than the
+  # Inertia redirect dance: the accepting client needs the authoritative
+  # winner list synchronously to merge each body into the CRDT locally.
+  # One activity entry and one broadcast for the whole batch — eleven
+  # "accepted X" rows would be noise, and the broadcast triggers every
+  # client's debounced props reload anyway.
+  def accept_all
+    document = Document.find_by!(slug: params[:slug])
+    by = preferred_name(params[:by], fallback: "human")
+    accepted = Suggestion.accept_all!(document:, by:)
+
+    if accepted.any?
+      Activity.log!(
+        document:,
+        actor_name: preferred_name(params[:by], fallback: "Someone"),
+        actor_kind: "human",
+        action: "accepted_suggestion",
+        detail: "accepted #{accepted.size} suggestions in one batch"
+      )
+      DocumentMetaChannel.broadcast_event(document, :suggestions)
+    end
+
+    render json: { accepted: accepted.map(&:as_props) }
+  end
+
   def accept
     @suggestion.accept!(by: preferred_name(params[:by], fallback: "human"))
     log_and_broadcast("accepted_suggestion", "accepted “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")

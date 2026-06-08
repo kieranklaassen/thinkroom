@@ -10,6 +10,7 @@ Rails.application.routes.draw do
   delete "d/:slug", to: "documents#destroy", as: :destroy_document
   post "d/:slug/snapshot", to: "documents#snapshot", as: :document_snapshot
   post "d/:slug/suggestions", to: "suggestions#create", as: :document_suggestions
+  patch "d/:slug/suggestions/accept_all", to: "suggestions#accept_all", as: :accept_all_document_suggestions
 
   patch "suggestions/:id/accept", to: "suggestions#accept", as: :accept_suggestion
   patch "suggestions/:id/reject", to: "suggestions#reject", as: :reject_suggestion
