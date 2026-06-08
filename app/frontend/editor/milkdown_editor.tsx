@@ -48,6 +48,7 @@ import {
   trashIcon,
 } from './table_icons'
 import { agentCursors } from './agent_cursors'
+import { renderSoftBreaks } from './line_breaks'
 import { selectionCallbackCtx, selectionWatcher } from './selection_watcher'
 import { postJSON } from '../lib/csrf'
 
@@ -276,6 +277,7 @@ function CollabEditor({
             uploader: imageUploader,
             enableHtmlFileUploader: true,
           }))
+          renderSoftBreaks(ctx)
           // The defaults are bare text ('+', 'left', …) — real icons required.
           ctx.update(tableBlockConfig.key, (prev) => ({
             ...prev,
