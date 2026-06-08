@@ -2,19 +2,18 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { SuggestionPayload } from '../editor/suggestions'
 import { truncate } from '../lib/truncate'
 
-export type SheetKind = 'suggestions' | 'comments' | 'ask' | 'activity'
+export type SheetKind = 'suggestions' | 'comments' | 'activity'
 
 interface DockProps {
   suggestionCount: number
   commentCount: number
-  aiPending: boolean
   active: SheetKind | null
   onOpen: (kind: SheetKind) => void
 }
 
 /** Compact bottom action bar — the mobile home for everything the desktop
  *  rail and margin gutter carry. Each item opens a bottom sheet. */
-export function MobileDock({ suggestionCount, commentCount, aiPending, active, onOpen }: DockProps) {
+export function MobileDock({ suggestionCount, commentCount, active, onOpen }: DockProps) {
   const item = (kind: SheetKind, label: ReactNode, count: number) => (
     <button
       className={`dock-item ${active === kind ? 'is-active' : ''}`}
@@ -30,14 +29,6 @@ export function MobileDock({ suggestionCount, commentCount, aiPending, active, o
     <nav className="mobile-dock" aria-label="Document tools">
       {item('suggestions', 'Suggestions', suggestionCount)}
       {item('comments', 'Comments', commentCount)}
-      {item(
-        'ask',
-        <>
-          Ask AI
-          {aiPending && <span className="dock-busy" aria-label="Thinking" />}
-        </>,
-        0,
-      )}
       {item('activity', 'Activity', 0)}
     </nav>
   )
@@ -130,8 +121,7 @@ export function SuggestionSheetList({
   if (suggestions.length === 0) {
     return (
       <p className="rail-empty">
-        No pending suggestions. Select text or ask the AI to propose an edit —
-        it lands here for review.
+        No pending suggestions. Agent proposals land here for review.
       </p>
     )
   }

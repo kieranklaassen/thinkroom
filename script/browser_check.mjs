@@ -290,45 +290,6 @@ try {
   await b.waitForSelector('.milkdown .prov--ai.prov--pending', { timeout: 15000 })
   ok('AI provenance tints survive reload')
 
-  // --- Suggestion flow: Ask AI -> card in both windows -> accept -> merged ---
-  const beforeAiSpans = await a.locator('.milkdown [data-kind="ai"]').count()
-  await a.fill('.ask-ai-input', 'add a closing thought')
-  await a.click('.ask-ai-button')
-  await a.locator('.margin-card').first().waitFor({ timeout: 15000 })
-  ok('Ask AI produced a pending suggestion card in window A')
-  await b.locator('.margin-card').first().waitFor({ timeout: 10000 })
-  ok('suggestion card appeared live in window B')
-
-  const suggestionText = (await a.locator('.margin-card .margin-new').first().textContent())
-    ?.trim()
-    .slice(0, 40)
-  const acceptedId = await a
-    .locator('.margin-card')
-    .first()
-    .getAttribute('data-suggestion-id')
-  await a.locator('.margin-card .btn-accept').first().click()
-  await a.waitForFunction(
-    (n) => document.querySelectorAll('.milkdown [data-kind="ai"]').length > n,
-    beforeAiSpans,
-    { timeout: 10000 },
-  )
-  ok('accepting merged the text with AI provenance in window A')
-
-  await b.waitForFunction(
-    (snippet) =>
-      document.querySelector('.milkdown .ProseMirror')?.textContent?.includes(snippet),
-    suggestionText,
-    { timeout: 10000 },
-  )
-  ok('accepted suggestion text synced live to window B')
-
-  await a.waitForFunction(
-    (id) => !document.querySelector(`.margin-card[data-suggestion-id="${id}"]`),
-    acceptedId,
-    { timeout: 10000 },
-  )
-  ok('suggestion card cleared after accept (optimistic + reconcile)')
-
   // --- Comment flow: select text -> comment -> appears live -> resolve ---
   // Mouse-select a word in the sentinel paragraph typed above — keyboard
   // line-selection is brittle against demo-doc pollution from prior runs
