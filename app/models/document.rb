@@ -165,7 +165,7 @@ class Document < ApplicationRecord
     }
   end
 
-  # Markdown without provenance span or suggestion-mark markup — the
+  # Markdown source without provenance span or suggestion-mark markup — the
   # human-readable export. Suggestion tags unwrap keeping content: pending
   # insertions are in the doc, pending deletions are still in the doc until
   # accepted (document-as-is view). Paired-capture so semantic <ins>/<del>
@@ -207,9 +207,9 @@ class Document < ApplicationRecord
 
   # Cold-read fallback: before any editor session pushes a snapshot, an
   # agent-seeded doc is 100% unreviewed AI prose — report that instead of
-  # zeros. The total approximates rendered length from the markdown source
-  # (syntax overhead inflates it); the first real snapshot replaces it.
-  # Human and legacy seeds keep returning zeros (no behavior change).
+  # zeros. The total uses rendered plain text for either source format; the
+  # first real snapshot replaces it. Human and legacy seeds keep returning
+  # zeros (no behavior change).
   def seed_authorship_summary
     zeros = { total: 0, human_pct: 0, ai_pct: 0, unreviewed_pct: 0 }
     return zeros unless seed_author_kind == "agent" && seed_content.present?
