@@ -1,6 +1,51 @@
 require "test_helper"
 
 class DocumentTest < ActiveSupport::TestCase
+  test "content format defaults to markdown" do
+    assert_equal "markdown", Document.create!(title: "Default").content_format
+  end
+
+  test "content format accepts html and cannot change after creation" do
+    doc = Document.create!(title: "HTML", content_format: "html")
+
+    assert doc.html?
+    assert_equal Document::DEFAULT_HTML_SEED, doc.default_seed
+    assert_raises(ActiveRecord::ReadonlyAttributeError) do
+      doc.update!(content_format: "markdown")
+    end
+    assert_equal "html", doc.reload.content_format
+  end
+
+  test "content format rejects unknown values" do
+    doc = Document.new(title: "Unknown", content_format: "xml")
+
+    assert_not doc.valid?
+    assert doc.errors[:content_format].present?
+  end
+
+  test "format-neutral source accessors use existing columns" do
+    doc = Document.new(seed_content: "<p>Seed</p>", content_snapshot: "<p>Snapshot</p>")
+
+    assert_equal "<p>Seed</p>", doc.seed_markdown
+    assert_equal "<p>Snapshot</p>", doc.content_markdown
+  end
+
+  test "an empty snapshot remains authoritative for markdown and HTML" do
+    markdown = Document.new(seed_content: "# Seed", content_snapshot: "")
+    html = Document.new(content_format: "html", seed_content: "<p>Seed</p>", content_snapshot: "")
+
+    assert_equal "", markdown.current_content
+    assert_equal "", html.current_content
+  end
+
+  test "database rejects unknown content formats" do
+    doc = Document.create!(title: "Constrained")
+
+    assert_raises(ActiveRecord::StatementInvalid) do
+      Document.where(id: doc.id).update_all(content_format: "xml")
+    end
+  end
+
   include ActionCable::TestHelper
   test "generates a slug on create" do
     doc = Document.create!(title: "Fresh")
@@ -63,7 +108,7 @@ class DocumentTest < ActiveSupport::TestCase
       seed_author_kind: "agent", seed_author_name: "Scout"
     )
     summary = doc.provenance_summary
-    assert_equal "# From an agent".length, summary[:total]
+    assert_equal "From an agent".length, summary[:total]
     assert_equal 0, summary[:human_pct]
     assert_equal 100, summary[:ai_pct]
     assert_equal 100, summary[:unreviewed_pct]

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useMediaQuery } from '../lib/use_media_query'
 import { useDismissable } from '../lib/use_dismissable'
@@ -23,16 +23,13 @@ export function SharePopover({
   // fixed descendants — so the mobile full-width sheet must portal to body.
   const isMobile = useMediaQuery('(max-width: 48rem)')
 
-  const setOpen = useCallback(
-    (next: boolean | ((value: boolean) => boolean)) => {
-      setOpenState((value) => {
-        const resolved = typeof next === 'function' ? next(value) : next
-        if (resolved !== value) onOpenChange?.(resolved)
-        return resolved
-      })
-    },
-    [onOpenChange],
-  )
+  const setOpen = useCallback((next: boolean | ((value: boolean) => boolean)) => {
+    setOpenState((value) => (typeof next === 'function' ? next(value) : next))
+  }, [])
+
+  useEffect(() => {
+    onOpenChange?.(open)
+  }, [onOpenChange, open])
 
   const url = typeof window === 'undefined' ? '' : window.location.href
 

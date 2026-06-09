@@ -49,6 +49,107 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_nil doc.seed_author_name
   end
 
+  test "agent creates sanitized HTML and receives generic source fields" do
+    post "/api/docs",
+         params: {
+           title: "HTML Doc",
+           format: "html",
+           content: '<h1 onclick="bad()">Hello</h1><p><strong>world</strong></p>'
+         },
+         headers: AGENT,
+         as: :json
+
+    assert_response :created
+    body = response.parsed_body
+    assert_equal "html", body["content_format"]
+    assert_equal "Hello world", body["plain_text"]
+    assert body["normalized"]
+    assert_includes body["warning"], "normalized"
+    refute body.key?("markdown")
+    refute_match(/onclick/, body["content"])
+
+    doc = Document.find_by!(slug: body["slug"])
+    assert_equal "html", doc.content_format
+    assert_equal body["content"], doc.seed_content
+    assert_equal "agent", doc.seed_author_kind
+  end
+
+  test "route suffix does not override the document format body field" do
+    post "/api/docs.json",
+         params: { title: "JSON Markdown", content: "# Body" },
+         headers: AGENT,
+         as: :json
+
+    assert_response :created
+    doc = Document.find_by!(slug: response.parsed_body["slug"])
+    assert_equal "markdown", doc.content_format
+    assert_equal "# Body", doc.seed_content
+  end
+
+  test "HTML state exposes generic fields without markdown aliases" do
+    document = Document.create!(
+      title: "HTML",
+      content_format: "html",
+      seed_content: "<h2>Heading</h2><p>Body <em>copy</em>.</p>"
+    )
+
+    get "/api/docs/#{document.slug}", headers: AGENT
+
+    assert_response :success
+    body = response.parsed_body
+    assert_equal "html", body["content_format"]
+    assert_equal document.seed_content, body["content"]
+    assert_equal "Heading Body copy.", body["plain_text"]
+    refute body.key?("markdown")
+    refute body.key?("plain_markdown")
+    assert_includes body.dig("api", "propose_suggestion", "body", "body"), "HTML"
+  end
+
+  test "HTML suggestion is sanitized and reports normalization" do
+    document = Document.create!(
+      title: "HTML",
+      content_format: "html",
+      seed_content: "<p>Hello</p>"
+    )
+
+    post "/api/docs/#{document.slug}/suggestions",
+         params: { body: '<p onclick="bad()">Better</p>' },
+         headers: AGENT,
+         as: :json
+
+    assert_response :created
+    body = response.parsed_body
+    assert body["normalized"]
+    assert_includes body["warning"], "normalized"
+    assert_equal "<p>Better</p>", document.suggestions.last.body
+  end
+
+  test "explicit format validates content and legacy field compatibility" do
+    assert_no_difference -> { Document.count } do
+      post "/api/docs", params: { format: "html" }, headers: AGENT, as: :json
+    end
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "content is required"
+
+    assert_no_difference -> { Document.count } do
+      post "/api/docs",
+           params: { format: "html", markdown: "# Wrong field" },
+           headers: AGENT,
+           as: :json
+    end
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "markdown field"
+
+    assert_no_difference -> { Document.count } do
+      post "/api/docs",
+           params: { format: "xml", content: "<p>No</p>" },
+           headers: AGENT,
+           as: :json
+    end
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "markdown or html"
+  end
+
   test "doc created without X-Agent-Name records no seed authorship" do
     post "/api/docs", params: { markdown: "# Anonymous" }, as: :json
 

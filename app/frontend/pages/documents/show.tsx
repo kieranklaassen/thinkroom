@@ -7,6 +7,7 @@ import {
   type ConnectionStatus,
   type EditorHandle,
 } from '../../editor/milkdown_editor'
+import type { DocumentFormat } from '../../editor/document_format'
 import { userIdentity, type UserIdentity } from '../../editor/identity'
 import { provenanceIdentityCtx } from '../../editor/provenance'
 import {
@@ -21,10 +22,12 @@ import {
   findSuggestionTarget,
   findTextRange,
   flashMergedRange,
+  suggestionApplicability,
   type SuggestionPayload,
 } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
-import { editorViewCtx, parserCtx } from '@milkdown/kit/core'
+import { editorViewCtx, parserCtx, schemaCtx } from '@milkdown/kit/core'
+import { sourceParser } from '../../editor/document_format'
 import { collectInlineSuggestions } from '../../editor/suggest_changes'
 import {
   MarginInlineSuggestions,
@@ -81,7 +84,8 @@ export interface DocumentProps {
     id: number
     slug: string
     title: string
-    seed_markdown: string | null
+    content_format: DocumentFormat
+    seed_content: string | null
     seed_granted: boolean
     seed_author_kind: string | null
     seed_author_name: string | null
@@ -155,6 +159,7 @@ export default function DocumentShow({
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
   const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null)
   const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null)
+  const [suggestionNotice, setSuggestionNotice] = useState<string | null>(null)
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   // Live handle for code that runs after awaits or inside stable callbacks —
@@ -331,11 +336,18 @@ export default function DocumentShow({
     if (isMobileRef.current && empty) {
       const pos = view.state.selection.head
       const parser = handleRef.current
-        ? handleRef.current.editor.action((ctx) => ctx.get(parserCtx))
+        ? handleRef.current.editor.action((ctx) =>
+            sourceParser(doc.content_format, ctx.get(parserCtx), ctx.get(schemaCtx)),
+          )
         : null
       const hit = parser
         ? suggestionsRef.current.find((s) => {
-            const range = findSuggestionTarget(view.state.doc, parser, s.replaces ?? s.anchor_text)
+            const range = findSuggestionTarget(
+              view.state.doc,
+              parser,
+              s.replaces ?? s.anchor_text,
+              doc.content_format,
+            )
             return range !== null && pos >= range.from && pos <= range.to
           })
         : undefined
@@ -365,7 +377,7 @@ export default function DocumentShow({
 
     const span = aiSpanAt(view.state)
     setReviewTarget(span ? { span } : null)
-  }, [])
+  }, [doc.content_format])
 
   // While a popover is open, any scroll or resize schedules one rAF-throttled
   // reposition pass (coordsAtPos for a single anchor is cheap).
@@ -402,6 +414,22 @@ export default function DocumentShow({
     applyReviewState(view, span, state)
   }, [])
 
+  const reopenSuggestion = useCallback(
+    async (suggestionId: number): Promise<boolean> => {
+      try {
+        const response = await patchJSON(`/suggestions/${suggestionId}/reopen`, {
+          by: identity.name,
+        })
+        if (response.ok) return true
+        console.warn('pruf: suggestion reopen rejected', suggestionId, response.status)
+      } catch (error) {
+        console.warn('pruf: suggestion reopen failed', suggestionId, error)
+      }
+      return false
+    },
+    [identity.name],
+  )
+
   // Promise-based single accept, shared by the per-card button and Accept
   // all. The card clears optimistically, but the CRDT insert waits for the
   // server to confirm THIS client won the accept — otherwise two windows
@@ -418,6 +446,22 @@ export default function DocumentShow({
           resolve()
           return
         }
+        const applicability = suggestionApplicability(
+          handle.editor,
+          suggestion,
+          doc.content_format,
+        )
+        if (!applicability.ok) {
+          setSuggestionNotice(
+            applicability.reason === 'ambiguous'
+              ? 'This quoted text appears more than once. The suggestion is still pending so no content was changed.'
+              : applicability.reason === 'missing'
+                ? 'The quoted text has changed or was removed. The suggestion is still pending so no content was changed.'
+                : 'This suggestion has no editable content and was left pending.',
+          )
+          resolve()
+          return
+        }
         router
           .optimistic((props: Partial<DocumentProps>) => ({
             suggestions: (props.suggestions ?? []).filter((s) => s.id !== suggestion.id),
@@ -430,15 +474,26 @@ export default function DocumentShow({
               only: ['suggestions', 'activities'],
               async: true,
               onSuccess: () => {
-                const merged = applySuggestion(handle.editor, suggestion)
+                const merged = applySuggestion(handle.editor, suggestion, doc.content_format)
                 // A one-beat pulse on the merged text — the reward for review.
-                if (merged) flashMergedRange(handle.editor, merged)
+                if (merged) {
+                  flashMergedRange(handle.editor, merged)
+                } else {
+                  void reopenSuggestion(suggestion.id).then((reopened) => {
+                    setSuggestionNotice(
+                      reopened
+                        ? 'The document changed before this suggestion could be merged. It was returned to pending.'
+                        : 'The document changed before this suggestion could be merged, and Pruf could not restore it to pending. Refresh before reviewing it again.',
+                    )
+                    router.reload({ only: ['suggestions', 'activities'], async: true })
+                  })
+                }
               },
               onFinish: () => resolve(),
             },
           )
       }),
-    [handle, identity.name],
+    [handle, identity.name, doc.content_format, reopenSuggestion],
   )
 
   const acceptSuggestion = useCallback(
@@ -458,7 +513,18 @@ export default function DocumentShow({
   const [acceptingAll, setAcceptingAll] = useState(false)
   const acceptAllSuggestions = useCallback(async () => {
     if (acceptingAll || !handleRef.current) return
-    if (suggestionsRef.current.filter((s) => s.id > 0).length === 0) return
+    const pending = suggestionsRef.current.filter((s) => s.id > 0)
+    if (pending.length === 0) return
+    const blocked = pending.find(
+      (suggestion) =>
+        !suggestionApplicability(handleRef.current!.editor, suggestion, doc.content_format).ok,
+    )
+    if (blocked) {
+      setSuggestionNotice(
+        'Accept all paused because at least one suggestion has a missing, ambiguous, or empty target. Review that suggestion individually.',
+      )
+      return
+    }
     setAcceptingAll(true)
     let succeeded = false
     try {
@@ -467,18 +533,45 @@ export default function DocumentShow({
       })
       if (response.ok) {
         const { accepted } = (await response.json()) as { accepted: SuggestionPayload[] }
+        let reopened = 0
+        let reopenFailed = 0
         for (const suggestion of accepted) {
           // Live handle: the editor can remount during the awaits above.
           const live = handleRef.current
-          if (!live) break
-          // One failing merge must not strand the rest of the batch — every
-          // winner is already accepted server-side.
+          if (!live) {
+            if (await reopenSuggestion(suggestion.id)) {
+              reopened += 1
+            } else {
+              reopenFailed += 1
+            }
+            continue
+          }
           try {
-            const merged = applySuggestion(live.editor, suggestion)
-            if (merged) flashMergedRange(live.editor, merged)
+            const merged = applySuggestion(live.editor, suggestion, doc.content_format)
+            if (merged) {
+              flashMergedRange(live.editor, merged)
+            } else if (await reopenSuggestion(suggestion.id)) {
+              reopened += 1
+            } else {
+              reopenFailed += 1
+            }
           } catch (error) {
             console.warn('pruf: bulk merge failed for suggestion', suggestion.id, error)
+            if (await reopenSuggestion(suggestion.id)) {
+              reopened += 1
+            } else {
+              reopenFailed += 1
+            }
           }
+        }
+        if (reopenFailed > 0) {
+          setSuggestionNotice(
+            `${reopenFailed} suggestion${reopenFailed === 1 ? '' : 's'} could not be restored to pending after the document changed. Refresh before reviewing again.`,
+          )
+        } else if (reopened > 0) {
+          setSuggestionNotice(
+            `${reopened} suggestion${reopened === 1 ? '' : 's'} changed before merging and returned to pending.`,
+          )
         }
         succeeded = true
       } else {
@@ -502,7 +595,7 @@ export default function DocumentShow({
         setAcceptingAll(false)
       }
     }
-  }, [acceptingAll, doc.slug, identity.name])
+  }, [acceptingAll, doc.slug, doc.content_format, identity.name, reopenSuggestion])
 
   // Optimistic clearing for the bulk path: server-backed cards vanish the
   // moment Accept all is clicked; optimistic placeholders (negative ids,
@@ -748,7 +841,7 @@ export default function DocumentShow({
   )
 
   // Server-backed pending suggestions — the population Accept all covers.
-  const pendingSuggestionCount = suggestions.filter((s) => s.id > 0).length
+  const pendingSuggestionCount = visibleSuggestions.filter((s) => s.id > 0).length
 
   const jumpToAnchor = useCallback((anchorText: string) => {
     const view = viewRef.current
@@ -773,6 +866,9 @@ export default function DocumentShow({
               P.
             </Link>
             <span className="doc-title">{doc.title}</span>
+            <span className="doc-format" aria-label={`Document format: ${doc.content_format}`}>
+              {doc.content_format === 'html' ? 'HTML' : 'Markdown'}
+            </span>
             <span
               className={`doc-status doc-status--${status}`}
               title={status === 'live' ? 'Connected — edits sync live' : 'Connecting…'}
@@ -808,14 +904,27 @@ export default function DocumentShow({
           </div>
         </header>
         <ClaimBanner slug={doc.slug} ownership={ownership} claimerName={identity.name} />
+        {suggestionNotice && (
+          <div className="doc-notice" role="status">
+            <span>{suggestionNotice}</span>
+            <button
+              type="button"
+              aria-label="Dismiss notice"
+              onClick={() => setSuggestionNotice(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
         <main className="doc-body">
           <div className={`doc-canvas ${focusMode ? 'is-focus' : ''}`}>
             <article className="doc-main">
               <DocumentEditor
                 slug={doc.slug}
                 identity={identity}
+                contentFormat={doc.content_format}
                 initialStateB64={doc.yjs_state_b64}
-                seedMarkdown={doc.seed_markdown}
+                seedContent={doc.seed_content}
                 seedGranted={doc.seed_granted}
                 seedAuthorKind={doc.seed_author_kind}
                 seedAuthorName={doc.seed_author_name}
@@ -839,6 +948,7 @@ export default function DocumentShow({
                 handle={handle}
                 spans={spans}
                 focusMode={focusMode || isMobile}
+                contentFormat={doc.content_format}
                 onAccept={acceptSuggestion}
                 onReject={rejectSuggestion}
                 onMarkerSelect={

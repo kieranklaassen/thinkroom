@@ -196,6 +196,122 @@ a:focus-visible {
   justify-content: center;
 }
 
+.document-creator {
+  margin-top: 1.5rem;
+  text-align: left;
+  animation: creator-in 160ms ease-out;
+}
+
+.document-creator fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.document-creator legend {
+  width: 100%;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin-bottom: 0.65rem;
+}
+
+.format-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+}
+
+.format-option {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+  padding: 0.7rem 0.75rem;
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+}
+
+.format-option:hover {
+  border-color: var(--ink-faint);
+  transform: translateY(-1px);
+}
+
+.format-option.is-selected {
+  border-color: var(--ink);
+  background: var(--surface-raised);
+}
+
+.format-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.format-option:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.format-option-copy {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.format-option-copy strong {
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+.format-option-copy small {
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.format-help {
+  margin-top: 0.55rem;
+  text-align: center;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+}
+
+.document-creator-actions {
+  margin-top: 0.8rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-quiet {
+  border: 0;
+  background: transparent;
+  color: var(--ink-faint);
+}
+
+.btn-quiet:hover {
+  color: var(--ink);
+  background: var(--accent-soft);
+}
+
+.form-error {
+  margin-top: 0.45rem;
+  color: #a33b2d;
+  font-size: 0.72rem;
+  text-align: center;
+}
+
+@keyframes creator-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
 .landing-recent {
   margin-top: 3rem;
   text-align: left;
@@ -247,6 +363,18 @@ a:focus-visible {
 .recent-row a {
   flex: 1;
   min-width: 0;
+}
+
+.format-label,
+.doc-format {
+  flex: none;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .recent-claim {
@@ -488,6 +616,38 @@ a:focus-visible {
   /* Flex items default to min-width:auto — without this the nowrap title
    * refuses to shrink and forces horizontal overflow on narrow screens. */
   min-width: 0;
+}
+
+.doc-format {
+  padding: 0.16rem 0.34rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.doc-notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+}
+
+.doc-notice button {
+  border: 0;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.doc-notice button:hover {
+  color: var(--ink);
 }
 
 .doc-status {

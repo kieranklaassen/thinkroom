@@ -1,5 +1,8 @@
 class Document < ApplicationRecord
   DEFAULT_SEED = "# Untitled\n\nStart writing — everything you type is attributed to you.\n"
+  DEFAULT_HTML_SEED = "<h1>Untitled</h1><p>Start writing — everything you type is attributed to you.</p>"
+  CONTENT_FORMATS = %w[markdown html].freeze
+  MAX_CONTENT_BYTES = 2.megabytes
 
   # A stale seed claim (seeder crashed or never connected before its first
   # update persisted) is reclaimable after this window.
@@ -18,7 +21,7 @@ class Document < ApplicationRecord
   # as "already claimed".
   class ClaimRaceError < StandardError; end
 
-  attr_readonly :slug
+  attr_readonly :slug, :content_format
 
   has_many :suggestions, dependent: :destroy
   has_many :comments, dependent: :destroy
@@ -29,6 +32,8 @@ class Document < ApplicationRecord
 
   validates :title, presence: true
   validates :slug, presence: true, uniqueness: true
+  validates :content_format, inclusion: { in: CONTENT_FORMATS }
+  validate :content_format_is_immutable, on: :update
   # owner_name is broadcast to every client and served to agents — unbounded
   # names are an amplification vector, so cap it (deliberate exception to the
   # no-validation convention on author_name).
@@ -42,6 +47,32 @@ class Document < ApplicationRecord
   validates :seed_author_kind, inclusion: { in: %w[human agent] }, allow_nil: true
 
   def to_param = slug
+
+  def html? = content_format == "html"
+
+  def seed_content = seed_markdown
+
+  def seed_content=(value)
+    self.seed_markdown = value
+  end
+
+  def content_snapshot = content_markdown
+
+  def content_snapshot=(value)
+    self.content_markdown = value
+  end
+
+  def default_seed
+    html? ? DEFAULT_HTML_SEED : DEFAULT_SEED
+  end
+
+  def current_content
+    content_snapshot.nil? ? seed_content : content_snapshot
+  end
+
+  def plain_text
+    DocumentPlainText.call(format: content_format, content: current_content)
+  end
 
   def claimed? = owner_token.present?
 
@@ -103,14 +134,14 @@ class Document < ApplicationRecord
     self
   end
 
-  # Exactly one client seeds an empty document from its markdown template.
+  # Exactly one client seeds an empty document from its source template.
   # The atomic UPDATE claims it; the affected-row count picks exactly one
   # winner under concurrency. Shared by both grant paths — the HTTP page
   # render (documents#show, so a fresh doc seeds from props without waiting
   # for the WebSocket) and the SyncChannel subscribe handshake (fallback for
   # stale-claim reclaim when an HTTP-granted seeder never applied).
   def try_claim_seed
-    return false if yjs_state.present? || seed_markdown.blank?
+    return false if yjs_state.present? || seed_content.blank?
     # Read-side short-circuit: a fresh claim can't be won, so don't issue
     # a write per page load of a just-claimed doc. The conditional UPDATE
     # below remains the single source of truth under concurrency.
@@ -134,7 +165,7 @@ class Document < ApplicationRecord
     }
   end
 
-  # Markdown without provenance span or suggestion-mark markup — the
+  # Markdown source without provenance span or suggestion-mark markup — the
   # human-readable export. Suggestion tags unwrap keeping content: pending
   # insertions are in the doc, pending deletions are still in the doc until
   # accepted (document-as-is view). Paired-capture so semantic <ins>/<del>
@@ -170,16 +201,20 @@ class Document < ApplicationRecord
 
   private
 
+  def content_format_is_immutable
+    errors.add(:content_format, "cannot be changed") if will_save_change_to_content_format?
+  end
+
   # Cold-read fallback: before any editor session pushes a snapshot, an
   # agent-seeded doc is 100% unreviewed AI prose — report that instead of
-  # zeros. The total approximates rendered length from the markdown source
-  # (syntax overhead inflates it); the first real snapshot replaces it.
-  # Human and legacy seeds keep returning zeros (no behavior change).
+  # zeros. The total uses rendered plain text for either source format; the
+  # first real snapshot replaces it. Human and legacy seeds keep returning
+  # zeros (no behavior change).
   def seed_authorship_summary
     zeros = { total: 0, human_pct: 0, ai_pct: 0, unreviewed_pct: 0 }
-    return zeros unless seed_author_kind == "agent" && seed_markdown.present?
+    return zeros unless seed_author_kind == "agent" && seed_content.present?
 
-    { total: seed_markdown.length, human_pct: 0, ai_pct: 100, unreviewed_pct: 100 }
+    { total: plain_text.length, human_pct: 0, ai_pct: 100, unreviewed_pct: 100 }
   end
 
   def ensure_slug

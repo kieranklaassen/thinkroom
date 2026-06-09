@@ -80,6 +80,9 @@ jobs:
       - name: Install JS dependencies
         run: npm ci
 
+      - name: Check TypeScript
+        run: npm run check
+
       # Integration tests render Inertia views, which resolve assets through
       # the Vite manifest — build it up front so vite_rails never falls back
       # to an on-demand build mid-suite.

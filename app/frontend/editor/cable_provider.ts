@@ -13,10 +13,13 @@ type SyncMessage = {
   update?: string
   sv?: string
   seed?: boolean
+  content_format?: 'markdown' | 'html'
+  seed_content?: string
   seed_markdown?: string
   seed_author_kind?: string | null
   seed_author_name?: string | null
   cid?: string
+  seq?: number
 }
 
 const toBase64 = (u8: Uint8Array): string => {
@@ -41,8 +44,9 @@ export class CableProvider {
   readonly awareness: Awareness
   readonly clientId = crypto.randomUUID()
   synced = false
-  seedMarkdown: string | null = null
-  // Seed authorship rides alongside seedMarkdown with the same one-shot
+  seedContent: string | null = null
+  seedFormat: 'markdown' | 'html' = 'markdown'
+  // Seed authorship rides alongside seedContent with the same one-shot
   // consume semantics: the editor reads and nulls all three together so a
   // remount can never re-attribute.
   seedAuthorKind: string | null = null
@@ -52,6 +56,7 @@ export class CableProvider {
   private consumer: Consumer
   private listeners = new Map<string, Set<(...args: never[]) => void>>()
   private destroyed = false
+  private updateSequence = 0
 
   constructor(doc: Y.Doc, slug: string, consumer?: Consumer) {
     this.doc = doc
@@ -121,6 +126,11 @@ export class CableProvider {
     this.subscription.send({ ...payload, cid: this.clientId })
   }
 
+  private sendUpdate(type: 'sync-reply' | 'update', update: Uint8Array): void {
+    this.updateSequence += 1
+    this.send({ type, update: toBase64(update), seq: this.updateSequence })
+  }
+
   private handleReceived(data: SyncMessage): void {
     if (data.cid === this.clientId) return
 
@@ -129,17 +139,17 @@ export class CableProvider {
         // Server's full state, then reply with what it's missing (sync step 2).
         Y.applyUpdate(this.doc, fromBase64(data.update!), this)
         const serverVector = fromBase64(data.sv!)
-        this.send({
-          type: 'sync-reply',
-          update: toBase64(Y.encodeStateAsUpdate(this.doc, serverVector)),
-        })
-        if (data.seed && data.seed_markdown) {
+        this.updateSequence = 0
+        this.sendUpdate('sync-reply', Y.encodeStateAsUpdate(this.doc, serverVector))
+        const seedContent = data.seed_content ?? data.seed_markdown
+        if (data.seed && seedContent) {
           // No one listens to 'seed' by design: the editor reads
-          // provider.seedMarkdown directly inside its bind step, which runs
+          // provider.seedContent directly inside its bind step, which runs
           // on the 'synced' emit below — this assignment is ordered before
           // it on purpose. Handling the seed in a 'seed' listener instead
           // would double-apply the template.
-          this.seedMarkdown = data.seed_markdown
+          this.seedContent = seedContent
+          this.seedFormat = data.content_format ?? 'markdown'
           this.seedAuthorKind = data.seed_author_kind ?? null
           this.seedAuthorName = data.seed_author_name ?? null
           this.emit('seed')
@@ -173,7 +183,7 @@ export class CableProvider {
   private handleDocUpdate = (update: Uint8Array, origin: unknown): void => {
     // Updates we applied from the wire carry `this` as origin — don't echo them.
     if (origin === this || !this.synced) return
-    this.send({ type: 'update', update: toBase64(update) })
+    this.sendUpdate('update', update)
   }
 
   private handleAwarenessUpdate = (

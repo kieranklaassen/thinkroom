@@ -7,6 +7,18 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     Base64.strict_encode64(ydoc.diff.pack("C*"))
   end
 
+  def build_sequential_updates
+    ydoc = Y::Doc.new
+    text = ydoc.get_text("t")
+    before_first = ydoc.state
+    text << "a"
+    first = ydoc.diff(before_first)
+    before_second = ydoc.state
+    text << "b"
+    second = ydoc.diff(before_second)
+    [ first, second ].map { |update| Base64.strict_encode64(update.pack("C*")) }
+  end
+
   test "subscribing transmits the sync handshake" do
     doc = Document.create!(title: "Live")
 
@@ -29,11 +41,29 @@ class SyncChannelTest < ActionCable::Channel::TestCase
 
     subscribe slug: doc.slug
     assert_equal true, transmissions.last["seed"]
+    assert_equal "markdown", transmissions.last["content_format"]
+    assert_equal "# Template", transmissions.last["seed_content"]
     assert_equal "# Template", transmissions.last["seed_markdown"]
 
     unsubscribe
     subscribe slug: doc.slug
     assert_nil transmissions.last["seed"]
+  end
+
+  test "HTML seed grant carries generic source without the legacy markdown key" do
+    doc = Document.create!(
+      title: "HTML",
+      content_format: "html",
+      seed_content: "<h1>Template</h1>"
+    )
+
+    subscribe slug: doc.slug
+
+    message = transmissions.last
+    assert_equal true, message["seed"]
+    assert_equal "html", message["content_format"]
+    assert_equal "<h1>Template</h1>", message["seed_content"]
+    assert_not message.key?("seed_markdown")
   end
 
   test "seed grant carries agent authorship for agent-seeded docs" do
@@ -111,7 +141,6 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert doc.reload.yjs_state.present?
   end
 
-
   test "malformed update frames are dropped without raising or relaying" do
     doc = Document.create!(title: "Poison")
     subscribe slug: doc.slug
@@ -123,6 +152,46 @@ class SyncChannelTest < ActionCable::Channel::TestCase
       perform :receive, { "type" => "update", "cid" => "x" }
     end
     assert_nil doc.reload.yjs_state
+  end
+
+  test "an update that fails persistence is not relayed to peers" do
+    doc = Document.create!(title: "Failed relay")
+    subscribe slug: doc.slug
+    update = build_update_b64("not durable")
+
+    original_merge = YjsPersistence.method(:merge)
+    YjsPersistence.define_singleton_method(:merge) { |*| raise "storage unavailable" }
+    begin
+      assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+        perform :receive, { "type" => "update", "update" => update, "cid" => "x" }
+      end
+    ensure
+      YjsPersistence.define_singleton_method(:merge, original_merge)
+    end
+
+    assert_nil doc.reload.yjs_state
+  end
+
+  test "sequenced updates are persisted and relayed in client order" do
+    doc = Document.create!(title: "Ordered relay")
+    subscribe slug: doc.slug
+    first, second = build_sequential_updates
+
+    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+      perform :receive, {
+        "type" => "update", "update" => second, "cid" => "x", "seq" => 2
+      }
+    end
+
+    assert_broadcasts SyncChannel.broadcasting_for(doc), 2 do
+      perform :receive, {
+        "type" => "update", "update" => first, "cid" => "x", "seq" => 1
+      }
+    end
+
+    persisted = Y::Doc.new
+    persisted.sync(doc.reload.yjs_state.unpack("C*"))
+    assert_equal "ab", persisted.get_text("t").to_s
   end
 
   test "first subscriber still gets the seed after an empty sync-reply was merged" do

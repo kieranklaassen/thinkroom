@@ -1,5 +1,5 @@
 class SuggestionsController < InertiaController
-  before_action :set_suggestion, only: [ :accept, :reject ]
+  before_action :set_suggestion, only: [ :accept, :reopen, :reject ]
 
   # Browser-facing suggest-a-change (Suggest mode). Mirrors comments#create:
   # the session display name wins over the posted one, the author kind is
@@ -72,6 +72,22 @@ class SuggestionsController < InertiaController
                   inertia: { errors: { suggestion: "is no longer pending" } }
   end
 
+  def reopen
+    by = preferred_name(params[:by], fallback: "human")
+    @suggestion.reopen_after_failed_apply!(by:)
+    Activity.log!(
+      document: @suggestion.document,
+      actor_name: by,
+      actor_kind: "human",
+      action: "reopened_suggestion",
+      detail: "returned a suggestion to pending after its target changed"
+    )
+    DocumentMetaChannel.broadcast_event(@suggestion.document, :suggestions)
+    render json: { suggestion: @suggestion.as_props }
+  rescue ActiveRecord::RecordInvalid
+    render json: { error: "Suggestion could not be reopened." }, status: :conflict
+  end
+
   def reject
     @suggestion.reject!(by: preferred_name(params[:by], fallback: "human"))
     log_and_broadcast("rejected_suggestion", "rejected “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
@@ -90,8 +106,12 @@ class SuggestionsController < InertiaController
     # The suggestion (or its doc) was deleted while the card was on screen —
     # redirect back cleanly instead of a 404 modal over the editor.
     # No `status:` on error-bag redirects — see create's rescue.
-    redirect_back fallback_location: root_path,
-                  inertia: { errors: { suggestion: "is no longer available" } }
+    if request.format.json?
+      render json: { error: "Suggestion is no longer available." }, status: :not_found
+    else
+      redirect_back fallback_location: root_path,
+                    inertia: { errors: { suggestion: "is no longer available" } }
+    end
   end
 
   def log_and_broadcast(action, detail)
