@@ -41,12 +41,24 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert_equal @document.slug, body["slug"]
     assert body["api"]["announce_presence"]["url"].present?
     assert body["notes"].any? { |n| n.include?("X-Agent-Name") }
+    assert body["notes"].any? { |n| n.include?("creation permits no header") }
+    assert body["notes"].any? { |n| n.include?("content is canonical Markdown source") }
+    assert body["notes"].any? { |n| n.include?("unique quote from plain_text") }
   end
 
   test "explicit ?format=txt works regardless of user agent" do
     get "/d/#{@document.slug}?format=txt", headers: { "User-Agent" => "Mozilla/5.0" }
     assert_equal "text/plain", response.media_type
     assert_includes response.body, "Announce yourself"
+  end
+
+  test "explicit ?format=json returns machine-readable state" do
+    get "/d/#{@document.slug}?format=json", headers: { "User-Agent" => "Mozilla/5.0" }
+
+    assert_response :success
+    assert_equal "application/json", response.media_type
+    assert_equal @document.slug, response.parsed_body["slug"]
+    assert_equal "markdown", response.parsed_body["content_format"]
   end
 
   test "text guide marks claiming browser-only and explains deletion 404 semantics" do
@@ -83,6 +95,11 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     assert_includes response.body, '"body":"<p>Your proposed HTML.</p>"'
+    assert_includes response.body, "canonical source in \"content\""
+    assert_includes response.body, "ProseMirror/Yjs is"
+    assert_includes response.body, "do not send editor JSON or CRDT data"
+    assert_includes response.body, "missing or ambiguous replacement stays"
+    assert_includes response.body, "creation permits no header"
     refute_includes response.body, "\\u003c"
   end
 end

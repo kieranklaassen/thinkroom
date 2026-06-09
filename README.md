@@ -6,6 +6,10 @@ and humans review AI contributions explicitly. Live CRDT collaboration over
 ActionCable, reviewable suggestions, anchored comments, agent presence, and a
 document-level provenance summary that updates as you type.
 
+> **HTML contract:** HTML documents are edited as rendered documents, not as
+> raw source in a code editor. The API stores and returns sanitized canonical
+> HTML in `content`; ProseMirror/Yjs is only the browser's shared editing model.
+
 ## Setup
 
 ```bash
@@ -24,9 +28,12 @@ Requires Ruby 3.4, Node 20+ (22+ for `script/sync_check.mjs`), SQLite.
 subscribe the server transmits its merged state + state vector; the client
 applies it and replies with everything the server is missing (sync step 2);
 afterwards incremental updates broadcast to every subscriber, with echoes
-filtered client-side by a connection id. The server blindly merges every
-update into `documents.yjs_state` via **y-rb** (Rust yrs bindings) —
-commutative, idempotent, no document-structure knowledge needed
+filtered client-side by a connection id. Persistent client frames carry a
+per-connection sequence number because Action Cable may dispatch a burst on
+multiple workers; the channel drains them in order, merges each update into
+`documents.yjs_state`, then relays it. A peer-visible edit is therefore
+already durable. Merging uses **y-rb** (Rust yrs bindings) — commutative,
+idempotent, and unaware of document structure
 (`app/services/yjs_persistence.rb`, per-document lock). Documents survive
 restarts; late joiners get the full merged state. Awareness (cursors) rides
 the same channel, relay-only, never persisted.
@@ -42,7 +49,26 @@ double-guards the race).
 and keeps that format for its lifetime. Both formats are parsed into the same
 ProseMirror/Yjs document for editing and collaboration. HTML is normalized to
 the editable schema, sanitized on server and browser ingress, and serialized
-back to canonical HTML; Pruf is not a lossless full-page HTML source editor.
+back to canonical HTML. Supported content includes headings, paragraphs,
+lists, links, code, blockquotes, tables, and app-owned images; executable
+markup, styling beyond constrained table alignment, remote images, and
+full-page metadata are removed. Pruf is not a lossless full-page HTML source
+editor.
+
+**Agent source contract.** The generic state fields are stable across both
+formats:
+
+| Field | Meaning |
+|---|---|
+| `content_format` | Immutable `markdown` or `html` |
+| `content` | Canonical source in that format |
+| `plain_text` | Rendered text for context, search, and anchors |
+
+Markdown responses additionally retain the legacy `markdown` and
+`plain_markdown` aliases. HTML responses intentionally omit them. Agents
+send suggestion `body` in `content_format`, and should use a unique quote
+from `plain_text` for `anchor_text` or `replaces`. Source-formatted quotes
+also work because Pruf parses them before matching.
 
 **Provenance** is a single ProseMirror mark type with
 `{kind: human|ai, author, state}` attrs. y-prosemirror stores marks as
@@ -80,7 +106,7 @@ Apr 2024):
 - It **loads and runs on Rails 8.1** — `Y::Actioncable::Sync` includes
   cleanly and exposes the documented `sync_for` / `sync_to` / `load` /
   `persist` surface (verified in this app before replacing it).
-- We chose a ~60-line manual relay instead, for reasons inherent to the gem's
+- We chose a small manual relay instead, for reasons inherent to the gem's
   design: it keeps a **full server-side `Y::Doc` replica per subscription**
   (N subscribers = N replicas integrating every message), persists the
   **entire document state on every received message per subscriber**, leaves
@@ -103,17 +129,28 @@ browser UA returns a plain-text guide (browsers get the editor; the editor
 HTML also embeds the same guide invisibly in a `<template id="agent-guide">`,
 and `Accept: application/json` returns machine-readable state + endpoints).
 
+| Share-link request | Result |
+|---|---|
+| Browser / `Accept: text/html` | Live collaborative editor, with the guide embedded in `#agent-guide` |
+| curl-like non-browser user agent | Plain-text participation guide |
+| `?format=txt` | Plain-text guide regardless of user agent |
+| `Accept: application/json` or `?format=json` | Machine-readable state and endpoint metadata |
+
 ```bash
-# 1. Create a document, get its shareable slug
+# 1. Create a Markdown document with the recommended generic source contract
 curl -s -X POST http://localhost:3000/api/docs \
   -H "X-Agent-Name: Scout" -H "Content-Type: application/json" \
-  -d '{"title": "Field Notes", "markdown": "# Field Notes\n\nDay one."}'
-# => { "slug": "U3m9qBQymg", "share_url": ".../d/U3m9qBQymg", "api": { ... } }
+  -d '{"title":"Field Notes","format":"markdown","content":"# Field Notes\n\nDay one."}'
+# => { "slug": "U3m9qBQymg", "content_format": "markdown",
+#      "content": "# Field Notes\n\nDay one.", "plain_text": "Field Notes Day one.",
+#      "share_url": ".../d/U3m9qBQymg", "api": { ... } }
 
-# HTML uses the generic source contract
+# HTML uses the same contract; content remains canonical HTML
 curl -s -X POST http://localhost:3000/api/docs \
   -H "X-Agent-Name: Scout" -H "Content-Type: application/json" \
   -d '{"title":"Field Notes","format":"html","content":"<h1>Field Notes</h1><p>Day one.</p>"}'
+
+# Legacy Markdown clients may still send {"markdown":"# Field Notes"}
 
 # 2. Cold discovery — fetch the share link the way an agent would
 curl -s http://localhost:3000/d/U3m9qBQymg
@@ -125,15 +162,21 @@ curl -s -X POST http://localhost:3000/api/docs/U3m9qBQymg/presence \
   -H "X-Agent-Name: Scout" -H "Content-Type: application/json" \
   -d '{"status": "active", "location": "Day one"}'
 
-# 4. Read full state: markdown, provenance spans, suggestions, comments
+# 4. Read full state: format, canonical source, plain text, provenance,
+#    suggestions, comments, presence, activity, and endpoint metadata
 curl -s http://localhost:3000/api/docs/U3m9qBQymg -H "X-Agent-Name: Scout"
 
 # 5. Propose an edit — it slides into every open editor, agent-attributed,
 #    pending review. A human clicks Accept and the text lands in the doc
-#    carrying "Scout" provenance, tinted until reviewed.
+#    carrying "Scout" provenance, tinted until reviewed. `body` must use the
+#    document's content_format. Use a unique plain_text quote for the anchor.
 curl -s -X POST http://localhost:3000/api/docs/U3m9qBQymg/suggestions \
   -H "X-Agent-Name: Scout" -H "Content-Type: application/json" \
   -d '{"body": "## Day two\n\nThe survey continues.", "intent": "Add day two", "anchor_text": "Day one"}'
+
+# For replacements, use `replaces` instead. Missing or ambiguous replacement
+# targets stay pending and do not change the document. If an insertion anchor
+# is missing when accepted, the proposal appends to the document.
 
 # 6. Comment on a selection
 curl -s -X POST http://localhost:3000/api/docs/U3m9qBQymg/comments \
@@ -169,7 +212,8 @@ activity feed entries, and agent-attributed provenance after acceptance.
 ## Verification
 
 ```bash
-bin/rails test                                        # full Rails suite
+bin/rails test                                                # full Rails suite
+npm run check                                                 # browser TypeScript
 BASE_URL=http://localhost:3000 node script/sync_check.mjs     # two-client CRDT convergence proof
 BASE_URL=http://localhost:3000 node script/browser_check.mjs  # broad end-to-end browser checks (Playwright)
 BASE_URL=http://localhost:3000 npm run check:html              # focused HTML source/edit/reload checks
