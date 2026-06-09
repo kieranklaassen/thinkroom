@@ -84,6 +84,7 @@ export const deletionSchema = $markSchema('deletion', () => ({
   parseDOM: [
     {
       tag: 'del[data-suggestion-id]',
+      priority: 100,
       getAttrs: (dom) => {
         const el = dom as HTMLElement
         return {

@@ -1,7 +1,7 @@
 # Proof — a provenance-tracking collaborative editor
 
 A working clone of [Proof](https://proofeditor.ai): an agent-native collaborative
-markdown editor where every span of text knows who wrote it — a human or an AI —
+Markdown and HTML editor where every span of text knows who wrote it — a human or an AI —
 and humans review AI contributions explicitly. Live CRDT collaboration over
 ActionCable, reviewable suggestions, anchored comments, agent presence, and a
 document-level provenance summary that updates as you type.
@@ -35,8 +35,14 @@ the same channel, relay-only, never persisted.
 presets) bound to the Yjs doc through `@milkdown/plugin-collab`
 (y-prosemirror underneath). Code blocks highlight via shiki. Seeding an empty
 document happens client-side under a server-issued atomic claim (exactly one
-client applies the markdown template; the collab plugin's empty-doc condition
+client applies the format-specific source template; the collab plugin's empty-doc condition
 double-guards the race).
+
+**Source formats.** A document is created as Markdown or semantic body HTML
+and keeps that format for its lifetime. Both formats are parsed into the same
+ProseMirror/Yjs document for editing and collaboration. HTML is normalized to
+the editable schema, sanitized on server and browser ingress, and serialized
+back to canonical HTML; Pruf is not a lossless full-page HTML source editor.
 
 **Provenance** is a single ProseMirror mark type with
 `{kind: human|ai, author, state}` attrs. y-prosemirror stores marks as
@@ -52,9 +58,11 @@ them back), which is how the seeded demo ships pre-attributed AI spans.
 
 **Suggestions live in the database, not the CRDT, until accepted.** Agents
 and the AI propose; rows broadcast to a meta channel; every connected editor
-partial-reloads just that prop. Accepting is local-first: the accepting
-client inserts the proposed markdown into the Yjs doc carrying the AI
-author's provenance marks (pending review), then reconciles with the server.
+partial-reloads just that prop. The server first awards one accepting client;
+that client parses the proposal in the document's source format and inserts it
+into Yjs with the author's provenance marks. If collaboration changes a
+replacement target during that round trip, the client safely returns the
+suggestion to pending instead of applying it elsewhere.
 Rejecting discards. The UI path and the agent API share single entry points
 (`Suggestion.propose!`, `Comment.post!`) — there is no side channel.
 
@@ -101,6 +109,11 @@ curl -s -X POST http://localhost:3000/api/docs \
   -H "X-Agent-Name: Scout" -H "Content-Type: application/json" \
   -d '{"title": "Field Notes", "markdown": "# Field Notes\n\nDay one."}'
 # => { "slug": "U3m9qBQymg", "share_url": ".../d/U3m9qBQymg", "api": { ... } }
+
+# HTML uses the generic source contract
+curl -s -X POST http://localhost:3000/api/docs \
+  -H "X-Agent-Name: Scout" -H "Content-Type: application/json" \
+  -d '{"title":"Field Notes","format":"html","content":"<h1>Field Notes</h1><p>Day one.</p>"}'
 
 # 2. Cold discovery — fetch the share link the way an agent would
 curl -s http://localhost:3000/d/U3m9qBQymg
@@ -156,9 +169,10 @@ activity feed entries, and agent-attributed provenance after acceptance.
 ## Verification
 
 ```bash
-bin/rails test                                        # 57 tests: models, services, channels, API, discovery
+bin/rails test                                        # full Rails suite
 BASE_URL=http://localhost:3000 node script/sync_check.mjs     # two-client CRDT convergence proof
-BASE_URL=http://localhost:3000 node script/browser_check.mjs  # 33 end-to-end browser checks (Playwright)
+BASE_URL=http://localhost:3000 node script/browser_check.mjs  # broad end-to-end browser checks (Playwright)
+BASE_URL=http://localhost:3000 npm run check:html              # focused HTML source/edit/reload checks
 ```
 
 **Two-client sync check** (`script/sync_check.mjs`): two Node clients speak
@@ -217,9 +231,13 @@ Findings and fixes are recorded in
 
 - The share-link is the trust model (like Proof's slug links): no accounts;
   anyone with the slug can edit. Agent identity is honor-system via header.
-- The server-readable markdown/spans snapshot is pushed by connected editors
+- Browser-pushed source/provenance snapshots are derived API read models, not
+  authenticated authorship evidence. The Yjs state remains authoritative; a
+  stronger trust model requires authenticated collaborators and signed review
+  transitions across both Markdown and HTML.
+- The server-readable source/spans snapshot is pushed by connected editors
   (debounced); if nobody has the doc open, API reads serve the last snapshot
-  (or the seed markdown for never-opened docs). The Yjs binary state is
+  (or the seed source for never-opened docs). The Yjs binary state is
   always authoritative for sync.
 - Dev runs single-process (async cable adapter + in-process seed locks);
   production would want Redis/AnyCable and the same relay holds.

@@ -13,6 +13,7 @@ class Suggestion < ApplicationRecord
   MAX_BODY_BYTES = 64.kilobytes
   MAX_ANCHOR_BYTES = 10.kilobytes
   MAX_INTENT_BYTES = 1.kilobyte
+  attr_accessor :normalization_changed
 
   belongs_to :document
 
@@ -28,10 +29,19 @@ class Suggestion < ApplicationRecord
   # the agent API both flow through here (create + activity + live broadcast),
   # so there is no side channel around the review machinery.
   def self.propose!(document:, author_name:, author_kind:, body:, intent: nil, anchor_text: nil, replaces: nil)
+    body = body.to_s
+    if body.bytesize > MAX_BODY_BYTES
+      invalid = document.suggestions.build(author_name:, author_kind:, body:, intent:, anchor_text:, replaces:)
+      invalid.errors.add(:body, "is too long")
+      raise ActiveRecord::RecordInvalid.new(invalid)
+    end
+
+    normalization = document.html? ? HtmlDocumentSanitizer.external(body) : nil
     suggestion = document.suggestions.create!(
-      author_name:, author_kind:, body:, intent:, anchor_text:, replaces:,
+      author_name:, author_kind:, body: normalization&.content || body, intent:, anchor_text:, replaces:,
       status: "pending"
     )
+    suggestion.normalization_changed = normalization&.changed? || false
     Activity.log!(
       document:,
       actor_name: author_name,
@@ -45,6 +55,18 @@ class Suggestion < ApplicationRecord
 
   def accept!(by: nil)
     transition!("accepted", by:)
+  end
+
+  # Compensation for the narrow collaboration race where a replacement
+  # target changes after the server wins acceptance but before the accepting
+  # client can merge it into Yjs. Only that resolver can reopen the exact
+  # accepted row, and the compare-and-set prevents changing later state.
+  def reopen_after_failed_apply!(by:)
+    updated = self.class.where(id:, status: "accepted", resolved_by: by)
+                  .update_all(status: "pending", resolved_by: nil, updated_at: Time.current)
+    raise ActiveRecord::RecordInvalid.new(self), "cannot reopen" if updated.zero?
+
+    reload
   end
 
   # Batch accept for the Accept-all button: flips every pending suggestion

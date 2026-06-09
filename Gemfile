@@ -56,3 +56,6 @@ gem "vite_rails", "~> 3.11"
 gem "y-rb", "~> 0.7.0"
 
 gem "y-rb_actioncable", "~> 0.1.7"
+
+# Render source documents to plain text for format-neutral agent context.
+gem "commonmarker", "~> 2.8"

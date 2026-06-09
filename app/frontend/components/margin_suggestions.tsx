@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { editorViewCtx, parserCtx } from '@milkdown/kit/core'
+import { editorViewCtx, parserCtx, schemaCtx } from '@milkdown/kit/core'
 import { TextSelection } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import type { EditorHandle } from '../editor/milkdown_editor'
@@ -7,6 +7,7 @@ import type { ProvenanceSpan } from '../editor/provenance'
 import { findSuggestionTarget, type SuggestionPayload } from '../editor/suggestions'
 import { truncate } from '../lib/truncate'
 import { clearHighlight, domRange, setHighlight, supportsHighlights } from '../lib/highlights'
+import { sourceParser, type DocumentFormat } from '../editor/document_format'
 
 interface Props {
   suggestions: SuggestionPayload[]
@@ -14,6 +15,7 @@ interface Props {
   /** Remeasure signal — updates on every document change. */
   spans: ProvenanceSpan[]
   focusMode: boolean
+  contentFormat: DocumentFormat
   onAccept: (suggestion: SuggestionPayload) => void
   onReject: (suggestion: SuggestionPayload) => void
   /** When set, marker taps open this instead of jumping to the anchor —
@@ -37,6 +39,7 @@ export function MarginSuggestions({
   handle,
   spans,
   focusMode,
+  contentFormat,
   onAccept,
   onReject,
   onMarkerSelect,
@@ -95,7 +98,7 @@ export function MarginSuggestions({
     try {
       ;({ view, parser } = handle.editor.action((ctx) => ({
         view: ctx.get(editorViewCtx),
-        parser: ctx.get(parserCtx),
+        parser: sourceParser(contentFormat, ctx.get(parserCtx), ctx.get(schemaCtx)),
       })))
     } catch {
       return // editor torn down mid-navigation
@@ -106,7 +109,7 @@ export function MarginSuggestions({
     rangesRef.current = new Map()
 
     const entries = suggestions.map((s) => {
-      const range = findSuggestionTarget(view.state.doc, parser, anchorOf(s))
+      const range = findSuggestionTarget(view.state.doc, parser, anchorOf(s), contentFormat)
       if (range) {
         const dom = domRange(view, range.from, range.to)
         if (dom) rangesRef.current.set(s.id, dom)
@@ -148,7 +151,7 @@ export function MarginSuggestions({
 
     setHighlight('sug-anchor', [...rangesRef.current.values()])
     return () => cancelAnimationFrame(raf)
-  }, [suggestions, spans, handle, focusMode, resizeTick])
+  }, [suggestions, spans, handle, focusMode, resizeTick, contentFormat])
 
   useEffect(() => {
     if (!supportsHighlights) return
@@ -170,7 +173,13 @@ export function MarginSuggestions({
       try {
         handle.editor.action((ctx) => {
           const view = ctx.get(editorViewCtx)
-          const range = findSuggestionTarget(view.state.doc, ctx.get(parserCtx), anchorOf(suggestion))
+          const parser = sourceParser(contentFormat, ctx.get(parserCtx), ctx.get(schemaCtx))
+          const range = findSuggestionTarget(
+            view.state.doc,
+            parser,
+            anchorOf(suggestion),
+            contentFormat,
+          )
           if (!range) return
           const tr = view.state.tr.setSelection(
             TextSelection.create(view.state.doc, range.from, range.to),
@@ -182,7 +191,7 @@ export function MarginSuggestions({
         // editor torn down mid-navigation
       }
     },
-    [handle],
+    [handle, contentFormat],
   )
 
   const resolve = (suggestion: SuggestionPayload, action: (s: SuggestionPayload) => void) => {

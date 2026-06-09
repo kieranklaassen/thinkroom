@@ -87,4 +87,91 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     client.sync(Base64.strict_decode64(full_state).unpack("C*"))
     assert_equal "server content", client.get_text("t").to_s
   end
+
+  test "snapshot persistence rejects a client behind the current Yjs state" do
+    doc = Document.create!(title: "Snapshot", content_snapshot: "current")
+    YjsPersistence.merge(doc, b64_update_for("server content"))
+    stale_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+
+    persisted = YjsPersistence.persist_snapshot(
+      doc,
+      state_vector_b64: stale_vector,
+      content: "stale",
+      spans: []
+    )
+
+    assert_not persisted
+    assert_equal "current", doc.reload.content_snapshot
+  end
+
+  test "snapshot persistence accepts clients at or ahead of the server state" do
+    doc = Document.create!(title: "Snapshot")
+    client = Y::Doc.new
+    YjsPersistence.merge(doc, b64_update_for("server content", from_doc: client))
+    client.get_text("t") << " client content"
+    client_vector = Base64.strict_encode64(client.state.pack("C*"))
+
+    persisted = YjsPersistence.persist_snapshot(
+      doc,
+      state_vector_b64: client_vector,
+      content: "new source",
+      spans: []
+    )
+
+    assert persisted
+    assert_equal "new source", doc.reload.content_snapshot
+  end
+
+  test "snapshot persistence accepts reordered multi-client state vectors" do
+    doc = Document.create!(title: "Snapshot")
+    YjsPersistence.merge(doc, b64_update_for("client one"))
+    YjsPersistence.merge(doc, b64_update_for("client two"))
+
+    server = Y::Doc.new
+    server.sync(doc.reload.yjs_state.unpack("C*"))
+    entries = decode_state_vector_for_test(server.state).to_a.reverse
+    reordered = encode_state_vector_for_test(entries)
+
+    persisted = YjsPersistence.persist_snapshot(
+      doc,
+      state_vector_b64: Base64.strict_encode64(reordered.pack("C*")),
+      content: "ordered independently",
+      spans: []
+    )
+
+    assert persisted
+    assert_equal "ordered independently", doc.reload.content_snapshot
+  end
+
+  private
+
+  def decode_state_vector_for_test(bytes)
+    index = 0
+    read = lambda do
+      value = 0
+      shift = 0
+      loop do
+        byte = bytes.fetch(index)
+        index += 1
+        value |= (byte & 0x7f) << shift
+        break value if (byte & 0x80).zero?
+        shift += 7
+      end
+    end
+    read.call.times.to_h { [ read.call, read.call ] }
+  end
+
+  def encode_state_vector_for_test(entries)
+    values = [ entries.length, *entries.flatten ]
+    values.flat_map do |value|
+      encoded = []
+      loop do
+        byte = value & 0x7f
+        value >>= 7
+        encoded << (value.zero? ? byte : byte | 0x80)
+        break if value.zero?
+      end
+      encoded
+    end
+  end
 end

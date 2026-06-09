@@ -43,6 +43,32 @@ class YjsPersistence
       ]
     end
 
+    # Persist a derived source/provenance snapshot only when the submitting
+    # client has observed every Yjs update currently stored by the server.
+    # A client may be ahead (its own cable frame is still in flight), but it
+    # may not overwrite the API read model from behind.
+    def persist_snapshot(document, state_vector_b64:, content:, spans:)
+      client_state = decode_state_vector(decode(state_vector_b64)) if state_vector_b64.present?
+
+      lock_for(document.id).synchronize do
+        document.with_lock do
+          document.reload
+          if client_state && document.yjs_state.present?
+            server_state = decode_state_vector(load_ydoc(document).state)
+            current = server_state.all? do |client_id, clock|
+              client_state.fetch(client_id, 0) >= clock
+            end
+            return false unless current
+          end
+
+          document.update!(content_snapshot: content, provenance_spans: spans)
+        end
+      end
+      true
+    rescue ArgumentError
+      false
+    end
+
     private
 
     def load_ydoc(document)
@@ -53,6 +79,34 @@ class YjsPersistence
 
     def decode(base64_update)
       Base64.strict_decode64(base64_update).unpack("C*")
+    end
+
+    # Yjs state vectors are lib0 varUint maps of client id => clock. Decode
+    # them directly: y-rb's diff binding can misread a valid multi-client
+    # vector when JavaScript emits the map entries in a different order.
+    def decode_state_vector(bytes)
+      count, index = decode_var_uint(bytes, 0)
+      count.times.each_with_object({}) do |_entry, clocks|
+        client_id, index = decode_var_uint(bytes, index)
+        clock, index = decode_var_uint(bytes, index)
+        clocks[client_id] = clock
+      end
+    end
+
+    def decode_var_uint(bytes, index)
+      value = 0
+      shift = 0
+      loop do
+        byte = bytes.fetch(index)
+        index += 1
+        value |= (byte & 0x7f) << shift
+        return [ value, index ] if (byte & 0x80).zero?
+
+        shift += 7
+        raise ArgumentError, "invalid state vector" if shift > 63
+      end
+    rescue IndexError
+      raise ArgumentError, "truncated state vector"
     end
 
     def lock_for(document_id)

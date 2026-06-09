@@ -66,4 +66,19 @@ class SuggestionTest < ActiveSupport::TestCase
     assert_equal %w[id author_name author_kind intent body anchor_text replaces status created_at].sort,
                  props.keys.map(&:to_s).sort
   end
+
+  test "HTML proposals are sanitized and report normalization" do
+    document = Document.create!(title: "HTML", content_format: "html")
+
+    suggestion = Suggestion.propose!(
+      document:,
+      author_name: "Scout",
+      author_kind: "agent",
+      body: '<p onclick="bad()">Hello <span data-provenance data-kind="human" data-state="endorsed">world</span></p>'
+    )
+
+    assert suggestion.normalization_changed
+    assert_includes suggestion.body, "<p>Hello"
+    refute_match(/onclick|data-provenance|data-kind|data-state/, suggestion.body)
+  end
 end
