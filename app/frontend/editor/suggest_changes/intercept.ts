@@ -36,7 +36,29 @@ const generateSuggestionId = (): string => `s${clientNonce}-${(counter += 1)}`
  * `withSuggestChanges`). The transformed transaction — not the original — is
  * what appendTransaction plugins (provenanceWriter, suggest guard) observe.
  */
-export const suggestDispatch: EditorView['dispatch'] = withSuggestChanges(
+const trackedDispatch = withSuggestChanges(
   undefined,
   generateSuggestionId,
 )
+
+export const suggestDispatch: EditorView['dispatch'] = function suggestDispatch(
+  this: EditorView,
+  transaction,
+) {
+  // TableBlock moves a NodeSelection asynchronously when a cell is clicked.
+  // There is no document change to track, and the upstream wrapper can map
+  // that transient node selection through an empty transaction to a node
+  // that no longer exists. Selection-only transactions must pass through.
+  if (transaction.steps.length === 0) {
+    // TableBlock schedules this selection move in requestAnimationFrame.
+    // A remote Yjs update can replace the view state before it fires, making
+    // the transaction invalid for the current document. The click selection
+    // is disposable; applying a stale transaction is not.
+    if (!transaction.before.eq(this.state.doc)) return
+
+    this.updateState(this.state.apply(transaction))
+    return
+  }
+
+  trackedDispatch.call(this, transaction)
+}

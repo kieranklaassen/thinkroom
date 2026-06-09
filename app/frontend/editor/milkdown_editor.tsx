@@ -1,6 +1,12 @@
 import { useEffect, useRef } from 'react'
 import * as Y from 'yjs'
-import { Editor, editorViewCtx, editorViewOptionsCtx, rootCtx } from '@milkdown/kit/core'
+import {
+  Editor,
+  editorViewCtx,
+  editorViewOptionsCtx,
+  rootCtx,
+  schemaCtx,
+} from '@milkdown/kit/core'
 import { commonmark } from '@milkdown/kit/preset/commonmark'
 import { gfm } from '@milkdown/kit/preset/gfm'
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
@@ -53,6 +59,12 @@ import { agentCursors } from './agent_cursors'
 import { renderSoftBreaks } from './line_breaks'
 import { selectionCallbackCtx, selectionWatcher } from './selection_watcher'
 import { postJSON } from '../lib/csrf'
+import {
+  htmlDefaultValue,
+  sanitizeHtml,
+  serializeHtml,
+  type DocumentFormat,
+} from './document_format'
 
 export interface EditorHandle {
   editor: Editor
@@ -65,16 +77,17 @@ export type ConnectionStatus = 'connecting' | 'live'
 interface EditorProps {
   slug: string
   identity: UserIdentity
+  contentFormat: DocumentFormat
   /** Server-rendered Yjs state (base64) — hydrates the doc before the
    *  provider syncs, so the first paint is already populated. */
   initialStateB64?: string | null
   /** Seed template for a never-edited document. Applied at bind time when
    *  the page response granted this client the seed claim. */
-  seedMarkdown?: string | null
+  seedContent?: string | null
   /** True when documents#show atomically claimed the seed for this page
    *  load — the props-first path that skips the WebSocket round-trip. */
   seedGranted?: boolean
-  /** Who authored the seed markdown ('human' | 'agent' | null). Non-human
+  /** Who authored the seed source ('human' | 'agent' | null). Non-human
    *  seeds get their text explicitly AI-attributed after the collab
    *  connection renders them — otherwise seeded text is unmarked and
    *  counts as human in the provenance summary. */
@@ -229,8 +242,9 @@ function releaseSession(slug: string): void {
 function CollabEditor({
   slug,
   identity,
+  contentFormat,
   initialStateB64,
-  seedMarkdown,
+  seedContent,
   seedGranted,
   seedAuthorKind,
   seedAuthorName,
@@ -268,6 +282,7 @@ function CollabEditor({
             ...prev,
             editable: () => editableRef.current,
             dispatchTransaction: suggestDispatch,
+            transformPastedHTML: (html) => sanitizeHtml(html, 'external'),
           }))
           ctx.update(highlightPluginConfig.key, (prev) => ({
             ...prev,
@@ -337,21 +352,39 @@ function CollabEditor({
     callbacksRef.current.onStatus?.('connecting')
 
     let snapshotTimer: ReturnType<typeof setTimeout> | null = null
-    const pushSnapshot = () => {
+    let snapshotRetryTimer: ReturnType<typeof setTimeout> | null = null
+    let cancelled = false
+    const pushSnapshot = (attempt = 0) => {
       editor.action((ctx) => {
-        const markdown = getMarkdown()(ctx)
         const view = ctx.get(editorViewCtx)
+        const content =
+          contentFormat === 'html'
+            ? serializeHtml(view.state.doc, ctx.get(schemaCtx))
+            : getMarkdown()(ctx)
         const spans = collectSpans(view.state.doc)
-        void postJSON(`/d/${slug}/snapshot`, { markdown, spans }).catch((error) => {
-          // Best-effort persistence, but never silent: the agent API serves
-          // these spans, so a permanently failing push must be observable.
-          console.warn('pruf: snapshot push failed', error)
+        let binaryState = ''
+        Y.encodeStateVector(ydoc).forEach((byte) => {
+          binaryState += String.fromCharCode(byte)
         })
+        const stateVector = btoa(binaryState)
+        void postJSON(`/d/${slug}/snapshot`, { content, spans, state_vector: stateVector })
+          .then((response) => {
+            if (response.status === 409 && attempt < 3 && !cancelled) {
+              if (snapshotRetryTimer) clearTimeout(snapshotRetryTimer)
+              snapshotRetryTimer = setTimeout(() => pushSnapshot(attempt + 1), 250)
+            } else if (!response.ok) {
+              console.warn('pruf: snapshot push rejected', response.status)
+            }
+          })
+          .catch((error) => {
+            // Best-effort persistence, but never silent: the agent API serves
+            // these spans, so a permanently failing push must be observable.
+            console.warn('pruf: snapshot push failed', error)
+          })
       })
     }
 
     let started = false
-    let cancelled = false
     const syncSuggesting = (instance: Editor) => {
       try {
         instance.action((ctx) => {
@@ -372,16 +405,19 @@ function CollabEditor({
         // Consume the seed one-shot: capture to locals before nulling so a
         // remounted editor never re-applies or re-attributes, and a later
         // refactor can't clear the author fields out from under the re-mark.
-        const seed = provider.seedMarkdown
+        const seed = provider.seedContent
+        const seedFormat = provider.seedFormat
         const seedKind = provider.seedAuthorKind
         const seedAuthor = provider.seedAuthorName
-        provider.seedMarkdown = null
+        provider.seedContent = null
         provider.seedAuthorKind = null
         provider.seedAuthorName = null
         if (seed) {
           // Server granted this client the seed claim; the default condition
           // (remote doc empty) double-guards against racing another seeder.
-          service.applyTemplate(seed)
+          service.applyTemplate(
+            seedFormat === 'html' ? htmlDefaultValue(seed, 'external') : seed,
+          )
         }
         service.connect()
         if (seed && seedKind && seedKind !== 'human') {
@@ -429,9 +465,10 @@ function CollabEditor({
     // someone else holds the claim — waits for the sync handshake.
     if (provider.synced || ydoc.store.clients.size > 0) {
       start()
-    } else if (seedGranted && seedMarkdown && !seedAlreadyApplied(slug)) {
+    } else if (seedGranted && seedContent && !seedAlreadyApplied(slug)) {
       markSeedApplied(slug)
-      provider.seedMarkdown = seedMarkdown
+      provider.seedContent = seedContent
+      provider.seedFormat = contentFormat
       provider.seedAuthorKind = seedAuthorKind ?? null
       provider.seedAuthorName = seedAuthorName ?? null
       start()
@@ -443,6 +480,7 @@ function CollabEditor({
       cancelled = true
       provider.off('synced', start)
       if (snapshotTimer) clearTimeout(snapshotTimer)
+      if (snapshotRetryTimer) clearTimeout(snapshotRetryTimer)
       try {
         editor.action((ctx) => ctx.get(collabServiceCtx).disconnect())
       } catch {
@@ -451,7 +489,7 @@ function CollabEditor({
       releaseSession(slug)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, slug])
+  }, [loading, slug, contentFormat])
 
   // ProseMirror caches editable at each state update; an empty transaction
   // makes it re-read the prop when the mode flips. Safe pre-bind: the action

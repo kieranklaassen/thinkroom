@@ -21,6 +21,33 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
     assert_equal "accepted_suggestion", @document.activities.last.action
   end
 
+  test "accepting client can reopen its suggestion after a failed merge" do
+    @suggestion.accept!(by: "Quiet Falcon")
+
+    assert_difference -> { @document.activities.count }, 1 do
+      patch reopen_suggestion_path(@suggestion),
+            params: { by: "Quiet Falcon" },
+            as: :json
+    end
+
+    assert_response :success
+    assert_equal "pending", @suggestion.reload.status
+    assert_nil @suggestion.resolved_by
+    assert_equal "reopened_suggestion", @document.activities.last.action
+  end
+
+  test "a different resolver cannot reopen an accepted suggestion" do
+    @suggestion.accept!(by: "First Window")
+
+    patch reopen_suggestion_path(@suggestion),
+          params: { by: "Second Window" },
+          as: :json
+
+    assert_response :conflict
+    assert_equal "accepted", @suggestion.reload.status
+    assert_equal "First Window", @suggestion.resolved_by
+  end
+
   test "accept broadcasts a suggestions event to connected editors" do
     assert_broadcasts(DocumentMetaChannel.broadcasting_for(@document), 2) do
       # one :activities event from Activity.log!, one :suggestions event

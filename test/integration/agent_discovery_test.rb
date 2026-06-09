@@ -71,4 +71,18 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert body["notes"].any? { |n| n.include?("cannot claim") }
     refute_includes response.body, "tok-owner"
   end
+
+  test "HTML text guide uses readable native HTML in its suggestion example" do
+    document = Document.create!(
+      title: "HTML guide",
+      content_format: "html",
+      seed_content: "<p>Hello</p>"
+    )
+
+    get "/d/#{document.slug}?format=txt", headers: { "User-Agent" => "Mozilla/5.0" }
+
+    assert_response :success
+    assert_includes response.body, '"body":"<p>Your proposed HTML.</p>"'
+    refute_includes response.body, "\\u003c"
+  end
 end

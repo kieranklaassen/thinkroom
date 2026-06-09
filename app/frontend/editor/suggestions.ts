@@ -1,10 +1,12 @@
-import { editorViewCtx, parserCtx, type Editor } from '@milkdown/kit/core'
+import { editorViewCtx, parserCtx, schemaCtx, type Editor } from '@milkdown/kit/core'
 import { Slice, type MarkType, type Node } from '@milkdown/kit/prose/model'
 import { TextSelection } from '@milkdown/kit/prose/state'
 import { SKIP_PROVENANCE } from './provenance'
-
-/** The Milkdown parser's call shape — markdown source in, doc node out. */
-type MarkdownParser = (markdown: string) => Node | undefined
+import {
+  sourceParser,
+  type DocumentFormat,
+  type SourceParser,
+} from './document_format'
 
 export interface SuggestionPayload {
   id: number
@@ -67,6 +69,47 @@ export function findTextRange(
   return result
 }
 
+function findTextRanges(doc: Node, search: string | null): { from: number; to: number }[] {
+  if (!search) return []
+  const results: { from: number; to: number }[] = []
+
+  doc.descendants((node, pos) => {
+    if (!node.isTextblock) return true
+
+    let text = ''
+    const segments: { strFrom: number; strTo: number; docFrom: number }[] = []
+    node.forEach((child, offset) => {
+      if (child.isText && child.text) {
+        segments.push({
+          strFrom: text.length,
+          strTo: text.length + child.text.length,
+          docFrom: pos + 1 + offset,
+        })
+        text += child.text
+      }
+    })
+
+    let fromIndex = 0
+    while (fromIndex <= text.length - search.length) {
+      const index = text.indexOf(search, fromIndex)
+      if (index === -1) break
+      const endIndex = index + search.length
+      const startSeg = segments.find((s) => index >= s.strFrom && index < s.strTo)
+      const endSeg = segments.find((s) => endIndex > s.strFrom && endIndex <= s.strTo)
+      if (startSeg && endSeg) {
+        results.push({
+          from: startSeg.docFrom + (index - startSeg.strFrom),
+          to: endSeg.docFrom + (endIndex - endSeg.strFrom),
+        })
+      }
+      fromIndex = index + Math.max(1, search.length)
+    }
+    return true
+  })
+
+  return results
+}
+
 const normalizeBlockText = (text: string): string => text.replace(/\s+/g, ' ').trim()
 
 /** Normalized plain text of each top-level block in a parsed fragment. */
@@ -81,8 +124,8 @@ const blockTexts = (parsed: Node): string[] => {
  * matches `searchTexts` block-for-block (whitespace-normalized, full-block
  * equality). Returns the doc range spanning the window.
  */
-function findBlockRange(doc: Node, searchTexts: string[]): { from: number; to: number } | null {
-  if (searchTexts.length === 0 || searchTexts.every((t) => t === '')) return null
+function findBlockRanges(doc: Node, searchTexts: string[]): { from: number; to: number }[] {
+  if (searchTexts.length === 0 || searchTexts.every((t) => t === '')) return []
   const blocks: { text: string; from: number; to: number }[] = []
   doc.forEach((child, offset) => {
     blocks.push({
@@ -91,6 +134,7 @@ function findBlockRange(doc: Node, searchTexts: string[]): { from: number; to: n
       to: offset + child.nodeSize,
     })
   })
+  const results: { from: number; to: number }[] = []
   for (let i = 0; i + searchTexts.length <= blocks.length; i += 1) {
     let matched = true
     for (let j = 0; j < searchTexts.length; j += 1) {
@@ -100,10 +144,10 @@ function findBlockRange(doc: Node, searchTexts: string[]): { from: number; to: n
       }
     }
     if (matched) {
-      return { from: blocks[i].from, to: blocks[i + searchTexts.length - 1].to }
+      results.push({ from: blocks[i].from, to: blocks[i + searchTexts.length - 1].to })
     }
   }
-  return null
+  return results
 }
 
 interface MatchedRange {
@@ -121,8 +165,9 @@ interface MatchedRange {
 const PARSE_CACHE_MAX = 200
 const parseCache = new Map<string, Node | null>()
 
-const parseQuote = (parser: MarkdownParser, search: string): Node | null => {
-  const cached = parseCache.get(search)
+const parseQuote = (parser: SourceParser, cacheScope: string, search: string): Node | null => {
+  const cacheKey = `${cacheScope}\u0000${search}`
+  const cached = parseCache.get(cacheKey)
   if (cached !== undefined) return cached
   let parsed: Node | null = null
   try {
@@ -134,8 +179,22 @@ const parseQuote = (parser: MarkdownParser, search: string): Node | null => {
     const oldest = parseCache.keys().next().value
     if (oldest !== undefined) parseCache.delete(oldest)
   }
-  parseCache.set(search, parsed)
+  parseCache.set(cacheKey, parsed)
   return parsed
+}
+
+type MatchResult =
+  | { status: 'matched'; range: MatchedRange }
+  | { status: 'ambiguous' }
+  | { status: 'missing' }
+
+const uniqueMatch = (
+  ranges: { from: number; to: number }[],
+  kind: MatchedRange['kind'],
+): MatchResult => {
+  if (ranges.length === 0) return { status: 'missing' }
+  if (ranges.length > 1) return { status: 'ambiguous' }
+  return { status: 'matched', range: { ...ranges[0], kind } }
 }
 
 /**
@@ -150,27 +209,31 @@ const parseQuote = (parser: MarkdownParser, search: string): Node | null => {
  */
 function matchQuotedText(
   doc: Node,
-  parser: MarkdownParser,
+  parser: SourceParser,
+  cacheScope: string,
   search: string | null,
-): MatchedRange | null {
-  if (!search) return null
+): MatchResult {
+  if (!search) return { status: 'missing' }
 
-  const raw = findTextRange(doc, search)
-  if (raw) return { ...raw, kind: 'inline' }
+  const raw = uniqueMatch(findTextRanges(doc, search), 'inline')
+  if (raw.status !== 'missing') return raw
 
-  const parsed = parseQuote(parser, search)
-  if (!parsed || parsed.content.size === 0) return null
+  const parsed = parseQuote(parser, cacheScope, search)
+  if (!parsed || parsed.content.size === 0) return { status: 'missing' }
 
-  const block = findBlockRange(doc, blockTexts(parsed))
-  if (block) return { ...block, kind: 'block' }
+  const block = uniqueMatch(findBlockRanges(doc, blockTexts(parsed)), 'block')
+  if (block.status !== 'missing') return block
 
-  // Markdown-styled inline quote (e.g. `**Date:** 2026`) inside a larger
+  // Source-styled inline quote (e.g. `**Date:** 2026` or `<strong>Date:</strong>`)
+  // inside a larger
   // paragraph: match its rendered text within a single block.
   if (parsed.childCount === 1 && parsed.firstChild?.isTextblock) {
-    const inline = findTextRange(doc, normalizeBlockText(parsed.firstChild.textContent))
-    if (inline) return { ...inline, kind: 'inline' }
+    return uniqueMatch(
+      findTextRanges(doc, normalizeBlockText(parsed.firstChild.textContent)),
+      'inline',
+    )
   }
-  return null
+  return { status: 'missing' }
 }
 
 /**
@@ -181,11 +244,43 @@ function matchQuotedText(
  */
 export function findSuggestionTarget(
   doc: Node,
-  parser: MarkdownParser,
+  parser: SourceParser,
   search: string | null,
+  cacheScope = 'markdown',
 ): { from: number; to: number } | null {
-  const match = matchQuotedText(doc, parser, search)
-  return match ? { from: match.from, to: match.to } : null
+  const match = matchQuotedText(doc, parser, cacheScope, search)
+  return match.status === 'matched'
+    ? { from: match.range.from, to: match.range.to }
+    : null
+}
+
+export type SuggestionApplicability =
+  | { ok: true }
+  | { ok: false; reason: 'ambiguous' | 'empty' | 'missing' }
+
+export function suggestionApplicability(
+  editor: Editor,
+  suggestion: SuggestionPayload,
+  format: DocumentFormat,
+): SuggestionApplicability {
+  return editor.action((ctx) => {
+    const view = ctx.get(editorViewCtx)
+    const parser = sourceParser(format, ctx.get(parserCtx), ctx.get(schemaCtx))
+    let parsed: Node | undefined
+    try {
+      parsed = parser(suggestion.body)
+    } catch {
+      return { ok: false, reason: 'empty' }
+    }
+    if (!parsed || parsed.content.size === 0) return { ok: false, reason: 'empty' }
+
+    if (suggestion.replaces) {
+      const match = matchQuotedText(view.state.doc, parser, format, suggestion.replaces)
+      if (match.status === 'ambiguous') return { ok: false, reason: 'ambiguous' }
+      if (match.status === 'missing') return { ok: false, reason: 'missing' }
+    }
+    return { ok: true }
+  })
 }
 
 /**
@@ -203,21 +298,22 @@ export function findSuggestionTarget(
  *   the parsed body (section rewrites)
  * - `replaces` matched inline + multi-block body → replaceRange fits the
  *   block content around the matched text
- * - no `replaces` match → inserted after `anchor_text`'s block, else
- *   appended at the end of the document. The old content is only ever left
- *   in place when `replaces` genuinely matched nothing.
+ * - no `replaces` field → inserted after `anchor_text`'s block, else
+ *   appended at the end of the document
+ * - a missing or ambiguous `replaces` target → no mutation
  *
  * Returns the inserted range so callers can spotlight the merge.
  */
 export function applySuggestion(
   editor: Editor,
   suggestion: SuggestionPayload,
+  format: DocumentFormat = 'markdown',
 ): { from: number; to: number } | null {
   let applied: { from: number; to: number } | null = null
 
   editor.action((ctx) => {
     const view = ctx.get(editorViewCtx)
-    const parser = ctx.get(parserCtx)
+    const parser = sourceParser(format, ctx.get(parserCtx), ctx.get(schemaCtx))
     const { state } = view
     const markType = state.schema.marks.provenance as MarkType | undefined
     if (!markType) return
@@ -230,7 +326,9 @@ export function applySuggestion(
     let insertFrom: number
     let insertTo: number
 
-    const target = matchQuotedText(state.doc, parser, suggestion.replaces)
+    const targetResult = matchQuotedText(state.doc, parser, format, suggestion.replaces)
+    if (suggestion.replaces && targetResult.status !== 'matched') return
+    const target = targetResult.status === 'matched' ? targetResult.range : null
     if (target && target.kind === 'inline' && bodyIsInline) {
       const inline = parsed.firstChild!.content
       tr = tr.replaceWith(target.from, target.to, inline)
@@ -247,7 +345,8 @@ export function applySuggestion(
       insertFrom = tr.mapping.map(target.from, -1)
       insertTo = tr.mapping.map(target.to, 1)
     } else {
-      const anchorRange = matchQuotedText(state.doc, parser, suggestion.anchor_text)
+      const anchorResult = matchQuotedText(state.doc, parser, format, suggestion.anchor_text)
+      const anchorRange = anchorResult.status === 'matched' ? anchorResult.range : null
       let insertPos = state.doc.content.size
       if (anchorRange) {
         // Block matches already end at a top-level boundary; inline matches
