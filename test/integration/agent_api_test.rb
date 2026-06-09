@@ -19,6 +19,9 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert body["slug"].present?
     assert_includes body["share_url"], "/d/#{body['slug']}"
     assert body["api"]["propose_suggestion"]["url"].present?
+    assert body["api"]["upload_image"]["url"].present?
+    assert_equal "markdown", body.dig("content_contract", "content_format")
+    assert body.dig("content_contract", "immutable")
 
     doc = Document.find_by!(slug: body["slug"])
     assert_equal "# From an agent", doc.seed_markdown
@@ -72,6 +75,16 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal "html", doc.content_format
     assert_equal body["content"], doc.seed_content
     assert_equal "agent", doc.seed_author_kind
+    contract = body["content_contract"]
+    assert_equal "html", contract["content_format"]
+    assert_equal "content", contract["canonical_source_field"]
+    assert_equal "plain_text", contract["rendered_text_field"]
+    assert_includes contract.dig("html", "allowed_elements"), "table"
+    assert_includes contract.dig("html", "allowed_elements"), "img"
+    assert_includes contract.dig("html", "css", "supported"), "text-align"
+    assert_includes contract.dig("html", "css", "removed"), "<style> blocks"
+    assert_equal "/api/uploads", URI(contract.dig("html", "images", "upload", "url")).path
+    assert_includes contract.dig("html", "images", "removed_sources"), "https:// remote images"
   end
 
   test "route suffix does not override the document format body field" do
@@ -103,6 +116,9 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     refute body.key?("markdown")
     refute body.key?("plain_markdown")
     assert_includes body.dig("api", "propose_suggestion", "body", "body"), "HTML"
+    assert_equal "html", body.dig("content_contract", "suggestion_body_format")
+    assert_includes body.dig("content_contract", "html", "css", "guidance"), "semantic elements"
+    assert body["notes"].any? { |note| note.include?("Upload images through api.upload_image") }
   end
 
   test "HTML suggestion is sanitized and reports normalization" do

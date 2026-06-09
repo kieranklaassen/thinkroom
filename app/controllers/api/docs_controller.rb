@@ -61,6 +61,7 @@ module Api
         normalized: normalization&.changed? || false,
         warning: ("Unsupported HTML was removed or normalized." if normalization&.changed?),
         note: "This document is unclaimed. The first person to open the share URL in a browser can claim it — claiming grants them ownership (including delete).",
+        content_contract: AgentGuide.content_contract(doc.content_format, request.base_url),
         api: AgentGuide.endpoints(doc, request.base_url)
       }
       response[:markdown] = doc.seed_content if doc.content_format == "markdown"
