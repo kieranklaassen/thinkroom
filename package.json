@@ -3,7 +3,6 @@
   "type": "module",
   "devDependencies": {
     "@types/rails__actioncable": "^8.0.3",
-    "@types/rails__activestorage": "^8.0.1",
     "playwright": "^1.60.0",
     "vite": "^8.0.16",
     "vite-plugin-ruby": "^5.2.2"
@@ -17,7 +16,6 @@
     "@milkdown/plugin-highlight": "7.21.2",
     "@milkdown/react": "7.21.2",
     "@rails/actioncable": "^8.1.300",
-    "@rails/activestorage": "^8.1.300",
     "@tailwindcss/forms": "^0.5.11",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.3.0",

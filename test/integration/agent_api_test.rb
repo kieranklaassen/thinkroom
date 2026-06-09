@@ -76,6 +76,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal body["content"], doc.seed_content
     assert_equal "agent", doc.seed_author_kind
     contract = body["content_contract"]
+    assert_equal 1, contract["version"]
     assert_equal "html", contract["content_format"]
     assert_equal "content", contract["canonical_source_field"]
     assert_equal "plain_text", contract["rendered_text_field"]
@@ -84,7 +85,11 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_includes contract.dig("html", "css", "supported"), "text-align"
     assert_includes contract.dig("html", "css", "removed"), "<style> blocks"
     assert_equal "/api/uploads", URI(contract.dig("html", "images", "upload", "url")).path
+    assert_equal ImageUploadPolicy::MAX_INPUT_BYTES,
+                 contract.dig("html", "images", "upload", "request", "max_bytes")
     assert_includes contract.dig("html", "images", "removed_sources"), "https:// remote images"
+    assert_equal "html", body.dig("api", "create_document", "content_contracts", "html", "content_format")
+    assert_equal "markdown", body.dig("api", "create_document", "content_contracts", "markdown", "content_format")
   end
 
   test "route suffix does not override the document format body field" do
@@ -243,6 +248,18 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_includes body["error"], "X-Agent-Name"
     assert_includes body["how_to_participate"], "presence"
     assert_includes body["example"], "curl"
+  end
+
+  test "missing identity examples match each write endpoint" do
+    {
+      "/api/docs/#{@document.slug}/comments" => [ { body: "Hi" }, "/comments" ],
+      "/api/docs/#{@document.slug}/presence" => [ { status: "active" }, "/presence" ],
+      "/api/docs/#{@document.slug}/events/ack" => [ { last_event_id: 1 }, "/events/ack" ]
+    }.each do |path, (params, expected_path)|
+      post path, params:, as: :json
+      assert_response :unprocessable_entity
+      assert_includes response.parsed_body["example"], expected_path
+    end
   end
 
   test "agent suggestion lands pending, attributed, logged, and broadcast" do

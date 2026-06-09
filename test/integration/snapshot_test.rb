@@ -1,6 +1,10 @@
 require "test_helper"
 
 class SnapshotTest < ActionDispatch::IntegrationTest
+  PNG = Base64.decode64(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+  ).freeze
+
   setup do
     @document = Document.create!(title: "Snap", content_markdown: "original")
   end
@@ -54,6 +58,40 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert_includes content, "data-provenance"
     assert_includes content, 'data-suggestion-id="s1"'
     refute_match(/onclick|script/, content)
+  end
+
+  test "HTML snapshot claims an image uploaded by the browser API" do
+    upload = Tempfile.new([ "snapshot-image", ".png" ])
+    upload.binmode
+    upload.write(PNG)
+    upload.rewind
+    post "/api/uploads",
+         params: {
+           file: Rack::Test::UploadedFile.new(
+             upload.path,
+             "image/png",
+             original_filename: "snapshot.png"
+           )
+         },
+         headers: { "X-Agent-Name" => "Quiet Falcon", "REMOTE_ADDR" => "192.0.2.240" }
+    src = response.parsed_body.fetch("src")
+    asset = DocumentAsset.last
+    document = Document.create!(
+      title: "HTML upload",
+      content_format: "html",
+      content_snapshot: "<p>original</p>"
+    )
+
+    post document_snapshot_path(document.slug), params: {
+      content: %(<p><img src="#{src}" alt="Snapshot"></p>),
+      spans: [],
+      state_vector: Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+    }, as: :json
+
+    assert_response :ok
+    assert_equal document, asset.reload.document
+  ensure
+    upload&.close!
   end
 
   test "snapshot rejects conflicting generic and legacy source fields" do

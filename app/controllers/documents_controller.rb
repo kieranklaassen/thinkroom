@@ -102,6 +102,7 @@ class DocumentsController < InertiaController
       seed_author_name: creator_name,
       claimed_at: Time.current
     )
+    DocumentAsset.claim_from_html!(document:, source:) if document.html?
     remember_recent(document)
     redirect_to document_page_path(document.slug), status: :see_other
   end
@@ -188,6 +189,7 @@ class DocumentsController < InertiaController
     return render json: { error: "Snapshot is stale; retry from current document state." },
                   status: :conflict unless persisted
 
+    DocumentAsset.claim_from_html!(document:, source: content) if document.html?
     render json: { normalized: normalization&.changed? || false }
   end
 

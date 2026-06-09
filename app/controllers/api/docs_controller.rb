@@ -24,7 +24,10 @@ module Api
                       status: :unprocessable_entity
       end
       if content.to_s.bytesize > Document::MAX_CONTENT_BYTES
-        return render json: { error: "content is too long." }, status: :content_too_large
+        return render json: {
+          error: "content is too long.",
+          max_bytes: Document::MAX_CONTENT_BYTES
+        }, status: :content_too_large
       end
 
       normalization = format == "html" ? HtmlDocumentSanitizer.external(content) : nil
@@ -43,6 +46,7 @@ module Api
         seed_author_kind: agent_authored ? "agent" : nil,
         seed_author_name: agent_authored ? agent_name : nil
       )
+      DocumentAsset.claim_from_html!(document: doc, source:) if doc.html?
 
       if current_agent
         Activity.log!(

@@ -17,6 +17,11 @@ servers:
 proxy:
   ssl: true
   host: pruf.kieranklaassen.com
+  buffering:
+    requests: true
+    responses: true
+    max_request_body: 3407872
+    memory: 2097152
 
 # Where you keep your container images.
 registry:

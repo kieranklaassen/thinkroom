@@ -42,6 +42,12 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert body["api"]["announce_presence"]["url"].present?
     assert_equal "/api/uploads", URI(body.dig("api", "upload_image", "url")).path
     assert_equal "multipart/form-data", body.dig("api", "upload_image", "request", "content_type")
+    assert_equal 201, body.dig("api", "upload_image", "success_status")
+    assert_equal "required", body.dig("api", "propose_suggestion", "headers", "X-Agent-Name")
+    assert_equal Document::MAX_CONTENT_BYTES,
+                 body.dig("api", "create_document", "limits", "content_max_bytes")
+    assert_equal "html",
+                 body.dig("api", "create_document", "content_contracts", "html", "content_format")
     assert body["notes"].any? { |n| n.include?("X-Agent-Name") }
     assert body["notes"].any? { |n| n.include?("creation permits no header") }
     assert body["notes"].any? { |n| n.include?("content is canonical Markdown source") }
@@ -110,6 +116,9 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert_includes response.body, '<img src="RETURNED_SRC" alt="Descriptive text">'
     assert_includes response.body, "only text-align left, center, or"
     assert_includes response.body, "<style> blocks"
+    assert_includes response.body, "safely re-encoded"
+    assert_includes response.body, "within one hour"
+    assert_includes response.body, "Read the created document state"
     assert_includes response.body, "Remote, protocol-relative, data:"
     refute_includes response.body, "\\u003c"
   end
