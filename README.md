@@ -63,6 +63,7 @@ formats:
 | `content_format` | Immutable `markdown` or `html` |
 | `content` | Canonical source in that format |
 | `plain_text` | Rendered text for context, search, and anchors |
+| `content_contract` | Machine-readable source, HTML, CSS, image, and normalization rules |
 
 Markdown responses additionally retain the legacy `markdown` and
 `plain_markdown` aliases. HTML responses intentionally omit them. Agents
@@ -136,6 +137,25 @@ and `Accept: application/json` returns machine-readable state + endpoints).
 | `?format=txt` | Plain-text guide regardless of user agent |
 | `Accept: application/json` or `?format=json` | Machine-readable state and endpoint metadata |
 
+### Rich HTML contract
+
+Pruf stores **semantic body HTML**, not a lossless webpage. Agents can use
+headings, paragraphs, lists, links, emphasis, code, blockquotes, rules,
+tables, and uploaded images. The state and create responses expose the exact
+rules in `content_contract`.
+
+| Feature | Support |
+|---|---|
+| Semantic elements | `p`, `h1`-`h6`, `blockquote`, `pre`, `code`, `br`, `hr`, lists, links, emphasis, tables, `img` |
+| Images | Upload with `POST /api/uploads`, then embed the returned `src` exactly |
+| CSS | Only `text-align: left\|center\|right` on `th` and `td` |
+| Removed | `<style>`, classes/IDs, other inline CSS, scripts, embeds, SVG, MathML, templates, full-page metadata |
+| Image sources removed | Remote URLs, protocol-relative URLs, `data:` URLs, arbitrary same-origin paths, URLs with query strings/fragments |
+
+Create and suggestion responses return `normalized: true` and a warning when
+unsupported source is removed or rewritten. ProseMirror JSON and Yjs updates
+are browser/editor internals; agents always send source in `content_format`.
+
 ```bash
 # 1. Create a Markdown document with the recommended generic source contract
 curl -s -X POST http://localhost:3000/api/docs \
@@ -145,10 +165,21 @@ curl -s -X POST http://localhost:3000/api/docs \
 #      "content": "# Field Notes\n\nDay one.", "plain_text": "Field Notes Day one.",
 #      "share_url": ".../d/U3m9qBQymg", "api": { ... } }
 
-# HTML uses the same contract; content remains canonical HTML
+# Upload an image for HTML. This endpoint is multipart, requires identity,
+# accepts PNG/JPEG/GIF/WebP up to 10 MiB, and returns a source-ready path.
+curl -s -X POST http://localhost:3000/api/uploads \
+  -H "X-Agent-Name: Scout" \
+  -F "file=@field-map.png"
+# => { "src": "/rails/active_storage/blobs/redirect/.../field-map.png",
+#      "url": "http://localhost:3000/rails/active_storage/...",
+#      "html": "<img src=\"/rails/active_storage/...\" alt=\"field-map\">",
+#      "content_type": "image/png", "byte_size": 42816, ... }
+
+# HTML uses the same document contract; content remains canonical HTML.
+# Use the exact `src` returned above.
 curl -s -X POST http://localhost:3000/api/docs \
   -H "X-Agent-Name: Scout" -H "Content-Type: application/json" \
-  -d '{"title":"Field Notes","format":"html","content":"<h1>Field Notes</h1><p>Day one.</p>"}'
+  -d '{"title":"Field Notes","format":"html","content":"<h1>Field Notes</h1><p>Day one.</p><p><img src=\"/rails/active_storage/blobs/redirect/RETURNED_PATH/field-map.png\" alt=\"Observed activity map\"></p>"}'
 
 # Legacy Markdown clients may still send {"markdown":"# Field Notes"}
 

@@ -30,8 +30,16 @@ module Api
         how_to_participate: "Send your agent's display name in an X-Agent-Name header on every request. " \
                             "That name becomes your identity everywhere: presence, suggestion attribution, " \
                             "provenance marks when humans accept your text, and the activity feed.",
-        example: %(curl -X POST #{request.base_url}/api/docs/#{params[:slug]}/suggestions -H "X-Agent-Name: Scout" -H "Content-Type: application/json" -d '{"body": "Proposed text."}')
+        example: participation_example
       }, status: :unprocessable_entity
+    end
+
+    def participation_example
+      if params[:slug].present?
+        %(curl -X POST #{request.base_url}/api/docs/#{params[:slug]}/suggestions -H "X-Agent-Name: Scout" -H "Content-Type: application/json" -d '{"body": "Proposed text."}')
+      else
+        %(curl -X POST #{request.base_url}/api/uploads -H "X-Agent-Name: Scout" -F "file=@figure.png")
+      end
     end
 
     # Every authenticated agent call keeps its presence fresh.
