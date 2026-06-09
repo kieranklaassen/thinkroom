@@ -57,3 +57,6 @@ gem "y-rb_actioncable", "~> 0.1.7"
 
 # Render source documents to plain text for format-neutral agent context.
 gem "commonmarker", "~> 2.8"
+
+# Decode and re-encode public image uploads before Active Storage persistence.
+gem "ruby-vips", "~> 2.3"

@@ -1,24 +1,33 @@
-import { DirectUpload } from '@rails/activestorage'
 import type { Uploader } from '@milkdown/kit/plugin/upload'
 import type { Node } from '@milkdown/kit/prose/model'
 
-const DIRECT_UPLOAD_URL = '/rails/active_storage/direct_uploads'
+interface UploadResponse {
+  src?: string
+  error?: string
+}
 
-/** Push a file through Active Storage direct upload, resolve to a blob URL. */
-export const directUpload = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
-    new DirectUpload(file, DIRECT_UPLOAD_URL).create((error, blob) => {
-      if (error || !blob) reject(error ?? new Error('upload failed'))
-      else resolve(`/rails/active_storage/blobs/redirect/${blob.signed_id}/${encodeURIComponent(blob.filename)}`)
-    })
+/** Use the same validated upload boundary as agents and return canonical HTML src. */
+export const uploadImage = async (file: File, agentName: string): Promise<string> => {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await fetch('/api/uploads', {
+    method: 'POST',
+    headers: { 'X-Agent-Name': agentName },
+    body: form,
   })
+  const payload = (await response.json()) as UploadResponse
+  if (!response.ok || !payload.src) {
+    throw new Error(payload.error ?? `upload failed (${response.status})`)
+  }
+  return payload.src
+}
 
 /**
  * Paste/drop handler for the Milkdown upload plugin: images go through
  * Active Storage; the resulting URL lands in the image node, which is plain
  * text inside the Yjs doc — so it syncs and survives reload like everything.
  */
-export const imageUploader: Uploader = async (files, schema) => {
+export const imageUploader = (agentName: string): Uploader => async (files, schema) => {
   const images: File[] = []
   for (let i = 0; i < files.length; i += 1) {
     const file = files.item(i)
@@ -28,7 +37,7 @@ export const imageUploader: Uploader = async (files, schema) => {
 
   const nodes = await Promise.all(
     images.map(async (image) => {
-      const src = await directUpload(image)
+      const src = await uploadImage(image, agentName)
       return schema.nodes.image.createAndFill({ src, alt: image.name }) as Node
     }),
   )

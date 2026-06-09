@@ -46,44 +46,56 @@ class AgentGuide
       api_base = "#{base_url}/api/docs/#{document.slug}"
       source_name = document.html? ? "HTML" : "Markdown"
       {
-        upload_image: {
-          method: "POST",
-          url: "#{base_url}/api/uploads",
-          request: {
-            content_type: "multipart/form-data",
-            field: "file",
-            allowed_content_types: Api::UploadsController::CONTENT_TYPES,
-            max_bytes: Api::UploadsController::MAX_BYTES
-          },
+        upload_image: ImageUploadPolicy.contract(base_url).merge(
           returns: {
             src: "Canonical same-origin image path to embed in document source",
             html: "Ready-to-embed <img> element",
             filename: "Stored filename",
             content_type: "Detected image MIME type",
-            byte_size: "Stored byte size"
+            byte_size: "Stored byte size after safe re-encoding",
+            width: "Decoded width in pixels",
+            height: "Decoded height in pixels",
+            expires_at: "Deadline to save HTML that references src"
           },
           purpose: "Upload an app-hosted image before referencing it in HTML. Requires X-Agent-Name. Use the returned src exactly; remote and data: image URLs are removed."
-        },
-        state: { method: "GET", url: api_base,
+        ),
+        state: { method: "GET", url: api_base, headers: { "X-Agent-Name": "recommended" },
+                 success_status: 200,
                  purpose: "Full live document state: immutable content format, canonical source, rendered plain text, provenance spans, pending suggestions, open comments, presence, activity." },
         propose_suggestion: { method: "POST", url: "#{api_base}/suggestions",
+                              headers: { "X-Agent-Name": "required", "Content-Type": "application/json" },
+                              success_status: 201,
                               body: { body: "(required) #{source_name} you propose", intent: "(optional) one-line summary",
                                       anchor_text: "(optional) unique rendered text to insert after; missing anchors append on acceptance",
                                       replaces: "(optional) unique rendered text your proposal replaces; missing or ambiguous targets cannot apply" },
                               purpose: "Propose an edit in the document's content_format. It appears live in every open editor as a pending suggestion attributed to you. A human accepts or rejects it; accepted text keeps your provenance." },
         comment: { method: "POST", url: "#{api_base}/comments",
+                   headers: { "X-Agent-Name": "required", "Content-Type": "application/json" },
+                   success_status: 201,
                    body: { body: "(required) what you want to say", anchor_text: "(optional) the doc text you're commenting on" },
                    purpose: "Leave a comment anchored to a text selection." },
         announce_presence: { method: "POST", url: "#{api_base}/presence",
+                             headers: { "X-Agent-Name": "required", "Content-Type": "application/json" },
+                             success_status: 200,
                              body: { status: "active | done", location: "(optional) doc text you're working near" },
                              purpose: "Show up in the document's presence area with a labeled cursor while you work. Send status: done when finished." },
-        poll_events: { method: "GET", url: "#{api_base}/events/pending",
+        poll_events: { method: "GET", url: "#{api_base}/events/pending", headers: { "X-Agent-Name": "required" },
+                       success_status: 200,
                        purpose: "Activity since your last ack (humans accepting your suggestions, comments, etc.)." },
         ack_events: { method: "POST", url: "#{api_base}/events/ack",
+                      headers: { "X-Agent-Name": "required", "Content-Type": "application/json" },
+                      success_status: 204,
                       body: { last_event_id: "(required) the ack_with value from poll_events" },
                       purpose: "Advance your event cursor." },
         create_document: { method: "POST", url: "#{base_url}/api/docs",
+                           headers: { "X-Agent-Name": "recommended", "Content-Type": "application/json" },
+                           success_status: 201,
                            body: { title: "(optional)", format: "markdown | html", content: "(required with explicit format; canonical source)" },
+                           limits: { content_max_bytes: Document::MAX_CONTENT_BYTES },
+                           content_contracts: {
+                             markdown: content_contract("markdown", base_url),
+                             html: content_contract("html", base_url)
+                           },
                            returns: { slug: "Document identifier", share_url: "Browser/editor URL",
                                       content_format: "Immutable markdown or html", content: "Canonical source",
                                       plain_text: "Rendered text", normalized: "Whether source changed during normalization",
@@ -94,6 +106,7 @@ class AgentGuide
 
     def content_contract(format, base_url)
       contract = {
+        version: 1,
         content_format: format,
         immutable: true,
         canonical_source_field: "content",
@@ -114,7 +127,7 @@ class AgentGuide
           allowed_elements: HtmlDocumentSanitizer::TAGS,
           dropped_with_content: HtmlDocumentSanitizer::DROP_WITH_CONTENT,
           attributes: {
-            supported: %w[href title src alt start colspan rowspan colwidth data-language],
+            supported: HtmlDocumentSanitizer::EXTERNAL_ATTRIBUTES,
             reserved: "Pruf provenance and suggestion data attributes may appear in trusted snapshots; external source cannot set them."
           },
           css: {
@@ -123,17 +136,10 @@ class AgentGuide
             guidance: "Use semantic elements and Pruf's editor styling. Do not depend on custom colors, spacing, fonts, grids, or page-level layout."
           },
           images: {
-            upload: {
-              method: "POST",
-              url: "#{base_url}/api/uploads",
-              request_content_type: "multipart/form-data",
-              field: "file",
-              identity_header: "X-Agent-Name",
-              allowed_content_types: Api::UploadsController::CONTENT_TYPES,
-              max_bytes: Api::UploadsController::MAX_BYTES
-            },
+            upload: ImageUploadPolicy.contract(base_url),
             embed: %(<img src="RETURNED_SRC" alt="Descriptive text">),
-            allowed_sources: "Only exact same-origin Active Storage paths returned by the upload endpoint.",
+            guidance: "Use the exact src returned by api.upload_image. It expires unless referenced by saved HTML within one hour.",
+            accepted_sources: "Validated same-origin Active Storage blob, representation, or disk paths. Agents should only generate the blob src returned by the upload endpoint.",
             removed_sources: [ "https:// remote images", "protocol-relative URLs", "data: URLs",
                                "arbitrary same-origin paths", "URLs with query strings or fragments" ]
           }
@@ -249,6 +255,13 @@ class AgentGuide
              -H "X-Agent-Name: YOUR_NAME" -H "Content-Type: application/json" \\
              -d '{"title": "My doc", "format": "html", "content": "<h1>Hello</h1><p><img src=\"RETURNED_SRC\" alt=\"Figure description\"></p>"}'
 
+        3. Read the created document state using the returned slug:
+           curl #{base_url}/api/docs/RETURNED_SLUG \\
+             -H "X-Agent-Name: YOUR_NAME"
+
+        4. Propose edits and comments through the endpoints in that state
+           payload, poll events while waiting for review, then sign off.
+
         HTML is sanitized and normalized to Pruf's editable schema. Create and
         suggestion responses include normalized=true plus a warning when
         unsupported markup was removed or rewritten.
@@ -290,6 +303,9 @@ class AgentGuide
             -F "file=@figure.png"
         Embed the exact returned src:
           <img src="RETURNED_SRC" alt="Descriptive text">
+        PNG, JPEG, and WebP inputs up to #{ImageUploadPolicy::MAX_INPUT_BYTES}
+        bytes are decoded and safely re-encoded. The returned src must be used
+        in saved HTML within one hour or the temporary upload is purged.
         Remote, protocol-relative, data:, arbitrary same-origin, query-string,
         and fragment image sources are removed.
 

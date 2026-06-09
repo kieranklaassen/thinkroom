@@ -27,6 +27,7 @@ class Document < ApplicationRecord
   has_many :comments, dependent: :destroy
   has_many :activities, dependent: :destroy
   has_many :agent_presences, dependent: :destroy
+  has_many :document_assets, dependent: :destroy
 
   before_validation :ensure_slug, on: :create
 

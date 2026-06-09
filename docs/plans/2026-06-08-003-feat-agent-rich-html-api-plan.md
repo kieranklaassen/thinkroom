@@ -62,8 +62,12 @@ enumerating supported elements, image rules, or the narrow CSS exception.
   browser direct-upload CSRF handshake to agents.
 - **Require agent identity for uploads:** `X-Agent-Name` keeps the public write
   surface consistent and gives missing-identity errors a clear remediation.
-- **Constrain files at the API boundary:** accept common raster image MIME
-  types and enforce a fixed byte limit before persistence.
+- **Constrain files at every boundary:** enforce proxy and request byte limits,
+  decode and re-encode supported raster files, cap dimensions/pixels, and
+  throttle the public endpoint.
+- **Own uploaded assets:** temporary uploads expire after one hour; saving HTML
+  claims referenced assets for the document, and deleting the document purges
+  them.
 - **Return source-ready paths:** the response's `src` is a same-origin
   Active Storage redirect path accepted by both server and browser sanitizers.
 - **Document CSS limits instead of broadening them:** arbitrary author CSS
@@ -150,16 +154,17 @@ sequenceDiagram
 
 - Broad inline CSS, classes, IDs, `<style>`, custom layouts, SVG, embedded
   media, and remote images remain outside this change.
-- Image deletion and blob garbage collection are not introduced here.
+- Arbitrary media libraries and user-managed image deletion remain out of
+  scope; document-owned files are purged with their document.
 - Agent-side acceptance or rejection of suggestions remains out of scope;
   review stays human-gated.
-- The existing browser paste/drop direct-upload flow remains unchanged.
+- Browser paste/drop uses the same validated upload API as agents; generic
+  Active Storage direct upload creation is disabled.
 
 ## Risks And Dependencies
 
-- Unattached Active Storage blobs can accumulate. The upload limit and
-  image-only contract reduce abuse, while lifecycle cleanup remains future
-  operational work.
+- Temporary uploads can accumulate briefly, so the endpoint purges expired
+  records opportunistically and enforces a global unclaimed-byte ceiling.
 - Declared content types are untrusted. Detection must inspect the uploaded
   bytes before accepting the file.
 - Production uses persistent local disk on one host, so upload verification

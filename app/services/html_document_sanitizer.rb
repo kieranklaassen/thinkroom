@@ -32,6 +32,7 @@ class HtmlDocumentSanitizer
   PROVENANCE_ATTRIBUTES = %w[data-provenance data-kind data-author data-state].freeze
   SUGGESTION_ATTRIBUTES = %w[data-suggestion-id data-author].freeze
   PRUF_ATTRIBUTES = (PROVENANCE_ATTRIBUTES + SUGGESTION_ATTRIBUTES).uniq.freeze
+  EXTERNAL_ATTRIBUTES = (ATTRIBUTES - PRUF_ATTRIBUTES).freeze
 
   class << self
     def external(source)

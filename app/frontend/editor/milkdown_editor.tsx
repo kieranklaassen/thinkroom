@@ -291,7 +291,7 @@ function CollabEditor({
           }))
           ctx.update(uploadConfig.key, (prev) => ({
             ...prev,
-            uploader: imageUploader,
+            uploader: imageUploader(identity.name),
             enableHtmlFileUploader: true,
           }))
           renderSoftBreaks(ctx)

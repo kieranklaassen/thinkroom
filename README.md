@@ -147,7 +147,7 @@ rules in `content_contract`.
 | Feature | Support |
 |---|---|
 | Semantic elements | `p`, `h1`-`h6`, `blockquote`, `pre`, `code`, `br`, `hr`, lists, links, emphasis, tables, `img` |
-| Images | Upload with `POST /api/uploads`, then embed the returned `src` exactly |
+| Images | Upload PNG/JPEG/WebP with `POST /api/uploads`, then embed the returned `src` exactly |
 | CSS | Only `text-align: left\|center\|right` on `th` and `td` |
 | Removed | `<style>`, classes/IDs, other inline CSS, scripts, embeds, SVG, MathML, templates, full-page metadata |
 | Image sources removed | Remote URLs, protocol-relative URLs, `data:` URLs, arbitrary same-origin paths, URLs with query strings/fragments |
@@ -166,7 +166,8 @@ curl -s -X POST http://localhost:3000/api/docs \
 #      "share_url": ".../d/U3m9qBQymg", "api": { ... } }
 
 # Upload an image for HTML. This endpoint is multipart, requires identity,
-# accepts PNG/JPEG/GIF/WebP up to 10 MiB, and returns a source-ready path.
+# accepts PNG/JPEG/WebP up to 3 MiB, decodes and safely re-encodes it, and
+# returns a source-ready path. Save HTML using that src within one hour.
 curl -s -X POST http://localhost:3000/api/uploads \
   -H "X-Agent-Name: Scout" \
   -F "file=@field-map.png"
@@ -270,7 +271,7 @@ the captured run:
 live typing sync, reload persistence, markdown input shortcuts, seeded AI
 tints, human attribution of typed text, live summary, agent suggestion →
 accept → AI-provenance merge, comments with resolve, image paste through
-Active Storage direct upload, instant + persistent theme switching, and the
+validated app-hosted image upload, instant + persistent theme switching, and the
 full agent loop described above. All checks pass.
 
 ## Design notes & critique pass

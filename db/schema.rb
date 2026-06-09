@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_08_181000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_08_200000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -76,6 +76,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_08_181000) do
     t.index ["document_id"], name: "index_comments_on_document_id"
   end
 
+  create_table "document_assets", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "document_id"
+    t.datetime "expires_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "uploader_name", limit: 255, null: false
+    t.index ["document_id", "expires_at"], name: "index_document_assets_on_document_id_and_expires_at"
+    t.index ["document_id"], name: "index_document_assets_on_document_id"
+    t.index ["expires_at"], name: "index_document_assets_on_expires_at", where: "document_id IS NULL"
+  end
+
   create_table "documents", force: :cascade do |t|
     t.datetime "claimed_at"
     t.string "content_format", default: "markdown", null: false
@@ -119,5 +130,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_08_181000) do
   add_foreign_key "activities", "documents"
   add_foreign_key "agent_presences", "documents"
   add_foreign_key "comments", "documents"
+  add_foreign_key "document_assets", "documents"
   add_foreign_key "suggestions", "documents"
 end
