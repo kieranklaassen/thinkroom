@@ -74,12 +74,19 @@ flowchart TD
 | 7 | Review | Create and resolve a comment; create and accept an HTML replacement suggestion | Pass | - | - | - |
 | 8 | Safety | Reject direct uploads, missing identity, malformed data, oversized bodies, and burst traffic | Pass | - | - | - |
 | 9 | Normalization | Remove scripts, remote images, event handlers, classes, and unsupported CSS with warning | Pass | - | - | - |
-| 10 | Responsive | Desktop and 390px mobile layouts render without overflow or console errors | Pass | - | - | - |
+| 10 | Responsive | Desktop and 390px mobile layouts render without overflow or console errors | Fixed | A long live-agent cursor label added 35px of horizontal overflow on the production document | Clamp cursor labels to viewport gutters, truncate oversized names, and cover the case in the browser smoke test | Hotfix |
 | 11 | Regression | Landing page and Markdown creation remain usable after uploader replacement | Pass | - | - | - |
 
 ## What Was Fixed
 
-None. The review hardening held through the full browser matrix without an additional code fix.
+- **Mobile agent cursor overflow:** Production verification found that a long
+  live-agent name could extend beyond a 390px viewport even though the rich
+  document content and images were responsive. Cursor labels now cap their
+  width, translate back inside 8px viewport gutters after editor resize, scroll,
+  or cursor movement, and remove their observers and listeners when ProseMirror
+  destroys the widget. The browser smoke test creates an intentionally oversized
+  agent name, moves it between document positions, toggles the side-panel
+  layout, and asserts both the label bounds and page scroll width.
 
 ## Console Errors
 
@@ -108,7 +115,9 @@ None.
 
 The matrix is green. A substantial HTML research document rendered three
 production-scale figures and one browser-pasted image, persisted browser edits,
-accepted an agent HTML replacement, resolved an anchored comment, survived
-reload, and fit a 390px viewport without overflow. Invalid uploads, disabled
-direct uploads, normalization, and throttling returned the documented errors.
-The landing page and Markdown creation/edit/reload journey also remained green.
+accepted an agent HTML replacement, resolved an anchored comment, and survived
+reload. Production testing exposed and fixed a mobile overflow caused by a long
+live-agent cursor label; the final 390px regression now keeps the label and page
+inside the viewport. Invalid uploads, disabled direct uploads, normalization,
+and throttling returned the documented errors. The landing page and Markdown
+creation/edit/reload journey also remained green.

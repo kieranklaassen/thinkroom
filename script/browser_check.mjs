@@ -391,6 +391,96 @@ try {
   ok('share popover shows the agent-active signal')
   await a.locator('.agent-cursor-label', { hasText: 'Scout' }).first().waitFor({ timeout: 5000 })
   ok('agent pseudo-cursor rendered at its work location')
+  const overflowAgentName = 'Extremely Long Production Review Agent Name For Mobile Overflow'
+  const overflowAgentHeaders = {
+    'X-Agent-Name': overflowAgentName,
+    'Content-Type': 'application/json',
+  }
+  await fetch(`${api}/presence`, {
+    method: 'POST',
+    headers: overflowAgentHeaders,
+    body: JSON.stringify({ status: 'active', location: 'provenance' }),
+  })
+  await a.locator('.agent-cursor-label', { hasText: overflowAgentName }).first().waitFor({ timeout: 5000 })
+  await a.setViewportSize({ width: 390, height: 844 })
+  await a
+    .waitForFunction(
+      (agentName) => {
+        const label = Array.from(document.querySelectorAll('.agent-cursor-label')).find((el) =>
+          el.textContent?.includes(agentName),
+        )
+        if (!label) return false
+        const rect = label.getBoundingClientRect()
+        return rect.left >= 8 && rect.right <= 382 && document.documentElement.scrollWidth <= 390
+      },
+      overflowAgentName,
+      { timeout: 5000 },
+    )
+    .catch(() => null)
+  const cursorBox = await a.locator('.agent-cursor-label', { hasText: overflowAgentName }).first().boundingBox()
+  const pageWidth = await a.evaluate(() => document.documentElement.scrollWidth)
+  if (cursorBox && cursorBox.x >= 8 && cursorBox.x + cursorBox.width <= 382 && pageWidth <= 390) {
+    ok('agent pseudo-cursor label stays inside the mobile viewport')
+  } else {
+    fail(`agent pseudo-cursor label escapes mobile viewport: box=${JSON.stringify(cursorBox)} pageWidth=${pageWidth}`)
+  }
+  const cursorMoveAnchor = await a.locator('.milkdown .ProseMirror h1').first().innerText()
+  await fetch(`${api}/presence`, {
+    method: 'POST',
+    headers: overflowAgentHeaders,
+    body: JSON.stringify({ status: 'active', location: cursorMoveAnchor }),
+  })
+  await a
+    .waitForFunction(
+      (agentName) => {
+        const label = Array.from(document.querySelectorAll('.agent-cursor-label')).find((el) =>
+          el.textContent?.includes(agentName),
+        )
+        if (!label || !label.closest('h1')) return false
+        const rect = label.getBoundingClientRect()
+        return rect.left >= 8 && rect.right <= 382 && document.documentElement.scrollWidth <= 390
+      },
+      overflowAgentName,
+      { timeout: 5000 },
+    )
+  ok('agent pseudo-cursor stays clamped after moving without a viewport resize')
+  await a.setViewportSize({ width: 1280, height: 900 })
+  const panelWasHidden = await a.locator('.doc-page').evaluate((page) => page.classList.contains('is-panel-hidden'))
+  await a.keyboard.press('Meta+\\')
+  await a.waitForFunction(
+    (wasHidden) => document.querySelector('.doc-page')?.classList.contains('is-panel-hidden') !== wasHidden,
+    panelWasHidden,
+    { timeout: 5000 },
+  )
+  await a.waitForTimeout(250)
+  const shiftedCursorBox = await a
+    .locator('.agent-cursor-label', { hasText: overflowAgentName })
+    .first()
+    .boundingBox()
+  const shiftedPageWidth = await a.evaluate(() => document.documentElement.scrollWidth)
+  if (
+    shiftedCursorBox &&
+    shiftedCursorBox.x >= 8 &&
+    shiftedCursorBox.x + shiftedCursorBox.width <= 1272 &&
+    shiftedPageWidth <= 1280
+  ) {
+    ok('agent pseudo-cursor stays clamped after the side panel changes layout')
+  } else {
+    fail(
+      `agent pseudo-cursor escaped after panel layout: box=${JSON.stringify(shiftedCursorBox)} pageWidth=${shiftedPageWidth}`,
+    )
+  }
+  await a.keyboard.press('Meta+\\')
+  await a.waitForFunction(
+    (wasHidden) => document.querySelector('.doc-page')?.classList.contains('is-panel-hidden') === wasHidden,
+    panelWasHidden,
+    { timeout: 5000 },
+  )
+  await fetch(`${api}/presence`, {
+    method: 'POST',
+    headers: overflowAgentHeaders,
+    body: JSON.stringify({ status: 'done' }),
+  })
 
   const suggestRes = await fetch(`${api}/suggestions`, {
     method: 'POST',
