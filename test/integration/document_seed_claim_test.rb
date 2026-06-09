@@ -15,9 +15,28 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     assert_response :ok
     assert_inertia_props do |props|
       props[:document][:seed_granted] == true &&
-        props[:document][:seed_markdown] == "# Template"
+        props[:document][:seed_content] == "# Template" &&
+        props[:document][:seed_markdown] == "# Template" &&
+        props[:document][:content_format] == "markdown"
     end
     assert_equal "claimed", @document.reload.seed_state
+  end
+
+  test "HTML page load ships HTML source and format with the seed grant" do
+    html = Document.create!(
+      title: "HTML",
+      content_format: "html",
+      seed_content: "<h1>Template</h1><p>Body</p>"
+    )
+
+    get document_page_path(html.slug), headers: browser
+
+    assert_inertia_props do |props|
+      props[:document][:seed_granted] == true &&
+        props[:document][:seed_content] == "<h1>Template</h1><p>Body</p>" &&
+        !props[:document].key?(:seed_markdown) &&
+        props[:document][:content_format] == "html"
+    end
   end
 
   test "page render ships seed authorship alongside the grant" do

@@ -10,12 +10,12 @@ class DocumentsController < InertiaController
     slugs = Array(session[:recent_slugs])
     docs = Document.where(slug: slugs).index_by(&:slug)
     render inertia: "documents/index", props: {
-      yours: yours.map { |d| d.slice(:title, :slug) },
+      yours: yours.map { |d| d.slice(:title, :slug, :content_format) },
       # Recent rows carry ownership state so claimable docs can offer an
       # inline claim affordance. Render-time staleness is fine: the claim
       # POST is race-tolerant and the scoped reload reconciles the lists.
       recent: slugs.filter_map { |slug| docs[slug] unless your_slugs.include?(slug) }
-                   .map { |d| d.slice(:title, :slug).merge(d.ownership_props(owner_token)) }
+                   .map { |d| d.slice(:title, :slug, :content_format).merge(d.ownership_props(owner_token)) }
     }
   end
 
@@ -46,13 +46,14 @@ class DocumentsController < InertiaController
     seed_granted = initial_render? && !prefetch_request? && document.try_claim_seed
 
     render inertia: "documents/show", props: {
-      document: document.slice(:id, :slug, :title).merge(
-        seed_markdown: document.seed_markdown,
+      document: document.slice(:id, :slug, :title, :content_format).merge(
+        seed_content: document.seed_content,
         seed_granted: seed_granted,
         seed_author_kind: document.seed_author_kind,
         seed_author_name: document.seed_author_name,
         has_state: document.yjs_state.present?,
-        yjs_state_b64: (Base64.strict_encode64(document.yjs_state) if document.yjs_state.present?)
+        yjs_state_b64: (Base64.strict_encode64(document.yjs_state) if document.yjs_state.present?),
+        **(document.content_format == "markdown" ? { seed_markdown: document.seed_content } : {})
       ),
       # Ownership rides its own lazy prop so claim events reload cheaply —
       # never re-shipping the Yjs state embedded in the document prop above.
@@ -68,10 +69,33 @@ class DocumentsController < InertiaController
     # UI-created docs are owned by their creator from the same INSERT — a UI
     # doc never exists momentarily unclaimed, and no claim activity is logged
     # (the doc was never up for grabs).
+    format = params[:content_format].presence || request.request_parameters["format"].presence || "markdown"
+    unless Document::CONTENT_FORMATS.include?(format)
+      return redirect_to root_path, inertia: { errors: { content_format: "Choose Markdown or HTML" } }
+    end
+    if params.key?(:content) && params.key?(:markdown)
+      return redirect_to root_path,
+                         inertia: { errors: { content: "Send content or legacy markdown, not both" } }
+    end
+    if params[:markdown].present? && format != "markdown"
+      return redirect_to root_path,
+                         inertia: { errors: { content: "The markdown field can only create Markdown documents" } }
+    end
+
+    raw_content = params[:content].presence || params[:markdown].presence
+    if raw_content.to_s.bytesize > Document::MAX_CONTENT_BYTES
+      return redirect_to root_path,
+                         inertia: { errors: { content: "Document content is too long" } }
+    end
+    source = raw_content
+    source ||= format == "html" ? Document::DEFAULT_HTML_SEED : Document::DEFAULT_SEED
+    source = HtmlDocumentSanitizer.external(source).content if format == "html"
+
     creator_name = Document.normalize_owner_name(preferred_name(params[:name], fallback: nil))
     document = Document.create!(
       title: params[:title].presence || "Untitled",
-      seed_markdown: params[:markdown].presence || Document::DEFAULT_SEED,
+      content_format: format,
+      seed_content: source,
       owner_token: owner_token,
       owner_name: creator_name,
       seed_author_kind: "human",
@@ -122,26 +146,74 @@ class DocumentsController < InertiaController
                   inertia: { errors: { document: "Delete failed — please try again" } }
   end
 
-  # Editor clients debounce-push a derived snapshot { markdown, spans } so the
+  # Editor clients debounce-push a derived snapshot { content, spans } so the
   # Agent API can read document state without a Yjs client.
   MAX_SNAPSHOT_BYTES = 2.megabytes
+  MAX_STATE_VECTOR_BYTES = 64.kilobytes
+  MAX_SNAPSHOT_SPANS = 2_000
+  MAX_SNAPSHOT_SPAN_TEXT = 280
+  PROVENANCE_KINDS = %w[human ai].freeze
+  PROVENANCE_STATES = %w[verbatim pending reviewed endorsed].freeze
 
   def snapshot
     document = Document.find_by!(slug: params[:slug])
-    markdown = params[:markdown].to_s
-    return head :payload_too_large if markdown.bytesize > MAX_SNAPSHOT_BYTES
+    if params.key?(:content) && params.key?(:markdown)
+      return render json: { error: "Send content or legacy markdown, not both." },
+                    status: :unprocessable_entity
+    end
+    if document.html? && params.key?(:markdown)
+      return render json: { error: "HTML snapshots must use the content field." },
+                    status: :unprocessable_entity
+    end
+    if document.html? && params[:state_vector].blank?
+      return render json: { error: "HTML snapshots require a Yjs state vector." },
+                    status: :unprocessable_entity
+    end
+    content = (params.key?(:content) ? params[:content] : params[:markdown]).to_s
+    return head :content_too_large if content.bytesize > MAX_SNAPSHOT_BYTES
+    state_vector = params[:state_vector].to_s
+    return head :content_too_large if state_vector.bytesize > MAX_STATE_VECTOR_BYTES
 
-    spans = Array(params[:spans]).first(2_000).map do |span|
-      next unless span.respond_to?(:permit)
+    normalization = document.html? ? HtmlDocumentSanitizer.snapshot(content) : nil
+    content = normalization.content if normalization
 
-      span.permit(:kind, :author, :state, :chars, :text).to_h
-    end.compact
+    spans = sanitize_snapshot_spans(params[:spans])
 
-    document.update!(content_markdown: markdown, provenance_spans: spans)
-    head :ok
+    persisted = YjsPersistence.persist_snapshot(
+      document,
+      state_vector_b64: state_vector.presence,
+      content:,
+      spans:
+    )
+    return render json: { error: "Snapshot is stale; retry from current document state." },
+                  status: :conflict unless persisted
+
+    render json: { normalized: normalization&.changed? || false }
   end
 
   private
+
+  def sanitize_snapshot_spans(raw_spans)
+    Array(raw_spans).first(MAX_SNAPSHOT_SPANS).filter_map do |span|
+      next unless span.respond_to?(:permit)
+
+      values = span.permit(:kind, :author, :state, :chars, :text).to_h
+      kind = values["kind"].to_s
+      state = values["state"].to_s
+      chars = Integer(values["chars"], exception: false)
+      next unless PROVENANCE_KINDS.include?(kind)
+      next unless PROVENANCE_STATES.include?(state)
+      next unless chars&.between?(0, MAX_SNAPSHOT_BYTES)
+
+      {
+        "kind" => kind,
+        "author" => Document.normalize_display_name(values["author"]) || "",
+        "state" => state,
+        "chars" => chars,
+        "text" => values["text"].to_s.first(MAX_SNAPSHOT_SPAN_TEXT)
+      }
+    end
+  end
 
   def remember_recent(document)
     session[:recent_slugs] = ([ document.slug ] + Array(session[:recent_slugs])).uniq.first(12)

@@ -35,6 +35,7 @@ function connect(slug, label) {
   const consumer = createConsumer(WS)
   const cid = `${label}-${Math.random().toString(36).slice(2)}`
   let synced = false
+  let updateSequence = 0
   const syncedPromise = {}
   syncedPromise.promise = new Promise((resolve) => (syncedPromise.resolve = resolve))
 
@@ -46,10 +47,12 @@ function connect(slug, label) {
         switch (data.type) {
           case 'sync': {
             Y.applyUpdate(doc, fromBase64(data.update), 'remote')
+            updateSequence = 0
             subscription.send({
               type: 'sync-reply',
               update: toBase64(Y.encodeStateAsUpdate(doc, fromBase64(data.sv))),
               cid,
+              seq: ++updateSequence,
             })
             synced = true
             syncedPromise.resolve()
@@ -66,7 +69,12 @@ function connect(slug, label) {
 
   doc.on('update', (update, origin) => {
     if (origin === 'remote' || !synced) return
-    subscription.send({ type: 'update', update: toBase64(update), cid })
+    subscription.send({
+      type: 'update',
+      update: toBase64(update),
+      cid,
+      seq: ++updateSequence,
+    })
   })
 
   return { doc, consumer, synced: () => syncedPromise.promise, label }

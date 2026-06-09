@@ -13,6 +13,7 @@ Rails.application.routes.draw do
   patch "d/:slug/suggestions/accept_all", to: "suggestions#accept_all", as: :accept_all_document_suggestions
 
   patch "suggestions/:id/accept", to: "suggestions#accept", as: :accept_suggestion
+  patch "suggestions/:id/reopen", to: "suggestions#reopen", as: :reopen_suggestion
   patch "suggestions/:id/reject", to: "suggestions#reject", as: :reject_suggestion
 
   post "d/:slug/comments", to: "comments#create", as: :document_comments

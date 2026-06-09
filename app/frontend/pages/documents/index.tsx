@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Head, Link, useForm } from '@inertiajs/react'
 import { FeedbackButton } from '../../components/feedback_button'
 import { userIdentity } from '../../editor/identity'
@@ -8,6 +8,7 @@ import type { OwnershipPayload } from '../../components/ownership_chip'
 interface DocLink {
   title: string
   slug: string
+  content_format: 'markdown' | 'html'
 }
 
 interface RecentDoc extends DocLink, OwnershipPayload {}
@@ -53,13 +54,20 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
   // random localStorage name as the fallback (the server prefers the
   // session name on create anyway). Staying on useForm keeps the
   // `processing` double-submit guard.
-  const { post, processing } = useForm(() => ({ name: userIdentity(viewer.name).name }))
+  const { data, setData, post, processing, errors, clearErrors } = useForm(() => ({
+    name: userIdentity(viewer.name).name,
+    content_format: 'markdown' as 'markdown' | 'html',
+  }))
+  const [creating, setCreating] = useState(false)
   const [copied, setCopied] = useState(false)
+  const newDocumentRef = useRef<HTMLButtonElement>(null)
+  const markdownFormatRef = useRef<HTMLInputElement>(null)
 
   const origin = typeof window === 'undefined' ? '' : window.location.origin
   const agentInstruction =
     `Create a Pruf document for me: POST ${origin}/api/docs with JSON ` +
-    `{"title": "…", "markdown": "# …"} and an X-Agent-Name header. ` +
+    `{"title": "…", "format": "markdown", "content": "# …"} ` +
+    `or use "format": "html" with HTML content, plus an X-Agent-Name header. ` +
     `The response includes the share URL — open it and we'll collaborate live. ` +
     `Fetch the share URL (Accept: text/plain) for the full API guide.`
 
@@ -69,6 +77,24 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
       setTimeout(() => setCopied(false), 1600)
     })
   }, [agentInstruction])
+
+  const createDocument = (event: FormEvent) => {
+    event.preventDefault()
+    post('/documents')
+  }
+
+  const closeCreator = () => {
+    clearErrors()
+    setCreating(false)
+    requestAnimationFrame(() => newDocumentRef.current?.focus())
+  }
+
+  useEffect(() => {
+    if (creating) markdownFormatRef.current?.focus()
+  }, [creating])
+
+  const formatLabel = (format: DocLink['content_format']) =>
+    format === 'html' ? 'HTML' : 'Markdown'
 
   return (
     <>
@@ -85,29 +111,76 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
             A collaborative editor that remembers who wrote what — humans and AI,
             side by side, every word attributed.
           </p>
-          <div className="landing-actions">
-            <button
-              className="btn btn-primary"
-              disabled={processing}
-              onClick={() => post('/documents')}
-            >
-              New document
-            </button>
-            {recent.some((d) => d.slug === 'demo') && (
-              <Link href="/d/demo" className="btn btn-ghost" prefetch>
-                Open the demo
-              </Link>
-            )}
-          </div>
+          {!creating ? (
+            <div className="landing-actions">
+              <button
+                ref={newDocumentRef}
+                className="btn btn-primary"
+                type="button"
+                onClick={() => setCreating(true)}
+              >
+                New document
+              </button>
+              {recent.some((d) => d.slug === 'demo') && (
+                <Link href="/d/demo" className="btn btn-ghost" prefetch>
+                  Open the demo
+                </Link>
+              )}
+            </div>
+          ) : (
+            <form className="document-creator" onSubmit={createDocument}>
+              <fieldset>
+                <legend>Choose a document format</legend>
+                <div className="format-options">
+                  {(['markdown', 'html'] as const).map((format) => (
+                    <label
+                      key={format}
+                      className={`format-option ${data.content_format === format ? 'is-selected' : ''}`}
+                    >
+                      <input
+                        ref={format === 'markdown' ? markdownFormatRef : undefined}
+                        type="radio"
+                        name="format"
+                        value={format}
+                        checked={data.content_format === format}
+                        onChange={() => setData('content_format', format)}
+                      />
+                      <span className="format-option-copy">
+                        <strong>{format === 'html' ? 'HTML' : 'Markdown'}</strong>
+                        <small>
+                          {format === 'html'
+                            ? 'Semantic HTML for web-ready content'
+                            : 'Portable Markdown for prose and notes'}
+                        </small>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <p className="format-help">Format is permanent for this document.</p>
+              {errors.content_format && (
+                <p className="form-error">{errors.content_format}</p>
+              )}
+              <div className="document-creator-actions">
+                <button className="btn btn-primary" type="submit" disabled={processing}>
+                  {processing ? 'Creating…' : `Create ${formatLabel(data.content_format)}`}
+                </button>
+                <button className="btn btn-quiet" type="button" onClick={closeCreator}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
           {yours.length > 0 && (
             <section className="landing-recent">
               <h2 className="landing-recent-heading">Your docs</h2>
               <ul>
                 {yours.map((doc) => (
-                  <li key={doc.slug}>
+                  <li key={doc.slug} className="recent-row">
                     <Link href={`/d/${doc.slug}`} prefetch>
                       {doc.title}
                     </Link>
+                    <span className="format-label">{formatLabel(doc.content_format)}</span>
                   </li>
                 ))}
               </ul>
@@ -122,6 +195,7 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
                     <Link href={`/d/${doc.slug}`} prefetch>
                       {doc.title}
                     </Link>
+                    <span className="format-label">{formatLabel(doc.content_format)}</span>
                     {doc.claimable && (
                       <RecentClaimButton
                         slug={doc.slug}

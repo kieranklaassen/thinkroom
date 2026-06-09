@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_06_090000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_08_181000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -78,6 +78,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_06_090000) do
 
   create_table "documents", force: :cascade do |t|
     t.datetime "claimed_at"
+    t.string "content_format", default: "markdown", null: false
     t.text "content_markdown"
     t.datetime "created_at", null: false
     t.string "owner_name", limit: 255
@@ -94,6 +95,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_06_090000) do
     t.binary "yjs_state"
     t.index ["owner_token"], name: "index_documents_on_owner_token"
     t.index ["slug"], name: "index_documents_on_slug", unique: true
+    t.check_constraint "content_format IN ('markdown', 'html')", name: "documents_content_format"
   end
 
   create_table "suggestions", force: :cascade do |t|
