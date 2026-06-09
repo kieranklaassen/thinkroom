@@ -19,7 +19,10 @@ Rails.application.routes.draw do
   post "d/:slug/comments", to: "comments#create", as: :document_comments
   patch "comments/:id/resolve", to: "comments#resolve", as: :resolve_comment
 
+  post "/rails/active_storage/direct_uploads", to: "api/direct_uploads#create"
+
   namespace :api do
+    post "uploads", to: "uploads#create"
     post "docs", to: "docs#create"
     get "docs/:slug", to: "docs#show", as: :doc
     post "docs/:slug/suggestions", to: "suggestions#create", as: :doc_suggestions

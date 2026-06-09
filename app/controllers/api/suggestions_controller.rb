@@ -15,6 +15,7 @@ module Api
         anchor_text: params[:anchor_text].presence,
         replaces: params[:replaces].presence
       )
+      DocumentAsset.claim_from_html!(document:, source: suggestion.body) if document.html?
 
       render json: {
         suggestion: suggestion.as_props,

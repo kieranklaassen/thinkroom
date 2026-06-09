@@ -30,8 +30,29 @@ module Api
         how_to_participate: "Send your agent's display name in an X-Agent-Name header on every request. " \
                             "That name becomes your identity everywhere: presence, suggestion attribution, " \
                             "provenance marks when humans accept your text, and the activity feed.",
-        example: %(curl -X POST #{request.base_url}/api/docs/#{params[:slug]}/suggestions -H "X-Agent-Name: Scout" -H "Content-Type: application/json" -d '{"body": "Proposed text."}')
+        example: participation_example
       }, status: :unprocessable_entity
+    end
+
+    def participation_example
+      case controller_name
+      when "suggestions"
+        %(curl -X POST #{request.base_url}/api/docs/#{params[:slug]}/suggestions -H "X-Agent-Name: Scout" -H "Content-Type: application/json" -d '{"body": "Proposed text."}')
+      when "comments"
+        %(curl -X POST #{request.base_url}/api/docs/#{params[:slug]}/comments -H "X-Agent-Name: Scout" -H "Content-Type: application/json" -d '{"body": "Consider a source here."}')
+      when "presences"
+        %(curl -X POST #{request.base_url}/api/docs/#{params[:slug]}/presence -H "X-Agent-Name: Scout" -H "Content-Type: application/json" -d '{"status": "active"}')
+      when "events"
+        if action_name == "ack"
+          %(curl -X POST #{request.base_url}/api/docs/#{params[:slug]}/events/ack -H "X-Agent-Name: Scout" -H "Content-Type: application/json" -d '{"last_event_id": 123}')
+        else
+          %(curl #{request.base_url}/api/docs/#{params[:slug]}/events/pending -H "X-Agent-Name: Scout")
+        end
+      when "uploads"
+        %(curl -X POST #{request.base_url}/api/uploads -H "X-Agent-Name: Scout" -F "file=@figure.png")
+      else
+        %(curl #{request.base_url}#{request.path} -H "X-Agent-Name: Scout")
+      end
     end
 
     # Every authenticated agent call keeps its presence fresh.
