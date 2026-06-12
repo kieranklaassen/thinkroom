@@ -29,6 +29,12 @@
 # Compound Engineering local config (per-developer)
 .compound-engineering/config.local.yaml
 
+# Local agent state
+/.claude/
+
+# Local feedback recordings and extracted artifacts
+/riffrec-*.zip
+/docs/brainstorms/riffrec-feedback/
+
 # Ignore key files for decrypting credentials and more.
 /config/*.key
-

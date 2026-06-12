@@ -9,7 +9,7 @@ date: 2026-06-07
 
 ## Summary
 
-The document at https://pruf.example.com/d/1KytrvTXNj opens with a metadata block — `**Date:** …`, `**Source:** …`, `**Goal:** …` on consecutive lines — that renders as one run-on paragraph in the editor. The lines are separated by single newlines (CommonMark soft breaks), and Milkdown's mdast→ProseMirror conversion collapses them to spaces. Agent-authored markdown uses single newlines deliberately (this metadata-block shape tops nearly every plan/brainstorm doc agents share to Pruf), so Pruf should preserve them as visible line breaks — the behavior users know from Notion, Slack, Obsidian, and GitHub comments.
+An example document opens with a metadata block — `**Date:** …`, `**Source:** …`, `**Goal:** …` on consecutive lines — that renders as one run-on paragraph in the editor. The lines are separated by single newlines (CommonMark soft breaks), and Milkdown's mdast→ProseMirror conversion collapses them to spaces. Agent-authored markdown uses single newlines deliberately (this metadata-block shape tops nearly every plan/brainstorm doc agents share to Pruf), so Pruf should preserve them as visible line breaks — the behavior users know from Notion, Slack, Obsidian, and GitHub comments.
 
 Fix: a small remark transformer (mirroring the repo's existing `$remark` plugins) that converts in-paragraph newlines in mdast `text` values into mdast `break` nodes, which the commonmark preset already renders as `hardbreak`. Then repair the already-damaged live document via the agent suggestion API.
 
