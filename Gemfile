@@ -14,7 +14,6 @@ gem "puma", ">= 5.0"
 # Database-backed Action Cable adapter (Yjs sync, presence, Inertia reload broadcasts)
 gem "solid_cable"
 
-
 # Add HTTP asset caching/compression and X-Sendfile acceleration to Puma [https://github.com/basecamp/thruster/]
 gem "thruster", require: false
 

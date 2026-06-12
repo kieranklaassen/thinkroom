@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 # check=error=true
 
+# This Dockerfile is designed for production, not development:
 # docker build -t pruf .
 # docker run -d -p 80:80 -e RAILS_MASTER_KEY=<value from config/master.key> --name pruf pruf
 

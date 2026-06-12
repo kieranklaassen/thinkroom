@@ -26,7 +26,8 @@ test:
 #
 # Similarly, if you deploy your application as a Docker container, you must
 # ensure the database is located in a persisted volume.
-# Multi-db: primary + Solid Cable. Both live under storage/ so the single
+# Multi-db: primary + Solid Cable. Both live under storage/ so one persistent
+# volume can preserve them across deploys.
 production:
   primary:
     <<: *default
