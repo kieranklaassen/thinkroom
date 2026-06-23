@@ -56,7 +56,9 @@ import {
   trashIcon,
 } from './table_icons'
 import { agentCursors } from './agent_cursors'
+import { configureCleanClipboard } from './clipboard'
 import { renderSoftBreaks } from './line_breaks'
+import { interactiveTaskListItems } from './task_list_items'
 import { selectionCallbackCtx, selectionWatcher } from './selection_watcher'
 import { postJSON } from '../lib/csrf'
 import {
@@ -294,6 +296,7 @@ function CollabEditor({
             uploader: imageUploader(identity.name),
             enableHtmlFileUploader: true,
           }))
+          configureCleanClipboard(ctx)
           renderSoftBreaks(ctx)
           // The defaults are bare text ('+', 'left', …) — real icons required.
           ctx.update(tableBlockConfig.key, (prev) => ({
@@ -321,6 +324,7 @@ function CollabEditor({
         })
         .use(commonmark)
         .use(gfm)
+        .use(interactiveTaskListItems)
         .use(tableBlock)
         .use(listener)
         .use(clipboard)

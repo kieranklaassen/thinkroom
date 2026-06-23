@@ -69,6 +69,110 @@ try {
   else fail('## input rule did not produce a heading')
   await c.close()
 
+  // Task lists: the rendered control must be a native, keyboard-focusable
+  // checkbox whose state round-trips through Markdown and collaborative Yjs.
+  const taskDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Task list check',
+        markdown: '- [ ] First task\n- [x] Second task\n',
+      }),
+    })
+  ).json()
+  const taskA = await browser.newPage()
+  const taskB = await browser.newPage()
+  await taskA.goto(`${BASE}/d/${taskDoc.slug}`)
+  await taskB.goto(`${BASE}/d/${taskDoc.slug}`)
+  await taskA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await taskB.waitForSelector('.doc-status--live', { timeout: 15000 })
+  const taskCheckboxes = taskA.locator(
+    '.milkdown .ProseMirror li[data-item-type="task"] input[type="checkbox"]',
+  )
+  if (
+    (await taskCheckboxes.count()) === 2 &&
+    !(await taskCheckboxes.nth(0).isChecked()) &&
+    (await taskCheckboxes.nth(1).isChecked())
+  ) {
+    ok('task items render native checkboxes with their Markdown state')
+  } else {
+    fail('task items did not render usable native checkboxes')
+  }
+  await taskCheckboxes.nth(0).check()
+  await taskB
+    .locator('.milkdown .ProseMirror li[data-item-type="task"] input[type="checkbox"]')
+    .nth(0)
+    .waitFor({ state: 'visible', timeout: 5000 })
+  await taskB.waitForFunction(
+    () =>
+      document.querySelector(
+        '.milkdown .ProseMirror li[data-item-type="task"] input[type="checkbox"]',
+      )?.checked === true,
+    { timeout: 10000 },
+  )
+  ok('checking a task syncs to another editor')
+
+  let taskMarkdown = ''
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const taskState = await (await fetch(`${BASE}/api/docs/${taskDoc.slug}`)).json()
+    taskMarkdown = taskState.markdown ?? ''
+    const plainTaskMarkdown = taskMarkdown.replace(/<\/?(?:span|ins|del)[^>]*>/g, '')
+    if (/^[*-] \[x\] First task/m.test(plainTaskMarkdown)) break
+    await taskA.waitForTimeout(300)
+  }
+  const plainTaskMarkdown = taskMarkdown.replace(/<\/?(?:span|ins|del)[^>]*>/g, '')
+  if (/^[*-] \[x\] First task/m.test(plainTaskMarkdown)) {
+    ok('checked task round-trips to [x] Markdown')
+  } else {
+    fail(`checked task did not persist: ${JSON.stringify(taskMarkdown)}`)
+  }
+  await taskA.reload()
+  await taskA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  if (await taskA.locator('.task-checkbox').nth(0).isChecked()) {
+    ok('checked task survives reload')
+  } else {
+    fail('checked task did not survive reload')
+  }
+  await taskA.close()
+  await taskB.close()
+
+  // Clipboard: users should get portable Markdown, not Pruf's internal
+  // provenance/suggestion wrappers. Ordinary Markdown formatting must stay.
+  const clipboardDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'clipboard-check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Clipboard check',
+        markdown:
+          '# Checklist\n\n- [ ] **Keep formatting**\n\nA [useful link](https://example.com).\n',
+      }),
+    })
+  ).json()
+  const clipboardContext = await browser.newContext({
+    permissions: ['clipboard-read', 'clipboard-write'],
+  })
+  const clipboardPage = await clipboardContext.newPage()
+  await clipboardPage.goto(`${BASE}/d/${clipboardDoc.slug}`)
+  await clipboardPage.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await clipboardPage.locator('.milkdown .ProseMirror').click()
+  await clipboardPage.keyboard.press('Meta+A')
+  await clipboardPage.keyboard.press('Meta+C')
+  const copiedMarkdown = await clipboardPage.evaluate(() => navigator.clipboard.readText())
+  if (
+    copiedMarkdown.includes('# Checklist') &&
+    copiedMarkdown.includes('**Keep formatting**') &&
+    copiedMarkdown.includes('[useful link](https://example.com)') &&
+    !/<\/?(?:span|ins|del)\b/.test(copiedMarkdown) &&
+    !/data-(?:provenance|suggestion-id)/.test(copiedMarkdown)
+  ) {
+    ok('clipboard exports clean Markdown without activity tracking')
+  } else {
+    fail(`clipboard leaked activity markup: ${JSON.stringify(copiedMarkdown)}`)
+  }
+  await clipboardContext.close()
+
   // Soft breaks: single newlines in seeded markdown must render as visible
   // line breaks (metadata blocks like **Date:** / **Source:** / **Goal:**),
   // the snapshot must round-trip them back to plain newlines unchanged, and
