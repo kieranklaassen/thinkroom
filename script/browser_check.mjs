@@ -427,6 +427,29 @@ try {
   if (pendingAi > 0) ok('seeded AI spans render with pending tint')
   else fail('no pending AI spans found — seed provenance did not round-trip')
 
+  // Provenance review is a transient text-targeted affordance. Clicking
+  // anywhere outside the document should dismiss it instead of leaving a
+  // stale "Pending review" popover anchored to the last AI span.
+  await a.locator('.milkdown .prov--ai.prov--pending').first().click()
+  await a.locator('.review-popover').waitFor({ state: 'visible', timeout: 5000 })
+  await a.locator('.doc-title').click()
+  const reviewDismissed = await a
+    .locator('.review-popover')
+    .waitFor({ state: 'hidden', timeout: 1000 })
+    .then(() => true)
+    .catch(() => false)
+  if (reviewDismissed) ok('clicking outside the document dismisses provenance review')
+  else fail('provenance review stayed open after an outside click')
+  await a.locator('.milkdown .prov--ai.prov--pending').first().click()
+  const reviewReopened = await a
+    .locator('.review-popover')
+    .waitFor({ state: 'visible', timeout: 1000 })
+    .then(() => true)
+    .catch(() => false)
+  if (reviewReopened) ok('clicking the same agent text reopens provenance review')
+  else fail('dismissed provenance review did not reopen on the same text')
+  await a.locator('.doc-title').click()
+
   // Typed text gets human attribution in the DOM of the other window
   const humanSentinel = `human-${Date.now()}`
   await a.click('.milkdown .ProseMirror')

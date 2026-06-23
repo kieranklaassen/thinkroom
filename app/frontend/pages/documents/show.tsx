@@ -379,6 +379,47 @@ export default function DocumentShow({
     setReviewTarget(span ? { span } : null)
   }, [doc.content_format])
 
+  // Review/selection chrome belongs to the text that opened it. ProseMirror
+  // does not dispatch a selection transaction when focus moves to page
+  // chrome, so explicitly clear these transient targets on outside clicks.
+  // Keep clicks on the floating chrome itself alive so its actions still run.
+  useEffect(() => {
+    let editorClickRaf = 0
+    const clearTextTarget = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest('.milkdown .ProseMirror')) {
+        // A dismissed popover leaves ProseMirror's cursor where it was. A
+        // second click on that exact span therefore produces no selection
+        // transaction, so explicitly re-evaluate provenance after the click.
+        if (target.closest('[data-provenance]')) {
+          if (editorClickRaf) cancelAnimationFrame(editorClickRaf)
+          editorClickRaf = requestAnimationFrame(() => {
+            editorClickRaf = 0
+            const view = viewRef.current
+            if (view) handleSelection(view)
+          })
+        }
+        return
+      }
+      if (
+        target.closest('.selection-toolbar, .review-popover, .comment-composer--anchored')
+      ) {
+        return
+      }
+
+      setReviewTarget(null)
+      setSelectionTarget(null)
+      setCommentTarget(null)
+    }
+
+    window.addEventListener('pointerdown', clearTextTarget, true)
+    return () => {
+      if (editorClickRaf) cancelAnimationFrame(editorClickRaf)
+      window.removeEventListener('pointerdown', clearTextTarget, true)
+    }
+  }, [handleSelection])
+
   // While a popover is open, any scroll or resize schedules one rAF-throttled
   // reposition pass (coordsAtPos for a single anchor is cheap).
   const [popoverTick, setPopoverTick] = useState(0)
