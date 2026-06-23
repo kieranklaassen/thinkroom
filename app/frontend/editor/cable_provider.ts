@@ -1,5 +1,6 @@
 import type { Consumer, Subscription } from '@rails/actioncable'
 import { getConsumer } from '../lib/cable'
+import { csrfToken } from '../lib/csrf'
 import * as Y from 'yjs'
 import {
   Awareness,
@@ -20,6 +21,12 @@ type SyncMessage = {
   seed_author_name?: string | null
   cid?: string
   seq?: number
+}
+
+export interface DurableSnapshotPayload {
+  content: string
+  spans: unknown[]
+  state_vector: string
 }
 
 const toBase64 = (u8: Uint8Array): string => {
@@ -57,9 +64,12 @@ export class CableProvider {
   private listeners = new Map<string, Set<(...args: never[]) => void>>()
   private destroyed = false
   private updateSequence = 0
+  private serverStateVector: Uint8Array | null = null
+  private readonly slug: string
 
   constructor(doc: Y.Doc, slug: string, consumer?: Consumer) {
     this.doc = doc
+    this.slug = slug
     this.awareness = new Awareness(doc)
     this.consumer = consumer ?? getConsumer()
 
@@ -131,6 +141,44 @@ export class CableProvider {
     this.send({ type, update: toBase64(update), seq: this.updateSequence })
   }
 
+  /**
+   * Persist everything this client has observed beyond the server vector from
+   * its last handshake. The update is idempotent, and `keepalive` lets the
+   * request finish when a click is immediately followed by navigation.
+   */
+  persistCurrentState = (snapshot: DurableSnapshotPayload): void => {
+    const update = this.serverStateVector
+      ? Y.encodeStateAsUpdate(this.doc, this.serverStateVector)
+      : Y.encodeStateAsUpdate(this.doc)
+    const persistedVector = Y.encodeStateVector(this.doc)
+
+    const updatePayload = { update: toBase64(update), cid: this.clientId }
+    const completePayload = { ...updatePayload, ...snapshot }
+    const completeBody = JSON.stringify(completePayload)
+    // Browsers cap keepalive request bodies at roughly 64 KiB. Large docs
+    // still get durable CRDT state (and therefore correct reload behavior);
+    // their derived source snapshot continues through the normal debounce.
+    const body =
+      new TextEncoder().encode(completeBody).byteLength <= 60 * 1024
+        ? completeBody
+        : JSON.stringify(updatePayload)
+
+    void fetch(`/d/${this.slug}/sync_update`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken(),
+      },
+      body,
+      keepalive: true,
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        this.serverStateVector = persistedVector
+      })
+      .catch((error) => console.warn('CableProvider: durable sync failed', error))
+  }
+
   private handleReceived(data: SyncMessage): void {
     if (data.cid === this.clientId) return
 
@@ -139,6 +187,7 @@ export class CableProvider {
         // Server's full state, then reply with what it's missing (sync step 2).
         Y.applyUpdate(this.doc, fromBase64(data.update!), this)
         const serverVector = fromBase64(data.sv!)
+        this.serverStateVector = serverVector
         this.updateSequence = 0
         this.sendUpdate('sync-reply', Y.encodeStateAsUpdate(this.doc, serverVector))
         const seedContent = data.seed_content ?? data.seed_markdown

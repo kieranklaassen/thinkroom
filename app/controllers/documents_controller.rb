@@ -151,6 +151,7 @@ class DocumentsController < InertiaController
   # Agent API can read document state without a Yjs client.
   MAX_SNAPSHOT_BYTES = 2.megabytes
   MAX_STATE_VECTOR_BYTES = 64.kilobytes
+  MAX_SYNC_UPDATE_BYTES = 2.megabytes
   MAX_SNAPSHOT_SPANS = 2_000
   MAX_SNAPSHOT_SPAN_TEXT = 280
   PROVENANCE_KINDS = %w[human ai].freeze
@@ -191,6 +192,52 @@ class DocumentsController < InertiaController
 
     DocumentAsset.claim_from_html!(document:, source: content) if document.html?
     render json: { normalized: normalization&.changed? || false }
+  end
+
+  # Discrete editor actions (currently task-checkbox toggles) also send their
+  # incremental Yjs diff over a keepalive HTTP request. A page reload can close
+  # Action Cable before its frame reaches the server; this idempotent fallback
+  # makes the same CRDT update durable and relays it to any connected clients.
+  def sync_update
+    document = Document.find_by!(slug: params[:slug])
+    update = params[:update].to_s
+    decoded = Base64.strict_decode64(update)
+    return head :content_too_large if decoded.bytesize > MAX_SYNC_UPDATE_BYTES
+
+    YjsPersistence.merge(document, update)
+    SyncChannel.broadcast_to(document, {
+      type: "update",
+      update:,
+      cid: params[:cid].to_s.presence || "http-sync"
+    })
+
+    if params.key?(:content)
+      content = params[:content].to_s
+      return head :content_too_large if content.bytesize > MAX_SNAPSHOT_BYTES
+
+      state_vector = params[:state_vector].to_s
+      return render json: { error: "A state vector is required with snapshot content." },
+                    status: :unprocessable_entity if state_vector.blank?
+      return head :content_too_large if state_vector.bytesize > MAX_STATE_VECTOR_BYTES
+
+      normalization = document.html? ? HtmlDocumentSanitizer.snapshot(content) : nil
+      content = normalization.content if normalization
+      spans = sanitize_snapshot_spans(params[:spans])
+      persisted = YjsPersistence.persist_snapshot(
+        document,
+        state_vector_b64: state_vector,
+        content:,
+        spans:
+      )
+      return render json: { error: "Snapshot is stale; retry from current document state." },
+                    status: :conflict unless persisted
+
+      DocumentAsset.claim_from_html!(document:, source: content) if document.html?
+    end
+
+    head :no_content
+  rescue ArgumentError
+    render json: { error: "Invalid Yjs update." }, status: :unprocessable_entity
   end
 
   private

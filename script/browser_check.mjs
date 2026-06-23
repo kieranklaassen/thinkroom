@@ -83,6 +83,20 @@ try {
   ).json()
   const taskA = await browser.newPage()
   const taskB = await browser.newPage()
+  let blockTaskWebSocketUpdates = false
+  await taskA.routeWebSocket(/\/cable(?:\?|$)/, (socket) => {
+    const server = socket.connectToServer()
+    socket.onMessage((message) => {
+      try {
+        const command = JSON.parse(String(message))
+        const data = command.data ? JSON.parse(command.data) : null
+        if (blockTaskWebSocketUpdates && data?.type === 'update') return
+      } catch {
+        // Non-Action-Cable frames pass through unchanged.
+      }
+      server.send(message)
+    })
+  })
   await taskA.goto(`${BASE}/d/${taskDoc.slug}`)
   await taskB.goto(`${BASE}/d/${taskDoc.slug}`)
   await taskA.waitForSelector('.doc-status--live', { timeout: 15000 })
@@ -133,6 +147,19 @@ try {
     ok('checked task survives reload')
   } else {
     fail('checked task did not survive reload')
+  }
+
+  // A discrete click must be durable even if the user reloads immediately.
+  // This exercises the HTTP durability fallback rather than giving the
+  // WebSocket and debounced source snapshot time to settle first.
+  blockTaskWebSocketUpdates = true
+  await taskA.locator('.task-checkbox').nth(0).uncheck()
+  await taskA.reload()
+  await taskA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  if (!(await taskA.locator('.task-checkbox').nth(0).isChecked())) {
+    ok('task toggle survives an immediate reload')
+  } else {
+    fail('task toggle was lost during an immediate reload')
   }
   await taskA.close()
   await taskB.close()

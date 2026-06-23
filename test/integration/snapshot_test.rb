@@ -1,6 +1,8 @@
 require "test_helper"
 
 class SnapshotTest < ActionDispatch::IntegrationTest
+  include ActionCable::TestHelper
+
   PNG = Base64.decode64(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
   ).freeze
@@ -150,5 +152,45 @@ class SnapshotTest < ActionDispatch::IntegrationTest
 
     assert_response :ok
     assert_equal 1, @document.reload.provenance_spans.length
+  end
+
+  test "durable sync update persists and broadcasts the Yjs diff" do
+    ydoc = Y::Doc.new
+    ydoc.get_text("task") << "checked"
+    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
+    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+
+    assert_broadcast_on(
+      SyncChannel.broadcasting_for(@document),
+      type: "update", update:, cid: "browser-1"
+    ) do
+      post document_sync_update_path(@document.slug),
+           params: {
+             update:, cid: "browser-1", content: "* [x] checked",
+             spans: [], state_vector:
+           },
+           as: :json
+    end
+
+    assert_response :no_content
+    persisted = Y::Doc.new
+    persisted.sync(@document.reload.yjs_state.unpack("C*"))
+    assert_equal "checked", persisted.get_text("task").to_s
+    assert_equal "* [x] checked", @document.content_snapshot
+  end
+
+  test "durable sync update rejects malformed and oversized payloads" do
+    post document_sync_update_path(@document.slug),
+         params: { update: "not-base64" },
+         as: :json
+    assert_response :unprocessable_entity
+    assert_nil @document.reload.yjs_state
+
+    oversized = Base64.strict_encode64("x" * (DocumentsController::MAX_SYNC_UPDATE_BYTES + 1))
+    post document_sync_update_path(@document.slug),
+         params: { update: oversized },
+         as: :json
+    assert_response :content_too_large
+    assert_nil @document.reload.yjs_state
   end
 end

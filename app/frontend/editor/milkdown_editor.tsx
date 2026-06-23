@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import * as Y from 'yjs'
+import type { Ctx } from '@milkdown/kit/ctx'
 import {
   Editor,
   editorViewCtx,
@@ -28,7 +29,7 @@ import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
 import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight'
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import { CableProvider } from './cable_provider'
+import { CableProvider, type DurableSnapshotPayload } from './cable_provider'
 import { lazyShikiParser, loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
 import type { UserIdentity } from './identity'
@@ -58,7 +59,7 @@ import {
 import { agentCursors } from './agent_cursors'
 import { configureCleanClipboard } from './clipboard'
 import { renderSoftBreaks } from './line_breaks'
-import { interactiveTaskListItems } from './task_list_items'
+import { interactiveTaskListItems, taskPersistenceCtx } from './task_list_items'
 import { selectionCallbackCtx, selectionWatcher } from './selection_watcher'
 import { postJSON } from '../lib/csrf'
 import {
@@ -121,6 +122,25 @@ const SNAPSHOT_DEBOUNCE_MS = 900
 // lazy-parser protocol. Content paint is gated on nothing.
 void loadShikiParser()
 const shikiParser = lazyShikiParser()
+
+function buildSnapshotPayload(
+  ctx: Ctx,
+  ydoc: Y.Doc,
+  contentFormat: DocumentFormat,
+): DurableSnapshotPayload {
+  const view = ctx.get(editorViewCtx)
+  const content =
+    contentFormat === 'html'
+      ? serializeHtml(view.state.doc, ctx.get(schemaCtx))
+      : getMarkdown()(ctx)
+  const spans = collectSpans(view.state.doc)
+  let binaryState = ''
+  Y.encodeStateVector(ydoc).forEach((byte) => {
+    binaryState += String.fromCharCode(byte)
+  })
+
+  return { content, spans, state_vector: btoa(binaryState) }
+}
 
 interface CollabSession {
   ydoc: Y.Doc
@@ -360,18 +380,7 @@ function CollabEditor({
     let cancelled = false
     const pushSnapshot = (attempt = 0) => {
       editor.action((ctx) => {
-        const view = ctx.get(editorViewCtx)
-        const content =
-          contentFormat === 'html'
-            ? serializeHtml(view.state.doc, ctx.get(schemaCtx))
-            : getMarkdown()(ctx)
-        const spans = collectSpans(view.state.doc)
-        let binaryState = ''
-        Y.encodeStateVector(ydoc).forEach((byte) => {
-          binaryState += String.fromCharCode(byte)
-        })
-        const stateVector = btoa(binaryState)
-        void postJSON(`/d/${slug}/snapshot`, { content, spans, state_vector: stateVector })
+        void postJSON(`/d/${slug}/snapshot`, buildSnapshotPayload(ctx, ydoc, contentFormat))
           .then((response) => {
             if (response.status === 409 && attempt < 3 && !cancelled) {
               if (snapshotRetryTimer) clearTimeout(snapshotRetryTimer)
@@ -406,6 +415,10 @@ function CollabEditor({
       editor.action((ctx) => {
         const service = ctx.get(collabServiceCtx)
         service.bindDoc(ydoc).setAwareness(provider.awareness)
+        ctx.set(taskPersistenceCtx.key, {
+          persist: () =>
+            provider.persistCurrentState(buildSnapshotPayload(ctx, ydoc, contentFormat)),
+        })
         // Consume the seed one-shot: capture to locals before nulling so a
         // remounted editor never re-applies or re-attributes, and a later
         // refactor can't clear the author fields out from under the re-mark.

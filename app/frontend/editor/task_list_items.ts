@@ -2,7 +2,12 @@ import { extendListItemSchemaForTask } from '@milkdown/kit/preset/gfm'
 import type { Node } from '@milkdown/kit/prose/model'
 import { Plugin } from '@milkdown/kit/prose/state'
 import type { EditorView, NodeView, NodeViewConstructor } from '@milkdown/kit/prose/view'
-import { $prose, $view } from '@milkdown/kit/utils'
+import { $ctx, $prose, $view } from '@milkdown/kit/utils'
+
+export const taskPersistenceCtx = $ctx<{ persist: (() => void) | null }, 'taskPersistence'>(
+  { persist: null },
+  'taskPersistence',
+)
 
 function syncListItemAttributes(dom: HTMLLIElement, node: Node): void {
   dom.dataset.label = String(node.attrs.label)
@@ -37,6 +42,7 @@ function taskListItemView(
   initialNode: Node,
   view: EditorView,
   getPos: () => number | undefined,
+  persist: () => void,
 ): NodeView {
   const dom = document.createElement('li')
   const control = document.createElement('span')
@@ -91,6 +97,7 @@ function taskListItemView(
         checked: checkbox.checked,
       }),
     )
+    persist()
   }
 
   checkbox.addEventListener('change', onChange)
@@ -115,9 +122,11 @@ function taskListItemView(
 
 const taskListItemNodeView = $view(
   extendListItemSchemaForTask.node,
-  (): NodeViewConstructor => (node, view, getPos) => {
+  (ctx): NodeViewConstructor => (node, view, getPos) => {
     if (node.attrs.checked == null) return plainListItemView(node)
-    return taskListItemView(node, view, getPos)
+    return taskListItemView(node, view, getPos, () => {
+      ctx.get(taskPersistenceCtx.key).persist?.()
+    })
   },
 )
 
@@ -138,4 +147,8 @@ const taskListEditability = $prose(
     }),
 )
 
-export const interactiveTaskListItems = [taskListItemNodeView, taskListEditability].flat()
+export const interactiveTaskListItems = [
+  taskPersistenceCtx,
+  taskListItemNodeView,
+  taskListEditability,
+].flat()
