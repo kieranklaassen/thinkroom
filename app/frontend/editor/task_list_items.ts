@@ -3,6 +3,7 @@ import type { Node } from '@milkdown/kit/prose/model'
 import { Plugin } from '@milkdown/kit/prose/state'
 import type { EditorView, NodeView, NodeViewConstructor } from '@milkdown/kit/prose/view'
 import { $ctx, $prose, $view } from '@milkdown/kit/utils'
+import { suggestChangesKey } from '@handlewithcare/prosemirror-suggest-changes'
 
 export const taskPersistenceCtx = $ctx<{ persist: (() => void) | null }, 'taskPersistence'>(
   { persist: null },
@@ -91,12 +92,16 @@ function taskListItemView(
       return
     }
 
-    view.dispatch(
-      view.state.tr.setNodeMarkup(pos, undefined, {
-        ...currentNode.attrs,
-        checked: checkbox.checked,
-      }),
-    )
+    const tr = view.state.tr.setNodeMarkup(pos, undefined, {
+      ...currentNode.attrs,
+      checked: checkbox.checked,
+    })
+    // Completing a task is a direct checklist action, not a textual edit.
+    // Suggest mode's AttrStep transform cannot represent this list-item
+    // attribute safely, so bypass it instead of leaving the native control
+    // visually changed while ProseMirror/Yjs remain untouched.
+    tr.setMeta(suggestChangesKey, { skip: true })
+    view.dispatch(tr)
     persist()
   }
 

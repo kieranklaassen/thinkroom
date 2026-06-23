@@ -161,6 +161,41 @@ try {
   } else {
     fail('task toggle was lost during an immediate reload')
   }
+
+  // Task completion is a direct checklist action even while text edits are
+  // tracked as suggestions. Attr-only task transactions must bypass the
+  // suggest-changes transform or the native control toggles without changing
+  // ProseMirror/Yjs and silently reverts on reload.
+  await taskA.evaluate(
+    (slug) => localStorage.setItem(`pruf:mode:${slug}`, 'suggest'),
+    taskDoc.slug,
+  )
+  await taskA.reload()
+  await taskA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await taskA.waitForFunction(
+    () => document.querySelector('.mode-control-trigger')?.textContent?.includes('Suggest'),
+    { timeout: 5000 },
+  )
+  await taskA.locator('.task-checkbox').nth(0).check()
+  await taskA.reload()
+  await taskA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  if (await taskA.locator('.task-checkbox').nth(0).isChecked()) {
+    ok('task toggle persists in Suggest mode')
+  } else {
+    fail('task toggle was dropped by Suggest mode')
+  }
+  let suggestTaskMarkdown = ''
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const taskState = await (await fetch(`${BASE}/api/docs/${taskDoc.slug}`)).json()
+    suggestTaskMarkdown = (taskState.markdown ?? '').replace(/<\/?(?:span|ins|del)[^>]*>/g, '')
+    if (/^[*-] \[x\] First task/m.test(suggestTaskMarkdown)) break
+    await taskA.waitForTimeout(300)
+  }
+  if (/^[*-] \[x\] First task/m.test(suggestTaskMarkdown)) {
+    ok('Suggest-mode task toggle persists to Markdown')
+  } else {
+    fail(`Suggest-mode task did not persist: ${JSON.stringify(suggestTaskMarkdown)}`)
+  }
   await taskA.close()
   await taskB.close()
 
