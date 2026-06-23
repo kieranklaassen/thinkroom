@@ -180,17 +180,21 @@ class DocumentsController < InertiaController
     content = normalization.content if normalization
 
     spans = sanitize_snapshot_spans(params[:spans])
+    previous_title = document.title
+    title = DocumentTitle.call(format: document.content_format, content:) || previous_title
 
     persisted = YjsPersistence.persist_snapshot(
       document,
       state_vector_b64: state_vector.presence,
       content:,
-      spans:
+      spans:,
+      title:
     )
     return render json: { error: "Snapshot is stale; retry from current document state." },
                   status: :conflict unless persisted
 
     DocumentAsset.claim_from_html!(document:, source: content) if document.html?
+    broadcast_title(document) if title != previous_title
     render json: { normalized: normalization&.changed? || false }
   end
 
@@ -223,16 +227,20 @@ class DocumentsController < InertiaController
       normalization = document.html? ? HtmlDocumentSanitizer.snapshot(content) : nil
       content = normalization.content if normalization
       spans = sanitize_snapshot_spans(params[:spans])
+      previous_title = document.title
+      title = DocumentTitle.call(format: document.content_format, content:) || previous_title
       persisted = YjsPersistence.persist_snapshot(
         document,
         state_vector_b64: state_vector,
         content:,
-        spans:
+        spans:,
+        title:
       )
       return render json: { error: "Snapshot is stale; retry from current document state." },
                     status: :conflict unless persisted
 
       DocumentAsset.claim_from_html!(document:, source: content) if document.html?
+      broadcast_title(document) if title != previous_title
     end
 
     head :no_content
@@ -241,6 +249,10 @@ class DocumentsController < InertiaController
   end
 
   private
+
+  def broadcast_title(document)
+    DocumentMetaChannel.broadcast_event(document, :title, title: document.title)
+  end
 
   def sanitize_snapshot_spans(raw_spans)
     Array(raw_spans).first(MAX_SNAPSHOT_SPANS).filter_map do |span|

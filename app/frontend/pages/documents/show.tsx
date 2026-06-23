@@ -153,6 +153,7 @@ export default function DocumentShow({
   const [identity, setIdentity] = useState<UserIdentity>(() => userIdentity(viewer.name))
   const [guest, setGuest] = useState(viewer.guest)
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
+  const [documentTitle, setDocumentTitle] = useState(doc.title)
   const [handle, setHandle] = useState<EditorHandle | null>(null)
   const [spans, setSpans] = useState<ProvenanceSpan[]>([])
   const [peers, setPeers] = useState<UserIdentity[]>([])
@@ -293,7 +294,7 @@ export default function DocumentShow({
     presencePoll.stop()
     router.visit('/')
   }, [presencePoll])
-  useMetaChannel(doc.slug, { onDeleted: onDocumentGone })
+  useMetaChannel(doc.slug, { onDeleted: onDocumentGone, onTitle: setDocumentTitle })
 
   // The sync channel rejects its resubscription when the doc is gone —
   // same exit path.
@@ -899,14 +900,14 @@ export default function DocumentShow({
 
   return (
     <>
-      <Head title={doc.title} />
+      <Head title={documentTitle} />
       <div className={`doc-page ${panelOpen ? '' : 'is-panel-hidden'}`}>
         <header className="doc-header">
           <div className="doc-header-left">
             <Link href="/" className="doc-home" aria-label="Home">
               P.
             </Link>
-            <span className="doc-title">{doc.title}</span>
+            <span className="doc-title">{documentTitle}</span>
             <span className="doc-format" aria-label={`Document format: ${doc.content_format}`}>
               {doc.content_format === 'html' ? 'HTML' : 'Markdown'}
             </span>
@@ -975,6 +976,7 @@ export default function DocumentShow({
                 onStatus={setStatus}
                 onSpans={setSpans}
                 onSelection={handleSelection}
+                onTitleChange={setDocumentTitle}
               />
             </article>
             <div className="margin-gutter">

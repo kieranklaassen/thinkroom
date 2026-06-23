@@ -97,11 +97,13 @@ class YjsPersistenceTest < ActiveSupport::TestCase
       doc,
       state_vector_b64: stale_vector,
       content: "stale",
-      spans: []
+      spans: [],
+      title: "Stale title"
     )
 
     assert_not persisted
     assert_equal "current", doc.reload.content_snapshot
+    assert_equal "Snapshot", doc.title
   end
 
   test "snapshot persistence accepts clients at or ahead of the server state" do
@@ -115,11 +117,13 @@ class YjsPersistenceTest < ActiveSupport::TestCase
       doc,
       state_vector_b64: client_vector,
       content: "new source",
-      spans: []
+      spans: [],
+      title: "New title"
     )
 
     assert persisted
     assert_equal "new source", doc.reload.content_snapshot
+    assert_equal "New title", doc.title
   end
 
   test "snapshot persistence accepts reordered multi-client state vectors" do

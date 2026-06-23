@@ -12,17 +12,23 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   end
 
   test "persists markdown and sanitized spans" do
-    post document_snapshot_path(@document.slug), params: {
-      markdown: "# Updated",
-      spans: [
-        { kind: "human", author: "A", state: "verbatim", chars: 9, text: "# Updated" },
-        { kind: "ai", author: "Gemini", state: "pending", chars: 4, text: "tail", extra: "dropped" }
-      ]
-    }, as: :json
+    assert_broadcast_on(
+      DocumentMetaChannel.broadcasting_for(@document),
+      event: "title", title: "Updated"
+    ) do
+      post document_snapshot_path(@document.slug), params: {
+        markdown: "# Updated",
+        spans: [
+          { kind: "human", author: "A", state: "verbatim", chars: 9, text: "# Updated" },
+          { kind: "ai", author: "Gemini", state: "pending", chars: 4, text: "tail", extra: "dropped" }
+        ]
+      }, as: :json
+    end
 
     assert_response :ok
     @document.reload
     assert_equal "# Updated", @document.content_markdown
+    assert_equal "Updated", @document.title
     assert_equal 2, @document.provenance_spans.length
     assert_not @document.provenance_spans.last.key?("extra"), "unpermitted keys must be stripped"
   end

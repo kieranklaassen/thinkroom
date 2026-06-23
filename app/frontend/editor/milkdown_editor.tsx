@@ -29,6 +29,7 @@ import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
 import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight'
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
+import type { Node as ProseNode } from '@milkdown/kit/prose/model'
 import { CableProvider, type DurableSnapshotPayload } from './cable_provider'
 import { lazyShikiParser, loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
@@ -112,6 +113,7 @@ interface EditorProps {
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
   onSelection?: (view: EditorView) => void
+  onTitleChange?: (title: string) => void
 }
 
 const SNAPSHOT_DEBOUNCE_MS = 900
@@ -140,6 +142,17 @@ function buildSnapshotPayload(
   })
 
   return { content, spans, state_vector: btoa(binaryState) }
+}
+
+function firstHeadingTitle(doc: ProseNode): string | null {
+  let title: string | null = null
+  doc.descendants((node) => {
+    if (node.type.name !== 'heading' || node.attrs.level !== 1) return title === null
+
+    title = node.textContent.replace(/\s+/g, ' ').trim().slice(0, 255) || null
+    return false
+  })
+  return title
 }
 
 interface CollabSession {
@@ -276,9 +289,10 @@ function CollabEditor({
   onStatus,
   onSpans,
   onSelection,
+  onTitleChange,
 }: EditorProps) {
-  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection })
-  callbacksRef.current = { onReady, onStatus, onSpans, onSelection }
+  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange })
+  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange }
   // Ref so the editable() closure always reads the live value; the effect
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
@@ -460,9 +474,14 @@ function CollabEditor({
           // snapshot path below stays unfiltered — persisted provenance must
           // remain complete while suggestions are pending.
           callbacksRef.current.onSpans?.(collectSpans(doc, { excludePendingInsertions: true }))
+          const title = firstHeadingTitle(doc)
+          if (title) callbacksRef.current.onTitleChange?.(title)
           if (snapshotTimer) clearTimeout(snapshotTimer)
           snapshotTimer = setTimeout(pushSnapshot, SNAPSHOT_DEBOUNCE_MS)
         })
+
+        const title = firstHeadingTitle(ctx.get(editorViewCtx).state.doc)
+        if (title) callbacksRef.current.onTitleChange?.(title)
       })
 
       const handle = { editor, ydoc, provider }

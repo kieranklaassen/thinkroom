@@ -47,7 +47,7 @@ class YjsPersistence
     # client has observed every Yjs update currently stored by the server.
     # A client may be ahead (its own cable frame is still in flight), but it
     # may not overwrite the API read model from behind.
-    def persist_snapshot(document, state_vector_b64:, content:, spans:)
+    def persist_snapshot(document, state_vector_b64:, content:, spans:, title: document.title)
       client_state = decode_state_vector(decode(state_vector_b64)) if state_vector_b64.present?
 
       lock_for(document.id).synchronize do
@@ -61,7 +61,7 @@ class YjsPersistence
             return false unless current
           end
 
-          document.update!(content_snapshot: content, provenance_spans: spans)
+          document.update!(title:, content_snapshot: content, provenance_spans: spans)
         end
       end
       true

@@ -69,6 +69,59 @@ try {
   else fail('## input rule did not produce a heading')
   await c.close()
 
+  // The first H1 is the canonical document title: changing it updates this
+  // editor, collaborators, durable API state, and survives a reload.
+  const titleDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Original title', markdown: '# Original title\n\nBody.\n' }),
+    })
+  ).json()
+  const titleA = await browser.newPage()
+  const titleB = await browser.newPage()
+  await titleA.goto(`${BASE}/d/${titleDoc.slug}`)
+  await titleB.goto(`${BASE}/d/${titleDoc.slug}`)
+  await titleA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await titleB.waitForSelector('.doc-status--live', { timeout: 15000 })
+  const renamedTitle = `Renamed title ${Date.now()}`
+  await titleA.locator('.milkdown .ProseMirror h1').click({ clickCount: 3 })
+  await titleA.keyboard.type(renamedTitle)
+  const localTitleUpdated = await titleA
+    .locator('.doc-title', { hasText: renamedTitle })
+    .waitFor({ timeout: 500 })
+    .then(() => true)
+    .catch(() => false)
+  const remoteTitleUpdated = await titleB
+    .locator('.doc-title', { hasText: renamedTitle })
+    .waitFor({ timeout: 10000 })
+    .then(() => true)
+    .catch(() => false)
+  if (localTitleUpdated && remoteTitleUpdated) {
+    ok('editing H1 optimistically updates the title and syncs it live')
+  }
+  else fail('H1 and live document title diverged')
+  if ((await titleA.title()) === renamedTitle) ok('editing H1 updates the browser tab title')
+  else fail(`browser tab title diverged: ${JSON.stringify(await titleA.title())}`)
+  let persistedTitle = ''
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const titleState = await (await fetch(`${BASE}/api/docs/${titleDoc.slug}`)).json()
+    persistedTitle = titleState.title ?? ''
+    if (persistedTitle === renamedTitle) break
+    await titleA.waitForTimeout(300)
+  }
+  if (persistedTitle === renamedTitle) ok('H1 title persists to the API')
+  else fail(`H1 title did not persist: ${JSON.stringify(persistedTitle)}`)
+  await titleA.reload()
+  await titleA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  if ((await titleA.locator('.doc-title').innerText()) === renamedTitle) {
+    ok('H1 title survives reload')
+  } else {
+    fail('H1 title was lost on reload')
+  }
+  await titleA.close()
+  await titleB.close()
+
   // Task lists: the rendered control must be a native, keyboard-focusable
   // checkbox whose state round-trips through Markdown and collaborative Yjs.
   const taskDoc = await (

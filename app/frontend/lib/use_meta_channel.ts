@@ -9,6 +9,8 @@ interface MetaChannelOptions {
    * destroyed doc would 404 — and any pending reload is cancelled first.
    */
   onDeleted?: () => void
+  /** Receives the canonical H1-derived title without reloading Yjs props. */
+  onTitle?: (title: string) => void
 }
 
 /**
@@ -27,6 +29,8 @@ interface MetaChannelOptions {
 export function useMetaChannel(slug: string, options?: MetaChannelOptions): void {
   const onDeletedRef = useRef(options?.onDeleted)
   onDeletedRef.current = options?.onDeleted
+  const onTitleRef = useRef(options?.onTitle)
+  onTitleRef.current = options?.onTitle
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
@@ -46,10 +50,14 @@ export function useMetaChannel(slug: string, options?: MetaChannelOptions): void
     const subscription = getConsumer().subscriptions.create(
       { channel: 'DocumentMetaChannel', slug },
       {
-        received: ({ event }: { event: string }) => {
+        received: ({ event, title }: { event: string; title?: string }) => {
           if (dead) return
           if (event === 'document_deleted') {
             handleGone()
+            return
+          }
+          if (event === 'title' && title) {
+            onTitleRef.current?.(title)
             return
           }
           pending.add(event)

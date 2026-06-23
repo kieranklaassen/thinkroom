@@ -9,7 +9,7 @@ class DocumentMetaChannel < ApplicationCable::Channel
     stream_for document
   end
 
-  def self.broadcast_event(document, event)
-    broadcast_to(document, { event: event.to_s })
+  def self.broadcast_event(document, event, **payload)
+    broadcast_to(document, { event: event.to_s, **payload })
   end
 end
