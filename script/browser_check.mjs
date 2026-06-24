@@ -26,6 +26,22 @@ const makePage = async (label) => {
 }
 
 try {
+  const landing = await browser.newPage()
+  await landing.goto(BASE)
+  await landing.waitForSelector('.landing-wordmark')
+  if ((await landing.locator('.landing-wordmark').innerText()) === 'Thinkroom') {
+    ok('landing page uses the Thinkroom wordmark')
+  } else {
+    fail('landing page does not use the Thinkroom wordmark')
+  }
+  if ((await landing.locator('.landing-tagline').innerText()) === 'Where deeper thinking compounds.') {
+    ok('landing page uses the approved Thinkroom tagline')
+  } else {
+    fail('landing page does not use the approved Thinkroom tagline')
+  }
+  await landing.locator('.landing-byline', { hasText: 'creator of Compound Engineering' }).waitFor()
+  await landing.close()
+
   const a = await makePage('a')
   await a.waitForSelector('.milkdown .ProseMirror', { timeout: 15000 })
   await a.waitForSelector('.doc-status--live', { timeout: 10000 })
@@ -252,7 +268,7 @@ try {
   await taskA.close()
   await taskB.close()
 
-  // Clipboard: users should get portable Markdown, not Pruf's internal
+  // Clipboard: users should get portable Markdown, not Thinkroom's internal
   // provenance/suggestion wrappers. Ordinary Markdown formatting must stay.
   const clipboardDoc = await (
     await fetch(`${BASE}/api/docs`, {
@@ -602,7 +618,7 @@ try {
   if (themeAfter === 'whitey') ok('theme persisted across reload')
   else fail(`theme lost on reload: ${themeAfter}`)
   await a.locator('.share-button').click()
-  await a.locator('.theme-option', { hasText: 'Pruf' }).click()
+  await a.locator('.theme-option', { hasText: 'Thinkroom' }).click()
   await a.keyboard.press('Escape')
 
   // --- Agent loop: an agent joins over plain HTTP while humans watch ---

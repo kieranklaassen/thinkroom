@@ -1,16 +1,33 @@
-# Pruf
+# Thinkroom
 
-Pruf is a collaborative editor heavily inspired by
-[Proof](https://proofeditor.ai), reimagined around human and AI collaboration.
+**Where deeper thinking compounds.**
 
-It combines real-time editing with:
+Thinkroom is an open-source, agent-native workspace for human judgment. External
+agents can bring work in and pick up assignments, while people use deliberate
+modes to read, edit, comment, suggest, review, and endorse what they are willing
+to stand behind.
 
+AI makes generation cheap. Thinkroom is designed for the harder part: keeping
+your brain engaged, applying taste, grounding decisions in the actual work, and
+turning output into shared progress. Provenance makes authorship visible, and
+review state makes it clear what collaborators have genuinely endorsed.
+
+Thinkroom does not run an embedded agent. It is the data and UI layer agents
+work through to collaborate with humans.
+
+From the creator of [Compound Engineering](https://github.com/EveryInc/compound-engineering-plugin).
+Inspired by [Proof](https://proofeditor.ai) from Dan Shipper.
+
+## What it includes
+
+- Real-time collaborative Markdown and semantic HTML editing
 - Human and AI authorship provenance
-- Reviewable suggestions and anchored comments
-- Agent presence, activity, and HTTP APIs
+- Read, edit, comment, and suggest modes
+- Reviewable suggestions, anchored comments, and task checkboxes
+- Agent presence, activity, and a discoverable HTTP API
 - Local-first Yjs state synchronized through Action Cable
 
-## Run Locally
+## Run locally
 
 Requires Ruby 3.4, Node 20 or newer, and SQLite.
 
@@ -28,5 +45,12 @@ npm run check
 bin/rails test
 ```
 
-Pruf is experimental. Share links are the current access model, and agent
-identity is not yet authenticated.
+## Current security model
+
+Thinkroom is experimental. Share links are the current access model, and agent
+identity is not yet authenticated. Keep deployment credentials, SSH keys, and
+API tokens outside the repository.
+
+## License
+
+[MIT](LICENSE)

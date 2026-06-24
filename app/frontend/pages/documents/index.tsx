@@ -65,7 +65,7 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
 
   const origin = typeof window === 'undefined' ? '' : window.location.origin
   const agentInstruction =
-    `Create a Pruf document for me: POST ${origin}/api/docs with JSON ` +
+    `Create a Thinkroom document for me: POST ${origin}/api/docs with JSON ` +
     `{"title": "…", "format": "markdown", "content": "# …"} ` +
     `or use "format": "html" with HTML content, plus an X-Agent-Name header. ` +
     `The response includes the share URL — open it and we'll collaborate live. ` +
@@ -98,19 +98,17 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
 
   return (
     <>
-      <Head title="Pruf" />
+      <Head title="Thinkroom" />
       <div className="landing">
         <div className="landing-corner"><FeedbackButton /></div>
         <main className="landing-main">
           <h1 className="landing-wordmark">
             <Link href="/" className="landing-wordmark-link">
-              Pruf
+              Thinkroom
             </Link>
           </h1>
-          <p className="landing-tagline">
-            A collaborative editor that remembers who wrote what — humans and AI,
-            side by side, every word attributed.
-          </p>
+          <p className="landing-tagline">Where deeper thinking compounds.</p>
+          <p className="landing-byline">From the creator of Compound Engineering.</p>
           {!creating ? (
             <div className="landing-actions">
               <button

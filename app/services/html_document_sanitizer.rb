@@ -31,8 +31,8 @@ class HtmlDocumentSanitizer
   DROP_WITH_CONTENT = %w[script style iframe object embed template svg math].freeze
   PROVENANCE_ATTRIBUTES = %w[data-provenance data-kind data-author data-state].freeze
   SUGGESTION_ATTRIBUTES = %w[data-suggestion-id data-author].freeze
-  PRUF_ATTRIBUTES = (PROVENANCE_ATTRIBUTES + SUGGESTION_ATTRIBUTES).uniq.freeze
-  EXTERNAL_ATTRIBUTES = (ATTRIBUTES - PRUF_ATTRIBUTES).freeze
+  THINKROOM_ATTRIBUTES = (PROVENANCE_ATTRIBUTES + SUGGESTION_ATTRIBUTES).uniq.freeze
+  EXTERNAL_ATTRIBUTES = (ATTRIBUTES - THINKROOM_ATTRIBUTES).freeze
 
   class << self
     def external(source)
@@ -61,7 +61,7 @@ class HtmlDocumentSanitizer
 
         sanitize_style(node)
         sanitize_image(node)
-        sanitize_pruf_metadata(node, trusted: trusted_metadata)
+        sanitize_thinkroom_metadata(node, trusted: trusted_metadata)
       end
 
       content = fragment.to_html
@@ -85,9 +85,9 @@ class HtmlDocumentSanitizer
       node.remove unless valid_active_storage_src?(node["src"])
     end
 
-    def sanitize_pruf_metadata(node, trusted:)
-      metadata = PRUF_ATTRIBUTES.to_h { |attribute| [ attribute, node[attribute] ] }
-      strip_pruf_metadata(node)
+    def sanitize_thinkroom_metadata(node, trusted:)
+      metadata = THINKROOM_ATTRIBUTES.to_h { |attribute| [ attribute, node[attribute] ] }
+      strip_thinkroom_metadata(node)
       return unless trusted
 
       restore_provenance(node, metadata) if valid_provenance?(node, metadata)
@@ -137,8 +137,8 @@ class HtmlDocumentSanitizer
       node["data-author"] = metadata["data-author"].to_s
     end
 
-    def strip_pruf_metadata(node)
-      PRUF_ATTRIBUTES.each { |attribute| node.remove_attribute(attribute) }
+    def strip_thinkroom_metadata(node)
+      THINKROOM_ATTRIBUTES.each { |attribute| node.remove_attribute(attribute) }
     end
   end
 end

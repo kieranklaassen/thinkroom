@@ -4,7 +4,8 @@
 @plugin '@tailwindcss/forms';
 
 /* ---------------------------------------------------------------------------
- * Design tokens. The default ("proof") theme: warm paper, editorial type.
+ * Design tokens. The default Thinkroom theme retains the legacy "proof" key
+ * so existing preferences continue to work: warm paper, editorial type.
  * The "whitey" theme (Typora Whitey homage) overrides these on [data-theme].
  * ------------------------------------------------------------------------- */
 :root {
@@ -187,6 +188,12 @@ a:focus-visible {
   color: var(--ink-soft);
   line-height: 1.55;
   font-size: 0.95rem;
+}
+
+.landing-byline {
+  margin-top: 0.4rem;
+  color: var(--ink-faint);
+  font-size: 0.76rem;
 }
 
 .landing-actions {

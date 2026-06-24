@@ -24,7 +24,7 @@ class DocumentPlainTextTest < ActiveSupport::TestCase
                  DocumentPlainText.call(format: "html", content: source)
   end
 
-  test "markdown pruf markup contributes content but not tags" do
+  test "markdown Thinkroom markup contributes content but not tags" do
     source = 'Before <span data-provenance data-kind="ai">robot</span> ' \
       'and <ins data-suggestion-id="x">new</ins>'
 

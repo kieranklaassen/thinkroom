@@ -9,7 +9,7 @@ export function FeedbackButton() {
       startLabel="Feedback"
       stopLabel="Stop & save"
       disabledLabel="Feedback"
-      consentTitle="Record feedback for Pruf"
+      consentTitle="Record feedback for Thinkroom"
       consentDescription="Records this tab’s screen, your voice, clicks, and console/network signals into a zip that downloads to your machine. Nothing is uploaded."
       consentLabel="I understand what's being recorded"
       onSessionComplete={(result) =>

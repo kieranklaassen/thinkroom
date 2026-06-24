@@ -7,7 +7,9 @@ servers:
 
 proxy:
   ssl: true
-  host: pruf.kieranklaassen.com
+  hosts:
+    - thinkroom.kieranklaassen.com
+    - pruf.kieranklaassen.com
   buffering:
     requests: true
     responses: true

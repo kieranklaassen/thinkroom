@@ -77,7 +77,7 @@ const PROVENANCE_STATES = new Set(['verbatim', 'pending', 'reviewed', 'endorsed'
 const MAX_METADATA_LENGTH = 255
 const PROVENANCE_ATTRS = ['data-provenance', 'data-kind', 'data-author', 'data-state']
 const SUGGESTION_ATTRS = ['data-suggestion-id', 'data-author']
-const PRUF_ATTRS = Array.from(new Set([...PROVENANCE_ATTRS, ...SUGGESTION_ATTRS]))
+const THINKROOM_ATTRS = Array.from(new Set([...PROVENANCE_ATTRS, ...SUGGESTION_ATTRS]))
 
 const removeAttrs = (element: Element, attrs: string[]) => {
   attrs.forEach((attr) => element.removeAttribute(attr))
@@ -108,8 +108,10 @@ const validActiveStorageSrc = (source: string): boolean => {
 }
 
 const sanitizeMetadata = (element: HTMLElement, trust: HtmlTrust) => {
-  const metadata = Object.fromEntries(PRUF_ATTRS.map((attr) => [attr, element.getAttribute(attr)]))
-  removeAttrs(element, PRUF_ATTRS)
+  const metadata = Object.fromEntries(
+    THINKROOM_ATTRS.map((attr) => [attr, element.getAttribute(attr)]),
+  )
+  removeAttrs(element, THINKROOM_ATTRS)
   if (trust !== 'snapshot') return
 
   const author = metadata['data-author'] ?? ''

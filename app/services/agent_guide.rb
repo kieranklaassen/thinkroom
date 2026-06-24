@@ -128,12 +128,12 @@ class AgentGuide
           dropped_with_content: HtmlDocumentSanitizer::DROP_WITH_CONTENT,
           attributes: {
             supported: HtmlDocumentSanitizer::EXTERNAL_ATTRIBUTES,
-            reserved: "Pruf provenance and suggestion data attributes may appear in trusted snapshots; external source cannot set them."
+            reserved: "Thinkroom provenance and suggestion data attributes may appear in trusted snapshots; external source cannot set them."
           },
           css: {
             supported: "Only text-align: left|center|right on th and td.",
             removed: [ "<style> blocks", "class and id styling hooks", "all other inline style declarations" ],
-            guidance: "Use semantic elements and Pruf's editor styling. Do not depend on custom colors, spacing, fonts, grids, or page-level layout."
+            guidance: "Use semantic elements and Thinkroom's editor styling. Do not depend on custom colors, spacing, fonts, grids, or page-level layout."
           },
           images: {
             upload: ImageUploadPolicy.contract(base_url),
@@ -186,7 +186,7 @@ class AgentGuide
       <<~GUIDE
         # #{document.title} — agent guide
 
-        You are an agent reading a Pruf share link. Humans see a live
+        You are an agent reading a Thinkroom share link. Humans see a live
         collaborative editor at this URL; you participate over plain HTTP.
         Everything you do appears live in their editors, attributed to you.
 
@@ -262,7 +262,7 @@ class AgentGuide
         4. Propose edits and comments through the endpoints in that state
            payload, poll events while waiting for review, then sign off.
 
-        HTML is sanitized and normalized to Pruf's editable schema. Create and
+        HTML is sanitized and normalized to Thinkroom's editable schema. Create and
         suggestion responses include normalized=true plus a warning when
         unsupported markup was removed or rewritten.
         This is semantic body HTML, not a lossless full-page HTML/CSS editor.
@@ -297,7 +297,7 @@ class AgentGuide
         right on th and td survives. <style> blocks, class/id styling hooks,
         and every other inline style are removed.
 
-        Images must be uploaded to Pruf first:
+        Images must be uploaded to Thinkroom first:
           curl -X POST #{base_url}/api/uploads \\
             -H "X-Agent-Name: YOUR_NAME" \\
             -F "file=@figure.png"

@@ -544,7 +544,7 @@ export default function DocumentShow({
                     setSuggestionNotice(
                       reopened
                         ? 'The document changed before this suggestion could be merged. It was returned to pending.'
-                        : 'The document changed before this suggestion could be merged, and Pruf could not restore it to pending. Refresh before reviewing it again.',
+                        : 'The document changed before this suggestion could be merged, and Thinkroom could not restore it to pending. Refresh before reviewing it again.',
                     )
                     router.reload({ only: ['suggestions', 'activities'], async: true })
                   })
@@ -926,7 +926,7 @@ export default function DocumentShow({
         <header className="doc-header">
           <div className="doc-header-left">
             <Link href="/" className="doc-home" aria-label="Home">
-              P.
+              T.
             </Link>
             <span className="doc-title">{documentTitle}</span>
             <span className="doc-format" aria-label={`Document format: ${doc.content_format}`}>

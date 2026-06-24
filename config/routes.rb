@@ -1,6 +1,8 @@
 Rails.application.routes.draw do
   root "documents#index"
 
+  get "manifest" => "pwa#manifest", as: :pwa_manifest
+
   resources :documents, only: :create
 
   post "identity", to: "identities#update", as: :identity

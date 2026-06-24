@@ -19,7 +19,7 @@ function stripActivityMarks(fragment: Fragment): Fragment {
 
 /**
  * Clipboard content is an export surface, not a collaboration snapshot.
- * Remove Pruf-only activity marks before ProseMirror produces either its
+ * Remove Thinkroom-only activity marks before ProseMirror produces either its
  * Markdown text flavor or rich HTML flavor, while preserving normal marks
  * such as emphasis, links, code, and strikethrough.
  */
