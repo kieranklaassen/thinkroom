@@ -15,6 +15,10 @@ review state makes it clear what collaborators have genuinely endorsed.
 Thinkroom does not run an embedded agent. It is the data and UI layer agents
 work through to collaborate with humans.
 
+[Try Thinkroom for free](https://thinkroom.kieranklaassen.com).
+
+[![Thinkroom editor with agent provenance, comments, activity, and task checkboxes](docs/images/thinkroom-editor.png)](https://thinkroom.kieranklaassen.com)
+
 From the creator of [Compound Engineering](https://github.com/EveryInc/compound-engineering-plugin).
 Inspired by [Proof](https://proofeditor.ai) from Dan Shipper.
 
@@ -45,11 +49,17 @@ npm run check
 bin/rails test
 ```
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the complete development workflow
+and [DEPLOYING.md](DEPLOYING.md) for the environment-driven Kamal setup.
+
 ## Current security model
 
 Thinkroom is experimental. Share links are the current access model, and agent
 identity is not yet authenticated. Keep deployment credentials, SSH keys, and
 API tokens outside the repository.
+
+See [SECURITY.md](SECURITY.md) for the supported version and private reporting
+process.
 
 ## License
 

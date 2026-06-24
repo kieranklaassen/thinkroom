@@ -1,4 +1,6 @@
 class SuggestionsController < InertiaController
+  rate_limit_contributions
+
   before_action :set_suggestion, only: [ :accept, :reopen, :reject ]
 
   # Browser-facing suggest-a-change (Suggest mode). Mirrors comments#create:

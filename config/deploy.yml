@@ -1,15 +1,18 @@
-service: pruf
-image: kieranklaassen/pruf
+service: <%= ENV.fetch("KAMAL_SERVICE") %>
+image: <%= ENV.fetch("KAMAL_IMAGE") %>
 
 servers:
   web:
-    - cora-hetzner
+<% ENV.fetch("KAMAL_HOSTS").split(",").map(&:strip).reject(&:empty?).each do |host| %>
+    - <%= host %>
+<% end %>
 
 proxy:
   ssl: true
   hosts:
-    - thinkroom.kieranklaassen.com
-    - pruf.kieranklaassen.com
+<% ENV.fetch("KAMAL_PROXY_HOSTS").split(",").map(&:strip).reject(&:empty?).each do |host| %>
+    - <%= host %>
+<% end %>
   buffering:
     requests: true
     responses: true
@@ -17,8 +20,8 @@ proxy:
     max_request_body: 3_407_872
 
 registry:
-  server: ghcr.io
-  username: kieranklaassen
+  server: <%= ENV.fetch("KAMAL_REGISTRY_SERVER", "ghcr.io") %>
+  username: <%= ENV.fetch("KAMAL_REGISTRY_USERNAME") %>
   password:
     - KAMAL_REGISTRY_PASSWORD
 
@@ -36,14 +39,16 @@ aliases:
   dbc: app exec --interactive --reuse "bin/rails dbconsole"
 
 volumes:
-  - "pruf_storage:/rails/storage"
+  - "<%= ENV.fetch("KAMAL_STORAGE_VOLUME") %>:/rails/storage"
 
 # Keep fingerprinted Vite assets available while the proxy drains an old release.
 asset_path: /rails/public/vite
 
 builder:
-  arch: amd64
-  remote: ssh://ubuntu@cora-hetzner
+  arch: <%= ENV.fetch("KAMAL_BUILDER_ARCH", "amd64") %>
+<% unless ENV["KAMAL_BUILDER_REMOTE"].to_s.empty? %>
+  remote: <%= ENV.fetch("KAMAL_BUILDER_REMOTE") %>
+<% end %>
 
 ssh:
-  user: ubuntu
+  user: <%= ENV.fetch("KAMAL_SSH_USER", "root") %>

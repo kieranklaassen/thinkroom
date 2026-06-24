@@ -1,4 +1,6 @@
 class CommentsController < InertiaController
+  rate_limit_contributions
+
   def create
     document = Document.find_by!(slug: params[:slug])
     Comment.post!(

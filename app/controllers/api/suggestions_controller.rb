@@ -1,5 +1,7 @@
 module Api
   class SuggestionsController < BaseController
+    rate_limit_contributions
+
     before_action :require_agent!
 
     # POST /api/docs/:slug/suggestions — propose an edit. It appears live in
