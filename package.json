@@ -10,7 +10,7 @@
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.1",
     "@handlewithcare/prosemirror-suggest-changes": "^0.1.8",
-    "@inertiajs/react": "^3.3.1",
+    "@inertiajs/react": "^3.4.0",
     "@inertiajs/vite": "^3.3.1",
     "@milkdown/kit": "7.21.2",
     "@milkdown/plugin-collab": "7.21.2",
