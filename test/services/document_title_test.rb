@@ -13,7 +13,7 @@ class DocumentTitleTest < ActiveSupport::TestCase
   test "extracts an HTML H1 while ignoring markup" do
     title = DocumentTitle.call(
       format: "html",
-      content: '<h1>HTML <span data-provenance>title</span></h1><h1>Later</h1>'
+      content: "<h1>HTML <span data-provenance>title</span></h1><h1>Later</h1>"
     )
 
     assert_equal "HTML title", title

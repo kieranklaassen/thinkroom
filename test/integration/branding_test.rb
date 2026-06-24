@@ -7,7 +7,7 @@ class BrandingTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_includes response.body, "<title data-inertia>Thinkroom</title>"
     assert_includes response.body, '<meta name="application-name" content="Thinkroom">'
-    assert_includes response.body, '/icon.svg?v=thinkroom'
+    assert_includes response.body, "/icon.svg?v=thinkroom"
     refute_includes response.body, ">Pruf<"
   end
 
