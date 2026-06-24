@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import * as Y from 'yjs'
+import type { Ctx } from '@milkdown/kit/ctx'
 import {
   Editor,
   editorViewCtx,
@@ -28,7 +29,8 @@ import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
 import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight'
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import { CableProvider } from './cable_provider'
+import type { Node as ProseNode } from '@milkdown/kit/prose/model'
+import { CableProvider, type DurableSnapshotPayload } from './cable_provider'
 import { lazyShikiParser, loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
 import type { UserIdentity } from './identity'
@@ -56,7 +58,9 @@ import {
   trashIcon,
 } from './table_icons'
 import { agentCursors } from './agent_cursors'
+import { configureCleanClipboard } from './clipboard'
 import { renderSoftBreaks } from './line_breaks'
+import { interactiveTaskListItems, taskPersistenceCtx } from './task_list_items'
 import { selectionCallbackCtx, selectionWatcher } from './selection_watcher'
 import { postJSON } from '../lib/csrf'
 import {
@@ -105,13 +109,46 @@ interface EditorProps {
    *  suggesting off, so a pre-stored suggest mode can never wrap the seed
    *  template into suggestion marks. */
   suggesting?: boolean
+  /** Task controls can remain interactive while text editing is disabled,
+   *  as in Read mode. Defaults to the text editability setting. */
+  taskInteractive?: boolean
   onReady?: (handle: EditorHandle) => void
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
   onSelection?: (view: EditorView) => void
+  onTitleChange?: (title: string) => void
 }
 
 const SNAPSHOT_DEBOUNCE_MS = 900
+const OPENABLE_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:'])
+
+function openEditorLink(view: EditorView, event: Event): boolean {
+  if (!(event instanceof MouseEvent) || event.button !== 0 || event.defaultPrevented) {
+    return false
+  }
+
+  const target = event.target
+  const element =
+    target instanceof Element
+      ? target
+      : target instanceof Node
+        ? target.parentElement
+        : null
+  const anchor = element?.closest<HTMLAnchorElement>('a[href]')
+  if (!anchor || !view.dom.contains(anchor)) return false
+
+  let url: URL
+  try {
+    url = new URL(anchor.href, window.location.href)
+  } catch {
+    return false
+  }
+  if (!OPENABLE_LINK_PROTOCOLS.has(url.protocol)) return false
+
+  event.preventDefault()
+  window.open(url.href, '_blank', 'noopener,noreferrer')
+  return true
+}
 
 // Start loading shiki at import time so it's warm as early as possible. The
 // editor never waits on it: lazyShikiParser highlights synchronously once
@@ -119,6 +156,36 @@ const SNAPSHOT_DEBOUNCE_MS = 900
 // lazy-parser protocol. Content paint is gated on nothing.
 void loadShikiParser()
 const shikiParser = lazyShikiParser()
+
+function buildSnapshotPayload(
+  ctx: Ctx,
+  ydoc: Y.Doc,
+  contentFormat: DocumentFormat,
+): DurableSnapshotPayload {
+  const view = ctx.get(editorViewCtx)
+  const content =
+    contentFormat === 'html'
+      ? serializeHtml(view.state.doc, ctx.get(schemaCtx))
+      : getMarkdown()(ctx)
+  const spans = collectSpans(view.state.doc)
+  let binaryState = ''
+  Y.encodeStateVector(ydoc).forEach((byte) => {
+    binaryState += String.fromCharCode(byte)
+  })
+
+  return { content, spans, state_vector: btoa(binaryState) }
+}
+
+function firstHeadingTitle(doc: ProseNode): string | null {
+  let title: string | null = null
+  doc.descendants((node) => {
+    if (node.type.name !== 'heading' || node.attrs.level !== 1) return title === null
+
+    title = node.textContent.replace(/\s+/g, ' ').trim().slice(0, 255) || null
+    return false
+  })
+  return title
+}
 
 interface CollabSession {
   ydoc: Y.Doc
@@ -250,19 +317,23 @@ function CollabEditor({
   seedAuthorName,
   editable = true,
   suggesting = false,
+  taskInteractive = editable,
   onReady,
   onStatus,
   onSpans,
   onSelection,
+  onTitleChange,
 }: EditorProps) {
-  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection })
-  callbacksRef.current = { onReady, onStatus, onSpans, onSelection }
+  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange })
+  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange }
   // Ref so the editable() closure always reads the live value; the effect
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
   editableRef.current = editable
   const suggestingRef = useRef(suggesting)
   suggestingRef.current = suggesting
+  const taskInteractiveRef = useRef(taskInteractive)
+  taskInteractiveRef.current = taskInteractive
   // Suggesting only syncs into plugin state after start() — the gate that
   // keeps seed/initial-sync transactions out of the dispatch transform.
   const startedRef = useRef(false)
@@ -283,6 +354,11 @@ function CollabEditor({
             editable: () => editableRef.current,
             dispatchTransaction: suggestDispatch,
             transformPastedHTML: (html) => sanitizeHtml(html, 'external'),
+            handleDOMEvents: {
+              ...prev.handleDOMEvents,
+              click: (view, event) =>
+                prev.handleDOMEvents?.click?.(view, event) || openEditorLink(view, event),
+            },
           }))
           ctx.update(highlightPluginConfig.key, (prev) => ({
             ...prev,
@@ -294,6 +370,7 @@ function CollabEditor({
             uploader: imageUploader(identity.name),
             enableHtmlFileUploader: true,
           }))
+          configureCleanClipboard(ctx)
           renderSoftBreaks(ctx)
           // The defaults are bare text ('+', 'left', …) — real icons required.
           ctx.update(tableBlockConfig.key, (prev) => ({
@@ -321,6 +398,7 @@ function CollabEditor({
         })
         .use(commonmark)
         .use(gfm)
+        .use(interactiveTaskListItems)
         .use(tableBlock)
         .use(listener)
         .use(clipboard)
@@ -356,18 +434,7 @@ function CollabEditor({
     let cancelled = false
     const pushSnapshot = (attempt = 0) => {
       editor.action((ctx) => {
-        const view = ctx.get(editorViewCtx)
-        const content =
-          contentFormat === 'html'
-            ? serializeHtml(view.state.doc, ctx.get(schemaCtx))
-            : getMarkdown()(ctx)
-        const spans = collectSpans(view.state.doc)
-        let binaryState = ''
-        Y.encodeStateVector(ydoc).forEach((byte) => {
-          binaryState += String.fromCharCode(byte)
-        })
-        const stateVector = btoa(binaryState)
-        void postJSON(`/d/${slug}/snapshot`, { content, spans, state_vector: stateVector })
+        void postJSON(`/d/${slug}/snapshot`, buildSnapshotPayload(ctx, ydoc, contentFormat))
           .then((response) => {
             if (response.status === 409 && attempt < 3 && !cancelled) {
               if (snapshotRetryTimer) clearTimeout(snapshotRetryTimer)
@@ -402,6 +469,11 @@ function CollabEditor({
       editor.action((ctx) => {
         const service = ctx.get(collabServiceCtx)
         service.bindDoc(ydoc).setAwareness(provider.awareness)
+        ctx.set(taskPersistenceCtx.key, {
+          persist: () =>
+            provider.persistCurrentState(buildSnapshotPayload(ctx, ydoc, contentFormat)),
+          enabled: () => taskInteractiveRef.current,
+        })
         // Consume the seed one-shot: capture to locals before nulling so a
         // remounted editor never re-applies or re-attributes, and a later
         // refactor can't clear the author fields out from under the re-mark.
@@ -443,9 +515,14 @@ function CollabEditor({
           // snapshot path below stays unfiltered — persisted provenance must
           // remain complete while suggestions are pending.
           callbacksRef.current.onSpans?.(collectSpans(doc, { excludePendingInsertions: true }))
+          const title = firstHeadingTitle(doc)
+          if (title) callbacksRef.current.onTitleChange?.(title)
           if (snapshotTimer) clearTimeout(snapshotTimer)
           snapshotTimer = setTimeout(pushSnapshot, SNAPSHOT_DEBOUNCE_MS)
         })
+
+        const title = firstHeadingTitle(ctx.get(editorViewCtx).state.doc)
+        if (title) callbacksRef.current.onTitleChange?.(title)
       })
 
       const handle = { editor, ydoc, provider }
@@ -507,7 +584,7 @@ function CollabEditor({
       // view not mounted yet — the initial editable value applies at bind
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editable, loading])
+  }, [editable, taskInteractive, loading])
 
   // Mode flips after start: sync suggesting into the plugin state. Before
   // start, the ref alone carries the value — start() applies it post-seed.

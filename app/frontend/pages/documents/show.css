@@ -1,0 +1,33 @@
+/* Read mode is the clean document surface: no review gutters or provenance
+ * decoration, and unresolved tracked edits render as ordinary reading copy. */
+.doc-page.is-read-mode .doc-canvas {
+  max-width: var(--measure);
+}
+
+.doc-page.is-read-mode .milkdown .prov--ai,
+.doc-page.is-read-mode .milkdown ins.sug-ins {
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+.doc-page.is-read-mode .milkdown del.sug-del {
+  display: none;
+}
+
+.version-update {
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 0.22rem 0.5rem;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.version-update:hover {
+  border-color: var(--accent);
+}

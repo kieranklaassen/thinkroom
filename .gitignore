@@ -23,6 +23,7 @@
 # Secrets and env
 /config/master.key
 .env*
+/.kamal/secrets
 
 .DS_Store
 

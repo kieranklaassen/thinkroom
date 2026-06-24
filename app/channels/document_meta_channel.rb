@@ -7,9 +7,10 @@ class DocumentMetaChannel < ApplicationCable::Channel
     return reject unless document
 
     stream_for document
+    transmit({ event: "version", version: ENV.fetch("KAMAL_VERSION", "development") })
   end
 
-  def self.broadcast_event(document, event)
-    broadcast_to(document, { event: event.to_s })
+  def self.broadcast_event(document, event, **payload)
+    broadcast_to(document, { event: event.to_s, **payload })
   end
 end

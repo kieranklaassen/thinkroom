@@ -1,18 +1,20 @@
 import { useRef, useState } from 'react'
 import { useDismissable } from '../lib/use_dismissable'
 
-export type EditorMode = 'edit' | 'suggest' | 'comment'
+export type EditorMode = 'edit' | 'suggest' | 'comment' | 'read'
 
 export const MODE_LABELS: Record<EditorMode, string> = {
   edit: 'Edit',
   suggest: 'Suggest',
   comment: 'Comment',
+  read: 'Read',
 }
 
 const MODE_HINTS: Record<EditorMode, string> = {
   edit: 'Type directly into the document',
   suggest: 'Type directly — edits appear as tracked suggestions for review',
   comment: 'Read-only — click or select text to comment',
+  read: 'Clean reading view — links and checkboxes stay interactive',
 }
 
 interface Props {
@@ -24,7 +26,7 @@ interface Props {
 
 /**
  * Google-Docs-style mode switcher: a compact header dropdown showing the
- * current mode, opening to the three modes with hints. Per-visitor UI state
+ * current mode, opening to the four modes with hints. Per-visitor UI state
  * only — switching never affects other collaborators.
  */
 export function ModeControl({ mode, onChange, locked = false }: Props) {

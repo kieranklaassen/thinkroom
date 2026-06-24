@@ -4,7 +4,8 @@
 @plugin '@tailwindcss/forms';
 
 /* ---------------------------------------------------------------------------
- * Design tokens. The default ("proof") theme: warm paper, editorial type.
+ * Design tokens. The default Thinkroom theme retains the legacy "proof" key
+ * so existing preferences continue to work: warm paper, editorial type.
  * The "whitey" theme (Typora Whitey homage) overrides these on [data-theme].
  * ------------------------------------------------------------------------- */
 :root {
@@ -187,6 +188,12 @@ a:focus-visible {
   color: var(--ink-soft);
   line-height: 1.55;
   font-size: 0.95rem;
+}
+
+.landing-byline {
+  margin-top: 0.4rem;
+  color: var(--ink-faint);
+  font-size: 0.76rem;
 }
 
 .landing-actions {
@@ -829,47 +836,90 @@ a:focus-visible {
   color: var(--ink-faint);
 }
 
-/* Task lists. The gfm preset renders task items as bare
-   li[data-item-type='task'][data-checked] — no input element — so the
-   checkbox is drawn in the marker gutter with ::before. Toggling happens
-   by editing the [x] markdown; an interactive checkbox component is a
-   deferred follow-up. */
+/* Task lists use a native checkbox node view. The control lives outside the
+   ProseMirror content DOM, so toggling updates the node attribute without
+   inserting UI markup into serialized Markdown. */
 .milkdown .ProseMirror li[data-item-type='task'] {
   list-style: none;
   position: relative;
 }
 
-.milkdown .ProseMirror li[data-item-type='task']::before {
-  content: '';
+.milkdown .ProseMirror .task-checkbox-control {
   position: absolute;
   left: -1.45em;
   top: 0.3em;
-  width: 0.95em;
-  height: 0.95em;
+  display: inline-grid;
+  width: 1em;
+  height: 1em;
+  grid-template-columns: 1fr;
+}
+
+.milkdown .ProseMirror .task-checkbox,
+.milkdown .ProseMirror .task-checkbox-icon {
+  grid-column: 1;
+  grid-row: 1;
+  width: 100%;
+  height: 100%;
+}
+
+.milkdown .ProseMirror .task-checkbox {
+  appearance: none;
+  margin: 0;
   border: 1.5px solid var(--ink-faint);
   border-radius: 4px;
   background: var(--surface-raised);
+  cursor: pointer;
 }
 
-.milkdown .ProseMirror li[data-item-type='task'][data-checked='true']::before {
+.milkdown .ProseMirror .task-checkbox:not(:disabled):hover {
+  border-color: var(--accent);
+}
+
+.milkdown .ProseMirror .task-checkbox:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.milkdown .ProseMirror .task-checkbox:checked {
   background: var(--accent);
   border-color: var(--accent);
 }
 
-.milkdown .ProseMirror li[data-item-type='task'][data-checked='true']::after {
-  content: '';
-  position: absolute;
-  left: calc(-1.45em + 0.26em);
-  top: calc(0.3em + 0.2em);
-  width: 0.43em;
-  height: 0.24em;
-  border-left: 2px solid var(--surface-raised);
-  border-bottom: 2px solid var(--surface-raised);
-  transform: rotate(-45deg);
+.milkdown .ProseMirror .task-checkbox-icon {
+  pointer-events: none;
+  place-self: center;
+  stroke: var(--surface-raised);
+}
+
+.milkdown .ProseMirror .task-checkbox:not(:checked) + .task-checkbox-icon {
+  opacity: 0;
+}
+
+.milkdown .ProseMirror .task-checkbox:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .milkdown .ProseMirror li[data-item-type='task'][data-checked='true'] {
   color: var(--ink-soft);
+}
+
+@media (max-width: 40rem) {
+  .milkdown .ProseMirror .task-checkbox-control {
+    left: -1.55em;
+    width: 1.15em;
+    height: 1.15em;
+  }
+}
+
+@media (forced-colors: active) {
+  .milkdown .ProseMirror .task-checkbox {
+    appearance: auto;
+  }
+
+  .milkdown .ProseMirror .task-checkbox-icon {
+    display: none;
+  }
 }
 
 .milkdown .ProseMirror del {

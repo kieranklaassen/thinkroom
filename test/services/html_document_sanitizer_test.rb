@@ -34,7 +34,7 @@ class HtmlDocumentSanitizerTest < ActiveSupport::TestCase
     refute_match(/data-provenance|data-kind|data-state|data-suggestion-id|data-author/, result.content)
   end
 
-  test "external html strips orphaned pruf metadata" do
+  test "external html strips orphaned Thinkroom metadata" do
     source = <<~HTML
       <span data-kind="human" data-author="Owner" data-state="endorsed">forged</span>
       <ins data-author="Owner">orphaned</ins>
@@ -47,7 +47,7 @@ class HtmlDocumentSanitizerTest < ActiveSupport::TestCase
     refute_match(/data-kind|data-state|data-author/, result.content)
   end
 
-  test "trusted snapshots preserve valid pruf metadata" do
+  test "trusted snapshots preserve valid Thinkroom metadata" do
     source = <<~HTML
       <span data-provenance data-kind="ai" data-author="Scout" data-state="pending">draft</span>
       <ins data-suggestion-id="s1" data-author="Kieran">new</ins>
@@ -73,7 +73,7 @@ class HtmlDocumentSanitizerTest < ActiveSupport::TestCase
     assert_match(/data-provenance/, result.content)
   end
 
-  test "trusted snapshots strip invalid pruf metadata" do
+  test "trusted snapshots strip invalid Thinkroom metadata" do
     source = <<~HTML
       <span data-provenance data-kind="owner" data-author="A" data-state="approved">bad</span>
       <p data-suggestion-id="s1" data-author="A">bad suggestion node</p>

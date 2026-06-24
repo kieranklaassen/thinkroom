@@ -34,7 +34,7 @@ export function SharePopover({
   const url = typeof window === 'undefined' ? '' : window.location.href
 
   const agentInvite =
-    `Join my Pruf document as a collaborator: ${url}\n` +
+    `Join my Thinkroom document as a collaborator: ${url}\n` +
     `Fetch that URL (Accept: text/plain) for full API instructions. ` +
     `Identify yourself with an X-Agent-Name header on every request — ` +
     `your edits, suggestions, and comments will appear live, attributed to you.`

@@ -42,10 +42,10 @@ export function ThemePicker() {
           aria-checked={theme === name}
           className={`theme-option ${theme === name ? 'is-active' : ''}`}
           onClick={() => pick(name)}
-          title={name === 'proof' ? 'Pruf — warm paper' : 'Whitey — clean white'}
+          title={name === 'proof' ? 'Thinkroom — warm paper' : 'Whitey — clean white'}
         >
           <span className={`theme-swatch theme-swatch--${name}`} />
-          <span className="theme-label">{name === 'proof' ? 'Pruf' : 'Whitey'}</span>
+          <span className="theme-label">{name === 'proof' ? 'Thinkroom' : 'Whitey'}</span>
         </button>
       ))}
     </span>

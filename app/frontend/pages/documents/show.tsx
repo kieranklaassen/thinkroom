@@ -64,6 +64,7 @@ import {
   setStoredFlag,
   setStoredString,
 } from '../../lib/local_storage'
+import './show.css'
 
 export interface ActivityPayload {
   id: number
@@ -135,7 +136,7 @@ const modeKey = (slug: string) => `pruf:mode:${slug}`
 
 const readStoredMode = (slug: string): EditorMode => {
   const raw = getStoredString(modeKey(slug))
-  return raw === 'suggest' || raw === 'comment' ? raw : 'edit'
+  return raw === 'suggest' || raw === 'comment' || raw === 'read' ? raw : 'edit'
 }
 
 export default function DocumentShow({
@@ -153,6 +154,8 @@ export default function DocumentShow({
   const [identity, setIdentity] = useState<UserIdentity>(() => userIdentity(viewer.name))
   const [guest, setGuest] = useState(viewer.guest)
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
+  const [documentTitle, setDocumentTitle] = useState(doc.title)
+  const [newVersionAvailable, setNewVersionAvailable] = useState(false)
   const [handle, setHandle] = useState<EditorHandle | null>(null)
   const [spans, setSpans] = useState<ProvenanceSpan[]>([])
   const [peers, setPeers] = useState<UserIdentity[]>([])
@@ -173,6 +176,7 @@ export default function DocumentShow({
   const [mode, setMode] = useState<EditorMode>(() =>
     modeLocked ? 'edit' : readStoredMode(doc.slug),
   )
+  const isReading = mode === 'read'
   // handleSelection is a stable callback — it reads the live mode via ref.
   const modeRef = useRef(mode)
   modeRef.current = mode
@@ -194,6 +198,18 @@ export default function DocumentShow({
   useEffect(() => {
     if (!isMobile) setActiveSheet(null)
   }, [isMobile])
+
+  // Read mode has no text-targeted or review actions. Clear anything opened
+  // in another mode so switching always lands on a clean document view.
+  useEffect(() => {
+    if (!isReading) return
+    setReviewTarget(null)
+    setSelectionTarget(null)
+    setCommentTarget(null)
+    setComposerAnchor(null)
+    setSuggestionNotice(null)
+    setActiveSheet(null)
+  }, [isReading])
 
   // The comment composer lives in the comments panel — on mobile that means
   // opening its sheet when a selection chooses "Comment".
@@ -293,7 +309,11 @@ export default function DocumentShow({
     presencePoll.stop()
     router.visit('/')
   }, [presencePoll])
-  useMetaChannel(doc.slug, { onDeleted: onDocumentGone })
+  useMetaChannel(doc.slug, {
+    onDeleted: onDocumentGone,
+    onTitle: setDocumentTitle,
+    onVersionAvailable: () => setNewVersionAvailable(true),
+  })
 
   // The sync channel rejects its resubscription when the doc is gone —
   // same exit path.
@@ -378,6 +398,47 @@ export default function DocumentShow({
     const span = aiSpanAt(view.state)
     setReviewTarget(span ? { span } : null)
   }, [doc.content_format])
+
+  // Review/selection chrome belongs to the text that opened it. ProseMirror
+  // does not dispatch a selection transaction when focus moves to page
+  // chrome, so explicitly clear these transient targets on outside clicks.
+  // Keep clicks on the floating chrome itself alive so its actions still run.
+  useEffect(() => {
+    let editorClickRaf = 0
+    const clearTextTarget = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Element)) return
+      if (target.closest('.milkdown .ProseMirror')) {
+        // A dismissed popover leaves ProseMirror's cursor where it was. A
+        // second click on that exact span therefore produces no selection
+        // transaction, so explicitly re-evaluate provenance after the click.
+        if (target.closest('[data-provenance]')) {
+          if (editorClickRaf) cancelAnimationFrame(editorClickRaf)
+          editorClickRaf = requestAnimationFrame(() => {
+            editorClickRaf = 0
+            const view = viewRef.current
+            if (view) handleSelection(view)
+          })
+        }
+        return
+      }
+      if (
+        target.closest('.selection-toolbar, .review-popover, .comment-composer--anchored')
+      ) {
+        return
+      }
+
+      setReviewTarget(null)
+      setSelectionTarget(null)
+      setCommentTarget(null)
+    }
+
+    window.addEventListener('pointerdown', clearTextTarget, true)
+    return () => {
+      if (editorClickRaf) cancelAnimationFrame(editorClickRaf)
+      window.removeEventListener('pointerdown', clearTextTarget, true)
+    }
+  }, [handleSelection])
 
   // While a popover is open, any scroll or resize schedules one rAF-throttled
   // reposition pass (coordsAtPos for a single anchor is cheap).
@@ -483,7 +544,7 @@ export default function DocumentShow({
                     setSuggestionNotice(
                       reopened
                         ? 'The document changed before this suggestion could be merged. It was returned to pending.'
-                        : 'The document changed before this suggestion could be merged, and Pruf could not restore it to pending. Refresh before reviewing it again.',
+                        : 'The document changed before this suggestion could be merged, and Thinkroom could not restore it to pending. Refresh before reviewing it again.',
                     )
                     router.reload({ only: ['suggestions', 'activities'], async: true })
                   })
@@ -858,14 +919,16 @@ export default function DocumentShow({
 
   return (
     <>
-      <Head title={doc.title} />
-      <div className={`doc-page ${panelOpen ? '' : 'is-panel-hidden'}`}>
+      <Head title={documentTitle} />
+      <div
+        className={`doc-page ${panelOpen ? '' : 'is-panel-hidden'} ${isReading ? 'is-read-mode' : ''}`}
+      >
         <header className="doc-header">
           <div className="doc-header-left">
             <Link href="/" className="doc-home" aria-label="Home">
-              P.
+              T.
             </Link>
-            <span className="doc-title">{doc.title}</span>
+            <span className="doc-title">{documentTitle}</span>
             <span className="doc-format" aria-label={`Document format: ${doc.content_format}`}>
               {doc.content_format === 'html' ? 'HTML' : 'Markdown'}
             </span>
@@ -873,15 +936,24 @@ export default function DocumentShow({
               className={`doc-status doc-status--${status}`}
               title={status === 'live' ? 'Connected — edits sync live' : 'Connecting…'}
             />
+            {newVersionAvailable && (
+              <button
+                type="button"
+                className="version-update"
+                onClick={() => window.location.reload()}
+              >
+                New version · Update
+              </button>
+            )}
           </div>
           <div className="doc-header-right">
             {/* ≤4 groups: identity/presence · (mode control) · Share · ⋯ menu */}
             <div className="doc-header-people">
               <IdentityChip identity={identity} guest={guest} onRenamed={handleRenamed} />
-              <ProvenanceSummaryChip spans={spans} />
+              {!isReading && <ProvenanceSummaryChip spans={spans} />}
               <PresenceBar humans={peers} agents={presences} compact={isMobile} />
             </div>
-            {pendingSuggestionCount > 1 && (
+            {!isReading && pendingSuggestionCount > 1 && (
               <button
                 className="accept-all-button"
                 disabled={acceptingAll}
@@ -903,8 +975,10 @@ export default function DocumentShow({
             />
           </div>
         </header>
-        <ClaimBanner slug={doc.slug} ownership={ownership} claimerName={identity.name} />
-        {suggestionNotice && (
+        {!isReading && (
+          <ClaimBanner slug={doc.slug} ownership={ownership} claimerName={identity.name} />
+        )}
+        {!isReading && suggestionNotice && (
           <div className="doc-notice" role="status">
             <span>{suggestionNotice}</span>
             <button
@@ -928,41 +1002,45 @@ export default function DocumentShow({
                 seedGranted={doc.seed_granted}
                 seedAuthorKind={doc.seed_author_kind}
                 seedAuthorName={doc.seed_author_name}
-                editable={mode !== 'comment'}
+                editable={mode === 'edit' || mode === 'suggest'}
                 suggesting={mode === 'suggest'}
+                taskInteractive={mode !== 'comment'}
                 onReady={setHandle}
                 onStatus={setStatus}
                 onSpans={setSpans}
-                onSelection={handleSelection}
+                onSelection={isReading ? undefined : handleSelection}
+                onTitleChange={setDocumentTitle}
               />
             </article>
-            <div className="margin-gutter">
-              <MarginInlineSuggestions
-                inline={inlineSuggestions}
-                handle={handle}
-                spans={spans}
-                focusMode={focusMode || isMobile}
-              />
-              <MarginSuggestions
-                suggestions={visibleSuggestions}
-                handle={handle}
-                spans={spans}
-                focusMode={focusMode || isMobile}
-                contentFormat={doc.content_format}
-                onAccept={acceptSuggestion}
-                onReject={rejectSuggestion}
-                onMarkerSelect={
-                  isMobile
-                    ? (suggestion) => {
-                        setSheetFocusId(suggestion.id)
-                        setActiveSheet('suggestions')
-                      }
-                    : undefined
-                }
-              />
-            </div>
+            {!isReading && (
+              <div className="margin-gutter">
+                <MarginInlineSuggestions
+                  inline={inlineSuggestions}
+                  handle={handle}
+                  spans={spans}
+                  focusMode={focusMode || isMobile}
+                />
+                <MarginSuggestions
+                  suggestions={visibleSuggestions}
+                  handle={handle}
+                  spans={spans}
+                  focusMode={focusMode || isMobile}
+                  contentFormat={doc.content_format}
+                  onAccept={acceptSuggestion}
+                  onReject={rejectSuggestion}
+                  onMarkerSelect={
+                    isMobile
+                      ? (suggestion) => {
+                          setSheetFocusId(suggestion.id)
+                          setActiveSheet('suggestions')
+                        }
+                      : undefined
+                  }
+                />
+              </div>
+            )}
           </div>
-          {!isMobile && (
+          {!isReading && !isMobile && (
             <aside className="doc-rail">
               <CommentsPanel
                 comments={comments}
@@ -978,7 +1056,7 @@ export default function DocumentShow({
             </aside>
           )}
         </main>
-        {selectionTarget && selectionToolbarActive && (
+        {!isReading && selectionTarget && selectionToolbarActive && (
           <SelectionToolbar
             rootRef={selectionPopover.ref}
             position={selectionPopover.position}
@@ -993,7 +1071,7 @@ export default function DocumentShow({
             ]}
           />
         )}
-        {commentTarget && commentAffordanceActive && (
+        {!isReading && commentTarget && commentAffordanceActive && (
           <SelectionToolbar
             rootRef={commentAffordance.ref}
             position={commentAffordance.position}
@@ -1008,7 +1086,7 @@ export default function DocumentShow({
             ]}
           />
         )}
-        {liveReviewSpan && reviewActive && (
+        {!isReading && liveReviewSpan && reviewActive && (
           <ReviewPopover
             rootRef={reviewPopover.ref}
             span={liveReviewSpan}
@@ -1016,7 +1094,7 @@ export default function DocumentShow({
             onAdvance={handleAdvance}
           />
         )}
-        {composerOpen && composerAnchor !== null && (
+        {!isReading && composerOpen && composerAnchor !== null && (
           <AnchoredComposer
             key={composerAnchor}
             rootRef={composerPopover.ref}
@@ -1026,7 +1104,7 @@ export default function DocumentShow({
             onCancel={closeComposer}
           />
         )}
-        {isMobile && (
+        {!isReading && isMobile && (
           <MobileDock
             suggestionCount={visibleSuggestions.length + inlineSuggestions.length}
             commentCount={comments.filter((c) => !c.resolved).length}
@@ -1034,7 +1112,7 @@ export default function DocumentShow({
             onOpen={(kind) => setActiveSheet((current) => (current === kind ? null : kind))}
           />
         )}
-        {isMobile && activeSheet === 'suggestions' && (
+        {!isReading && isMobile && activeSheet === 'suggestions' && (
           <MobileSheet
             title={`Suggestions${visibleSuggestions.length + inlineSuggestions.length > 0 ? ` · ${visibleSuggestions.length + inlineSuggestions.length}` : ''}`}
             onClose={() => {
@@ -1053,7 +1131,7 @@ export default function DocumentShow({
             />
           </MobileSheet>
         )}
-        {isMobile && activeSheet === 'comments' && (
+        {!isReading && isMobile && activeSheet === 'comments' && (
           <MobileSheet title="Comments" onClose={() => setActiveSheet(null)}>
             <CommentsPanel
               comments={comments}
@@ -1068,7 +1146,7 @@ export default function DocumentShow({
             />
           </MobileSheet>
         )}
-        {isMobile && activeSheet === 'activity' && (
+        {!isReading && isMobile && activeSheet === 'activity' && (
           <MobileSheet title="Activity" onClose={() => setActiveSheet(null)}>
             <ActivityPanel activities={activities} />
           </MobileSheet>

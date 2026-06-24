@@ -26,6 +26,22 @@ const makePage = async (label) => {
 }
 
 try {
+  const landing = await browser.newPage()
+  await landing.goto(BASE)
+  await landing.waitForSelector('.landing-wordmark')
+  if ((await landing.locator('.landing-wordmark').innerText()) === 'Thinkroom') {
+    ok('landing page uses the Thinkroom wordmark')
+  } else {
+    fail('landing page does not use the Thinkroom wordmark')
+  }
+  if ((await landing.locator('.landing-tagline').innerText()) === 'Where deeper thinking compounds.') {
+    ok('landing page uses the approved Thinkroom tagline')
+  } else {
+    fail('landing page does not use the approved Thinkroom tagline')
+  }
+  await landing.locator('.landing-byline', { hasText: 'creator of Compound Engineering' }).waitFor()
+  await landing.close()
+
   const a = await makePage('a')
   await a.waitForSelector('.milkdown .ProseMirror', { timeout: 15000 })
   await a.waitForSelector('.doc-status--live', { timeout: 10000 })
@@ -68,6 +84,225 @@ try {
   if (headingOk) ok('## markdown input shortcut produced an h2')
   else fail('## input rule did not produce a heading')
   await c.close()
+
+  // The first H1 is the canonical document title: changing it updates this
+  // editor, collaborators, durable API state, and survives a reload.
+  const titleDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Original title', markdown: '# Original title\n\nBody.\n' }),
+    })
+  ).json()
+  const titleA = await browser.newPage()
+  const titleB = await browser.newPage()
+  await titleA.goto(`${BASE}/d/${titleDoc.slug}`)
+  await titleB.goto(`${BASE}/d/${titleDoc.slug}`)
+  await titleA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await titleB.waitForSelector('.doc-status--live', { timeout: 15000 })
+  const renamedTitle = `Renamed title ${Date.now()}`
+  await titleA.locator('.milkdown .ProseMirror h1').click({ clickCount: 3 })
+  await titleA.keyboard.type(renamedTitle)
+  const localTitleUpdated = await titleA
+    .locator('.doc-title', { hasText: renamedTitle })
+    .waitFor({ timeout: 500 })
+    .then(() => true)
+    .catch(() => false)
+  const remoteTitleUpdated = await titleB
+    .locator('.doc-title', { hasText: renamedTitle })
+    .waitFor({ timeout: 10000 })
+    .then(() => true)
+    .catch(() => false)
+  if (localTitleUpdated && remoteTitleUpdated) {
+    ok('editing H1 optimistically updates the title and syncs it live')
+  }
+  else fail('H1 and live document title diverged')
+  if ((await titleA.title()) === renamedTitle) ok('editing H1 updates the browser tab title')
+  else fail(`browser tab title diverged: ${JSON.stringify(await titleA.title())}`)
+  let persistedTitle = ''
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const titleState = await (await fetch(`${BASE}/api/docs/${titleDoc.slug}`)).json()
+    persistedTitle = titleState.title ?? ''
+    if (persistedTitle === renamedTitle) break
+    await titleA.waitForTimeout(300)
+  }
+  if (persistedTitle === renamedTitle) ok('H1 title persists to the API')
+  else fail(`H1 title did not persist: ${JSON.stringify(persistedTitle)}`)
+  await titleA.reload()
+  await titleA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  if ((await titleA.locator('.doc-title').innerText()) === renamedTitle) {
+    ok('H1 title survives reload')
+  } else {
+    fail('H1 title was lost on reload')
+  }
+  await titleA.close()
+  await titleB.close()
+
+  // Task lists: the rendered control must be a native, keyboard-focusable
+  // checkbox whose state round-trips through Markdown and collaborative Yjs.
+  const taskDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Task list check',
+        markdown: '- [ ] First task\n- [x] Second task\n',
+      }),
+    })
+  ).json()
+  const taskA = await browser.newPage()
+  const taskB = await browser.newPage()
+  let blockTaskWebSocketUpdates = false
+  await taskA.routeWebSocket(/\/cable(?:\?|$)/, (socket) => {
+    const server = socket.connectToServer()
+    socket.onMessage((message) => {
+      try {
+        const command = JSON.parse(String(message))
+        const data = command.data ? JSON.parse(command.data) : null
+        if (blockTaskWebSocketUpdates && data?.type === 'update') return
+      } catch {
+        // Non-Action-Cable frames pass through unchanged.
+      }
+      server.send(message)
+    })
+  })
+  await taskA.goto(`${BASE}/d/${taskDoc.slug}`)
+  await taskB.goto(`${BASE}/d/${taskDoc.slug}`)
+  await taskA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await taskB.waitForSelector('.doc-status--live', { timeout: 15000 })
+  const taskCheckboxes = taskA.locator(
+    '.milkdown .ProseMirror li[data-item-type="task"] input[type="checkbox"]',
+  )
+  if (
+    (await taskCheckboxes.count()) === 2 &&
+    !(await taskCheckboxes.nth(0).isChecked()) &&
+    (await taskCheckboxes.nth(1).isChecked())
+  ) {
+    ok('task items render native checkboxes with their Markdown state')
+  } else {
+    fail('task items did not render usable native checkboxes')
+  }
+  await taskCheckboxes.nth(0).check()
+  await taskB
+    .locator('.milkdown .ProseMirror li[data-item-type="task"] input[type="checkbox"]')
+    .nth(0)
+    .waitFor({ state: 'visible', timeout: 5000 })
+  await taskB.waitForFunction(
+    () =>
+      document.querySelector(
+        '.milkdown .ProseMirror li[data-item-type="task"] input[type="checkbox"]',
+      )?.checked === true,
+    { timeout: 10000 },
+  )
+  ok('checking a task syncs to another editor')
+
+  let taskMarkdown = ''
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const taskState = await (await fetch(`${BASE}/api/docs/${taskDoc.slug}`)).json()
+    taskMarkdown = taskState.markdown ?? ''
+    const plainTaskMarkdown = taskMarkdown.replace(/<\/?(?:span|ins|del)[^>]*>/g, '')
+    if (/^[*-] \[x\] First task/m.test(plainTaskMarkdown)) break
+    await taskA.waitForTimeout(300)
+  }
+  const plainTaskMarkdown = taskMarkdown.replace(/<\/?(?:span|ins|del)[^>]*>/g, '')
+  if (/^[*-] \[x\] First task/m.test(plainTaskMarkdown)) {
+    ok('checked task round-trips to [x] Markdown')
+  } else {
+    fail(`checked task did not persist: ${JSON.stringify(taskMarkdown)}`)
+  }
+  await taskA.reload()
+  await taskA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  if (await taskA.locator('.task-checkbox').nth(0).isChecked()) {
+    ok('checked task survives reload')
+  } else {
+    fail('checked task did not survive reload')
+  }
+
+  // A discrete click must be durable even if the user reloads immediately.
+  // This exercises the HTTP durability fallback rather than giving the
+  // WebSocket and debounced source snapshot time to settle first.
+  blockTaskWebSocketUpdates = true
+  await taskA.locator('.task-checkbox').nth(0).uncheck()
+  await taskA.reload()
+  await taskA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  if (!(await taskA.locator('.task-checkbox').nth(0).isChecked())) {
+    ok('task toggle survives an immediate reload')
+  } else {
+    fail('task toggle was lost during an immediate reload')
+  }
+
+  // Task completion is a direct checklist action even while text edits are
+  // tracked as suggestions. Attr-only task transactions must bypass the
+  // suggest-changes transform or the native control toggles without changing
+  // ProseMirror/Yjs and silently reverts on reload.
+  await taskA.evaluate(
+    (slug) => localStorage.setItem(`pruf:mode:${slug}`, 'suggest'),
+    taskDoc.slug,
+  )
+  await taskA.reload()
+  await taskA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await taskA.waitForFunction(
+    () => document.querySelector('.mode-control-trigger')?.textContent?.includes('Suggest'),
+    { timeout: 5000 },
+  )
+  await taskA.locator('.task-checkbox').nth(0).check()
+  await taskA.reload()
+  await taskA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  if (await taskA.locator('.task-checkbox').nth(0).isChecked()) {
+    ok('task toggle persists in Suggest mode')
+  } else {
+    fail('task toggle was dropped by Suggest mode')
+  }
+  let suggestTaskMarkdown = ''
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const taskState = await (await fetch(`${BASE}/api/docs/${taskDoc.slug}`)).json()
+    suggestTaskMarkdown = (taskState.markdown ?? '').replace(/<\/?(?:span|ins|del)[^>]*>/g, '')
+    if (/^[*-] \[x\] First task/m.test(suggestTaskMarkdown)) break
+    await taskA.waitForTimeout(300)
+  }
+  if (/^[*-] \[x\] First task/m.test(suggestTaskMarkdown)) {
+    ok('Suggest-mode task toggle persists to Markdown')
+  } else {
+    fail(`Suggest-mode task did not persist: ${JSON.stringify(suggestTaskMarkdown)}`)
+  }
+  await taskA.close()
+  await taskB.close()
+
+  // Clipboard: users should get portable Markdown, not Thinkroom's internal
+  // provenance/suggestion wrappers. Ordinary Markdown formatting must stay.
+  const clipboardDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'clipboard-check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Clipboard check',
+        markdown:
+          '# Checklist\n\n- [ ] **Keep formatting**\n\nA [useful link](https://example.com).\n',
+      }),
+    })
+  ).json()
+  const clipboardContext = await browser.newContext({
+    permissions: ['clipboard-read', 'clipboard-write'],
+  })
+  const clipboardPage = await clipboardContext.newPage()
+  await clipboardPage.goto(`${BASE}/d/${clipboardDoc.slug}`)
+  await clipboardPage.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await clipboardPage.locator('.milkdown .ProseMirror').click()
+  await clipboardPage.keyboard.press('Meta+A')
+  await clipboardPage.keyboard.press('Meta+C')
+  const copiedMarkdown = await clipboardPage.evaluate(() => navigator.clipboard.readText())
+  if (
+    copiedMarkdown.includes('# Checklist') &&
+    copiedMarkdown.includes('**Keep formatting**') &&
+    copiedMarkdown.includes('[useful link](https://example.com)') &&
+    !/<\/?(?:span|ins|del)\b/.test(copiedMarkdown) &&
+    !/data-(?:provenance|suggestion-id)/.test(copiedMarkdown)
+  ) {
+    ok('clipboard exports clean Markdown without activity tracking')
+  } else {
+    fail(`clipboard leaked activity markup: ${JSON.stringify(copiedMarkdown)}`)
+  }
+  await clipboardContext.close()
 
   // Soft breaks: single newlines in seeded markdown must render as visible
   // line breaks (metadata blocks like **Date:** / **Source:** / **Goal:**),
@@ -261,6 +496,29 @@ try {
   if (pendingAi > 0) ok('seeded AI spans render with pending tint')
   else fail('no pending AI spans found — seed provenance did not round-trip')
 
+  // Provenance review is a transient text-targeted affordance. Clicking
+  // anywhere outside the document should dismiss it instead of leaving a
+  // stale "Pending review" popover anchored to the last AI span.
+  await a.locator('.milkdown .prov--ai.prov--pending').first().click()
+  await a.locator('.review-popover').waitFor({ state: 'visible', timeout: 5000 })
+  await a.locator('.doc-title').click()
+  const reviewDismissed = await a
+    .locator('.review-popover')
+    .waitFor({ state: 'hidden', timeout: 1000 })
+    .then(() => true)
+    .catch(() => false)
+  if (reviewDismissed) ok('clicking outside the document dismisses provenance review')
+  else fail('provenance review stayed open after an outside click')
+  await a.locator('.milkdown .prov--ai.prov--pending').first().click()
+  const reviewReopened = await a
+    .locator('.review-popover')
+    .waitFor({ state: 'visible', timeout: 1000 })
+    .then(() => true)
+    .catch(() => false)
+  if (reviewReopened) ok('clicking the same agent text reopens provenance review')
+  else fail('dismissed provenance review did not reopen on the same text')
+  await a.locator('.doc-title').click()
+
   // Typed text gets human attribution in the DOM of the other window
   const humanSentinel = `human-${Date.now()}`
   await a.click('.milkdown .ProseMirror')
@@ -360,7 +618,7 @@ try {
   if (themeAfter === 'whitey') ok('theme persisted across reload')
   else fail(`theme lost on reload: ${themeAfter}`)
   await a.locator('.share-button').click()
-  await a.locator('.theme-option', { hasText: 'Pruf' }).click()
+  await a.locator('.theme-option', { hasText: 'Thinkroom' }).click()
   await a.keyboard.press('Escape')
 
   // --- Agent loop: an agent joins over plain HTTP while humans watch ---

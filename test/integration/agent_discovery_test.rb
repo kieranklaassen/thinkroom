@@ -26,6 +26,8 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_equal "text/plain", response.media_type
     assert_includes response.body, "agent guide"
+    assert_includes response.body, "Thinkroom share link"
+    refute_includes response.body, "Pruf share link"
     assert_includes response.body, "X-Agent-Name"
     assert_includes response.body, "/api/docs/#{@document.slug}"
   end

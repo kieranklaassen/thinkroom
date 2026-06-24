@@ -1,6 +1,8 @@
 Rails.application.routes.draw do
   root "documents#index"
 
+  get "manifest" => "pwa#manifest", as: :pwa_manifest
+
   resources :documents, only: :create
 
   post "identity", to: "identities#update", as: :identity
@@ -9,6 +11,7 @@ Rails.application.routes.draw do
   post "d/:slug/claim", to: "documents#claim", as: :claim_document
   delete "d/:slug", to: "documents#destroy", as: :destroy_document
   post "d/:slug/snapshot", to: "documents#snapshot", as: :document_snapshot
+  post "d/:slug/sync_update", to: "documents#sync_update", as: :document_sync_update
   post "d/:slug/suggestions", to: "suggestions#create", as: :document_suggestions
   patch "d/:slug/suggestions/accept_all", to: "suggestions#accept_all", as: :accept_all_document_suggestions
 
