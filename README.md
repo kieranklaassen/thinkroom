@@ -28,6 +28,7 @@ Inspired by [Proof](https://proofeditor.ai) from Dan Shipper.
 - Human and AI authorship provenance
 - Read, edit, comment, and suggest modes
 - Reviewable suggestions, anchored comments, and task checkboxes
+- Inline Excalidraw sketches with touch, Apple Pencil, and SVG export
 - Agent presence, activity, and a discoverable HTTP API
 - Local-first Yjs state synchronized through Action Cable
 

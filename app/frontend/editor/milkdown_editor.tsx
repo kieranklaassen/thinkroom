@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as Y from 'yjs'
 import type { Ctx } from '@milkdown/kit/ctx'
 import {
@@ -42,12 +42,21 @@ import {
   type ProvenanceSpan,
 } from './provenance'
 import { frontmatter } from './frontmatter'
+import {
+  attrsFromSketchData,
+  sketchControlsCtx,
+  sketchNodeViewPlugins,
+  sketchSchemaPlugins,
+  type SketchData,
+} from './sketch'
+import { SketchModal } from './sketch/sketch_modal'
 import { suggestChangesMarks } from './suggest_changes'
 import { suggestState, suggestDispatch } from './suggest_changes/intercept'
 import { suggestGuard } from './suggest_changes/normalize'
 import {
   enableSuggestChanges,
   disableSuggestChanges,
+  suggestChangesKey,
 } from '@handlewithcare/prosemirror-suggest-changes'
 import {
   alignCenterIcon,
@@ -74,6 +83,7 @@ export interface EditorHandle {
   editor: Editor
   ydoc: Y.Doc
   provider: CableProvider
+  openSketch: () => void
 }
 
 export type ConnectionStatus = 'connecting' | 'live'
@@ -324,6 +334,7 @@ function CollabEditor({
   onSelection,
   onTitleChange,
 }: EditorProps) {
+  const [sketchDraft, setSketchDraft] = useState<SketchData | null | undefined>(undefined)
   const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange })
   callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange }
   // Ref so the editable() closure always reads the live value; the effect
@@ -344,6 +355,10 @@ function CollabEditor({
         .config((ctx) => {
           ctx.set(rootCtx, root)
           ctx.set(provenanceIdentityCtx.key, { name: identity.name })
+          ctx.set(sketchControlsCtx.key, {
+            edit: (data) => setSketchDraft(data),
+            enabled: () => editableRef.current && !suggestingRef.current,
+          })
           // Read-only modes gate USER input only — ProseMirror still accepts
           // programmatic transactions (Yjs sync, seeding, suggestion accept).
           // dispatchTransaction is the suggest-changes wrapper: a pass-through
@@ -409,6 +424,8 @@ function CollabEditor({
         .use(upload)
         .use(provenance)
         .use(frontmatter)
+        .use(sketchSchemaPlugins)
+        .use(sketchNodeViewPlugins)
         .use(suggestChangesMarks)
         // Order matters: provenanceWriter (inside provenance) runs its
         // appendTransaction before suggestGuard's — the guard observes
@@ -525,7 +542,7 @@ function CollabEditor({
         if (title) callbacksRef.current.onTitleChange?.(title)
       })
 
-      const handle = { editor, ydoc, provider }
+      const handle = { editor, ydoc, provider, openSketch: () => setSketchDraft(null) }
       startedRef.current = true
       // Seed/initial sync ran with suggesting off; apply a pre-stored
       // suggest mode only now that the document content is settled.
@@ -604,7 +621,84 @@ function CollabEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggesting, loading])
 
-  return <Milkdown />
+  const saveSketch = (data: SketchData) => {
+    if (!editableRef.current || suggestingRef.current) return
+    const editor = get()
+    if (!editor) return
+    editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx)
+      const type = view.state.schema.nodes.thinkroomSketch
+      if (!type) return
+
+      let existingPos: number | null = null
+      view.state.doc.descendants((node, pos) => {
+        if (node.type === type && node.attrs.id === data.id) {
+          existingPos = pos
+          return false
+        }
+        return existingPos === null
+      })
+
+      const attrs = attrsFromSketchData(data)
+      const tr =
+        existingPos === null
+          ? view.state.tr.replaceSelectionWith(type.create(attrs)).scrollIntoView()
+          : view.state.tr.setNodeMarkup(existingPos, type, attrs)
+      tr.setMeta(SKIP_PROVENANCE, true)
+      tr.setMeta(suggestChangesKey, { skip: true })
+      view.dispatch(tr)
+
+      const session = sessions.get(slug)
+      if (session) void session.provider.persistCurrentState(buildSnapshotPayload(ctx, session.ydoc, contentFormat))
+    })
+    setSketchDraft(undefined)
+  }
+
+  const deleteSketch = (id: string) => {
+    if (!editableRef.current || suggestingRef.current) return
+    const editor = get()
+    if (!editor) return
+    editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx)
+      const type = view.state.schema.nodes.thinkroomSketch
+      if (!type) return
+
+      let targetPos = -1
+      let targetSize = 0
+      view.state.doc.descendants((node, pos) => {
+        if (node.type === type && node.attrs.id === id) {
+          targetPos = pos
+          targetSize = node.nodeSize
+          return false
+        }
+        return targetPos < 0
+      })
+      if (targetPos < 0) return
+
+      const tr = view.state.tr.delete(targetPos, targetPos + targetSize).scrollIntoView()
+      tr.setMeta(SKIP_PROVENANCE, true)
+      tr.setMeta(suggestChangesKey, { skip: true })
+      view.dispatch(tr)
+
+      const session = sessions.get(slug)
+      if (session) void session.provider.persistCurrentState(buildSnapshotPayload(ctx, session.ydoc, contentFormat))
+    })
+    setSketchDraft(undefined)
+  }
+
+  return (
+    <>
+      <Milkdown />
+      {sketchDraft !== undefined && (
+        <SketchModal
+          initialData={sketchDraft}
+          onCancel={() => setSketchDraft(undefined)}
+          onDelete={sketchDraft ? () => deleteSketch(sketchDraft.id) : undefined}
+          onSave={saveSketch}
+        />
+      )}
+    </>
+  )
 }
 
 export function DocumentEditor(props: EditorProps) {

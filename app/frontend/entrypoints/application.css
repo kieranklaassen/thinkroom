@@ -2725,3 +2725,230 @@ a:focus-visible {
     padding: 0.28rem 0.5rem !important;
   }
 }
+/* Inline sketch editor ---------------------------------------------------- */
+.sketch-modal-open {
+  overflow: hidden;
+}
+
+.sketch-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(20 18 15 / 54%);
+  backdrop-filter: blur(4px);
+}
+
+.sketch-modal {
+  width: min(1180px, 100%);
+  height: min(820px, calc(100dvh - 40px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-raised);
+  box-shadow: 0 24px 80px rgb(20 18 15 / 26%);
+}
+
+.sketch-modal-header,
+.sketch-modal-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 18px;
+}
+
+.sketch-modal-header {
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+}
+
+.sketch-modal-header h2 {
+  margin: 0;
+  font: 600 16px/1.3 var(--font-ui);
+}
+
+.sketch-modal-header p {
+  margin: 2px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.sketch-modal-actions,
+.sketch-modal-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sketch-canvas-shell {
+  min-height: 0;
+  position: relative;
+  background: #fff;
+  touch-action: none;
+}
+
+.sketch-canvas-shell > div,
+.sketch-canvas-shell .excalidraw {
+  width: 100%;
+  height: 100%;
+}
+
+.sketch-loading {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.sketch-load-error {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  height: 100%;
+  padding: 24px;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+.sketch-load-error strong {
+  color: var(--ink);
+}
+
+.sketch-modal-footer {
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+}
+
+.sketch-description {
+  min-width: min(360px, 100%);
+  flex: 1;
+  display: grid;
+  gap: 5px;
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.sketch-description input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.sketch-button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  padding: 6px 11px;
+  font: 500 12px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.sketch-button:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.sketch-button-primary {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--surface-raised);
+}
+
+.sketch-button-danger {
+  border-color: rgb(161 55 44 / 35%);
+  color: #a1372c;
+}
+
+.sketch-error {
+  flex-basis: 100%;
+  margin: 0;
+  color: #a1372c;
+  font-size: 12px;
+}
+
+@media (max-width: 700px) {
+  .sketch-modal-backdrop { padding: 0; }
+  .sketch-modal { width: 100%; height: 100dvh; border: 0; border-radius: 0; }
+  .sketch-modal-header { align-items: flex-start; }
+  .sketch-modal-header p { display: none; }
+  .sketch-modal-footer-actions { width: 100%; }
+}
+
+.sketch-insert-button {
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  padding: 5px 9px;
+  font: 500 12px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.sketch-insert-button:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.sketch-insert-button:disabled {
+  opacity: 0.45;
+}
+
+.thinkroom-sketch {
+  width: 100%;
+  margin: 24px 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(20 18 15 / 4%);
+}
+
+.thinkroom-sketch.is-editable {
+  cursor: pointer;
+}
+
+.thinkroom-sketch.is-editable:hover,
+.thinkroom-sketch.is-selected {
+  border-color: color-mix(in srgb, var(--ink) 42%, transparent);
+  box-shadow: 0 0 0 2px rgb(38 35 31 / 7%);
+}
+
+.thinkroom-sketch-preview {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  max-height: 520px;
+  overflow: hidden;
+}
+
+.sketch-preview-svg {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+}
+
+.thinkroom-sketch-caption {
+  min-height: 34px;
+  margin: 0;
+  border-top: 1px solid var(--line);
+  padding: 9px 12px;
+  color: var(--ink-soft);
+  font: 500 12px/1.3 var(--font-ui);
+}
+
+@media (max-width: 700px) {
+  .sketch-insert-button { display: none; }
+  .thinkroom-sketch { margin: 18px 0; border-radius: 9px; }
+  .thinkroom-sketch-preview { min-height: 150px; }
+}

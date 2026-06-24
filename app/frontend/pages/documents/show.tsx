@@ -962,6 +962,16 @@ export default function DocumentShow({
                 {acceptingAll ? 'Accepting…' : `Accept all ${pendingSuggestionCount}`}
               </button>
             )}
+            {mode === 'edit' && (
+              <button
+                type="button"
+                className="sketch-insert-button"
+                disabled={!handle}
+                onClick={() => handle?.openSketch()}
+              >
+                Sketch
+              </button>
+            )}
             <ModeControl mode={mode} onChange={setMode} locked={modeLocked} />
             <SharePopover agentsActive={presences.length} onOpenChange={setShareOpen} />
             <HeaderMenu
