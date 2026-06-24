@@ -120,4 +120,72 @@ class HtmlDocumentSanitizerTest < ActiveSupport::TestCase
     assert_equal "text-align: right", fragment.at_css("th")["style"]
     assert_nil fragment.css("td")[1]["style"]
   end
+
+  test "trusted snapshots preserve valid sketch data but external html cannot forge it" do
+    scene = {
+      type: "excalidraw", version: 2, elements: [ { type: "text", text: "Review" } ],
+      appState: {}, files: {}
+    }.to_json
+    source = %(<figure data-thinkroom-sketch data-sketch-id="flow_1" data-format-version="1" data-description="Flow" data-scene="#{CGI.escapeHTML(scene)}"><figcaption>Flow</figcaption></figure>)
+
+    trusted = HtmlDocumentSanitizer.snapshot(source).content
+    external = HtmlDocumentSanitizer.external(source).content
+
+    assert_includes trusted, "data-thinkroom-sketch"
+    assert_includes trusted, "data-scene="
+    assert_includes trusted, "<figcaption>Flow</figcaption>"
+    refute_match(/data-thinkroom-sketch|data-scene|data-description|data-format-version/, external)
+    assert_includes external, "<figcaption>Flow</figcaption>"
+  end
+
+  test "trusted snapshots strip malformed or unsafe sketch data" do
+    scene = {
+      type: "excalidraw", version: 2,
+      elements: [ { type: "image", fileId: "remote" } ], files: { remote: {} }
+    }.to_json
+    source = %(<figure data-thinkroom-sketch data-sketch-id="unsafe_1" data-format-version="1" data-scene="#{CGI.escapeHTML(scene)}"><figcaption>Unsafe</figcaption></figure>)
+
+    result = HtmlDocumentSanitizer.snapshot(source).content
+
+    refute_match(/data-thinkroom-sketch|data-scene|data-format-version/, result)
+    assert_includes result, "Unsafe"
+  end
+
+  test "trusted snapshots strip sketches with oversized descriptions" do
+    scene = { type: "excalidraw", version: 2, elements: [], appState: {}, files: {} }.to_json
+    source = %(<figure data-thinkroom-sketch data-sketch-id="oversized" data-format-version="1" data-description="#{"a" * 501}" data-scene="#{CGI.escapeHTML(scene)}"><figcaption>Visible fallback</figcaption></figure>)
+
+    result = HtmlDocumentSanitizer.snapshot(source).content
+
+    refute_match(/data-thinkroom-sketch|data-scene|data-description/, result)
+    assert_includes result, "Visible fallback"
+  end
+
+  test "trusted snapshots strip sketch colors that could reference remote resources" do
+    scene = {
+      type: "excalidraw", version: 2,
+      elements: [ { type: "rectangle", strokeColor: "url(https://tracker.example/paint)" } ],
+      appState: {}, files: {}
+    }.to_json
+    source = %(<figure data-thinkroom-sketch data-sketch-id="remote_color" data-format-version="1" data-scene="#{CGI.escapeHTML(scene)}"><figcaption>Visible fallback</figcaption></figure>)
+
+    result = HtmlDocumentSanitizer.snapshot(source).content
+
+    refute_match(/data-thinkroom-sketch|tracker\.example/, result)
+    assert_includes result, "Visible fallback"
+  end
+
+  test "trusted snapshots strip malformed sketch point tuples" do
+    scene = {
+      type: "excalidraw", version: 2,
+      elements: [ { type: "arrow", points: [ nil, [ 1, 2 ] ] } ],
+      appState: {}, files: {}
+    }.to_json
+    source = %(<figure data-thinkroom-sketch data-sketch-id="bad_points" data-format-version="1" data-scene="#{CGI.escapeHTML(scene)}"><figcaption>Visible fallback</figcaption></figure>)
+
+    result = HtmlDocumentSanitizer.snapshot(source).content
+
+    refute_match(/data-thinkroom-sketch|data-scene/, result)
+    assert_includes result, "Visible fallback"
+  end
 end

@@ -120,6 +120,21 @@ class AgentGuide
           response_field: "normalized",
           warning_field: "warning",
           meaning: "When normalized is true, unsupported or unsafe source was removed or rewritten."
+        },
+        sketches: {
+          purpose: "Inline Excalidraw sketches remain editable in the human UI and expose text semantics to agents.",
+          markdown_source: "A fenced excalidraw block containing versioned JSON with id, description, and scene.",
+          html_source: "A trusted figure[data-thinkroom-sketch] snapshot; external HTML cannot set reserved sketch attributes.",
+          rendered_context: "plain_text emits the sketch description and text labels instead of raw scene JSON.",
+          canonical: "The Excalidraw scene is canonical; SVG is generated in the browser for preview, copy, and download.",
+          supported_elements: ThinkroomSketch::ELEMENT_TYPES,
+          limits: {
+            scene_max_bytes: ThinkroomSketch::MAX_SCENE_BYTES,
+            description_max_characters: ThinkroomSketch::MAX_DESCRIPTION_LENGTH,
+            elements_max: ThinkroomSketch::MAX_ELEMENTS,
+            points_max: ThinkroomSketch::MAX_POINTS,
+            embedded_images: false
+          }
         }
       }
       return contract unless format == "html"
@@ -131,7 +146,7 @@ class AgentGuide
           dropped_with_content: HtmlDocumentSanitizer::DROP_WITH_CONTENT,
           attributes: {
             supported: HtmlDocumentSanitizer::EXTERNAL_ATTRIBUTES,
-            reserved: "Thinkroom provenance and suggestion data attributes may appear in trusted snapshots; external source cannot set them."
+            reserved: "Thinkroom provenance, suggestion, and sketch data attributes may appear in trusted snapshots; external source cannot set them."
           },
           css: {
             supported: "Only text-align: left|center|right on th and td.",
@@ -160,6 +175,7 @@ class AgentGuide
         "Documents you create with source content are pre-attributed as 100% unreviewed AI prose. Before any editor session opens the doc, the provenance summary is derived from the seed source and replaced by the first editor snapshot.",
         "Connected editors see your suggestions, comments, and presence live over WebSocket — no refresh needed on their side.",
         "Reading state: use plain_text as working context and content when source fidelity matters. This document expects #{source_name} suggestion bodies. State may lag if no human has the document open — the Yjs CRDT state is always authoritative.",
+        "Sketches: inline Excalidraw scenes appear in content and are summarized in plain_text from their human description and text labels. Treat the scene as editable source and SVG as a derived browser export; embedded bitmap files are not supported.",
         "Suggestion targeting: use a unique quote from plain_text for replaces or anchor_text; source-formatted quotes are parsed too. A missing or ambiguous replaces target stays pending and changes nothing. A missing anchor_text falls back to appending if a human accepts it.",
         "Tracked changes use <ins data-suggestion-id> / <del data-suggestion-id> in the source snapshot. They are human-typed suggestions pending review, not your proposals, and are not resolvable through this API.",
         "Review is human-gated by design: accepting/rejecting suggestions and advancing review states happen in the editor, by humans. Your job is to propose well.",
@@ -211,6 +227,11 @@ class AgentGuide
         - rendered text in "plain_text"
         Humans edit the rendered document in the browser; ProseMirror/Yjs is
         internal — do not send editor JSON or CRDT data.
+
+        Inline Excalidraw sketches are versioned source blocks. Their editable
+        scene appears in content; plain_text gives you the human description
+        and text labels without raw scene JSON. SVG is a derived browser
+        preview/export, and embedded bitmap files are not supported.
 
         #{html_contract_text(document, base_url)}
         ## Participate

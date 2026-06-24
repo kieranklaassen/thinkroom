@@ -68,6 +68,30 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     refute_match(/onclick|script/, content)
   end
 
+  test "HTML snapshot preserves a valid sketch and exposes its semantics" do
+    document = Document.create!(
+      title: "HTML sketch",
+      content_format: "html",
+      content_snapshot: "<p>original</p>"
+    )
+    scene = {
+      type: "excalidraw", version: 2,
+      elements: [ { type: "text", text: "Review" }, { type: "rectangle" } ],
+      appState: { viewBackgroundColor: "#ffffff" }, files: {}
+    }.to_json
+    figure = %(<figure data-thinkroom-sketch data-sketch-id="flow_1" data-format-version="1" data-description="Approval flow" data-scene="#{CGI.escapeHTML(scene)}"><figcaption>Approval flow</figcaption></figure>)
+
+    post document_snapshot_path(document.slug), params: {
+      content: "<p>Before</p>#{figure}<p>After</p>",
+      spans: [],
+      state_vector: Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+    }, as: :json
+
+    assert_response :ok
+    assert_includes document.reload.content_snapshot, "data-thinkroom-sketch"
+    assert_equal "Before Sketch: Approval flow — Review After", document.plain_text
+  end
+
   test "HTML snapshot claims an image uploaded by the browser API" do
     upload = Tempfile.new([ "snapshot-image", ".png" ])
     upload.binmode

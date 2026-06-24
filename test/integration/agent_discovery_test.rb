@@ -55,6 +55,9 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert body["notes"].any? { |n| n.include?("content is canonical Markdown source") }
     assert body["notes"].any? { |n| n.include?("unique quote from plain_text") }
     assert_equal "markdown", body.dig("content_contract", "suggestion_body_format")
+    assert_includes body.dig("content_contract", "sketches", "markdown_source"), "excalidraw"
+    assert_equal false, body.dig("content_contract", "sketches", "limits", "embedded_images")
+    assert body["notes"].any? { |n| n.include?("inline Excalidraw") }
     refute body.dig("content_contract").key?("html")
   end
 
@@ -110,6 +113,7 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "canonical source in \"content\""
     assert_includes response.body, "ProseMirror/Yjs is"
     assert_includes response.body, "do not send editor JSON or CRDT data"
+    assert_includes response.body, "Inline Excalidraw sketches"
     assert_includes response.body, "missing or ambiguous replacement stays"
     assert_includes response.body, "creation permits no header"
     assert_includes response.body, "## HTML, CSS, and images"

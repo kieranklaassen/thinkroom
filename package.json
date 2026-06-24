@@ -8,6 +8,7 @@
     "vite-plugin-ruby": "^5.2.2"
   },
   "dependencies": {
+    "@excalidraw/excalidraw": "^0.18.1",
     "@handlewithcare/prosemirror-suggest-changes": "^0.1.8",
     "@inertiajs/react": "^3.3.1",
     "@inertiajs/vite": "^3.3.1",
@@ -39,5 +40,22 @@
     "check": "tsc -p tsconfig.app.json && tsc -p tsconfig.node.json",
     "check:html": "node script/html_document_check.mjs",
     "check:links": "node script/link_check.mjs"
+  },
+  "overrides": {
+    "@excalidraw/excalidraw": {
+      "nanoid": "3.3.12"
+    },
+    "@excalidraw/mermaid-to-excalidraw": {
+      "nanoid": "5.1.16"
+    },
+    "@chevrotain/cst-dts-gen": {
+      "lodash-es": "4.18.1"
+    },
+    "@chevrotain/gast": {
+      "lodash-es": "4.18.1"
+    },
+    "chevrotain": {
+      "lodash-es": "4.18.1"
+    }
   }
 }

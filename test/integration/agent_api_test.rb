@@ -85,8 +85,11 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal "html", contract["content_format"]
     assert_equal "content", contract["canonical_source_field"]
     assert_equal "plain_text", contract["rendered_text_field"]
+    assert_equal ThinkroomSketch::MAX_SCENE_BYTES,
+                 contract.dig("sketches", "limits", "scene_max_bytes")
     assert_includes contract.dig("html", "allowed_elements"), "table"
     assert_includes contract.dig("html", "allowed_elements"), "img"
+    assert_includes contract.dig("html", "allowed_elements"), "figure"
     assert_includes contract.dig("html", "css", "supported"), "text-align"
     assert_includes contract.dig("html", "css", "removed"), "<style> blocks"
     assert_equal "/api/uploads", URI(contract.dig("html", "images", "upload", "url")).path

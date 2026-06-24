@@ -268,6 +268,143 @@ try {
   await taskA.close()
   await taskB.close()
 
+  // Inline sketches: Excalidraw loads only on demand, Save creates one atom
+  // update, the lightweight SVG preview syncs, and agent-readable source
+  // survives reload. Non-edit modes remain preview-only.
+  const sketchDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Sketch check', markdown: '# Sketch check\n\nBody.\n' }),
+    })
+  ).json()
+  const sketchA = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  const sketchB = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  await Promise.all([
+    sketchA.goto(`${BASE}/d/${sketchDoc.slug}`),
+    sketchB.goto(`${BASE}/d/${sketchDoc.slug}`),
+  ])
+  await Promise.all([
+    sketchA.waitForSelector('.doc-status--live', { timeout: 15000 }),
+    sketchB.waitForSelector('.doc-status--live', { timeout: 15000 }),
+  ])
+  await sketchA.getByRole('button', { name: 'Sketch', exact: true }).click()
+  await sketchA.locator('.excalidraw').waitFor({ timeout: 15000 })
+  ok('sketch action lazy-loads the Excalidraw canvas')
+  await sketchA.getByTitle('Rectangle — R or 2').click()
+  const sketchCanvas = sketchA.locator('.excalidraw canvas').last()
+  const sketchBox = await sketchCanvas.boundingBox()
+  if (sketchBox) {
+    await sketchA.mouse.move(sketchBox.x + 300, sketchBox.y + 180)
+    await sketchA.mouse.down()
+    await sketchA.mouse.move(sketchBox.x + 520, sketchBox.y + 320, { steps: 8 })
+    await sketchA.mouse.up()
+  } else {
+    fail('Excalidraw canvas has no drawable bounds')
+  }
+  const sketchDescription = `Approval flow ${Date.now()}`
+  await sketchA.getByPlaceholder('e.g. Signup approval flow').fill(sketchDescription)
+  await sketchA.getByRole('button', { name: 'Save sketch' }).click()
+  await sketchA.locator('.thinkroom-sketch .sketch-preview-svg').waitFor({ timeout: 5000 })
+  await sketchB
+    .locator('.thinkroom-sketch-caption', { hasText: sketchDescription })
+    .waitFor({ timeout: 10000 })
+  ok('saved sketch renders as SVG and syncs to another editor')
+
+  let sketchState = null
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    sketchState = await (await fetch(`${BASE}/api/docs/${sketchDoc.slug}`)).json()
+    if (sketchState.content?.includes('```excalidraw') && sketchState.plain_text?.includes(sketchDescription)) break
+    await sketchA.waitForTimeout(250)
+  }
+  if (
+    sketchState?.content?.includes('```excalidraw') &&
+    sketchState.content.includes('"elements":[{"id"') &&
+    sketchState.plain_text.includes(sketchDescription)
+  ) {
+    ok('sketch source and human-readable semantics persist for agents')
+  } else {
+    fail(`sketch API contract did not persist: ${JSON.stringify(sketchState)}`)
+  }
+
+  await sketchA.reload()
+  await sketchA.locator('.thinkroom-sketch .sketch-preview-svg').waitFor({ timeout: 15000 })
+  if ((await sketchA.locator('.thinkroom-sketch-caption').innerText()) === sketchDescription) {
+    ok('editable sketch scene survives reload')
+  } else {
+    fail('sketch description or scene was lost on reload')
+  }
+  await sketchA.getByRole('button', { name: /Mode:/ }).click()
+  await sketchA.getByRole('option', { name: /^Read/ }).click()
+  await sketchA.locator('.thinkroom-sketch').click()
+  await sketchA.waitForTimeout(150)
+  if ((await sketchA.getByRole('dialog').count()) === 0) {
+    ok('Read mode keeps sketches preview-only')
+  } else {
+    fail('Read mode opened the sketch editor')
+  }
+  await sketchB.locator('.thinkroom-sketch').click()
+  await sketchB.getByRole('button', { name: 'Delete', exact: true }).click()
+  await sketchA.locator('.thinkroom-sketch').waitFor({ state: 'detached', timeout: 10000 })
+  await sketchB.reload()
+  if ((await sketchB.locator('.thinkroom-sketch').count()) === 0) {
+    ok('deleting a sketch syncs and survives reload')
+  } else {
+    fail('deleted sketch returned after reload')
+  }
+  await sketchA.close()
+  await sketchB.close()
+
+  const malformedSketch = JSON.stringify({
+    id: 'malformed_points',
+    formatVersion: 1,
+    description: 'Malformed sketch',
+    scene: {
+      type: 'excalidraw',
+      version: 2,
+      elements: [{ type: 'arrow', points: [null, null] }],
+      appState: {},
+      files: {},
+    },
+  })
+  const malformedDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Malformed sketch check',
+        markdown: `\`\`\`excalidraw\n${malformedSketch}\n\`\`\`\n`,
+      }),
+    })
+  ).json()
+  const malformedPage = await browser.newPage()
+  await malformedPage.goto(`${BASE}/d/${malformedDoc.slug}`)
+  await malformedPage.waitForSelector('.doc-status--live', { timeout: 15000 })
+  if (
+    (await malformedPage.locator('.thinkroom-sketch').count()) === 0 &&
+    (await malformedPage.locator('pre code').innerText()).includes('malformed_points')
+  ) {
+    ok('invalid sketch source stays visible without crashing the document')
+  } else {
+    fail('invalid sketch source was hidden or treated as an executable sketch')
+  }
+  await malformedPage.close()
+
+  const failedChunkContext = await browser.newContext()
+  const failedChunkPage = await failedChunkContext.newPage()
+  await failedChunkPage.route('**/vite-dev/editor/sketch/excalidraw_canvas.tsx*', (route) =>
+    route.abort(),
+  )
+  await failedChunkPage.goto(`${BASE}/d/${malformedDoc.slug}`)
+  await failedChunkPage.getByRole('button', { name: 'Sketch', exact: true }).click()
+  await failedChunkPage.locator('.sketch-load-error').waitFor({ timeout: 15000 })
+  if ((await failedChunkPage.locator('.milkdown .ProseMirror').count()) === 1) {
+    ok('canvas chunk failure leaves the document mounted')
+  } else {
+    fail('canvas chunk failure unmounted the document editor')
+  }
+  await failedChunkContext.close()
+
   // Clipboard: users should get portable Markdown, not Thinkroom's internal
   // provenance/suggestion wrappers. Ordinary Markdown formatting must stay.
   const clipboardDoc = await (
