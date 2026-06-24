@@ -65,6 +65,7 @@ class AgentGuide
         propose_suggestion: { method: "POST", url: "#{api_base}/suggestions",
                               headers: { "X-Agent-Name": "required", "Content-Type": "application/json" },
                               success_status: 201,
+                              rate_limits: contribution_rate_limits,
                               body: { body: "(required) #{source_name} you propose", intent: "(optional) one-line summary",
                                       anchor_text: "(optional) unique rendered text to insert after; missing anchors append on acceptance",
                                       replaces: "(optional) unique rendered text your proposal replaces; missing or ambiguous targets cannot apply" },
@@ -72,6 +73,7 @@ class AgentGuide
         comment: { method: "POST", url: "#{api_base}/comments",
                    headers: { "X-Agent-Name": "required", "Content-Type": "application/json" },
                    success_status: 201,
+                   rate_limits: contribution_rate_limits,
                    body: { body: "(required) what you want to say", anchor_text: "(optional) the doc text you're commenting on" },
                    purpose: "Leave a comment anchored to a text selection." },
         announce_presence: { method: "POST", url: "#{api_base}/presence",
@@ -90,6 +92,7 @@ class AgentGuide
         create_document: { method: "POST", url: "#{base_url}/api/docs",
                            headers: { "X-Agent-Name": "recommended", "Content-Type": "application/json" },
                            success_status: 201,
+                           rate_limits: document_creation_rate_limits,
                            body: { title: "(optional)", format: "markdown | html", content: "(required with explicit format; canonical source)" },
                            limits: { content_max_bytes: Document::MAX_CONTENT_BYTES },
                            content_contracts: {
@@ -161,7 +164,8 @@ class AgentGuide
         "Tracked changes use <ins data-suggestion-id> / <del data-suggestion-id> in the source snapshot. They are human-typed suggestions pending review, not your proposals, and are not resolvable through this API.",
         "Review is human-gated by design: accepting/rejecting suggestions and advancing review states happen in the editor, by humans. Your job is to propose well.",
         "Ownership: a human can claim a document in the browser; claimed docs show an owner in this payload (claimable: false means nobody can ever claim it, e.g. the demo). Claiming is browser-only (cookie-based) — agents cannot claim, so don't POST to any claim path. When a human claims, a claimed_document activity appears in the event feed with their name.",
-        "A claimed document can be deleted by its owner, after which every endpoint here returns 404. Treat a 404 on a previously-working slug as deletion, not an outage to retry."
+        "A claimed document can be deleted by its owner, after which every endpoint here returns 404. Treat a 404 on a previously-working slug as deletion, not an outage to retry.",
+        "Document creation, suggestion, and comment writes are rate-limited per source IP. A 429 response means retry later; inspect each endpoint's rate_limits field for the current windows."
       ]
       if document.html?
         notes.insert(
@@ -189,6 +193,10 @@ class AgentGuide
         You are an agent reading a Thinkroom share link. Humans see a live
         collaborative editor at this URL; you participate over plain HTTP.
         Everything you do appears live in their editors, attributed to you.
+
+        Document creation, suggestion, and comment writes are rate-limited per
+        source IP. A 429 response means retry later; the JSON guide exposes the
+        current windows in each write endpoint's rate_limits field.
 
         ## Identity
         Send your display name in an X-Agent-Name header on every request.
@@ -285,6 +293,29 @@ class AgentGuide
     end
 
     private
+
+    def document_creation_rate_limits
+      rate_limits(
+        burst: WriteRateLimited::DOCUMENT_CREATION_BURST_LIMIT,
+        daily: WriteRateLimited::DOCUMENT_CREATION_DAILY_LIMIT
+      )
+    end
+
+    def contribution_rate_limits
+      rate_limits(
+        burst: WriteRateLimited::CONTRIBUTION_BURST_LIMIT,
+        daily: WriteRateLimited::CONTRIBUTION_DAILY_LIMIT
+      )
+    end
+
+    def rate_limits(burst:, daily:)
+      {
+        by: "source_ip",
+        response_status: 429,
+        burst: { requests: burst, within_seconds: 10.minutes.to_i },
+        daily: { requests: daily, within_seconds: 1.day.to_i }
+      }
+    end
 
     def html_contract_text(document, base_url)
       return "" unless document.html?

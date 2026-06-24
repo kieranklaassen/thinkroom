@@ -1,5 +1,7 @@
 module Api
   class DocsController < BaseController
+    rate_limit_document_creation
+
     # POST /api/docs — create a typed source document, get back its slug.
     def create
       if params.key?(:content) && params.key?(:markdown)

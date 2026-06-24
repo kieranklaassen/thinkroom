@@ -20,6 +20,11 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_includes body["share_url"], "/d/#{body['slug']}"
     assert body["api"]["propose_suggestion"]["url"].present?
     assert body["api"]["upload_image"]["url"].present?
+    assert_equal 429, body.dig("api", "create_document", "rate_limits", "response_status")
+    assert_equal WriteRateLimited::DOCUMENT_CREATION_BURST_LIMIT,
+                 body.dig("api", "create_document", "rate_limits", "burst", "requests")
+    assert_equal WriteRateLimited::CONTRIBUTION_BURST_LIMIT,
+                 body.dig("api", "propose_suggestion", "rate_limits", "burst", "requests")
     assert_equal "markdown", body.dig("content_contract", "content_format")
     assert body.dig("content_contract", "immutable")
 

@@ -3,6 +3,8 @@ module Api
   # header and flows through everything: suggestion attribution, provenance
   # marks on accept, presence chips, and the activity feed.
   class BaseController < ActionController::API
+    include WriteRateLimited
+
     rescue_from ActiveRecord::RecordNotFound do
       render json: { error: "No document with that slug." }, status: :not_found
     end
@@ -12,6 +14,10 @@ module Api
     end
 
     private
+
+    def render_write_rate_limit
+      render json: { error: "Write rate limit exceeded; retry later." }, status: :too_many_requests
+    end
 
     def document
       @document ||= Document.find_by!(slug: params[:slug])

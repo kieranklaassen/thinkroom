@@ -1,5 +1,7 @@
 module Api
   class CommentsController < BaseController
+    rate_limit_contributions
+
     before_action :require_agent!
 
     # POST /api/docs/:slug/comments — leave a comment anchored to text.

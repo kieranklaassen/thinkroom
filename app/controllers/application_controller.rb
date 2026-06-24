@@ -1,4 +1,6 @@
 class ApplicationController < ActionController::Base
+  include WriteRateLimited
+
   # Only allow modern browsers supporting webp images, web push, badges, import maps, CSS nesting, and CSS :has.
   allow_browser versions: :modern
 
@@ -10,6 +12,10 @@ class ApplicationController < ActionController::Base
   before_action :ensure_owner_token
 
   private
+
+  def render_write_rate_limit
+    render plain: "Too many requests. Try again later.", status: :too_many_requests
+  end
 
   def ensure_owner_token
     return if cookies.signed[:owner_token].present?

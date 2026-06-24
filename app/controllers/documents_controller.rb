@@ -1,4 +1,6 @@
 class DocumentsController < InertiaController
+  rate_limit_document_creation
+
   def index
     # Your docs: claimed by this browser's ownership token, newest first.
     yours = Document.where(owner_token: owner_token).order(created_at: :desc).limit(50)
