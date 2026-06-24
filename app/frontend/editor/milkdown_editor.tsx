@@ -117,6 +117,35 @@ interface EditorProps {
 }
 
 const SNAPSHOT_DEBOUNCE_MS = 900
+const OPENABLE_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:'])
+
+function openEditorLink(view: EditorView, event: Event): boolean {
+  if (!(event instanceof MouseEvent) || event.button !== 0 || event.defaultPrevented) {
+    return false
+  }
+
+  const target = event.target
+  const element =
+    target instanceof Element
+      ? target
+      : target instanceof Node
+        ? target.parentElement
+        : null
+  const anchor = element?.closest<HTMLAnchorElement>('a[href]')
+  if (!anchor || !view.dom.contains(anchor)) return false
+
+  let url: URL
+  try {
+    url = new URL(anchor.href, window.location.href)
+  } catch {
+    return false
+  }
+  if (!OPENABLE_LINK_PROTOCOLS.has(url.protocol)) return false
+
+  event.preventDefault()
+  window.open(url.href, '_blank', 'noopener,noreferrer')
+  return true
+}
 
 // Start loading shiki at import time so it's warm as early as possible. The
 // editor never waits on it: lazyShikiParser highlights synchronously once
@@ -319,6 +348,11 @@ function CollabEditor({
             editable: () => editableRef.current,
             dispatchTransaction: suggestDispatch,
             transformPastedHTML: (html) => sanitizeHtml(html, 'external'),
+            handleDOMEvents: {
+              ...prev.handleDOMEvents,
+              click: (view, event) =>
+                prev.handleDOMEvents?.click?.(view, event) || openEditorLink(view, event),
+            },
           }))
           ctx.update(highlightPluginConfig.key, (prev) => ({
             ...prev,

@@ -37,6 +37,7 @@
   },
   "scripts": {
     "check": "tsc -p tsconfig.app.json && tsc -p tsconfig.node.json",
-    "check:html": "node script/html_document_check.mjs"
+    "check:html": "node script/html_document_check.mjs",
+    "check:links": "node script/link_check.mjs"
   }
 }
