@@ -11,6 +11,8 @@ interface MetaChannelOptions {
   onDeleted?: () => void
   /** Receives the canonical H1-derived title without reloading Yjs props. */
   onTitle?: (title: string) => void
+  /** Fired when this live tab reconnects to a different deployed build. */
+  onVersionAvailable?: (version: string) => void
 }
 
 /**
@@ -31,6 +33,9 @@ export function useMetaChannel(slug: string, options?: MetaChannelOptions): void
   onDeletedRef.current = options?.onDeleted
   const onTitleRef = useRef(options?.onTitle)
   onTitleRef.current = options?.onTitle
+  const onVersionAvailableRef = useRef(options?.onVersionAvailable)
+  onVersionAvailableRef.current = options?.onVersionAvailable
+  const loadedVersionRef = useRef<string | null>(null)
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
@@ -50,7 +55,15 @@ export function useMetaChannel(slug: string, options?: MetaChannelOptions): void
     const subscription = getConsumer().subscriptions.create(
       { channel: 'DocumentMetaChannel', slug },
       {
-        received: ({ event, title }: { event: string; title?: string }) => {
+        received: ({
+          event,
+          title,
+          version,
+        }: {
+          event: string
+          title?: string
+          version?: string
+        }) => {
           if (dead) return
           if (event === 'document_deleted') {
             handleGone()
@@ -58,6 +71,15 @@ export function useMetaChannel(slug: string, options?: MetaChannelOptions): void
           }
           if (event === 'title' && title) {
             onTitleRef.current?.(title)
+            return
+          }
+          if (event === 'version') {
+            if (!version) return
+            if (loadedVersionRef.current === null) {
+              loadedVersionRef.current = version
+            } else if (loadedVersionRef.current !== version) {
+              onVersionAvailableRef.current?.(version)
+            }
             return
           }
           pending.add(event)

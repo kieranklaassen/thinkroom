@@ -109,6 +109,9 @@ interface EditorProps {
    *  suggesting off, so a pre-stored suggest mode can never wrap the seed
    *  template into suggestion marks. */
   suggesting?: boolean
+  /** Task controls can remain interactive while text editing is disabled,
+   *  as in Read mode. Defaults to the text editability setting. */
+  taskInteractive?: boolean
   onReady?: (handle: EditorHandle) => void
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
@@ -314,6 +317,7 @@ function CollabEditor({
   seedAuthorName,
   editable = true,
   suggesting = false,
+  taskInteractive = editable,
   onReady,
   onStatus,
   onSpans,
@@ -328,6 +332,8 @@ function CollabEditor({
   editableRef.current = editable
   const suggestingRef = useRef(suggesting)
   suggestingRef.current = suggesting
+  const taskInteractiveRef = useRef(taskInteractive)
+  taskInteractiveRef.current = taskInteractive
   // Suggesting only syncs into plugin state after start() — the gate that
   // keeps seed/initial-sync transactions out of the dispatch transform.
   const startedRef = useRef(false)
@@ -466,6 +472,7 @@ function CollabEditor({
         ctx.set(taskPersistenceCtx.key, {
           persist: () =>
             provider.persistCurrentState(buildSnapshotPayload(ctx, ydoc, contentFormat)),
+          enabled: () => taskInteractiveRef.current,
         })
         // Consume the seed one-shot: capture to locals before nulling so a
         // remounted editor never re-applies or re-attributes, and a later
@@ -577,7 +584,7 @@ function CollabEditor({
       // view not mounted yet — the initial editable value applies at bind
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editable, loading])
+  }, [editable, taskInteractive, loading])
 
   // Mode flips after start: sync suggesting into the plugin state. Before
   // start, the ref alone carries the value — start() applies it post-seed.

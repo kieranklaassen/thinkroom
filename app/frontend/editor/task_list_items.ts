@@ -5,8 +5,13 @@ import type { EditorView, NodeView, NodeViewConstructor } from '@milkdown/kit/pr
 import { $ctx, $prose, $view } from '@milkdown/kit/utils'
 import { suggestChangesKey } from '@handlewithcare/prosemirror-suggest-changes'
 
-export const taskPersistenceCtx = $ctx<{ persist: (() => void) | null }, 'taskPersistence'>(
-  { persist: null },
+interface TaskControls {
+  persist: (() => void) | null
+  enabled: () => boolean
+}
+
+export const taskPersistenceCtx = $ctx<TaskControls, 'taskPersistence'>(
+  { persist: null, enabled: () => false },
   'taskPersistence',
 )
 
@@ -44,6 +49,7 @@ function taskListItemView(
   view: EditorView,
   getPos: () => number | undefined,
   persist: () => void,
+  enabled: () => boolean,
 ): NodeView {
   const dom = document.createElement('li')
   const control = document.createElement('span')
@@ -78,7 +84,7 @@ function taskListItemView(
     currentNode = node
     syncListItemAttributes(dom, node)
     checkbox.checked = node.attrs.checked === true
-    checkbox.disabled = !view.editable
+    checkbox.disabled = !enabled()
     checkbox.setAttribute(
       'aria-label',
       checkbox.checked ? 'Mark task incomplete' : 'Mark task complete',
@@ -87,7 +93,7 @@ function taskListItemView(
 
   const onChange = () => {
     const pos = getPos()
-    if (pos == null || !view.editable) {
+    if (pos == null || !enabled()) {
       sync(currentNode)
       return
     }
@@ -129,21 +135,25 @@ const taskListItemNodeView = $view(
   extendListItemSchemaForTask.node,
   (ctx): NodeViewConstructor => (node, view, getPos) => {
     if (node.attrs.checked == null) return plainListItemView(node)
-    return taskListItemView(node, view, getPos, () => {
-      ctx.get(taskPersistenceCtx.key).persist?.()
-    })
+    return taskListItemView(
+      node,
+      view,
+      getPos,
+      () => ctx.get(taskPersistenceCtx.key).persist?.(),
+      () => ctx.get(taskPersistenceCtx.key).enabled(),
+    )
   },
 )
 
-// Mode changes do not recreate node views. Keep the native controls' disabled
-// state aligned with ProseMirror's live editable setting on every view update.
-const taskListEditability = $prose(
-  () =>
+// Mode changes do not recreate node views. Keep native controls aligned with
+// the live task-interaction setting, which can differ from text editability.
+const taskListInteractivity = $prose(
+  (ctx) =>
     new Plugin({
       view: (view) => {
         const sync = () => {
           view.dom.querySelectorAll<HTMLInputElement>('.task-checkbox').forEach((checkbox) => {
-            checkbox.disabled = !view.editable
+            checkbox.disabled = !ctx.get(taskPersistenceCtx.key).enabled()
           })
         }
         sync()
@@ -155,5 +165,5 @@ const taskListEditability = $prose(
 export const interactiveTaskListItems = [
   taskPersistenceCtx,
   taskListItemNodeView,
-  taskListEditability,
+  taskListInteractivity,
 ].flat()
