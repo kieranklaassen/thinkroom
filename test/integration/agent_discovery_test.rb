@@ -54,8 +54,28 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert body["notes"].any? { |n| n.include?("creation permits no header") }
     assert body["notes"].any? { |n| n.include?("content is canonical Markdown source") }
     assert body["notes"].any? { |n| n.include?("unique quote from plain_text") }
+    assert_equal 2, body.dig("content_contract", "version") # bumped when markdown_source became an object
     assert_equal "markdown", body.dig("content_contract", "suggestion_body_format")
-    assert_includes body.dig("content_contract", "sketches", "markdown_source"), "excalidraw"
+    markdown_source = body.dig("content_contract", "sketches", "markdown_source")
+    assert_includes markdown_source["format"], "excalidraw"
+    assert_includes markdown_source.dig("schema", "formatVersion"), ThinkroomSketch::FORMAT_VERSION.to_s
+    assert_includes markdown_source.dig("schema", "id"), "a-zA-Z0-9"
+    assert_includes markdown_source.dig("schema", "height"), ThinkroomSketch::DEFAULT_HEIGHT.to_s
+    assert_equal %(must equal "excalidraw".), markdown_source.dig("schema", "scene", "type").split("(required) ").last
+    assert_includes markdown_source["recognition"], "Sketch:"
+    assert_includes markdown_source["recognition"], "—" # matches semantic_text's em-dash
+    assert_includes markdown_source["enforcement"], "id" # the editor-vs-create signal boundary
+    assert_includes markdown_source["reference"], "docs.excalidraw.com"
+    assert_includes markdown_source["example"], "```excalidraw"
+    # The documented example must actually pass server-side recognition, or the
+    # contract is teaching agents a payload the API would silently reject.
+    payload = JSON.parse(markdown_source["example"][/```excalidraw\n(.*?)\n```/m, 1])
+    parsed = ThinkroomSketch.parse(
+      JSON.generate(payload.fetch("scene")),
+      description: payload["description"], format_version: payload["formatVersion"]
+    )
+    assert parsed, "documented markdown_source.example must be recognized by ThinkroomSketch.parse"
+    assert_includes parsed.semantic_text, "Sketch: Human and AI agent edit the same Yjs room"
     assert_equal false, body.dig("content_contract", "sketches", "limits", "embedded_images")
     assert body["notes"].any? { |n| n.include?("inline Excalidraw") }
     refute body.dig("content_contract").key?("html")

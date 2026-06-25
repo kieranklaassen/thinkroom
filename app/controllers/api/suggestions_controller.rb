@@ -19,11 +19,23 @@ module Api
       )
       DocumentAsset.claim_from_html!(document:, source: suggestion.body) if document.html?
 
+      # A markdown suggestion can carry an excalidraw sketch fence; audit it so a
+      # malformed sketch is reported here rather than discovered only when a
+      # human accepts the suggestion and the editor renders "Invalid sketch".
+      sketch_audit = document.html? ? nil : MarkdownSketchAudit.call(suggestion.body)
+      normalized = suggestion.normalization_changed || sketch_audit&.unrecognized? || false
+      warning =
+        if suggestion.normalization_changed
+          "Unsupported HTML was removed or normalized."
+        else
+          sketch_audit&.warning_message
+        end
+
       render json: {
         suggestion: suggestion.as_props,
         status: "pending_human_review",
-        normalized: suggestion.normalization_changed,
-        warning: ("Unsupported HTML was removed or normalized." if suggestion.normalization_changed)
+        normalized: normalized,
+        warning: warning
       }, status: :created
     rescue ActionController::ParameterMissing
       source_name = document.html? ? "HTML" : "markdown"

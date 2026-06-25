@@ -114,7 +114,9 @@ class AgentGuide
 
     def content_contract(format, base_url)
       contract = {
-        version: 1,
+        # v2: sketches.markdown_source became a structured schema object (was a
+        # one-line string in v1). Consumers can branch on this to detect the shape.
+        version: 2,
         content_format: format,
         immutable: true,
         canonical_source_field: "content",
@@ -124,11 +126,30 @@ class AgentGuide
         normalization: {
           response_field: "normalized",
           warning_field: "warning",
-          meaning: "When normalized is true, unsupported or unsafe source was removed or rewritten."
+          meaning: "When normalized is true, unsupported or unsafe source was removed or rewritten, or an excalidraw block was not recognized as a valid sketch and was kept as a code block. The warning field explains what happened."
         },
         sketches: {
           purpose: "Inline Excalidraw sketches remain editable in the human UI and expose text semantics to agents.",
-          markdown_source: "A fenced excalidraw block containing versioned JSON with id, description, and scene.",
+          markdown_source: {
+            format: %(A fenced "excalidraw" code block whose body is a single JSON object (the SketchData wrapper). The fence language must be exactly "excalidraw".),
+            schema: {
+              formatVersion: "(required) integer, must equal #{ThinkroomSketch::FORMAT_VERSION}.",
+              id: %[(required) string matching /^[a-zA-Z0-9_-]{1,100}$/. Enforced by the editor — include it even though the create-time signal does not check it (see enforcement).],
+              description: "(optional) human summary up to #{ThinkroomSketch::MAX_DESCRIPTION_LENGTH} characters; surfaced in plain_text.",
+              height: "(required by the editor) integer reserved render height in pixels, #{ThinkroomSketch::MIN_HEIGHT}-#{ThinkroomSketch::MAX_HEIGHT}, default #{ThinkroomSketch::DEFAULT_HEIGHT}; out-of-range values are rejected by the editor (see enforcement).",
+              scene: {
+                type: %((required) must equal "excalidraw".),
+                version: "(required) integer greater than 0 (the Excalidraw scene version, e.g. 2).",
+                elements: %[(required) array of Excalidraw elements. Each element type must be one of #{ThinkroomSketch::ELEMENT_TYPES.join(", ")}; any strokeColor/backgroundColor must match /^(?:transparent|#[0-9a-f]{3,8})$/i; fileId and link are not allowed.],
+                appState: %[(optional) object; viewBackgroundColor must match the safe-color pattern. Only an allowlist of keys (theme, grid/zoom/scroll settings, viewBackgroundColor) is retained.],
+                files: "(required) must be exactly {} - embedded bitmap files are not supported."
+              }
+            },
+            example: markdown_sketch_example,
+            recognition: %(A recognized sketch renders in plain_text as "Sketch: <description> — <labels>". If plain_text instead echoes the raw scene JSON, the fence was not recognized; the create response then reports normalized: true with a warning.),
+            enforcement: %(The create-time signal (normalized/warning) validates the scene shape only. id and height are enforced when the editor opens the document, not at create — a scene with a missing/invalid id or out-of-range height returns normalized: false here yet still renders as "Invalid sketch" to humans, so follow this schema in full rather than relying on the absence of a warning.),
+            reference: "Excalidraw scene/element format and drawing semantics: https://docs.excalidraw.com/docs/codebase/json-schema"
+          },
           html_source: "A trusted figure[data-thinkroom-sketch] snapshot; external HTML cannot set reserved sketch attributes.",
           rendered_context: "plain_text emits the sketch description and text labels instead of raw scene JSON.",
           canonical: "The Excalidraw scene is canonical; SVG is generated in the browser for preview, copy, and download.",
@@ -180,7 +201,7 @@ class AgentGuide
         "Documents you create with source content are pre-attributed as 100% unreviewed AI prose. Before any editor session opens the doc, the provenance summary is derived from the seed source and replaced by the first editor snapshot.",
         "Connected editors see your suggestions, comments, and presence live over WebSocket — no refresh needed on their side.",
         "Reading state: use plain_text as working context and content when source fidelity matters. This document expects #{source_name} suggestion bodies. State may lag if no human has the document open — the Yjs CRDT state is always authoritative.",
-        "Sketches: inline Excalidraw scenes appear in content and are summarized in plain_text from their human description and text labels. Treat the scene as editable source and SVG as a derived browser export; embedded bitmap files are not supported.",
+        "Sketches: inline Excalidraw scenes appear in content and are summarized in plain_text from their human description and text labels. Treat the scene as editable source and SVG as a derived browser export; embedded bitmap files are not supported. To author one in Markdown, embed a fenced excalidraw block following content_contract.sketches.markdown_source (formatVersion, id, description, height, and a full excalidraw scene with type/version/appState/files) — copy its example to start. A recognized sketch shows in plain_text as \"Sketch: <description> — <labels>\"; raw scene JSON in plain_text means the block was not recognized, and the create response then returns normalized: true with a warning.",
         "Suggestion targeting: use a unique quote from plain_text for replaces or anchor_text; source-formatted quotes are parsed too. A missing or ambiguous replaces target stays pending and changes nothing. A missing anchor_text falls back to appending if a human accepts it.",
         "Tracked changes use <ins data-suggestion-id> / <del data-suggestion-id> in the source snapshot. They are human-typed suggestions pending review, not your proposals, and are not resolvable through this API.",
         "Review is human-gated by design: accepting/rejecting suggestions and advancing review states happen in the editor, by humans. Your job is to propose well.",
@@ -236,7 +257,14 @@ class AgentGuide
         Inline Excalidraw sketches are versioned source blocks. Their editable
         scene appears in content; plain_text gives you the human description
         and text labels without raw scene JSON. SVG is a derived browser
-        preview/export, and embedded bitmap files are not supported.
+        preview/export, and embedded bitmap files are not supported. Author one
+        with a fenced excalidraw block matching the JSON guide's
+        content_contract.sketches.markdown_source (formatVersion, id,
+        description, height, and a full excalidraw scene). When recognized,
+        plain_text reads "Sketch: <description> — <labels>"; raw scene JSON in
+        plain_text means it was not recognized. The Excalidraw scene/element
+        format and drawing semantics are documented at
+        https://docs.excalidraw.com/docs/codebase/json-schema.
 
         #{html_contract_text(document, base_url)}
         ## Participate
@@ -322,6 +350,18 @@ class AgentGuide
     end
 
     private
+
+    # A copy-pasteable, validation-passing markdown sketch fence. Agents drop
+    # this straight into content; it is recognized by ThinkroomSketch.parse and
+    # renders in plain_text as "Sketch: Human and AI agent edit the same Yjs
+    # room — Human". Kept on one JSON line so it survives a literal copy.
+    def markdown_sketch_example
+      <<~MARKDOWN
+        ```excalidraw
+        {"id":"flow1","formatVersion":1,"description":"Human and AI agent edit the same Yjs room","height":260,"scene":{"type":"excalidraw","version":2,"elements":[{"id":"r1","type":"rectangle","x":100,"y":100,"width":220,"height":90,"angle":0,"strokeColor":"#1e1e1e","backgroundColor":"#d3f9d8","fillStyle":"solid","strokeWidth":2,"strokeStyle":"solid","roughness":1,"opacity":100,"groupIds":[],"frameId":null,"roundness":{"type":3},"seed":1,"version":1,"versionNonce":1,"isDeleted":false,"boundElements":null,"updated":1,"link":null,"locked":false},{"id":"t1","type":"text","x":130,"y":132,"width":60,"height":25,"angle":0,"strokeColor":"#1e1e1e","backgroundColor":"transparent","fillStyle":"solid","strokeWidth":2,"strokeStyle":"solid","roughness":1,"opacity":100,"groupIds":[],"frameId":null,"roundness":null,"seed":1,"version":1,"versionNonce":1,"isDeleted":false,"boundElements":null,"updated":1,"link":null,"locked":false,"text":"Human","fontSize":20,"fontFamily":1,"textAlign":"left","verticalAlign":"top","containerId":null,"originalText":"Human","lineHeight":1.25,"baseline":18}],"appState":{"viewBackgroundColor":"#fffef9"},"files":{}}}
+        ```
+      MARKDOWN
+    end
 
     def document_creation_rate_limits
       rate_limits(

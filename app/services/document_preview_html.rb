@@ -4,9 +4,9 @@
 # it is ready; because both render the same content into the same prose styles,
 # the swap is seamless. See app/frontend/pages/documents/show.tsx (doc-editor-stack).
 class DocumentPreviewHtml
-  DEFAULT_SKETCH_HEIGHT = 448
-  MIN_SKETCH_HEIGHT = 180
-  MAX_SKETCH_HEIGHT = 1200
+  DEFAULT_SKETCH_HEIGHT = ThinkroomSketch::DEFAULT_HEIGHT
+  MIN_SKETCH_HEIGHT = ThinkroomSketch::MIN_HEIGHT
+  MAX_SKETCH_HEIGHT = ThinkroomSketch::MAX_HEIGHT
 
   class << self
     def call(format:, content:)

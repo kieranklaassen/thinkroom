@@ -4,6 +4,12 @@ class ThinkroomSketch
   MAX_DESCRIPTION_LENGTH = 500
   MAX_ELEMENTS = 500
   MAX_POINTS = 20_000
+  # Render-hint bounds for a sketch's reserved height. Enforced TS-side by
+  # normalizeSketchData; mirrored here as the single Ruby source of truth so the
+  # agent contract and the preview skeleton clamp cannot drift apart.
+  DEFAULT_HEIGHT = 448
+  MIN_HEIGHT = 180
+  MAX_HEIGHT = 1200
   ELEMENT_TYPES = %w[
     rectangle diamond ellipse line arrow freedraw text frame
   ].freeze
@@ -36,6 +42,26 @@ class ThinkroomSketch
 
       Parsed.new(scene:, description:, labels:, shape_types:)
     rescue JSON::ParserError, JSON::NestingError
+      nil
+    end
+
+    # Parse one markdown excalidraw fence body (the JSON inside a ```excalidraw
+    # block) into a Parsed sketch, or nil when the body is not a recognizable
+    # sketch. Centralizes the parse + rescue so the renderer (DocumentPlainText)
+    # and the create-time audit (MarkdownSketchAudit) recognize identically —
+    # and so a malformed body (non-Hash JSON, a value that can't be re-encoded,
+    # a missing scene) is reported as unrecognized rather than raising and
+    # 500ing the request that renders or audits it.
+    def parse_markdown_fence(code_text)
+      payload = JSON.parse(code_text.to_s)
+      return unless payload.is_a?(Hash)
+
+      parse(
+        JSON.generate(payload.fetch("scene")),
+        description: payload["description"],
+        format_version: payload["formatVersion"]
+      )
+    rescue JSON::ParserError, JSON::NestingError, JSON::GeneratorError, KeyError
       nil
     end
 
