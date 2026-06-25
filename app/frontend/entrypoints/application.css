@@ -741,20 +741,29 @@ a:focus-visible {
   min-height: 50vh;
 }
 
-/* booting + revealing: editor is an absolute overlay above the in-flow preview.
-   It is transparent, so the preview shows through any not-yet-painted region. */
+/* booting + revealing: the editor is an absolute overlay sharing the preview's
+   box; it doesn't intercept pointer events until it owns the flow at 'live'. */
 .doc-editor-stack[data-phase='booting'] .doc-live-editor,
 .doc-editor-stack[data-phase='revealing'] .doc-live-editor {
   position: absolute;
   inset: 0;
+  pointer-events: none;
 }
 
-/* While the preview is still mounted underneath (booting + revealing), the
-   live editor overlays it; don't let that overlay intercept pointer events
-   meant for the content until it fully takes over the flow at 'live'. */
-.doc-editor-stack[data-phase='booting'] .doc-live-editor,
-.doc-editor-stack[data-phase='revealing'] .doc-live-editor {
-  pointer-events: none;
+/* Exactly ONE text layer is ever visible — no doubled/ghosted text at the swap.
+   ProseMirror paints its content during boot, so a transparent editor overlaid
+   on the visible preview would render the same text twice (heavier/anti-aliased
+   shimmer), then drop to one layer when the preview is removed — a visible
+   flicker. Instead: while booting the preview is the sole visible layer and the
+   editor stays hidden behind it (still laid out, so Milkdown measures fine). The
+   instant the editor has painted (revealing, fired on onReady) we flip in a
+   single style recalc — reveal the editor and hide the preview — same content at
+   the same position, so the text never doubles and never blanks. */
+.doc-editor-stack[data-phase='booting'] .doc-live-editor {
+  visibility: hidden;
+}
+.doc-editor-stack[data-phase='revealing'] .doc-static-preview {
+  visibility: hidden;
 }
 
 .doc-static-preview {
