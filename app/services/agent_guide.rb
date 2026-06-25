@@ -132,9 +132,9 @@ class AgentGuide
             format: %(A fenced "excalidraw" code block whose body is a single JSON object (the SketchData wrapper). The fence language must be exactly "excalidraw".),
             schema: {
               formatVersion: "(required) integer, must equal #{ThinkroomSketch::FORMAT_VERSION}.",
-              id: %[(required) string matching /^[a-zA-Z0-9_-]{1,100}$/.],
+              id: %[(required) string matching /^[a-zA-Z0-9_-]{1,100}$/. Enforced by the editor — include it even though the create-time signal does not check it (see enforcement).],
               description: "(optional) human summary up to #{ThinkroomSketch::MAX_DESCRIPTION_LENGTH} characters; surfaced in plain_text.",
-              height: "(optional) integer reserved render height in pixels, #{ThinkroomSketch::MIN_HEIGHT}-#{ThinkroomSketch::MAX_HEIGHT}, default #{ThinkroomSketch::DEFAULT_HEIGHT}.",
+              height: "(required by the editor) integer reserved render height in pixels, #{ThinkroomSketch::MIN_HEIGHT}-#{ThinkroomSketch::MAX_HEIGHT}, default #{ThinkroomSketch::DEFAULT_HEIGHT}; out-of-range values are rejected by the editor (see enforcement).",
               scene: {
                 type: %((required) must equal "excalidraw".),
                 version: "(required) integer greater than 0 (the Excalidraw scene version, e.g. 2).",
@@ -144,7 +144,8 @@ class AgentGuide
               }
             },
             example: markdown_sketch_example,
-            recognition: %(A recognized sketch renders in plain_text as "Sketch: <description> - <labels>". If plain_text instead echoes the raw scene JSON, the fence was not recognized; the create response then reports normalized: true with a warning.),
+            recognition: %(A recognized sketch renders in plain_text as "Sketch: <description> — <labels>". If plain_text instead echoes the raw scene JSON, the fence was not recognized; the create response then reports normalized: true with a warning.),
+            enforcement: %(The create-time signal (normalized/warning) validates the scene shape only. id and height are enforced when the editor opens the document, not at create — a scene with a missing/invalid id or out-of-range height returns normalized: false here yet still renders as "Invalid sketch" to humans, so follow this schema in full rather than relying on the absence of a warning.),
             reference: "Excalidraw scene/element format and drawing semantics: https://docs.excalidraw.com/docs/codebase/json-schema"
           },
           html_source: "A trusted figure[data-thinkroom-sketch] snapshot; external HTML cannot set reserved sketch attributes.",

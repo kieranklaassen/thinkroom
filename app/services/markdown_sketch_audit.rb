@@ -13,37 +13,20 @@ class MarkdownSketchAudit
       source = content.to_s
       return Result.new(fence_count: 0, unrecognized_count: 0) if source.blank?
 
-      html = Commonmarker.to_html(
-        source,
-        plugins: { table: true, strikethrough: true, tasklist: true }
-      )
+      html = Commonmarker.to_html(source, plugins: DocumentPlainText::MARKDOWN_PLUGINS)
       fragment = Nokogiri::HTML5.fragment(html)
 
       fence_count = 0
       unrecognized_count = 0
       fragment.css('pre[lang="excalidraw"] > code').each do |node|
         fence_count += 1
-        unrecognized_count += 1 unless recognized?(node.text)
+        # ThinkroomSketch.parse_markdown_fence is the single recognition
+        # authority the renderer also uses, so a fence counts as unrecognized
+        # here exactly when DocumentPlainText would leave its raw JSON visible.
+        unrecognized_count += 1 unless ThinkroomSketch.parse_markdown_fence(node.text)
       end
 
       Result.new(fence_count:, unrecognized_count:)
-    end
-
-    private
-
-    # True only when the fence parses to the same Sketch ThinkroomSketch.parse
-    # would accept — the single recognition authority shared with the renderer.
-    def recognized?(source)
-      payload = JSON.parse(source)
-      return false unless payload.is_a?(Hash)
-
-      ThinkroomSketch.parse(
-        JSON.generate(payload.fetch("scene")),
-        description: payload["description"],
-        format_version: payload["formatVersion"]
-      ).present?
-    rescue JSON::ParserError, JSON::NestingError, KeyError
-      false
     end
   end
 end

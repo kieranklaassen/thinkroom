@@ -58,4 +58,20 @@ class DocumentPlainTextTest < ActiveSupport::TestCase
     assert_equal "Before Sketch: Approval flow — Draft, Review After",
                  DocumentPlainText.call(format: "html", content: html)
   end
+
+  test "leaves a malformed excalidraw fence body visible instead of raising" do
+    # Valid JSON but not a recognizable sketch: a bare array/number/string, and
+    # a number that overflows to Infinity (unencodable). Previously these raised
+    # TypeError/NoMethodError/JSON::GeneratorError and 500'd any request that
+    # rendered the document (create response, state read).
+    [
+      "```excalidraw\n[1,2,3]\n```",
+      "```excalidraw\n42\n```",
+      %(```excalidraw\n"hi"\n```),
+      %(```excalidraw\n{"formatVersion":1,"scene":{"type":"excalidraw","version":2,"elements":[],"x":1e309}}\n```)
+    ].each do |content|
+      result = assert_nothing_raised { DocumentPlainText.call(format: "markdown", content:) }
+      refute_includes result, "Sketch:" # not recognized as a sketch
+    end
+  end
 end

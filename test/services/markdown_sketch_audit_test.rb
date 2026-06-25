@@ -48,6 +48,16 @@ class MarkdownSketchAuditTest < ActiveSupport::TestCase
     assert result.unrecognized?
   end
 
+  test "treats valid-JSON-but-non-Hash and unencodable bodies as unrecognized without raising" do
+    # These bodies make DocumentPlainText's old code raise; the audit must agree
+    # (unrecognized) and never raise, since both run on the create request.
+    [ "[1,2,3]", "42", %("hi"), %({"formatVersion":1,"scene":{"type":"excalidraw","version":2,"elements":[],"x":1e309}}) ].each do |body|
+      result = assert_nothing_raised { MarkdownSketchAudit.call("```excalidraw\n#{body}\n```") }
+      assert_equal 1, result.fence_count, "body #{body.inspect} should be seen as a fence"
+      assert result.unrecognized?, "body #{body.inspect} should be unrecognized"
+    end
+  end
+
   test "ignores a non-excalidraw code block that merely holds a scene key" do
     fence = "```json\n#{JSON.generate({ formatVersion: 1, scene: { type: "excalidraw" } })}\n```"
 

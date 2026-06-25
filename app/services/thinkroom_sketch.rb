@@ -45,6 +45,26 @@ class ThinkroomSketch
       nil
     end
 
+    # Parse one markdown excalidraw fence body (the JSON inside a ```excalidraw
+    # block) into a Parsed sketch, or nil when the body is not a recognizable
+    # sketch. Centralizes the parse + rescue so the renderer (DocumentPlainText)
+    # and the create-time audit (MarkdownSketchAudit) recognize identically —
+    # and so a malformed body (non-Hash JSON, a value that can't be re-encoded,
+    # a missing scene) is reported as unrecognized rather than raising and
+    # 500ing the request that renders or audits it.
+    def parse_markdown_fence(code_text)
+      payload = JSON.parse(code_text.to_s)
+      return unless payload.is_a?(Hash)
+
+      parse(
+        JSON.generate(payload.fetch("scene")),
+        description: payload["description"],
+        format_version: payload["formatVersion"]
+      )
+    rescue JSON::ParserError, JSON::NestingError, JSON::GeneratorError, KeyError
+      nil
+    end
+
     private
 
     def valid_scene?(scene)

@@ -1,5 +1,9 @@
 class DocumentPlainText
   BLOCK_SEPARATOR = " "
+  # The canonical Commonmarker plugin set for rendering document markdown to the
+  # text projection agents read. MarkdownSketchAudit renders with the same set
+  # so its create-time recognition signal matches what this projection produces.
+  MARKDOWN_PLUGINS = { table: true, strikethrough: true, tasklist: true }.freeze
 
   class << self
     def call(format:, content:)
@@ -7,10 +11,7 @@ class DocumentPlainText
       html = if format == "html"
         source
       else
-        Commonmarker.to_html(
-          source,
-          plugins: { table: true, strikethrough: true, tasklist: true }
-        )
+        Commonmarker.to_html(source, plugins: MARKDOWN_PLUGINS)
       end
 
       fragment = Nokogiri::HTML5.fragment(html)
@@ -38,15 +39,11 @@ class DocumentPlainText
         end
       else
         fragment.css('pre[lang="excalidraw"] > code').each do |node|
-          payload = JSON.parse(node.text)
-          replace_with_semantics(
-            node.parent,
-            scene: JSON.generate(payload.fetch("scene")),
-            description: payload["description"],
-            format_version: payload["formatVersion"]
-          )
-        rescue JSON::ParserError, KeyError
-          # Leave malformed source visible instead of hiding data.
+          # A malformed body (unparseable, non-Hash, missing scene, or a value
+          # that can't be re-encoded) returns nil and is left visible instead of
+          # raising — the same outcome MarkdownSketchAudit reports as unrecognized.
+          parsed = ThinkroomSketch.parse_markdown_fence(node.text)
+          node.parent.replace(Nokogiri::XML::Text.new(parsed.semantic_text, node.parent.document)) if parsed
         end
       end
     end

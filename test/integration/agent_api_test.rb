@@ -421,6 +421,32 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_nil response.parsed_body["warning"]
   end
 
+  test "a malformed sketch fence body returns 201 with a warning, not a 500" do
+    # Valid JSON but not a Hash, and an unencodable number: these used to raise
+    # while building plain_text, 500ing the request after the doc was persisted.
+    [ "[1,2,3]", "42", %({"formatVersion":1,"scene":{"type":"excalidraw","version":2,"elements":[],"x":1e309}}) ].each do |body|
+      assert_difference -> { Document.count }, 1 do
+        post "/api/docs", params: { markdown: "```excalidraw\n#{body}\n```" }, headers: AGENT, as: :json
+      end
+      assert_response :created
+      body_json = response.parsed_body
+      assert body_json["slug"].present?, "agent must receive a slug, not an orphaned doc"
+      assert_equal true, body_json["normalized"]
+      assert_includes body_json["warning"], "excalidraw block"
+    end
+  end
+
+  test "an unrecognized sketch via the content field also reports the warning" do
+    bad = sketch_fence({ version: 1, id: "x", scene: { elements: [] } })
+    post "/api/docs", params: { format: "markdown", content: bad }, headers: AGENT, as: :json
+
+    assert_response :created
+    body = response.parsed_body
+    assert_equal "markdown", body["content_format"]
+    assert_equal true, body["normalized"]
+    assert_includes body["warning"], "excalidraw block"
+  end
+
   private
 
   def valid_sketch_fence
