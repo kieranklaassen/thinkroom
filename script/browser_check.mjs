@@ -430,6 +430,30 @@ try {
   } else {
     fail(`the sketch viewport changed ${reloadedViewportWidth - closedViewportWidth}px on reload`)
   }
+  const retinaContext = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    deviceScaleFactor: 2,
+  })
+  const retinaPage = await retinaContext.newPage()
+  await retinaPage.goto(`${BASE}/d/${sketchDoc.slug}`)
+  await retinaPage.locator('.thinkroom-sketch [data-renderer="excalidraw"]').waitFor({ timeout: 15000 })
+  const retinaPreviewFits = await retinaPage.locator('.thinkroom-sketch').evaluate((node) => {
+    const paper = node.querySelector('.sketch-preview-svg')?.getBoundingClientRect()
+    const drawing = node.querySelector('[data-excalidraw-scene]')?.getBoundingClientRect()
+    return Boolean(
+      paper && drawing &&
+      drawing.top >= paper.top - 0.5 &&
+      drawing.left >= paper.left - 0.5 &&
+      drawing.right <= paper.right + 0.5 &&
+      drawing.bottom <= paper.bottom + 0.5
+    )
+  })
+  if (retinaPreviewFits) {
+    ok('Retina Chrome renders the closed sketch in CSS pixels without 2x zoom')
+  } else {
+    fail('Retina Chrome device-scaled the closed sketch preview')
+  }
+  await retinaContext.close()
   await sketchA.getByRole('button', { name: /Mode:/ }).click()
   await sketchA.getByRole('option', { name: /^Read/ }).click()
   await sketchA.locator('.thinkroom-sketch').click()

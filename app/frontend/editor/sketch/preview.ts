@@ -290,8 +290,15 @@ export async function renderExactSketchPreview(
     height: viewportHeight,
     preserveAspectRatio: 'none',
   })
-  const exportedWidth = number(Number(exported.getAttribute('width')))
-  const exportedHeight = number(Number(exported.getAttribute('height')))
+  // Excalidraw may device-scale the SVG's width/height attributes (2× on a
+  // Retina display). The viewBox remains in stable scene/CSS coordinates,
+  // which is what the editor canvas and our outer viewport both use.
+  const exportedViewBox = exported.getAttribute('viewBox')
+    ?.trim()
+    .split(/[ ,]+/)
+    .map(Number)
+  const exportedWidth = number(exportedViewBox?.[2], Number(exported.getAttribute('width')))
+  const exportedHeight = number(exportedViewBox?.[3], Number(exported.getAttribute('height')))
   exported.setAttribute('x', String(topLeft.x))
   exported.setAttribute('y', String(topLeft.y))
   exported.setAttribute('width', String(exportedWidth * zoomValue))
