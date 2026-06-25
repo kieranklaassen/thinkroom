@@ -1,6 +1,14 @@
 class DocumentsController < InertiaController
   rate_limit_document_creation
 
+  # SSR is scoped to the document page only — #show server-renders the shell,
+  # header, and the static content_html preview into the initial HTML so the
+  # prose is on screen at first byte. Every other action (index, create, …)
+  # stays CSR. The lambda is instance_exec'd per request, so #index never
+  # pays for SSR. Browser-only branches of #show (agent UA / .txt / .json)
+  # return before the inertia render, so SSR never touches them.
+  inertia_config ssr_enabled: -> { action_name == "show" }
+
   def index
     # Signed-in ownership follows the account across browsers. Guests retain
     # the original permanent-cookie ownership model.
