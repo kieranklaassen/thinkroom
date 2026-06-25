@@ -66,8 +66,8 @@ module Api
       warning =
         if normalization&.changed?
           "Unsupported HTML was removed or normalized."
-        elsif sketch_audit&.unrecognized?
-          unrecognized_sketch_warning(sketch_audit.unrecognized_count)
+        else
+          sketch_audit&.warning_message
         end
 
       response = {
@@ -91,16 +91,6 @@ module Api
     def show
       touch_presence
       render json: AgentGuide.state(document, request.base_url)
-    end
-
-    private
-
-    def unrecognized_sketch_warning(count)
-      if count == 1
-        "An excalidraw block was not a valid sketch and was kept as a code block."
-      else
-        "#{count} excalidraw blocks were not valid sketches and were kept as code blocks."
-      end
     end
   end
 end

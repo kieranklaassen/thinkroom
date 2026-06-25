@@ -81,7 +81,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal body["content"], doc.seed_content
     assert_equal "agent", doc.seed_author_kind
     contract = body["content_contract"]
-    assert_equal 1, contract["version"]
+    assert_equal 2, contract["version"]
     assert_equal "html", contract["content_format"]
     assert_equal "content", contract["canonical_source_field"]
     assert_equal "plain_text", contract["rendered_text_field"]
@@ -151,6 +151,33 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert body["normalized"]
     assert_includes body["warning"], "normalized"
     assert_equal "<p>Better</p>", document.suggestions.last.body
+  end
+
+  test "markdown suggestion with an unrecognized sketch fence reports a warning" do
+    bad = sketch_fence({ version: 1, id: "x", scene: { elements: [] } })
+    post "/api/docs/#{@document.slug}/suggestions", params: { body: bad }, headers: AGENT, as: :json
+
+    assert_response :created
+    body = response.parsed_body
+    assert_equal true, body["normalized"]
+    assert_includes body["warning"], "excalidraw block"
+  end
+
+  test "markdown suggestion with a valid sketch fence reports clean success" do
+    post "/api/docs/#{@document.slug}/suggestions", params: { body: valid_sketch_fence }, headers: AGENT, as: :json
+
+    assert_response :created
+    body = response.parsed_body
+    assert_equal false, body["normalized"]
+    assert_nil body["warning"]
+  end
+
+  test "plain markdown suggestion stays unnormalized" do
+    post "/api/docs/#{@document.slug}/suggestions", params: { body: "A tighter intro." }, headers: AGENT, as: :json
+
+    assert_response :created
+    assert_equal false, response.parsed_body["normalized"]
+    assert_nil response.parsed_body["warning"]
   end
 
   test "explicit format validates content and legacy field compatibility" do

@@ -78,6 +78,14 @@ class MarkdownSketchAuditTest < ActiveSupport::TestCase
     assert result.unrecognized?
   end
 
+  test "warning_message is nil, singular, or pluralized by count" do
+    assert_nil MarkdownSketchAudit::Result.new(fence_count: 1, unrecognized_count: 0).warning_message
+    assert_includes MarkdownSketchAudit::Result.new(fence_count: 1, unrecognized_count: 1).warning_message,
+                    "An excalidraw block"
+    assert_includes MarkdownSketchAudit::Result.new(fence_count: 3, unrecognized_count: 2).warning_message,
+                    "2 excalidraw blocks"
+  end
+
   test "reports nothing for content with no fences or blank content" do
     assert_equal 0, MarkdownSketchAudit.call("# Just prose\n\nNo sketches here.").fence_count
     refute MarkdownSketchAudit.call("# Just prose").unrecognized?

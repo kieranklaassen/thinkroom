@@ -114,7 +114,9 @@ class AgentGuide
 
     def content_contract(format, base_url)
       contract = {
-        version: 1,
+        # v2: sketches.markdown_source became a structured schema object (was a
+        # one-line string in v1). Consumers can branch on this to detect the shape.
+        version: 2,
         content_format: format,
         immutable: true,
         canonical_source_field: "content",

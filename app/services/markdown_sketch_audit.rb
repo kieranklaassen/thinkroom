@@ -6,6 +6,19 @@
 class MarkdownSketchAudit
   Result = Data.define(:fence_count, :unrecognized_count) do
     def unrecognized? = unrecognized_count.positive?
+
+    # The agent-facing warning for unrecognized fences, or nil when every fence
+    # parsed. Lives next to the count so each API surface (create, suggestions)
+    # reports the same message without duplicating the pluralization.
+    def warning_message
+      return unless unrecognized?
+
+      if unrecognized_count == 1
+        "An excalidraw block was not a valid sketch and was kept as a code block."
+      else
+        "#{unrecognized_count} excalidraw blocks were not valid sketches and were kept as code blocks."
+      end
+    end
   end
 
   class << self

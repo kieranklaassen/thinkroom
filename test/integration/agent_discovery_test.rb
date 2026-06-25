@@ -54,6 +54,7 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert body["notes"].any? { |n| n.include?("creation permits no header") }
     assert body["notes"].any? { |n| n.include?("content is canonical Markdown source") }
     assert body["notes"].any? { |n| n.include?("unique quote from plain_text") }
+    assert_equal 2, body.dig("content_contract", "version") # bumped when markdown_source became an object
     assert_equal "markdown", body.dig("content_contract", "suggestion_body_format")
     markdown_source = body.dig("content_contract", "sketches", "markdown_source")
     assert_includes markdown_source["format"], "excalidraw"
