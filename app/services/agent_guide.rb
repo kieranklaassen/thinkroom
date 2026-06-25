@@ -361,8 +361,7 @@ class AgentGuide
         tables, and uploaded images. CSS is removed except text-align
         left/center/right on th and td. <style>, class/id hooks, scripts,
         embeds, SVG, remote images, data: images, and page metadata are removed.
-        For Markdown, send format="markdown" and Markdown in content. Legacy
-        clients may still send a top-level "markdown" field.
+        For Markdown, send Markdown in content (format defaults to "markdown").
 
         ## Ownership
         A human can claim a document in their browser; the claimed owner shows

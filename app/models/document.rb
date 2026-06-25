@@ -72,6 +72,15 @@ class Document < ApplicationRecord
     content_snapshot.nil? ? seed_content : content_snapshot
   end
 
+  # True while the seed is still what every reader sees: no editor has pushed a
+  # snapshot (content_snapshot nil) and no live CRDT exists (yjs_state blank).
+  # This is the only state where overwriting the seed actually changes what
+  # humans and agents read — once either is set, current_content shadows the
+  # seed, so a seed write would be a silent no-op.
+  def seed_stage?
+    content_snapshot.nil? && yjs_state.blank?
+  end
+
   def plain_text
     DocumentPlainText.call(format: content_format, content: current_content)
   end
