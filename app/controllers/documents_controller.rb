@@ -2,8 +2,13 @@ class DocumentsController < InertiaController
   rate_limit_document_creation
 
   def index
-    # Your docs: claimed by this browser's ownership token, newest first.
-    yours = Document.where(owner_token: owner_token).order(created_at: :desc).limit(50)
+    # Signed-in ownership follows the account across browsers. Guests retain
+    # the original permanent-cookie ownership model.
+    yours = if current_user
+      current_user.documents.order(created_at: :desc).limit(50)
+    else
+      Document.where(owner_token: owner_token).order(created_at: :desc).limit(50)
+    end
     your_slugs = yours.map(&:slug).to_set
 
     # Recents are session-scoped: you see the documents you opened, not a
@@ -17,7 +22,10 @@ class DocumentsController < InertiaController
       # inline claim affordance. Render-time staleness is fine: the claim
       # POST is race-tolerant and the scoped reload reconciles the lists.
       recent: slugs.filter_map { |slug| docs[slug] unless your_slugs.include?(slug) }
-                   .map { |d| d.slice(:title, :slug, :content_format).merge(d.ownership_props(owner_token)) }
+                   .map do |d|
+                     d.slice(:title, :slug, :content_format)
+                       .merge(d.ownership_props(owner_token, viewer_user: current_user))
+                   end
     }
   end
 
@@ -59,7 +67,7 @@ class DocumentsController < InertiaController
       ),
       # Ownership rides its own lazy prop so claim events reload cheaply —
       # never re-shipping the Yjs state embedded in the document prop above.
-      ownership: -> { document.ownership_props(owner_token) },
+      ownership: -> { document.ownership_props(owner_token, viewer_user: current_user) },
       suggestions: -> { document.suggestions.pending.order(:created_at).map(&:as_props) },
       comments: -> { document.comments.order(:created_at).map(&:as_props) },
       activities: -> { document.activities.recent.map(&:as_props) },
@@ -70,18 +78,11 @@ class DocumentsController < InertiaController
   def create
     # UI-created docs are owned by their creator from the same INSERT — a UI
     # doc never exists momentarily unclaimed, and no claim activity is logged
-    # (the doc was never up for grabs).
-    format = params[:content_format].presence || request.request_parameters["format"].presence || "markdown"
-    unless Document::CONTENT_FORMATS.include?(format)
-      return redirect_to root_path, inertia: { errors: { content_format: "Choose Markdown or HTML" } }
-    end
+    # (the doc was never up for grabs). Browser-created documents are always
+    # portable Markdown; agents can create typed HTML documents through the API.
     if params.key?(:content) && params.key?(:markdown)
       return redirect_to root_path,
                          inertia: { errors: { content: "Send content or legacy markdown, not both" } }
-    end
-    if params[:markdown].present? && format != "markdown"
-      return redirect_to root_path,
-                         inertia: { errors: { content: "The markdown field can only create Markdown documents" } }
     end
 
     raw_content = params[:content].presence || params[:markdown].presence
@@ -89,22 +90,21 @@ class DocumentsController < InertiaController
       return redirect_to root_path,
                          inertia: { errors: { content: "Document content is too long" } }
     end
-    source = raw_content
-    source ||= format == "html" ? Document::DEFAULT_HTML_SEED : Document::DEFAULT_SEED
-    source = HtmlDocumentSanitizer.external(source).content if format == "html"
+    source = raw_content || Document::DEFAULT_SEED
 
-    creator_name = Document.normalize_owner_name(preferred_name(params[:name], fallback: nil))
+    creator_name = current_user&.name ||
+      Document.normalize_owner_name(preferred_name(params[:name], fallback: nil))
+    ownership = current_user ? { user: current_user } : { owner_token: owner_token }
     document = Document.create!(
       title: params[:title].presence || "Untitled",
-      content_format: format,
+      content_format: "markdown",
       seed_content: source,
-      owner_token: owner_token,
       owner_name: creator_name,
       seed_author_kind: "human",
       seed_author_name: creator_name,
-      claimed_at: Time.current
+      claimed_at: Time.current,
+      **ownership
     )
-    DocumentAsset.claim_from_html!(document:, source:) if document.html?
     remember_recent(document)
     redirect_to document_page_path(document.slug), status: :see_other
   end
@@ -113,7 +113,11 @@ class DocumentsController < InertiaController
   # prefetchers and unfurlers can't claim. First claim wins atomically.
   def claim
     document = Document.find_by!(slug: params[:slug])
-    document.claim!(token: owner_token, name: preferred_name(params[:name], fallback: nil))
+    document.claim!(
+      token: owner_token,
+      user: current_user,
+      name: preferred_name(params[:name], fallback: nil)
+    )
     redirect_back fallback_location: document_page_path(document.slug), status: :see_other
   rescue Document::UnclaimableError
     redirect_back fallback_location: document_page_path(document.slug), status: :see_other,
@@ -136,7 +140,7 @@ class DocumentsController < InertiaController
     document = Document.find_by(slug: params[:slug])
     return redirect_to root_path, status: :see_other if document.nil?
 
-    unless document.owned_by?(owner_token)
+    unless document.owned_by?(owner_token, user: current_user)
       return redirect_back fallback_location: document_page_path(document.slug), status: :see_other,
                            inertia: { errors: { document: "Only the owner can delete this document" } }
     end

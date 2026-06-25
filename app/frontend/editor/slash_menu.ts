@@ -151,9 +151,13 @@ class SlashMenuView {
     this.provider.update(view)
   }
 
-  update = (view: EditorView, previousState?: EditorState) => {
+  update = (view: EditorView) => {
     this.view = view
-    this.provider.update(view, previousState)
+    // SlashProvider debounces updates. Passing previousState lets a later
+    // decoration-only update cancel the text-change update, then short-circuit
+    // as "same" before shouldShow sees the slash. Always evaluate the latest
+    // state; the provider's own debounce still coalesces the work.
+    this.provider.update(view)
   }
 
   handleKeyDown = (event: KeyboardEvent): boolean => {

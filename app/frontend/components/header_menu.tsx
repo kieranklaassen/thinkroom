@@ -1,9 +1,11 @@
 import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Link } from '@inertiajs/react'
 import { useMediaQuery } from '../lib/use_media_query'
 import { useDismissable } from '../lib/use_dismissable'
 import { OwnershipChip, type OwnershipPayload } from './ownership_chip'
 import { FeedbackButton } from './feedback_button'
+import type { AccountPayload } from '../types/viewer'
 
 interface Props {
   panelOpen: boolean
@@ -13,6 +15,7 @@ interface Props {
   slug: string
   ownership: OwnershipPayload
   claimerName: string
+  account: AccountPayload | null
 }
 
 /**
@@ -30,6 +33,7 @@ export function HeaderMenu({
   slug,
   ownership,
   claimerName,
+  account,
 }: Props) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -92,6 +96,16 @@ export function HeaderMenu({
                 <>
                   <div className="header-menu-sep" role="separator" />
                   <OwnershipChip slug={slug} ownership={ownership} claimerName={claimerName} />
+                </>
+              )}
+              {account && (
+                <>
+                  <div className="header-menu-sep" role="separator" />
+                  <div className="header-menu-account" title={account.email}>{account.name}</div>
+                  <Link href="/logout" method="delete" as="button" className="header-menu-item">
+                    <span className="header-menu-check" aria-hidden>↪</span>
+                    Sign out
+                  </Link>
                 </>
               )}
               <div className="header-menu-sep" role="separator" />

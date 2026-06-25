@@ -28,6 +28,7 @@ class Document < ApplicationRecord
   has_many :activities, dependent: :destroy
   has_many :agent_presences, dependent: :destroy
   has_many :document_assets, dependent: :destroy
+  belongs_to :user, optional: true
 
   before_validation :ensure_slug, on: :create
 
@@ -75,13 +76,15 @@ class Document < ApplicationRecord
     DocumentPlainText.call(format: content_format, content: current_content)
   end
 
-  def claimed? = owner_token.present?
+  def claimed? = user_id.present? || owner_token.present?
 
   def claimable? = !claimed? && UNCLAIMABLE_SLUGS.exclude?(slug)
 
   # Never true for blank tokens — the delete-authorization predicate must not
   # match an unclaimed doc against a missing cookie.
-  def owned_by?(token)
+  def owned_by?(token, user: nil)
+    return user.present? && user_id == user.id if user_id.present?
+
     token.present? && owner_token == token
   end
 
@@ -104,22 +107,34 @@ class Document < ApplicationRecord
   # convention). Re-claim by the owning token is a no-op success — checked
   # again after reload so even two same-token requests racing each other
   # (double-click, second tab) never surface a fake lost-race error.
-  def claim!(token:, name:)
+  def claim!(token:, name:, user: nil)
     raise UnclaimableError, "This document cannot be claimed." if UNCLAIMABLE_SLUGS.include?(slug)
-    return self if owned_by?(token)
+    raise ArgumentError, "token required" if token.blank? && user.nil?
+    return self if owned_by?(token, user:)
 
-    name = self.class.normalize_owner_name(name)
+    name = user&.name || self.class.normalize_owner_name(name)
     activity = nil
     # Ownership and its activity commit together: a failed activity insert
     # must not leave the doc silently claimed with no feed entry and no
     # broadcast. Broadcasts happen after commit — they can't be rolled back.
     transaction do
-      won = self.class.where(id: id, owner_token: nil)
-        .update_all(owner_token: token, owner_name: name, claimed_at: Time.current, updated_at: Time.current) == 1
+      attributes = {
+        owner_name: name,
+        claimed_at: Time.current,
+        updated_at: Time.current
+      }
+      if user
+        attributes[:user_id] = user.id
+        attributes[:owner_token] = nil
+      else
+        attributes[:owner_token] = token
+      end
+      won = self.class.where(id: id, owner_token: nil, user_id: nil)
+        .update_all(attributes) == 1
 
       reload
       unless won
-        return self if owned_by?(token) # lost to ourselves: another tab/click with this token won
+        return self if owned_by?(token, user:) # lost to ourselves: another tab/click won
 
         raise ClaimRaceError, "already claimed"
       end
@@ -157,12 +172,12 @@ class Document < ApplicationRecord
       .update_all(seed_state: "claimed", seed_claimed_at: Time.current) == 1
   end
 
-  def ownership_props(viewer_token)
+  def ownership_props(viewer_token, viewer_user: nil)
     {
       claimed: claimed?,
       claimable: claimable?,
       owner_name: owner_name,
-      yours: owned_by?(viewer_token)
+      yours: owned_by?(viewer_token, user: viewer_user)
     }
   end
 

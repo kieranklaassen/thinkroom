@@ -5,6 +5,7 @@ import type { UserIdentity } from '../editor/identity'
 interface Props {
   identity: UserIdentity
   guest: boolean
+  authenticated?: boolean
   /** Fired after the server confirms the session write — the caller applies
    *  the live side effects (awareness label, provenance identity). `null`
    *  means cleared back to guest. */
@@ -23,7 +24,7 @@ interface Props {
  * a failed save must never leave this tab signing a name the session
  * doesn't hold.
  */
-export function IdentityChip({ identity, guest, onRenamed }: Props) {
+export function IdentityChip({ identity, guest, authenticated = false, onRenamed }: Props) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const [saving, setSaving] = useState(false)
@@ -104,6 +105,15 @@ export function IdentityChip({ identity, guest, onRenamed }: Props) {
           }}
         />
         {failed && <span className="identity-error">Couldn’t save — try again</span>}
+      </span>
+    )
+  }
+
+  if (authenticated) {
+    return (
+      <span className="chrome-toggle identity-chip identity-chip--account" title={`Signed in as ${identity.name}`}>
+        <span className="identity-dot" style={{ background: identity.color }} aria-hidden />
+        <span className="identity-name">{identity.name}</span>
       </span>
     )
   }
