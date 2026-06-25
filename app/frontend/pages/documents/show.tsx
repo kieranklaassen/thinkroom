@@ -60,12 +60,7 @@ import { useAnchoredPopover } from '../../lib/use_anchored_popover'
 import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
 import { patchJSON } from '../../lib/csrf'
 import type { ViewerPayload } from '../../types/viewer'
-import {
-  getStoredFlag,
-  getStoredString,
-  setStoredFlag,
-  setStoredString,
-} from '../../lib/local_storage'
+import { setCookie, setCookieFlag } from '../../lib/cookies'
 import './show.css'
 
 export interface ActivityPayload {
@@ -93,6 +88,13 @@ export interface DocumentProps {
     display_title: string
   }
   viewer: ViewerPayload
+  // Server-rendered UI prefs from cookies — the source of truth for first
+  // paint so SSR and the client's first render agree (no post-hydration flip).
+  ui: {
+    panel_open: boolean
+    focus_mode: boolean
+    mode: EditorMode
+  }
   ownership: OwnershipPayload
   suggestions: SuggestionPayload[]
   comments: CommentPayload[]
@@ -129,18 +131,10 @@ const capAnchor = (text: string): string => {
   return new TextDecoder().decode(bytes.slice(0, ANCHOR_BYTE_CAP)).replace(/�+$/, '')
 }
 
-// Editor mode persists per doc (Google-Docs semantics: your mode, your
-// browser). Client-side only by design — never server state, never shared.
-const modeKey = (slug: string) => `pruf:mode:${slug}`
-
-const readStoredMode = (slug: string): EditorMode => {
-  const raw = getStoredString(modeKey(slug))
-  return raw === 'suggest' || raw === 'comment' || raw === 'read' ? raw : 'edit'
-}
-
 export default function DocumentShow({
   document: doc,
   viewer,
+  ui,
   ownership,
   suggestions,
   comments,
@@ -197,27 +191,17 @@ export default function DocumentShow({
   // a closure-captured handle goes stale when the editor remounts mid-flight.
   const handleRef = useRef<EditorHandle | null>(null)
   handleRef.current = handle
-  // Hydration-safe init: server and the first client render use the same fixed
-  // defaults these flags fall back to anyway (panel open, focus off, Edit
-  // mode). The stored localStorage prefs are applied in a post-hydration effect
-  // below — one frame later, before the editor mounts — so SSR markup matches.
-  const [panelOpen, setPanelOpen] = useState(true)
-  const [focusMode, setFocusMode] = useState(false)
-  // Demo doc always opens in Edit and stays locked there.
+  // Hydration-safe init from server-rendered cookie prefs: SSR and the client's
+  // first render derive panel/focus/mode from the same `ui` props, so a user
+  // who closed the panel (etc.) sees it closed at first paint — no flip. The
+  // client writes the cookie on change (effects below); cookies, not
+  // localStorage, are now the source of truth for first paint.
+  const [panelOpen, setPanelOpen] = useState(ui.panel_open)
+  const [focusMode, setFocusMode] = useState(ui.focus_mode)
+  // Demo doc always opens in Edit and stays locked there — a stale mode cookie
+  // can't override it (the server also defaults it; this is the client guard).
   const modeLocked = doc.slug === 'demo'
-  const [mode, setMode] = useState<EditorMode>('edit')
-  // Tracks whether stored prefs have been applied — gates the persisting
-  // effects below so the initial deterministic defaults aren't written back
-  // over the real stored values during the first commit.
-  const prefsHydrated = useRef(false)
-  useEffect(() => {
-    setPanelOpen(getStoredFlag('pruf:panel', true))
-    setFocusMode(getStoredFlag('pruf:focus', false))
-    if (!modeLocked) setMode(readStoredMode(doc.slug))
-    prefsHydrated.current = true
-    // doc.slug / modeLocked are stable for the page's lifetime.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  const [mode, setMode] = useState<EditorMode>(modeLocked ? 'edit' : ui.mode)
   const isReading = mode === 'read'
   // handleSelection is a stable callback — it reads the live mode via ref.
   const modeRef = useRef(mode)
@@ -263,18 +247,19 @@ export default function DocumentShow({
     if (isMobile && composerAnchor !== null) setActiveSheet('comments')
   }, [isMobile, composerAnchor])
 
-  // Persist only after the stored prefs have been read back in (the effect
-  // above). Without this gate the first commit's deterministic defaults would
-  // clobber the real stored values before they were ever applied.
+  // Persist prefs to server-readable cookies on change so the next first paint
+  // (SSR) matches. No hydration gate is needed: state initializes from the same
+  // cookie-backed props, so the first commit writes back the value it just read
+  // — idempotent, not a clobber. Demo doc never persists mode (it's locked).
   useEffect(() => {
-    if (prefsHydrated.current) setStoredFlag('pruf:panel', panelOpen)
+    setCookieFlag('pruf_panel', panelOpen)
   }, [panelOpen])
   useEffect(() => {
-    if (prefsHydrated.current) setStoredFlag('pruf:focus', focusMode)
+    setCookieFlag('pruf_focus', focusMode)
   }, [focusMode])
   useEffect(() => {
-    if (prefsHydrated.current && !modeLocked) setStoredString(modeKey(doc.slug), mode)
-  }, [mode, modeLocked, doc.slug])
+    if (!modeLocked) setCookie('pruf_mode', mode)
+  }, [mode, modeLocked])
 
   // ⌘\ toggles the side panel, ⌘. toggles suggestion focus.
   useEffect(() => {

@@ -1,13 +1,15 @@
 class DocumentsController < InertiaController
   rate_limit_document_creation
 
-  # SSR is scoped to the document page only — #show server-renders the shell,
-  # header, and the static content_html preview into the initial HTML so the
-  # prose is on screen at first byte. Every other action (index, create, …)
-  # stays CSR. The lambda is instance_exec'd per request, so #index never
-  # pays for SSR. Browser-only branches of #show (agent UA / .txt / .json)
-  # return before the inertia render, so SSR never touches them.
-  inertia_config ssr_enabled: -> { action_name == "show" }
+  # SSR is scoped to the read-only document surfaces — #show (shell, header,
+  # static content_html preview) and #index (the landing page) — so their
+  # content is on screen at first byte. Both pages are SSR-safe: the live
+  # editor is a client-only island (useIsClient), and the landing reads no
+  # browser globals at render time (origin is filled post-hydration). Other
+  # actions (create, claim, …) stay CSR. The lambda is instance_exec'd per
+  # request. Browser-only branches of #show (agent UA / .txt / .json) return
+  # before the inertia render, so SSR never touches them.
+  inertia_config ssr_enabled: -> { %w[show index].include?(action_name) }
 
   def index
     # Signed-in ownership follows the account across browsers. Guests retain
@@ -64,6 +66,13 @@ class DocumentsController < InertiaController
     seed_granted = initial_render? && !prefetch_request? && document.try_claim_seed
 
     render inertia: "documents/show", props: {
+      # UI prefs ride server-readable cookies so SSR renders panel/focus/mode at
+      # their stored values on first paint — no post-hydration flip for users
+      # who closed the panel, enabled focus, or picked a non-Edit mode. The
+      # client writes these cookies on change (see show.tsx). mode for the demo
+      # doc is forced to "edit" client-side (modeLocked), so any stale cookie is
+      # ignored there.
+      ui: ui_prefs,
       document: document.slice(:id, :slug, :title, :content_format).merge(
         seed_content: document.seed_content,
         seed_granted: seed_granted,
@@ -298,6 +307,21 @@ class DocumentsController < InertiaController
 
   def remember_recent(document)
     session[:recent_slugs] = ([ document.slug ] + Array(session[:recent_slugs])).uniq.first(12)
+  end
+
+  # Cookie-backed UI prefs, read server-side so SSR's first paint matches the
+  # user's stored panel/focus/mode (no flip). Defaults match the historical
+  # localStorage fallbacks: panel open, focus off, Edit mode. Cookies are
+  # "1"/"0" flags and a "edit|suggest|comment|read" mode string; anything else
+  # falls back to the default.
+  UI_MODES = %w[edit suggest comment read].freeze
+
+  def ui_prefs
+    {
+      panel_open: cookies[:pruf_panel] != "0",
+      focus_mode: cookies[:pruf_focus] == "1",
+      mode: UI_MODES.include?(cookies[:pruf_mode]) ? cookies[:pruf_mode] : "edit"
+    }
   end
 
   # Browsers identify as Mozilla/...; curl, wget, httpx, ruby, etc. don't.
