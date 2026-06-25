@@ -29,15 +29,21 @@ const initials = (name: string): string =>
 
 export function PresenceBar({ humans, agents, compact = false }: Props) {
   const total = humans.length + agents.length
-  if (total === 0) return null
 
   const visibleHumans = humans.slice(0, compact ? MAX_VISIBLE_COMPACT : MAX_VISIBLE)
   const overflow = humans.length - visibleHumans.length
 
+  // Always render the container — even with 0 collaborators — so its reserved
+  // lane (a min-width in render-blocking CSS, scoped to .presence-bar) holds
+  // the header's layout stable. Human peers arrive over the websocket after
+  // first paint; they fade in WITHIN this lane instead of pushing the
+  // Edit/Share/⋯ controls. Empty is visually blank but occupies the lane.
   return (
     <span
       className={`presence-bar ${compact ? 'presence-bar--compact' : ''}`}
-      aria-label={`${total} collaborators present`}
+      data-empty={total === 0 ? '' : undefined}
+      aria-label={total === 0 ? undefined : `${total} collaborators present`}
+      aria-hidden={total === 0 ? true : undefined}
     >
       {agents.map((agent) => (
         <span

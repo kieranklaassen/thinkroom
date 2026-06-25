@@ -79,3 +79,44 @@
 .doc-static-preview .ProseMirror li {
   position: relative;
 }
+
+/* ---------------------------------------------------------------------------
+ * Header presence-bar reserved lane (on-load layout stability)
+ *
+ * The document header's people cluster (.doc-header-people in
+ * app/frontend/pages/documents/show.tsx) holds: identity chip · provenance
+ * chip · PresenceBar. Human peers join via Yjs awareness over the websocket,
+ * so they CANNOT be server-rendered — they fade in a beat after first paint.
+ * Before this, the empty bar took zero width, so the first peer (0→N avatars +
+ * "N here") widened the cluster and shoved the Edit/Share/⋯ controls left.
+ *
+ * Fix: reserve a fixed-width lane for .presence-bar in THIS render-blocking
+ * Rails-pipeline stylesheet, so the lane's geometry is determined at first
+ * paint. Avatars then appear WITHIN the lane (acceptable) instead of pushing
+ * the neighbouring controls (a layout shift, not acceptable). The bar always
+ * renders now (even empty, data-empty) so the lane exists from the first frame.
+ *
+ * Scoped to .presence-bar in the header; the editor body is untouched. The
+ * Vite stylesheet (app/frontend/entrypoints/application.css) styles the bar's
+ * internals (avatars, count) — these rules only pin the lane width.
+ * ------------------------------------------------------------------------- */
+.doc-header-people .presence-bar {
+  /* Room for a couple of overlapping 28px avatars + the "N here" count, so a
+   * small group fits without reflow; larger groups collapse into the +N
+   * overflow chip, which also stays within the lane. */
+  min-width: 7.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+/* The empty bar reserves its lane but shows nothing — no stray gap from the
+ * inherited flex gap on a childless box. */
+.doc-header-people .presence-bar[data-empty] {
+  gap: 0;
+}
+
+/* Compact (mobile) header: 24px avatars, max 3 — a tighter lane. */
+.doc-header-people .presence-bar--compact {
+  min-width: 5rem;
+}
