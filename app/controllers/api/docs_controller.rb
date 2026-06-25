@@ -108,12 +108,15 @@ module Api
     # seed — is authoritative. Teach the agent the correct next action rather
     # than failing opaquely or silently no-opping a seed write.
     def render_update_conflict
+      revision_workflow = AgentGuide.revision_workflow(document, request.base_url)
+      steps = revision_workflow.fetch(:steps).index_by { |step| step.fetch(:action) }
       render json: {
         error: "This document is no longer an unclaimed draft — a human has claimed or started editing it, so its live state is authoritative.",
-        how_to_revise: "Propose your change as a suggestion — it appears live in the editor, " \
-                       "attributed to you, for a human to accept. See api.propose_suggestion in " \
-                       "the state payload (GET this document) for the full request shape.",
-        propose_suggestion: "#{request.base_url}/api/docs/#{document.slug}/suggestions"
+        how_to_revise: "#{revision_workflow[:guidance]} #{revision_workflow[:when_no_open_comments]}",
+        read_state: steps.fetch("read_open_comments").fetch(:url),
+        propose_suggestion: steps.fetch("propose_targeted_suggestion").fetch(:url),
+        resolve_comment: steps.fetch("resolve_addressed_comment").fetch(:url),
+        revision_workflow:
       }, status: :conflict
     end
 

@@ -7,6 +7,8 @@ class AgentGuide
     # share URL's JSON representation — same document, same truth).
     def state(document, base_url)
       content = document.current_content
+      open_comments = document.comments.open.order(:created_at).map(&:as_props)
+      revision_workflow = revision_workflow(document, base_url) if open_comments.any?
       payload = {
         slug: document.slug,
         title: document.title,
@@ -28,18 +30,63 @@ class AgentGuide
           summary: document.provenance_summary
         },
         pending_suggestions: document.suggestions.pending.order(:created_at).map(&:as_props),
-        open_comments: document.comments.open.order(:created_at).map(&:as_props),
+        open_comments:,
         agents_present: document.agent_presences.active.map(&:as_props),
         recent_activity: document.activities.recent.map(&:as_props),
         content_contract: content_contract(document.content_format, base_url),
         api: endpoints(document, base_url),
-        notes: notes(document)
+        notes: notes(document, revision_workflow:)
       }
+      payload[:revision_workflow] = revision_workflow if revision_workflow
       if document.content_format == "markdown"
         payload[:markdown] = content
         payload[:plain_markdown] = document.plain_markdown.presence || document.seed_markdown
       end
       payload
+    end
+
+    def revision_workflow(document, base_url)
+      api_base = "#{base_url}/api/docs/#{document.slug}"
+      source_name = document.html? ? "HTML" : "Markdown"
+      {
+        kind: "claimed_document_comments",
+        guidance: "Read open_comments, then for each comment you can address, propose one " \
+                  "targeted suggestion using its anchor_text as replaces and the replacement " \
+                  "source fragment as body. Resolve that comment only after the suggestion " \
+                  "is successfully created. Leave comments open when targeting or suggestion " \
+                  "creation fails.",
+        when_no_open_comments: "If open_comments is empty, propose the change as a normal " \
+                               "suggestion; no comment resolution is required.",
+        steps: [
+          {
+            step: 1,
+            action: "read_open_comments",
+            method: "GET",
+            url: api_base,
+            reads: "open_comments (id, body, anchor_text)",
+            guidance: "Use each comment's body as the requested change and anchor_text as its target."
+          },
+          {
+            step: 2,
+            action: "propose_targeted_suggestion",
+            method: "POST",
+            url: "#{api_base}/suggestions",
+            body: {
+              replaces: "comment.anchor_text",
+              body: "replacement #{source_name} source fragment",
+              intent: "one-line summary of how the revision addresses the comment"
+            },
+            guidance: "Create one suggestion per comment you address; do not create a replacement document."
+          },
+          {
+            step: 3,
+            action: "resolve_addressed_comment",
+            method: "POST",
+            url: "#{api_base}/comments/:id/resolve",
+            guidance: "Resolve the matching comment only after its suggestion is successfully created."
+          }
+        ]
+      }
     end
 
     def endpoints(document, base_url)
@@ -204,7 +251,7 @@ class AgentGuide
       )
     end
 
-    def notes(document)
+    def notes(document, revision_workflow: nil)
       source_name = document.html? ? "HTML" : "Markdown"
       notes = [
         "Identity: send an X-Agent-Name header on every request. Suggestions, comments, presence, and event writes require it; document creation permits no header but then records no agent seed attribution. The name flows through suggestion attribution, provenance, presence, and activity.",
@@ -223,6 +270,13 @@ class AgentGuide
         "A claimed document can be deleted by its owner, after which every endpoint here returns 404. Treat a 404 on a previously-working slug as deletion, not an outage to retry.",
         "Document creation, suggestion, and comment writes are rate-limited per source IP. A 429 response means retry later; inspect each endpoint's rate_limits field for the current windows."
       ]
+      if revision_workflow
+        notes.insert(
+          6,
+          "Revising a claimed document: #{revision_workflow[:guidance]} " \
+          "#{revision_workflow[:when_no_open_comments]}"
+        )
+      end
       if document.html?
         notes.insert(
           9,
