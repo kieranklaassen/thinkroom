@@ -421,6 +421,24 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     refute_includes body["plain_text"], "formatVersion"
   end
 
+  test "markdown create with an above-max sketch height is recognized without warning" do
+    # The symmetric upper-bound case for issue #59: server recognition is
+    # height-independent, so a too-tall height is accepted and the editor
+    # clamps it down to MAX_HEIGHT rather than breaking.
+    high = sketch_fence({
+      id: "high1", formatVersion: 1, description: "Tall flow", height: 5000,
+      scene: { type: "excalidraw", version: 2, elements: [ { type: "text", text: "Big" } ] }
+    })
+    post "/api/docs", params: { title: "High Sketch", content: high }, headers: AGENT, as: :json
+
+    assert_response :created
+    body = response.parsed_body
+    assert_equal false, body["normalized"], "an above-max height is not a recognition failure"
+    assert_nil body["warning"]
+    assert_includes body["plain_text"], "Sketch: Tall flow — Big"
+    refute_includes body["plain_text"], "formatVersion"
+  end
+
   test "markdown create with an unrecognized sketch fence is non-silent" do
     # The documented-but-wrong shape from issue #55: top-level `version` and a
     # scene that is not a full excalidraw export. Previously this returned a 201
