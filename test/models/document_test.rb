@@ -337,4 +337,24 @@ class DocumentTest < ActiveSupport::TestCase
     assert_equal({ claimed: true, claimable: false, owner_name: "Owner", yours: false }, doc.ownership_props("tok-b"))
     assert_not doc.ownership_props("tok-a").value?("tok-a")
   end
+
+  test "display_title derives the first H1 from the current content" do
+    doc = Document.create!(title: "Untitled", seed_markdown: "# Real Heading\n\nBody text.")
+
+    assert_equal "Real Heading", doc.display_title
+  end
+
+  test "display_title falls back to the stored title when content is blank" do
+    # Guards the Commonmarker UTF-8 requirement: nil.to_s is US-ASCII and would
+    # raise if handed to the renderer, so blank content must short-circuit.
+    doc = Document.create!(title: "Stored Title", seed_markdown: nil)
+
+    assert_equal "Stored Title", doc.display_title
+  end
+
+  test "display_title falls back to the stored title when content has no heading" do
+    doc = Document.create!(title: "Stored Title", seed_markdown: "Just a paragraph, no heading.")
+
+    assert_equal "Stored Title", doc.display_title
+  end
 end

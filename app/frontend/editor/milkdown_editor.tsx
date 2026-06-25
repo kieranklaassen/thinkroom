@@ -88,7 +88,6 @@ export interface EditorHandle {
   editor: Editor
   ydoc: Y.Doc
   provider: CableProvider
-  openSketch: () => void
 }
 
 export type ConnectionStatus = 'connecting' | 'live'
@@ -562,7 +561,7 @@ function CollabEditor({
         if (title) callbacksRef.current.onTitleChange?.(title)
       })
 
-      const handle = { editor, ydoc, provider, openSketch: () => insertSketchRef.current() }
+      const handle = { editor, ydoc, provider }
       startedRef.current = true
       // Seed/initial sync ran with suggesting off; apply a pre-stored
       // suggest mode only now that the document content is settled.

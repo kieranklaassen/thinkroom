@@ -749,9 +749,11 @@ a:focus-visible {
   inset: 0;
 }
 
-/* While booting the editor has no content yet; don't let the empty overlay
-   intercept pointer events meant for the (inert) preview underneath. */
-.doc-editor-stack[data-phase='booting'] .doc-live-editor {
+/* While the preview is still mounted underneath (booting + revealing), the
+   live editor overlays it; don't let that overlay intercept pointer events
+   meant for the content until it fully takes over the flow at 'live'. */
+.doc-editor-stack[data-phase='booting'] .doc-live-editor,
+.doc-editor-stack[data-phase='revealing'] .doc-live-editor {
   pointer-events: none;
 }
 
