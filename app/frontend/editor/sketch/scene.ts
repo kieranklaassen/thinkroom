@@ -138,14 +138,13 @@ export function normalizeSketchData(input: unknown): SketchData | null {
   if (!scene) return null
   const description = typeof input.description === 'string' ? input.description.trim() : ''
   if (Array.from(description).length > MAX_SKETCH_DESCRIPTION) return null
-  const height = input.height === undefined || input.height === null
-    ? DEFAULT_SKETCH_HEIGHT
-    : input.height
-  if (
-    !isFiniteNumber(height) ||
-    height < MIN_SKETCH_HEIGHT ||
-    height > MAX_SKETCH_HEIGHT
-  ) return null
+  // Height is a render hint, not a scene-correctness constraint: a finite
+  // out-of-range value clamps into [MIN, MAX] and anything non-numeric falls
+  // back to the default, so a valid scene never breaks into raw JSON over its
+  // height. Mirrors DocumentPreviewHtml's server clamp and the resize handle.
+  const height = isFiniteNumber(input.height)
+    ? Math.min(Math.max(input.height, MIN_SKETCH_HEIGHT), MAX_SKETCH_HEIGHT)
+    : DEFAULT_SKETCH_HEIGHT
   return {
     id: input.id,
     formatVersion: SKETCH_FORMAT_VERSION,
