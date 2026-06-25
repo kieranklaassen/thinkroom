@@ -63,6 +63,12 @@ class DocumentsController < InertiaController
         seed_author_name: document.seed_author_name,
         has_state: document.yjs_state.present?,
         yjs_state_b64: (Base64.strict_encode64(document.yjs_state) if document.yjs_state.present?),
+        # Server-rendered prose for an instant first paint; the live editor
+        # swaps in over it once Milkdown binds the hydrated Yjs state.
+        content_html: document.preview_html,
+        # First-H1 title derived on the server so the header reads correctly on
+        # first paint, before the editor mounts and derives the same title.
+        display_title: document.display_title,
         **(document.content_format == "markdown" ? { seed_markdown: document.seed_content } : {})
       ),
       # Ownership rides its own lazy prop so claim events reload cheaply —

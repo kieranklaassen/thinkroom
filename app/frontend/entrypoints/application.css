@@ -729,6 +729,46 @@ a:focus-visible {
   min-height: 50vh;
 }
 
+/* Instant first paint: a server-rendered prose preview and the live editor
+   share one stacking context. The preview (in flow) holds the layout height;
+   the live editor overlays it while Milkdown boots and binds the synced state,
+   painting its content directly over the identical preview. Once painted, the
+   preview is dropped and the editor returns to normal flow. The preview stays
+   behind the editor until that handoff, so content is never blank — it is
+   replaced, not deleted and re-added. */
+.doc-editor-stack {
+  position: relative;
+  min-height: 50vh;
+}
+
+/* booting + revealing: editor is an absolute overlay above the in-flow preview.
+   It is transparent, so the preview shows through any not-yet-painted region. */
+.doc-editor-stack[data-phase='booting'] .doc-live-editor,
+.doc-editor-stack[data-phase='revealing'] .doc-live-editor {
+  position: absolute;
+  inset: 0;
+}
+
+/* While the preview is still mounted underneath (booting + revealing), the
+   live editor overlays it; don't let that overlay intercept pointer events
+   meant for the content until it fully takes over the flow at 'live'. */
+.doc-editor-stack[data-phase='booting'] .doc-live-editor,
+.doc-editor-stack[data-phase='revealing'] .doc-live-editor {
+  pointer-events: none;
+}
+
+.doc-static-preview {
+  user-select: none;
+}
+
+/* Neutral box standing in for a sketch canvas until Excalidraw mounts, so a
+   sketch doc reserves the right height instead of reflowing on swap. */
+.doc-sketch-skeleton {
+  margin: 1.5rem 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
 .milkdown .ProseMirror {
   outline: none;
   font-family: var(--font-doc);
@@ -2925,25 +2965,6 @@ a:focus-visible {
   font-size: 12px;
 }
 
-.sketch-insert-button {
-  min-height: 30px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--ink);
-  padding: 5px 9px;
-  font: 500 12px/1 var(--font-ui);
-  cursor: pointer;
-}
-
-.sketch-insert-button:hover:not(:disabled) {
-  background: var(--surface);
-}
-
-.sketch-insert-button:disabled {
-  opacity: 0.45;
-}
-
 .thinkroom-sketch {
   isolation: isolate;
   position: relative;
@@ -3250,7 +3271,6 @@ a:focus-visible {
 }
 
 @media (max-width: 700px) {
-  .sketch-insert-button { padding-inline: 7px; }
   .thinkroom-sketch { margin: 18px 0; border-radius: 9px; }
   .thinkroom-sketch-preview { min-height: 150px; }
 }

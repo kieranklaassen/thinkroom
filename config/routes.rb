@@ -38,6 +38,7 @@ Rails.application.routes.draw do
     get "docs/:slug", to: "docs#show", as: :doc
     post "docs/:slug/suggestions", to: "suggestions#create", as: :doc_suggestions
     post "docs/:slug/comments", to: "comments#create", as: :doc_comments
+    post "docs/:slug/comments/:id/resolve", to: "comments#resolve", as: :doc_resolve_comment
     post "docs/:slug/presence", to: "presences#create", as: :doc_presence
     get "docs/:slug/events/pending", to: "events#pending", as: :doc_pending_events
     post "docs/:slug/events/ack", to: "events#ack", as: :doc_ack_events

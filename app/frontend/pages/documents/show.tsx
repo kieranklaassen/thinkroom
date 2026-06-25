@@ -88,6 +88,8 @@ export interface DocumentProps {
     seed_author_name: string | null
     has_state: boolean
     yjs_state_b64: string | null
+    content_html: string
+    display_title: string
   }
   viewer: ViewerPayload
   ownership: OwnershipPayload
@@ -149,10 +151,20 @@ export default function DocumentShow({
   // `viewer` would silently clobber mid-rename.
   const [identity, setIdentity] = useState<UserIdentity>(() => userIdentity(viewer.name))
   const [guest, setGuest] = useState(viewer.guest)
-  const [status, setStatus] = useState<ConnectionStatus>('connecting')
-  const [documentTitle, setDocumentTitle] = useState(doc.title)
+  // Optimistic: a hydrated or freshly-seeded doc is functionally live the
+  // moment it paints — the websocket only confirms it. Starting at 'live'
+  // avoids the connecting→live dot flash on every load.
+  const [status, setStatus] = useState<ConnectionStatus>(
+    doc.has_state || doc.seed_granted ? 'live' : 'connecting',
+  )
+  // Server-derived first-H1 title so the header reads correctly on first paint;
+  // the editor keeps it live via onTitleChange once it mounts.
+  const [documentTitle, setDocumentTitle] = useState(doc.display_title || doc.title)
   const [newVersionAvailable, setNewVersionAvailable] = useState(false)
   const [handle, setHandle] = useState<EditorHandle | null>(null)
+  // Drops the static first-paint preview only after the live editor has painted
+  // its synced content — so the preview is replaced, never briefly deleted.
+  const [editorSwapped, setEditorSwapped] = useState(false)
   const [spans, setSpans] = useState<ProvenanceSpan[]>([])
   const [peers, setPeers] = useState<UserIdentity[]>([])
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
@@ -963,16 +975,6 @@ export default function DocumentShow({
                 {acceptingAll ? 'Accepting…' : `Accept all ${pendingSuggestionCount}`}
               </button>
             )}
-            {mode === 'edit' && (
-              <button
-                type="button"
-                className="sketch-insert-button"
-                disabled={!handle}
-                onClick={() => handle?.openSketch()}
-              >
-                Sketch
-              </button>
-            )}
             <ModeControl mode={mode} onChange={setMode} locked={modeLocked} />
             <SharePopover agentsActive={presences.length} onOpenChange={setShareOpen} />
             <HeaderMenu
@@ -1005,24 +1007,52 @@ export default function DocumentShow({
         <main className="doc-body">
           <div className={`doc-canvas ${focusMode ? 'is-focus' : ''}`}>
             <article className="doc-main">
-              <DocumentEditor
-                slug={doc.slug}
-                identity={identity}
-                contentFormat={doc.content_format}
-                initialStateB64={doc.yjs_state_b64}
-                seedContent={doc.seed_content}
-                seedGranted={doc.seed_granted}
-                seedAuthorKind={doc.seed_author_kind}
-                seedAuthorName={doc.seed_author_name}
-                editable={mode === 'edit' || mode === 'suggest'}
-                suggesting={mode === 'suggest'}
-                taskInteractive={mode !== 'comment'}
-                onReady={setHandle}
-                onStatus={setStatus}
-                onSpans={setSpans}
-                onSelection={isReading ? undefined : handleSelection}
-                onTitleChange={setDocumentTitle}
-              />
+              {/* Instant first paint: server-rendered prose fills the reserved
+                  editor frame and holds the layout height. The live editor sits
+                  on top of it (transparent) while Milkdown boots, so its synced
+                  content paints over the identical preview — then the preview is
+                  dropped a couple frames later. The preview is always behind the
+                  editor until then, so content is never momentarily blank. */}
+              <div
+                className="doc-editor-stack"
+                data-phase={editorSwapped ? 'live' : handle ? 'revealing' : 'booting'}
+              >
+                {!editorSwapped && doc.content_html && (
+                  <div className="doc-static-preview milkdown" aria-hidden="true">
+                    <div
+                      className="ProseMirror"
+                      dangerouslySetInnerHTML={{ __html: doc.content_html }}
+                    />
+                  </div>
+                )}
+                <div className="doc-live-editor">
+                  <DocumentEditor
+                    slug={doc.slug}
+                    identity={identity}
+                    contentFormat={doc.content_format}
+                    initialStateB64={doc.yjs_state_b64}
+                    seedContent={doc.seed_content}
+                    seedGranted={doc.seed_granted}
+                    seedAuthorKind={doc.seed_author_kind}
+                    seedAuthorName={doc.seed_author_name}
+                    editable={mode === 'edit' || mode === 'suggest'}
+                    suggesting={mode === 'suggest'}
+                    taskInteractive={mode !== 'comment'}
+                    onReady={(h) => {
+                      setHandle(h)
+                      // Wait two frames so ProseMirror has painted the synced
+                      // content before the preview is removed.
+                      requestAnimationFrame(() =>
+                        requestAnimationFrame(() => setEditorSwapped(true)),
+                      )
+                    }}
+                    onStatus={setStatus}
+                    onSpans={setSpans}
+                    onSelection={isReading ? undefined : handleSelection}
+                    onTitleChange={setDocumentTitle}
+                  />
+                </div>
+              </div>
             </article>
             {!isReading && (
               <div className="margin-gutter">
