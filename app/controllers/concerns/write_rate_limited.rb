@@ -27,6 +27,18 @@ module WriteRateLimited
                  only: :create
     end
 
+    # Updating a seed-stage document is a contribution-class write (a revision),
+    # not a new-document event — share the contribution limits, scoped to the
+    # update action.
+    def rate_limit_document_update
+      rate_limit to: CONTRIBUTION_BURST_LIMIT, within: 10.minutes, by: -> { request.remote_ip },
+                 with: :render_write_rate_limit, store: STORE, name: "document-update-burst",
+                 only: :update
+      rate_limit to: CONTRIBUTION_DAILY_LIMIT, within: 1.day, by: -> { request.remote_ip },
+                 with: :render_write_rate_limit, store: STORE, name: "document-update-daily",
+                 only: :update
+    end
+
     def rate_limit_authentication
       rate_limit to: AUTHENTICATION_BURST_LIMIT, within: 10.minutes, by: -> { request.remote_ip },
                  with: :render_write_rate_limit, store: STORE, name: "authentication-burst",
