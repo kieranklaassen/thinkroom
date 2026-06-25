@@ -237,7 +237,12 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   test "state read returns content, provenance, suggestions, comments" do
     @document.update!(provenance_spans: [ { "kind" => "ai", "state" => "pending", "chars" => 10 } ])
     @document.suggestions.create!(author_name: "Gemini", author_kind: "ai", body: "Pending one")
-    @document.comments.create!(author_name: "A", author_kind: "human", body: "Open one")
+    @document.comments.create!(
+      author_name: "A",
+      author_kind: "human",
+      body: "Tighten this claim.",
+      anchor_text: "A paragraph about provenance."
+    )
 
     get "/api/docs/#{@document.slug}", headers: AGENT
 
@@ -248,6 +253,36 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal 1, body["open_comments"].length
     assert body["provenance"]["summary"]["ai_pct"].positive?
     assert body["api"].keys.size >= 6
+
+    workflow = body["revision_workflow"]
+    assert_equal "claimed_document_comments", workflow["kind"]
+    assert_equal %w[read_open_comments propose_targeted_suggestion resolve_addressed_comment],
+                 workflow["steps"].pluck("action")
+    assert_equal "/api/docs/#{@document.slug}", URI(workflow.dig("steps", 0, "url")).path
+    assert_equal "/api/docs/#{@document.slug}/suggestions",
+                 URI(workflow.dig("steps", 1, "url")).path
+    assert_equal "/api/docs/#{@document.slug}/comments/:id/resolve",
+                 URI(workflow.dig("steps", 2, "url")).path
+    assert_equal "comment.anchor_text", workflow.dig("steps", 1, "body", "replaces")
+    assert_includes workflow.dig("steps", 1, "body", "body"), "replacement"
+    assert_includes workflow.dig("steps", 2, "guidance"), "successfully created"
+    assert body["notes"].any? { |note| note.include?("Revising a claimed document") }
+  end
+
+  test "state omits the comment revision workflow when no comments are open" do
+    resolved = @document.comments.create!(
+      author_name: "A", author_kind: "human", body: "Already handled"
+    )
+    resolved.resolve!
+
+    get "/api/docs/#{@document.slug}", headers: AGENT
+
+    assert_response :success
+    body = response.parsed_body
+    refute body.key?("revision_workflow")
+    refute body["notes"].any? { |note| note.include?("Revising a claimed document") }
+    assert body.dig("api", "propose_suggestion").present?
+    assert body.dig("api", "resolve_comment").present?
   end
 
   test "state read falls back to seed markdown before any editor session" do
@@ -532,6 +567,12 @@ class AgentApiTest < ActionDispatch::IntegrationTest
 
   test "update on a collaborative document returns 409 with a route to suggestions" do
     @document.update!(yjs_state: "binary-crdt-state")
+    @document.comments.create!(
+      author_name: "Editor",
+      author_kind: "human",
+      body: "Make this more concrete.",
+      anchor_text: "A paragraph about provenance."
+    )
 
     patch "/api/docs/#{@document.slug}",
           params: { content: "# Trying to overwrite" },
@@ -540,11 +581,31 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_response :conflict
     body = response.parsed_body
     assert_includes body["error"], "no longer an unclaimed draft"
+    assert_equal "/api/docs/#{@document.slug}", URI(body["read_state"]).path
     assert_includes body["propose_suggestion"], "/api/docs/#{@document.slug}/suggestions"
+    assert_equal "/api/docs/#{@document.slug}/comments/:id/resolve",
+                 URI(body["resolve_comment"]).path
+    assert_equal AgentGuide.revision_workflow(@document, request.base_url).as_json,
+                 body["revision_workflow"]
+    assert_includes body["how_to_revise"], "open_comments"
+    assert_includes body["how_to_revise"], "anchor_text"
+    assert_includes body["how_to_revise"], "replaces"
+    assert_match(/resolve/i, body["how_to_revise"])
 
     @document.reload
     assert_equal "# Hello\n\nA paragraph about provenance.", @document.seed_markdown,
                  "seed must be untouched when the editor has taken over"
+  end
+
+  test "update conflict does not require comment resolution when there are no open comments" do
+    @document.update!(yjs_state: "binary-crdt-state")
+
+    patch "/api/docs/#{@document.slug}",
+          params: { content: "# Trying to overwrite" },
+          headers: AGENT, as: :json
+
+    assert_response :conflict
+    assert_includes response.parsed_body["how_to_revise"], "If open_comments is empty"
   end
 
   test "update returns 409 once an editor snapshot shadows the seed even if yjs_state is blank" do
