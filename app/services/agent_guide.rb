@@ -76,6 +76,11 @@ class AgentGuide
                    rate_limits: contribution_rate_limits,
                    body: { body: "(required) what you want to say", anchor_text: "(optional) the doc text you're commenting on" },
                    purpose: "Leave a comment anchored to a text selection." },
+        resolve_comment: { method: "POST", url: "#{api_base}/comments/:id/resolve",
+                           headers: { "X-Agent-Name": "required" },
+                           success_status: 200,
+                           rate_limits: contribution_rate_limits,
+                           purpose: "Close a comment thread (the id comes from open_comments). Attributed to you in the activity feed." },
         announce_presence: { method: "POST", url: "#{api_base}/presence",
                              headers: { "X-Agent-Name": "required", "Content-Type": "application/json" },
                              success_status: 200,
@@ -259,6 +264,9 @@ class AgentGuide
            curl -X POST #{api_base}/comments \\
              -H "X-Agent-Name: YOUR_NAME" -H "Content-Type: application/json" \\
              -d '{"body": "Consider a source here.", "anchor_text": "the text you mean"}'
+
+           Resolve a thread once it's addressed (id comes from open_comments):
+           curl -X POST #{api_base}/comments/COMMENT_ID/resolve -H "X-Agent-Name: YOUR_NAME"
 
         5. React to humans (poll + ack):
            curl #{api_base}/events/pending -H "X-Agent-Name: YOUR_NAME"
