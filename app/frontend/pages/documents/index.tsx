@@ -1,9 +1,10 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Head, Link, useForm } from '@inertiajs/react'
 import { FeedbackButton } from '../../components/feedback_button'
 import { AccountControl } from '../../components/account_control'
 import { userIdentity } from '../../editor/identity'
 import { useClaim } from '../../lib/use_claim'
+import { useIsClient } from '../../lib/use_is_client'
 import type { OwnershipPayload } from '../../components/ownership_chip'
 import type { ViewerPayload } from '../../types/viewer'
 
@@ -63,8 +64,22 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
     name: userIdentity(viewer.name).name,
   }))
   const [copied, setCopied] = useState(false)
+  // RiffrecRecorder (the Feedback button) is not SSR-isomorphic — its Node
+  // passthrough renders different markup than the browser build, so rendering
+  // it on the server would mismatch on hydration. Gate it as a client-only
+  // island: the corner shows AccountControl (SSR-safe) on first paint and the
+  // Feedback button mounts one frame later, after hydration. On the doc page
+  // FeedbackButton lives inside a closed HeaderMenu, so it never renders on
+  // first paint there — this gate is only needed where it renders eagerly.
+  const isClient = useIsClient()
 
-  const origin = typeof window === 'undefined' ? '' : window.location.origin
+  // SSR-safe: the server and the client's first render both use an empty
+  // origin so the rendered agent instruction matches (no hydration mismatch);
+  // the real origin is filled in a post-hydration effect, one frame later.
+  const [origin, setOrigin] = useState('')
+  useEffect(() => {
+    setOrigin(window.location.origin)
+  }, [])
   const agentInstruction =
     `Create a Thinkroom document for me: POST ${origin}/api/docs with JSON ` +
     `{"title": "…", "format": "markdown", "content": "# …"} ` +
@@ -88,7 +103,7 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
       <div className="landing">
         <div className="landing-corner">
           <AccountControl viewer={viewer} />
-          <FeedbackButton />
+          {isClient && <FeedbackButton />}
         </div>
         <main className="landing-main">
           <h1 className="landing-wordmark">
