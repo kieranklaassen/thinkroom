@@ -57,6 +57,19 @@ module Api
         )
       end
 
+      # Markdown isn't server-normalized, but an excalidraw fence that fails
+      # ThinkroomSketch.parse is silently kept as a dead code block. Audit the
+      # stored source (== plain_text's source) so the response can report it
+      # instead of looking byte-for-byte identical to a recognized sketch.
+      sketch_audit = format == "html" ? nil : MarkdownSketchAudit.call(doc.seed_content)
+      normalized = normalization&.changed? || sketch_audit&.unrecognized? || false
+      warning =
+        if normalization&.changed?
+          "Unsupported HTML was removed or normalized."
+        elsif sketch_audit&.unrecognized?
+          unrecognized_sketch_warning(sketch_audit.unrecognized_count)
+        end
+
       response = {
         slug: doc.slug,
         title: doc.title,
@@ -64,8 +77,8 @@ module Api
         content_format: doc.content_format,
         content: doc.seed_content,
         plain_text: doc.plain_text,
-        normalized: normalization&.changed? || false,
-        warning: ("Unsupported HTML was removed or normalized." if normalization&.changed?),
+        normalized: normalized,
+        warning: warning,
         note: "This document is unclaimed. The first person to open the share URL in a browser can claim it — claiming grants them ownership (including delete).",
         content_contract: AgentGuide.content_contract(doc.content_format, request.base_url),
         api: AgentGuide.endpoints(doc, request.base_url)
@@ -78,6 +91,16 @@ module Api
     def show
       touch_presence
       render json: AgentGuide.state(document, request.base_url)
+    end
+
+    private
+
+    def unrecognized_sketch_warning(count)
+      if count == 1
+        "An excalidraw block was not a valid sketch and was kept as a code block."
+      else
+        "#{count} excalidraw blocks were not valid sketches and were kept as code blocks."
+      end
     end
   end
 end

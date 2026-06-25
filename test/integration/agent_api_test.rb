@@ -366,4 +366,71 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_response :not_found
     assert_includes response.parsed_body["error"], "slug"
   end
+
+  test "markdown create with a valid sketch fence reports clean success" do
+    post "/api/docs",
+         params: { title: "Sketch Doc", markdown: "Intro\n\n#{valid_sketch_fence}" },
+         headers: AGENT, as: :json
+
+    assert_response :created
+    body = response.parsed_body
+    assert_equal false, body["normalized"]
+    assert_nil body["warning"]
+    # The recognized sketch shows as semantic text, not raw scene JSON.
+    assert_includes body["plain_text"], "Sketch: Approval flow — Draft"
+    refute_includes body["plain_text"], "formatVersion"
+  end
+
+  test "markdown create with an unrecognized sketch fence is non-silent" do
+    # The documented-but-wrong shape from issue #55: top-level `version` and a
+    # scene that is not a full excalidraw export. Previously this returned a 201
+    # byte-for-byte identical to success.
+    bad = sketch_fence({ version: 1, id: "x", scene: { elements: [] } })
+    post "/api/docs", params: { title: "Broken Sketch", markdown: bad },
+         headers: AGENT, as: :json
+
+    assert_response :created
+    body = response.parsed_body
+    assert_equal true, body["normalized"]
+    assert_includes body["warning"], "excalidraw block"
+    assert_includes body["warning"], "code block"
+    # The recognition signal the issue calls out: raw scene JSON in plain_text.
+    assert_includes body["plain_text"], %("version")
+    refute_includes body["plain_text"], "Sketch:"
+    # The broadened contract documents this outcome.
+    assert_includes body.dig("content_contract", "normalization", "meaning"), "excalidraw"
+  end
+
+  test "markdown create pluralizes the warning for multiple bad fences" do
+    bad = sketch_fence({ version: 1, scene: {} })
+    post "/api/docs",
+         params: { title: "Two Broken", markdown: "#{bad}\n\nBetween\n\n#{bad}" },
+         headers: AGENT, as: :json
+
+    assert_response :created
+    body = response.parsed_body
+    assert_equal true, body["normalized"]
+    assert_includes body["warning"], "2 excalidraw blocks"
+  end
+
+  test "plain markdown create stays unnormalized" do
+    post "/api/docs", params: { markdown: "# Just text, no sketch" }, headers: AGENT, as: :json
+
+    assert_response :created
+    assert_equal false, response.parsed_body["normalized"]
+    assert_nil response.parsed_body["warning"]
+  end
+
+  private
+
+  def valid_sketch_fence
+    sketch_fence({
+      id: "flow1", formatVersion: 1, description: "Approval flow", height: 260,
+      scene: { type: "excalidraw", version: 2, elements: [ { type: "text", text: "Draft" } ] }
+    })
+  end
+
+  def sketch_fence(payload)
+    "```excalidraw\n#{JSON.generate(payload)}\n```"
+  end
 end

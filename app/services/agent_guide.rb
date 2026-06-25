@@ -124,7 +124,7 @@ class AgentGuide
         normalization: {
           response_field: "normalized",
           warning_field: "warning",
-          meaning: "When normalized is true, unsupported or unsafe source was removed or rewritten."
+          meaning: "When normalized is true, unsupported or unsafe source was removed or rewritten, or an excalidraw block was not recognized as a valid sketch and was kept as a code block. The warning field explains what happened."
         },
         sketches: {
           purpose: "Inline Excalidraw sketches remain editable in the human UI and expose text semantics to agents.",
