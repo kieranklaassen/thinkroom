@@ -32,10 +32,16 @@ const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
  * record is never overwritten by a chosen name, so clearing the session
  * name falls back to the same guest identity as before.
  */
-export function userIdentity(serverName?: string | null): UserIdentity {
+export function userIdentity(
+  serverName?: string | null,
+  options?: { allowStorage?: boolean },
+): UserIdentity {
   // Render-path callers (useForm initializers) must survive non-browser
-  // environments where localStorage doesn't exist.
-  if (typeof window === 'undefined') {
+  // environments where localStorage doesn't exist. `allowStorage: false` also
+  // forces this deterministic shape on the client's first (hydration) render
+  // so the server and client markup match — the stored guest identity is then
+  // applied in a post-hydration effect.
+  if (typeof window === 'undefined' || options?.allowStorage === false) {
     return { name: serverName ?? 'Anonymous', color: COLORS[0] }
   }
   const guest = guestIdentity()

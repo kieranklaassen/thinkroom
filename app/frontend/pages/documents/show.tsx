@@ -55,6 +55,7 @@ import {
 } from '../../components/mobile_dock'
 import { useMetaChannel } from '../../lib/use_meta_channel'
 import { useMediaQuery } from '../../lib/use_media_query'
+import { useIsClient } from '../../lib/use_is_client'
 import { useAnchoredPopover } from '../../lib/use_anchored_popover'
 import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
 import { patchJSON } from '../../lib/csrf'
@@ -146,10 +147,29 @@ export default function DocumentShow({
   activities,
   presences,
 }: DocumentProps) {
+  // SSR/hydration island flag: the live editor and any render-time browser
+  // reads are gated on this so the server (and the client's first hydration
+  // render) produce identical markup. It flips true on the next client commit.
+  const isClient = useIsClient()
+
   // Initializer-only state plus an explicit rename handler — NOT a
   // sync-on-prop-change effect, which a future reload batch listing
   // `viewer` would silently clobber mid-rename.
-  const [identity, setIdentity] = useState<UserIdentity>(() => userIdentity(viewer.name))
+  //
+  // Hydration-safe init: server and the first client render derive identity
+  // from the server-provided viewer name only (userIdentity returns the SSR
+  // shape when window is absent, and we skip the localStorage guest read on the
+  // first client render). The stored guest identity (name + color) is applied
+  // in a post-hydration effect, one frame later, before the editor mounts.
+  const [identity, setIdentity] = useState<UserIdentity>(() =>
+    userIdentity(viewer.name, { allowStorage: false }),
+  )
+  useEffect(() => {
+    setIdentity(userIdentity(viewer.name))
+    // viewer.name is stable for the life of the page; the rename handler owns
+    // subsequent identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [guest, setGuest] = useState(viewer.guest)
   // Optimistic: a hydrated or freshly-seeded doc is functionally live the
   // moment it paints — the websocket only confirms it. Starting at 'live'
@@ -177,13 +197,27 @@ export default function DocumentShow({
   // a closure-captured handle goes stale when the editor remounts mid-flight.
   const handleRef = useRef<EditorHandle | null>(null)
   handleRef.current = handle
-  const [panelOpen, setPanelOpen] = useState(() => getStoredFlag('pruf:panel', true))
-  const [focusMode, setFocusMode] = useState(() => getStoredFlag('pruf:focus', false))
+  // Hydration-safe init: server and the first client render use the same fixed
+  // defaults these flags fall back to anyway (panel open, focus off, Edit
+  // mode). The stored localStorage prefs are applied in a post-hydration effect
+  // below — one frame later, before the editor mounts — so SSR markup matches.
+  const [panelOpen, setPanelOpen] = useState(true)
+  const [focusMode, setFocusMode] = useState(false)
   // Demo doc always opens in Edit and stays locked there.
   const modeLocked = doc.slug === 'demo'
-  const [mode, setMode] = useState<EditorMode>(() =>
-    modeLocked ? 'edit' : readStoredMode(doc.slug),
-  )
+  const [mode, setMode] = useState<EditorMode>('edit')
+  // Tracks whether stored prefs have been applied — gates the persisting
+  // effects below so the initial deterministic defaults aren't written back
+  // over the real stored values during the first commit.
+  const prefsHydrated = useRef(false)
+  useEffect(() => {
+    setPanelOpen(getStoredFlag('pruf:panel', true))
+    setFocusMode(getStoredFlag('pruf:focus', false))
+    if (!modeLocked) setMode(readStoredMode(doc.slug))
+    prefsHydrated.current = true
+    // doc.slug / modeLocked are stable for the page's lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const isReading = mode === 'read'
   // handleSelection is a stable callback — it reads the live mode via ref.
   const modeRef = useRef(mode)
@@ -194,8 +228,12 @@ export default function DocumentShow({
   }, [mode])
 
   // ≤64rem: rail and margin cards give way to anchor markers, a bottom dock,
-  // and sheets — the full product, rearranged for one hand.
-  const isMobile = useMediaQuery('(max-width: 64rem)')
+  // and sheets — the full product, rearranged for one hand. Masked by isClient
+  // so the first render is the desktop layout on both server and client (the
+  // matchMedia read happens only after mount) — the responsive collapse then
+  // applies one frame later, matching the editor mount.
+  const rawIsMobile = useMediaQuery('(max-width: 64rem)')
+  const isMobile = isClient && rawIsMobile
   const [activeSheet, setActiveSheet] = useState<SheetKind | null>(null)
   const [sheetFocusId, setSheetFocusId] = useState<number | null>(null)
   const suggestionsRef = useRef(suggestions)
@@ -225,10 +263,17 @@ export default function DocumentShow({
     if (isMobile && composerAnchor !== null) setActiveSheet('comments')
   }, [isMobile, composerAnchor])
 
-  useEffect(() => setStoredFlag('pruf:panel', panelOpen), [panelOpen])
-  useEffect(() => setStoredFlag('pruf:focus', focusMode), [focusMode])
+  // Persist only after the stored prefs have been read back in (the effect
+  // above). Without this gate the first commit's deterministic defaults would
+  // clobber the real stored values before they were ever applied.
   useEffect(() => {
-    if (!modeLocked) setStoredString(modeKey(doc.slug), mode)
+    if (prefsHydrated.current) setStoredFlag('pruf:panel', panelOpen)
+  }, [panelOpen])
+  useEffect(() => {
+    if (prefsHydrated.current) setStoredFlag('pruf:focus', focusMode)
+  }, [focusMode])
+  useEffect(() => {
+    if (prefsHydrated.current && !modeLocked) setStoredString(modeKey(doc.slug), mode)
   }, [mode, modeLocked, doc.slug])
 
   // ⌘\ toggles the side panel, ⌘. toggles suggestion focus.
@@ -1025,32 +1070,40 @@ export default function DocumentShow({
                     />
                   </div>
                 )}
+                {/* The editor is a client-only island: Milkdown/ProseMirror,
+                    Yjs, the ActionCable provider, and Excalidraw never render
+                    on the server. The server emits an empty doc-live-editor
+                    shell (identical on the client's first hydration render) and
+                    the static preview above carries first paint until the
+                    editor mounts post-hydration and the swap takes over. */}
                 <div className="doc-live-editor">
-                  <DocumentEditor
-                    slug={doc.slug}
-                    identity={identity}
-                    contentFormat={doc.content_format}
-                    initialStateB64={doc.yjs_state_b64}
-                    seedContent={doc.seed_content}
-                    seedGranted={doc.seed_granted}
-                    seedAuthorKind={doc.seed_author_kind}
-                    seedAuthorName={doc.seed_author_name}
-                    editable={mode === 'edit' || mode === 'suggest'}
-                    suggesting={mode === 'suggest'}
-                    taskInteractive={mode !== 'comment'}
-                    onReady={(h) => {
-                      setHandle(h)
-                      // Wait two frames so ProseMirror has painted the synced
-                      // content before the preview is removed.
-                      requestAnimationFrame(() =>
-                        requestAnimationFrame(() => setEditorSwapped(true)),
-                      )
-                    }}
-                    onStatus={setStatus}
-                    onSpans={setSpans}
-                    onSelection={isReading ? undefined : handleSelection}
-                    onTitleChange={setDocumentTitle}
-                  />
+                  {isClient && (
+                    <DocumentEditor
+                      slug={doc.slug}
+                      identity={identity}
+                      contentFormat={doc.content_format}
+                      initialStateB64={doc.yjs_state_b64}
+                      seedContent={doc.seed_content}
+                      seedGranted={doc.seed_granted}
+                      seedAuthorKind={doc.seed_author_kind}
+                      seedAuthorName={doc.seed_author_name}
+                      editable={mode === 'edit' || mode === 'suggest'}
+                      suggesting={mode === 'suggest'}
+                      taskInteractive={mode !== 'comment'}
+                      onReady={(h) => {
+                        setHandle(h)
+                        // Wait two frames so ProseMirror has painted the synced
+                        // content before the preview is removed.
+                        requestAnimationFrame(() =>
+                          requestAnimationFrame(() => setEditorSwapped(true)),
+                        )
+                      }}
+                      onStatus={setStatus}
+                      onSpans={setSpans}
+                      onSelection={isReading ? undefined : handleSelection}
+                      onTitleChange={setDocumentTitle}
+                    />
+                  )}
                 </div>
               </div>
             </article>
