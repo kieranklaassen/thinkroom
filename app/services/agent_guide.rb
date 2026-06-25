@@ -144,7 +144,8 @@ class AgentGuide
               }
             },
             example: markdown_sketch_example,
-            recognition: %(A recognized sketch renders in plain_text as "Sketch: <description> - <labels>". If plain_text instead echoes the raw scene JSON, the fence was not recognized; the create response then reports normalized: true with a warning.)
+            recognition: %(A recognized sketch renders in plain_text as "Sketch: <description> - <labels>". If plain_text instead echoes the raw scene JSON, the fence was not recognized; the create response then reports normalized: true with a warning.),
+            reference: "Excalidraw scene/element format and drawing semantics: https://docs.excalidraw.com/docs/codebase/json-schema"
           },
           html_source: "A trusted figure[data-thinkroom-sketch] snapshot; external HTML cannot set reserved sketch attributes.",
           rendered_context: "plain_text emits the sketch description and text labels instead of raw scene JSON.",
@@ -258,7 +259,9 @@ class AgentGuide
         content_contract.sketches.markdown_source (formatVersion, id,
         description, height, and a full excalidraw scene). When recognized,
         plain_text reads "Sketch: <description> — <labels>"; raw scene JSON in
-        plain_text means it was not recognized.
+        plain_text means it was not recognized. The Excalidraw scene/element
+        format and drawing semantics are documented at
+        https://docs.excalidraw.com/docs/codebase/json-schema.
 
         #{html_contract_text(document, base_url)}
         ## Participate

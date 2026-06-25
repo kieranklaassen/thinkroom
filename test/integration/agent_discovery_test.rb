@@ -62,6 +62,7 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert_includes markdown_source.dig("schema", "height"), ThinkroomSketch::DEFAULT_HEIGHT.to_s
     assert_equal %(must equal "excalidraw".), markdown_source.dig("schema", "scene", "type").split("(required) ").last
     assert_includes markdown_source["recognition"], "Sketch:"
+    assert_includes markdown_source["reference"], "docs.excalidraw.com"
     assert_includes markdown_source["example"], "```excalidraw"
     # The documented example must actually pass server-side recognition, or the
     # contract is teaching agents a payload the API would silently reject.
