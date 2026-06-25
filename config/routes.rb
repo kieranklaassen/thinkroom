@@ -36,6 +36,7 @@ Rails.application.routes.draw do
     post "uploads", to: "uploads#create"
     post "docs", to: "docs#create"
     get "docs/:slug", to: "docs#show", as: :doc
+    patch "docs/:slug", to: "docs#update"
     post "docs/:slug/suggestions", to: "suggestions#create", as: :doc_suggestions
     post "docs/:slug/comments", to: "comments#create", as: :doc_comments
     post "docs/:slug/comments/:id/resolve", to: "comments#resolve", as: :doc_resolve_comment

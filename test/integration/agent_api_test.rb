@@ -6,12 +6,15 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   AGENT = { "X-Agent-Name" => "Scout" }.freeze
 
   setup do
+    # Rate-limit counters live in a process-wide store; clear it so per-test
+    # write volume can't bleed across tests (mirrors WriteRateLimitTest).
+    WriteRateLimited::STORE.clear
     @document = Document.create!(title: "Shared Doc", seed_markdown: "# Hello\n\nA paragraph about provenance.")
   end
 
   test "agent creates a document from markdown and gets a shareable slug" do
     post "/api/docs",
-         params: { title: "Agent Doc", markdown: "# From an agent" },
+         params: { title: "Agent Doc", content: "# From an agent" },
          headers: AGENT, as: :json
 
     assert_response :created
@@ -180,21 +183,12 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_nil response.parsed_body["warning"]
   end
 
-  test "explicit format validates content and legacy field compatibility" do
+  test "explicit format validates content and rejects unknown formats" do
     assert_no_difference -> { Document.count } do
       post "/api/docs", params: { format: "html" }, headers: AGENT, as: :json
     end
     assert_response :unprocessable_entity
     assert_includes response.parsed_body["error"], "content is required"
-
-    assert_no_difference -> { Document.count } do
-      post "/api/docs",
-           params: { format: "html", markdown: "# Wrong field" },
-           headers: AGENT,
-           as: :json
-    end
-    assert_response :unprocessable_entity
-    assert_includes response.parsed_body["error"], "markdown field"
 
     assert_no_difference -> { Document.count } do
       post "/api/docs",
@@ -207,7 +201,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   end
 
   test "doc created without X-Agent-Name records no seed authorship" do
-    post "/api/docs", params: { markdown: "# Anonymous" }, as: :json
+    post "/api/docs", params: { content: "# Anonymous" }, as: :json
 
     assert_response :created
     doc = Document.find_by!(slug: response.parsed_body["slug"])
@@ -217,7 +211,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
 
   test "oversized agent name is capped at 255 chars in seed authorship" do
     post "/api/docs",
-         params: { markdown: "# Big name" },
+         params: { content: "# Big name" },
          headers: { "X-Agent-Name" => "A" * 300 }, as: :json
 
     assert_response :created
@@ -262,7 +256,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   end
 
   test "cold read reports agent-seeded docs as unreviewed AI with authorship" do
-    post "/api/docs", params: { markdown: "# From an agent" }, headers: AGENT, as: :json
+    post "/api/docs", params: { content: "# From an agent" }, headers: AGENT, as: :json
     slug = response.parsed_body["slug"]
 
     get "/api/docs/#{slug}", headers: AGENT
@@ -396,7 +390,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
 
   test "markdown create with a valid sketch fence reports clean success" do
     post "/api/docs",
-         params: { title: "Sketch Doc", markdown: "Intro\n\n#{valid_sketch_fence}" },
+         params: { title: "Sketch Doc", content: "Intro\n\n#{valid_sketch_fence}" },
          headers: AGENT, as: :json
 
     assert_response :created
@@ -413,7 +407,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     # scene that is not a full excalidraw export. Previously this returned a 201
     # byte-for-byte identical to success.
     bad = sketch_fence({ version: 1, id: "x", scene: { elements: [] } })
-    post "/api/docs", params: { title: "Broken Sketch", markdown: bad },
+    post "/api/docs", params: { title: "Broken Sketch", content: bad },
          headers: AGENT, as: :json
 
     assert_response :created
@@ -431,7 +425,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   test "markdown create pluralizes the warning for multiple bad fences" do
     bad = sketch_fence({ version: 1, scene: {} })
     post "/api/docs",
-         params: { title: "Two Broken", markdown: "#{bad}\n\nBetween\n\n#{bad}" },
+         params: { title: "Two Broken", content: "#{bad}\n\nBetween\n\n#{bad}" },
          headers: AGENT, as: :json
 
     assert_response :created
@@ -441,7 +435,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   end
 
   test "plain markdown create stays unnormalized" do
-    post "/api/docs", params: { markdown: "# Just text, no sketch" }, headers: AGENT, as: :json
+    post "/api/docs", params: { content: "# Just text, no sketch" }, headers: AGENT, as: :json
 
     assert_response :created
     assert_equal false, response.parsed_body["normalized"]
@@ -453,7 +447,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     # while building plain_text, 500ing the request after the doc was persisted.
     [ "[1,2,3]", "42", %({"formatVersion":1,"scene":{"type":"excalidraw","version":2,"elements":[],"x":1e309}}) ].each do |body|
       assert_difference -> { Document.count }, 1 do
-        post "/api/docs", params: { markdown: "```excalidraw\n#{body}\n```" }, headers: AGENT, as: :json
+        post "/api/docs", params: { content: "```excalidraw\n#{body}\n```" }, headers: AGENT, as: :json
       end
       assert_response :created
       body_json = response.parsed_body
@@ -472,6 +466,269 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal "markdown", body["content_format"]
     assert_equal true, body["normalized"]
     assert_includes body["warning"], "excalidraw block"
+  end
+
+  # --- PATCH /api/docs/:slug (seed-stage update) ---
+
+  test "agent updates a seed-stage document in place keeping its slug" do
+    post "/api/docs", params: { title: "Draft", content: "# First cut" }, headers: AGENT, as: :json
+    slug = response.parsed_body["slug"]
+    share_url = response.parsed_body["share_url"]
+
+    patch "/api/docs/#{slug}",
+          params: { title: "Revised", content: "# Second cut\n\nBetter now." },
+          headers: AGENT, as: :json
+
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal slug, body["slug"], "slug must stay stable — the whole point of update"
+    assert_equal share_url, body["share_url"]
+    assert_equal "Revised", body["title"]
+    assert_includes body["content"], "Second cut"
+
+    doc = Document.find_by!(slug: slug)
+    assert_equal "Revised", doc.title
+    assert_includes doc.current_content, "Second cut"
+    assert_equal "updated_document", doc.activities.last.action
+    assert_equal "Scout", doc.activities.last.actor_name
+  end
+
+  test "update on a collaborative document returns 409 with a route to suggestions" do
+    @document.update!(yjs_state: "binary-crdt-state")
+
+    patch "/api/docs/#{@document.slug}",
+          params: { content: "# Trying to overwrite" },
+          headers: AGENT, as: :json
+
+    assert_response :conflict
+    body = response.parsed_body
+    assert_includes body["error"], "no longer an unclaimed draft"
+    assert_includes body["propose_suggestion"], "/api/docs/#{@document.slug}/suggestions"
+
+    @document.reload
+    assert_equal "# Hello\n\nA paragraph about provenance.", @document.seed_markdown,
+                 "seed must be untouched when the editor has taken over"
+  end
+
+  test "update returns 409 once an editor snapshot shadows the seed even if yjs_state is blank" do
+    # A markdown snapshot can persist content_snapshot with no yjs_state. The
+    # seed is then no longer what readers see, so a seed overwrite would 200
+    # while changing nothing — block it instead of silently no-opping.
+    @document.update!(content_snapshot: "# Snapshot the editor pushed")
+
+    patch "/api/docs/#{@document.slug}",
+          params: { content: "# would be invisible" },
+          headers: AGENT, as: :json
+
+    assert_response :conflict
+    @document.reload
+    assert_equal "# Hello\n\nA paragraph about provenance.", @document.seed_markdown
+  end
+
+  test "update returns 409 once a human has claimed the document" do
+    @document.update!(owner_token: SecureRandom.hex(8), owner_name: "Owner")
+
+    patch "/api/docs/#{@document.slug}",
+          params: { content: "# not yours to overwrite" },
+          headers: AGENT, as: :json
+
+    assert_response :conflict
+    @document.reload
+    assert_equal "# Hello\n\nA paragraph about provenance.", @document.seed_markdown,
+                 "a claimed document's seed must not be overwritable through the agent API"
+  end
+
+  test "title-only update leaves content and seed authorship untouched" do
+    post "/api/docs", params: { title: "Draft", content: "# Body stays" }, headers: AGENT, as: :json
+    slug = response.parsed_body["slug"]
+    doc_before = Document.find_by!(slug: slug)
+
+    patch "/api/docs/#{slug}", params: { title: "Renamed" }, headers: AGENT, as: :json
+
+    assert_response :ok
+    doc = Document.find_by!(slug: slug)
+    assert_equal "Renamed", doc.title
+    assert_equal doc_before.seed_content, doc.current_content
+    assert_equal "agent", doc.seed_author_kind
+    assert_equal "Scout", doc.seed_author_name
+  end
+
+  test "content-only update leaves the title untouched" do
+    post "/api/docs", params: { title: "Keep Me", content: "# Old" }, headers: AGENT, as: :json
+    slug = response.parsed_body["slug"]
+
+    patch "/api/docs/#{slug}", params: { content: "# New" }, headers: AGENT, as: :json
+
+    assert_response :ok
+    doc = Document.find_by!(slug: slug)
+    assert_equal "Keep Me", doc.title
+    assert_includes doc.current_content, "New"
+  end
+
+  test "update rejects a format that differs from the immutable stored format" do
+    post "/api/docs", params: { content: "# Markdown doc" }, headers: AGENT, as: :json
+    slug = response.parsed_body["slug"]
+
+    patch "/api/docs/#{slug}",
+          params: { format: "html", content: "<h1>nope</h1>" },
+          headers: AGENT, as: :json
+
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "immutable"
+    assert_equal "# Markdown doc", Document.find_by!(slug: slug).seed_content
+  end
+
+  test "update accepts a format that matches the stored format" do
+    post "/api/docs", params: { content: "# Markdown doc" }, headers: AGENT, as: :json
+    slug = response.parsed_body["slug"]
+
+    patch "/api/docs/#{slug}",
+          params: { format: "markdown", content: "# Still markdown" },
+          headers: AGENT, as: :json
+
+    assert_response :ok
+    assert_includes Document.find_by!(slug: slug).current_content, "Still markdown"
+  end
+
+  test "clean HTML update reports no normalization" do
+    post "/api/docs", params: { format: "html", content: "<h1>Clean</h1>" }, headers: AGENT, as: :json
+    slug = response.parsed_body["slug"]
+
+    patch "/api/docs/#{slug}", params: { content: "<h1>Still clean</h1><p>Body.</p>" }, headers: AGENT, as: :json
+
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal false, body["normalized"]
+    assert_nil body["warning"]
+    assert_includes body["content"], "Still clean"
+  end
+
+  test "update with neither title nor content is rejected" do
+    patch "/api/docs/#{@document.slug}", params: {}, headers: AGENT, as: :json
+
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "title or content"
+  end
+
+  test "update rejects content larger than the byte cap" do
+    post "/api/docs", params: { content: "# small" }, headers: AGENT, as: :json
+    slug = response.parsed_body["slug"]
+
+    patch "/api/docs/#{slug}",
+          params: { content: "x" * (Document::MAX_CONTENT_BYTES + 1) },
+          headers: AGENT, as: :json
+
+    assert_response :content_too_large
+    assert_equal Document::MAX_CONTENT_BYTES, response.parsed_body["max_bytes"]
+  end
+
+  test "update reports HTML normalization the same way create does" do
+    post "/api/docs",
+         params: { format: "html", content: "<h1>Clean</h1>" },
+         headers: AGENT, as: :json
+    slug = response.parsed_body["slug"]
+
+    patch "/api/docs/#{slug}",
+          params: { content: '<h1 onclick="bad()">Hi</h1><script>evil()</script>' },
+          headers: AGENT, as: :json
+
+    assert_response :ok
+    body = response.parsed_body
+    assert body["normalized"]
+    assert_includes body["warning"], "normalized"
+    refute_match(/onclick|script/, body["content"])
+  end
+
+  test "update with an unrecognized markdown sketch fence reports a warning" do
+    post "/api/docs", params: { content: "# fine" }, headers: AGENT, as: :json
+    slug = response.parsed_body["slug"]
+    bad = sketch_fence({ version: 1, id: "x", scene: { elements: [] } })
+
+    patch "/api/docs/#{slug}", params: { content: bad }, headers: AGENT, as: :json
+
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal true, body["normalized"]
+    assert_includes body["warning"], "excalidraw block"
+  end
+
+  test "update re-attributes seed authorship to the updating agent" do
+    post "/api/docs", params: { content: "# v1" }, headers: { "X-Agent-Name" => "Author" }, as: :json
+    slug = response.parsed_body["slug"]
+
+    patch "/api/docs/#{slug}",
+          params: { content: "# v2" },
+          headers: { "X-Agent-Name" => "Editor" }, as: :json
+
+    assert_response :ok
+    doc = Document.find_by!(slug: slug)
+    assert_equal "agent", doc.seed_author_kind
+    assert_equal "Editor", doc.seed_author_name
+    assert_equal "updated_document", doc.activities.last.action
+    assert_equal "Editor", doc.activities.last.actor_name
+  end
+
+  test "anonymous content update preserves the original seed authorship" do
+    post "/api/docs", params: { content: "# v1" }, headers: { "X-Agent-Name" => "Author" }, as: :json
+    slug = response.parsed_body["slug"]
+
+    patch "/api/docs/#{slug}", params: { content: "# v2" }, as: :json
+
+    assert_response :ok
+    doc = Document.find_by!(slug: slug)
+    assert_equal "agent", doc.seed_author_kind
+    assert_equal "Author", doc.seed_author_name
+  end
+
+  test "create response advertises the update endpoint to agents" do
+    post "/api/docs", params: { content: "# hi" }, headers: AGENT, as: :json
+
+    assert_response :created
+    update = response.parsed_body.dig("api", "update_document")
+    assert_equal "PATCH", update["method"]
+    assert_equal 409, update["conflict_status"]
+    assert_includes update["url"], "/api/docs/#{response.parsed_body['slug']}"
+    assert_includes update["purpose"], "seed-stage"
+  end
+
+  test "state payload advertises the update endpoint and explains it in notes" do
+    get "/api/docs/#{@document.slug}", headers: AGENT, as: :json
+
+    assert_response :success
+    assert_equal "PATCH", response.parsed_body.dig("api", "update_document", "method")
+    assert response.parsed_body["notes"].any? { |n| n.include?("PATCH /api/docs/:slug") }
+  end
+
+  test "plain-text share guide documents updating a created document" do
+    get "/d/#{@document.slug}", headers: { "User-Agent" => "curl/8.6.0" }
+
+    assert_response :success
+    assert_equal "text/plain", response.media_type
+    assert_includes response.body, "Revise a document you created"
+    assert_includes response.body, "-X PATCH"
+  end
+
+  test "update of an unknown slug returns a clean 404" do
+    patch "/api/docs/does-not-exist", params: { content: "# x" }, headers: AGENT, as: :json
+
+    assert_response :not_found
+    assert_includes response.parsed_body["error"], "No document with that slug."
+  end
+
+  test "update writes are rate limited per source IP" do
+    headers = AGENT.merge("REMOTE_ADDR" => "192.0.2.243")
+    post "/api/docs", params: { content: "# seed" }, headers:, as: :json
+    slug = response.parsed_body["slug"]
+
+    WriteRateLimited::CONTRIBUTION_BURST_LIMIT.times do
+      patch "/api/docs/#{slug}", params: { content: "# rev" }, headers:, as: :json
+      assert_response :ok
+    end
+
+    patch "/api/docs/#{slug}", params: { content: "# rev" }, headers:, as: :json
+
+    assert_response :too_many_requests
+    assert_includes response.parsed_body["error"], "rate limit"
   end
 
   private

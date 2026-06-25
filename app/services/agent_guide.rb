@@ -108,7 +108,20 @@ class AgentGuide
                                       content_format: "Immutable markdown or html", content: "Canonical source",
                                       plain_text: "Rendered text", normalized: "Whether source changed during normalization",
                                       content_contract: "Machine-readable source, HTML, CSS, and image rules" },
-                           purpose: "Create a new shared document. X-Agent-Name is recommended for seed attribution but creation also permits an unattributed request." }
+                           purpose: "Create a new shared document. X-Agent-Name is recommended for seed attribution but creation also permits an unattributed request." },
+        update_document: { method: "PATCH", url: api_base,
+                           headers: { "X-Agent-Name": "recommended", "Content-Type": "application/json" },
+                           success_status: 200,
+                           conflict_status: 409,
+                           rate_limits: contribution_rate_limits,
+                           body: { title: "(optional) replacement title",
+                                   format: "(optional) must equal this document's immutable content_format",
+                                   content: "(optional) replacement canonical #{source_name} source; send title and/or content" },
+                           limits: { content_max_bytes: Document::MAX_CONTENT_BYTES },
+                           returns: { slug: "Unchanged identifier", share_url: "Unchanged share URL",
+                                      content: "Updated canonical source", plain_text: "Updated rendered text",
+                                      normalized: "Whether source changed during normalization", warning: "Normalization detail" },
+                           purpose: "Revise the document you created in place — same slug, same share URL — while it is still seed-stage (no human has opened it to edit). Once a human starts editing, the live collaborative document is authoritative: this returns 409, and you propose a suggestion instead." }
       }
     end
 
@@ -199,6 +212,7 @@ class AgentGuide
         "All your writes go through the same provenance/suggestion machinery as the human UI. There is no side channel: you propose, humans review.",
         "Text you contribute is marked kind=ai provenance (with your agent name as author) and tinted in the editor until a human advances its review state (pending -> reviewed -> endorsed).",
         "Documents you create with source content are pre-attributed as 100% unreviewed AI prose. Before any editor session opens the doc, the provenance summary is derived from the seed source and replaced by the first editor snapshot.",
+        "Updating: PATCH /api/docs/:slug rewrites your document's seed in place — same slug, same share URL — so revisions stay at the link you already shared, as long as no human has started editing. Once an editor takes over you get a 409: from then on, propose suggestions, which is how every edit to a live document works.",
         "Connected editors see your suggestions, comments, and presence live over WebSocket — no refresh needed on their side.",
         "Reading state: use plain_text as working context and content when source fidelity matters. This document expects #{source_name} suggestion bodies. State may lag if no human has the document open — the Yjs CRDT state is always authoritative.",
         "Sketches: inline Excalidraw scenes appear in content and are summarized in plain_text from their human description and text labels. Treat the scene as editable source and SVG as a derived browser export; embedded bitmap files are not supported. To author one in Markdown, embed a fenced excalidraw block following content_contract.sketches.markdown_source (formatVersion, id, description, height, and a full excalidraw scene with type/version/appState/files) — copy its example to start. A recognized sketch shows in plain_text as \"Sketch: <description> — <labels>\"; raw scene JSON in plain_text means the block was not recognized, and the create response then returns normalized: true with a warning.",
@@ -211,7 +225,7 @@ class AgentGuide
       ]
       if document.html?
         notes.insert(
-          8,
+          9,
           "HTML normalization: semantic body HTML is supported, not arbitrary page HTML/CSS. Scripts, embedded content, full-page metadata, <style> blocks, classes, remote images, and inline styles other than table-cell text alignment are removed. Upload images through api.upload_image and use the returned src exactly."
         )
       end
@@ -327,6 +341,18 @@ class AgentGuide
         4. Propose edits and comments through the endpoints in that state
            payload, poll events while waiting for review, then sign off.
 
+        ## Revise a document you created
+        While no human has opened the document to edit it, you can rewrite it
+        in place — same slug, same share URL, so the link you shared keeps
+        working. Send a new title, content, or both:
+           curl -X PATCH #{base_url}/api/docs/RETURNED_SLUG \\
+             -H "X-Agent-Name: YOUR_NAME" -H "Content-Type: application/json" \\
+             -d '{"title": "Revised", "content": "..."}'
+        format is immutable; omit it or send the document's existing format.
+        Once a human starts editing, the live collaborative document becomes
+        authoritative and PATCH returns 409 — from then on, propose a
+        suggestion instead.
+
         HTML is sanitized and normalized to Thinkroom's editable schema. Create and
         suggestion responses include normalized=true plus a warning when
         unsupported markup was removed or rewritten.
@@ -335,8 +361,7 @@ class AgentGuide
         tables, and uploaded images. CSS is removed except text-align
         left/center/right on th and td. <style>, class/id hooks, scripts,
         embeds, SVG, remote images, data: images, and page metadata are removed.
-        For Markdown, send format="markdown" and Markdown in content. Legacy
-        clients may still send a top-level "markdown" field.
+        For Markdown, send Markdown in content (format defaults to "markdown").
 
         ## Ownership
         A human can claim a document in their browser; the claimed owner shows
