@@ -76,6 +76,22 @@ class Document < ApplicationRecord
     DocumentPlainText.call(format: content_format, content: current_content)
   end
 
+  # Sanitized HTML of the current content, painted on first load so the editor
+  # frame shows real text before Milkdown finishes binding the hydrated state.
+  def preview_html
+    DocumentPreviewHtml.call(format: content_format, content: current_content)
+  end
+
+  # The title to show before the editor mounts. The editor derives the header
+  # title from the document's first H1; deriving the same thing here means the
+  # header reads correctly on first paint instead of flashing the stored title.
+  def display_title
+    content = current_content
+    return title if content.blank?
+
+    DocumentTitle.call(format: content_format, content: content).presence || title
+  end
+
   def claimed? = user_id.present? || owner_token.present?
 
   def claimable? = !claimed? && UNCLAIMABLE_SLUGS.exclude?(slug)
