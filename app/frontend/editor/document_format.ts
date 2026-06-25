@@ -72,6 +72,7 @@ const ALLOWED_ATTR = [
   'data-suggestion-id',
   'data-thinkroom-sketch',
   'data-sketch-id',
+  'data-sketch-height',
   'data-scene',
   'data-description',
   'data-format-version',
@@ -88,6 +89,7 @@ const SUGGESTION_ATTRS = ['data-suggestion-id', 'data-author']
 const SKETCH_ATTRS = [
   'data-thinkroom-sketch',
   'data-sketch-id',
+  'data-sketch-height',
   'data-scene',
   'data-description',
   'data-format-version',
@@ -160,6 +162,9 @@ const sanitizeMetadata = (element: HTMLElement, trust: HtmlTrust) => {
     try {
       const validSketch = normalizeSketchData({
         id: metadata['data-sketch-id'],
+        height: metadata['data-sketch-height'] === null
+          ? undefined
+          : Number(metadata['data-sketch-height']),
         formatVersion: Number(metadata['data-format-version']),
         description: metadata['data-description'],
         scene: JSON.parse(metadata['data-scene'] ?? ''),

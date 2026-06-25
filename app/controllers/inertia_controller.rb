@@ -19,9 +19,13 @@ class InertiaController < ApplicationController
 
   # Share data with all Inertia responses
   # see https://inertia-rails.dev/guide/shared-data
-  # The viewer's chosen display name lives in the session; no name set means
-  # guest mode (the client falls back to its random localStorage identity).
-  inertia_share viewer: -> { { name: session[:display_name], guest: session[:display_name].blank? } }
+  # Account identity wins over the optional guest display name. Only the
+  # small public account shape reaches the client.
+  inertia_share viewer: -> {
+    account = current_user&.slice(:id, :name, :email)
+    name = current_user&.name || session[:display_name]
+    { name:, guest: current_user.nil? && name.blank?, account: }
+  }
 
   private
 
@@ -31,6 +35,7 @@ class InertiaController < ApplicationController
   # Non-string params (name[x]=1 produces ActionController::Parameters) are
   # treated as absent rather than stringified into garbage attribution.
   def preferred_name(raw, fallback:)
-    session[:display_name].presence || (raw.presence if raw.is_a?(String)) || fallback
+    current_user&.name || session[:display_name].presence ||
+      (raw.presence if raw.is_a?(String)) || fallback
   end
 end

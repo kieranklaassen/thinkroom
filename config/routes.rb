@@ -7,6 +7,14 @@ Rails.application.routes.draw do
 
   post "identity", to: "identities#update", as: :identity
 
+  get "login", to: "sessions#new", as: :login
+  post "login", to: "sessions#create"
+  delete "logout", to: "sessions#destroy", as: :logout
+  get "signup", to: "registrations#new", as: :signup
+  post "signup", to: "registrations#create"
+  match "/auth/:provider/callback", to: "oauth_callbacks#create", via: %i[get post]
+  get "/auth/failure", to: "oauth_callbacks#failure"
+
   get "d/:slug", to: "documents#show", as: :document_page
   post "d/:slug/claim", to: "documents#claim", as: :claim_document
   delete "d/:slug", to: "documents#destroy", as: :destroy_document

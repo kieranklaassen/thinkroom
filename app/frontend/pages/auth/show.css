@@ -1,0 +1,147 @@
+.auth-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 2rem 1rem;
+}
+
+.auth-card {
+  width: min(100%, 23rem);
+}
+
+.auth-wordmark {
+  display: inline-grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-family: var(--font-doc);
+  font-size: 1rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.auth-heading {
+  margin: 1.75rem 0 1.5rem;
+}
+
+.auth-heading h1 {
+  font-family: var(--font-doc);
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.auth-heading p {
+  margin-top: 0.45rem;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.auth-google {
+  display: flex;
+  width: 100%;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.auth-google:hover {
+  border-color: var(--ink-faint);
+}
+
+.auth-google svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  height: 1px;
+  flex: 1;
+  background: var(--line);
+  content: '';
+}
+
+.auth-fields {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.auth-fields label {
+  display: grid;
+  gap: 0.35rem;
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+  font-weight: 550;
+}
+
+.auth-fields input {
+  width: 100%;
+  min-height: 2.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  padding: 0.65rem 0.75rem;
+  font-size: 0.9rem;
+  box-shadow: none;
+}
+
+.auth-fields input:focus {
+  border-color: var(--ink-faint);
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
+.auth-fields input[aria-invalid='true'] {
+  border-color: color-mix(in srgb, #b3261e 45%, var(--line));
+}
+
+.auth-error {
+  color: #9a2f28;
+  font-size: 0.76rem;
+  line-height: 1.4;
+}
+
+.auth-submit {
+  min-height: 2.75rem;
+  justify-content: center;
+}
+
+.auth-switch {
+  margin-top: 1.35rem;
+  color: var(--ink-faint);
+  font-size: 0.78rem;
+}
+
+.auth-switch a {
+  color: var(--ink-soft);
+  text-underline-offset: 2px;
+}
+
+.auth-switch a:hover {
+  color: var(--ink);
+}

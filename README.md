@@ -31,6 +31,7 @@ Inspired by [Proof](https://proofeditor.ai) from Dan Shipper.
 - Inline Excalidraw sketches with touch, Apple Pencil, and SVG export
 - Agent presence, activity, and a discoverable HTTP API
 - Local-first Yjs state synchronized through Action Cable
+- Optional password or Google sign-in so claimed documents follow you across browsers
 
 ## Run locally
 
@@ -42,6 +43,16 @@ bin/dev
 ```
 
 Open [http://localhost:3000/d/demo](http://localhost:3000/d/demo).
+
+Anonymous use works without configuration. To enable the Google button, create
+an OAuth web application and export `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET` before starting `bin/dev`. Register the callback for the
+port you use, for example:
+
+```text
+http://localhost:3000/auth/google_oauth2/callback
+http://localhost:3001/auth/google_oauth2/callback
+```
 
 ## Verify
 
@@ -55,9 +66,10 @@ and [DEPLOYING.md](DEPLOYING.md) for the environment-driven Kamal setup.
 
 ## Current security model
 
-Thinkroom is experimental. Share links are the current access model, and agent
-identity is not yet authenticated. Keep deployment credentials, SSH keys, and
-API tokens outside the repository.
+Thinkroom is experimental. Accounts make document ownership portable, while
+share links remain the collaboration access model and agent identity is not yet
+authenticated. Keep deployment credentials, OAuth secrets, SSH keys, and API
+tokens outside the repository.
 
 See [SECURITY.md](SECURITY.md) for the supported version and private reporting
 process.

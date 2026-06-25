@@ -63,3 +63,7 @@ gem "commonmarker", "~> 2.8"
 
 # Decode and re-encode public image uploads before Active Storage persistence.
 gem "ruby-vips", "~> 2.3"
+
+gem "bcrypt", "~> 3.1"
+gem "omniauth-google-oauth2", "~> 1.2"
+gem "omniauth-rails_csrf_protection", "~> 2.0"

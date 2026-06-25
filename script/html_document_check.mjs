@@ -172,6 +172,10 @@ try {
   await a.keyboard.type(trackedSentinel)
   await a.locator('.milkdown ins.sug-ins', { hasText: trackedSentinel }).waitFor({ timeout: 5000 })
   await b.locator('.milkdown ins.sug-ins', { hasText: trackedSentinel }).waitFor({ timeout: 10000 })
+  assert(
+    (await a.locator('.milkdown .ProseMirror > p', { hasText: trackedSentinel }).count()) === 1,
+    'tracked block insertion created a top-level paragraph',
+  )
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const snapshot = await (await fetch(`${BASE}/api/docs/${created.slug}`)).json()
     if (snapshot.content.includes(trackedSentinel) && snapshot.content.includes('<ins')) break

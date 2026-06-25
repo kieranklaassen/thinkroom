@@ -161,13 +161,56 @@ a:focus-visible {
 /* --------------------------------- Landing ------------------------------- */
 .landing {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   padding: 2rem;
 }
 
+.account-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink-soft);
+  padding: 0.35rem 0.65rem;
+  font-size: 0.74rem;
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.account-control--guest:hover {
+  border-color: var(--ink-faint);
+  color: var(--ink);
+}
+
+.account-control--signed-in > span {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-control--signed-in button {
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-faint);
+  padding: 0 0 0 0.5rem;
+  cursor: pointer;
+}
+
+.account-control--signed-in button:hover {
+  color: var(--ink);
+}
+
 .landing-main {
+  width: 100%;
   max-width: 26rem;
+  margin-block: auto;
   text-align: center;
 }
 
@@ -201,122 +244,6 @@ a:focus-visible {
   display: flex;
   gap: 0.75rem;
   justify-content: center;
-}
-
-.document-creator {
-  margin-top: 1.5rem;
-  text-align: left;
-  animation: creator-in 160ms ease-out;
-}
-
-.document-creator fieldset {
-  border: 0;
-  padding: 0;
-  margin: 0;
-}
-
-.document-creator legend {
-  width: 100%;
-  text-align: center;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--ink-soft);
-  margin-bottom: 0.65rem;
-}
-
-.format-options {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.55rem;
-}
-
-.format-option {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  cursor: pointer;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--surface);
-  padding: 0.7rem 0.75rem;
-  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
-}
-
-.format-option:hover {
-  border-color: var(--ink-faint);
-  transform: translateY(-1px);
-}
-
-.format-option.is-selected {
-  border-color: var(--ink);
-  background: var(--surface-raised);
-}
-
-.format-option input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.format-option:has(input:focus-visible) {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.format-option-copy {
-  display: grid;
-  gap: 0.2rem;
-}
-
-.format-option-copy strong {
-  font-size: 0.82rem;
-  font-weight: 650;
-}
-
-.format-option-copy small {
-  color: var(--ink-faint);
-  font-size: 0.68rem;
-  line-height: 1.35;
-}
-
-.format-help {
-  margin-top: 0.55rem;
-  text-align: center;
-  color: var(--ink-faint);
-  font-size: 0.68rem;
-}
-
-.document-creator-actions {
-  margin-top: 0.8rem;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.btn-quiet {
-  border: 0;
-  background: transparent;
-  color: var(--ink-faint);
-}
-
-.btn-quiet:hover {
-  color: var(--ink);
-  background: var(--accent-soft);
-}
-
-.form-error {
-  margin-top: 0.45rem;
-  color: #a33b2d;
-  font-size: 0.72rem;
-  text-align: center;
-}
-
-@keyframes creator-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
 }
 
 .landing-recent {
@@ -449,6 +376,72 @@ a:focus-visible {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
+}
+
+.landing-footer {
+  display: grid;
+  justify-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  margin-top: 3rem;
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.landing-github {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-height: 2rem;
+  padding: 0.36rem 0.62rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: 0 1px 1px rgb(38 28 16 / 4%);
+  transition: border-color 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.landing-github:hover {
+  border-color: var(--ink-faint);
+  color: var(--ink);
+  transform: translateY(-1px);
+}
+
+.landing-github:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.landing-github svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.landing-github-star {
+  margin-left: 0.08rem;
+  padding-left: 0.45rem;
+  border-left: 1px solid var(--line);
+  color: #a06a21;
+  font-size: 0.75rem;
+}
+
+.landing-footer p {
+  margin: 0;
+}
+
+.landing-footer p a {
+  color: var(--ink-soft);
+  text-underline-offset: 2px;
+}
+
+.landing-footer p a:hover {
+  color: var(--ink);
 }
 
 .btn {
@@ -1856,6 +1849,15 @@ a:focus-visible {
   margin: 0.3rem 0.35rem;
 }
 
+.header-menu-account {
+  overflow: hidden;
+  padding: 0.35rem 0.55rem 0.1rem;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .header-menu-popover .ownership-owner {
   display: block;
   padding: 0.45rem 0.55rem;
@@ -1988,6 +1990,10 @@ a:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 0.38rem;
+}
+
+.identity-chip--account {
+  cursor: default;
 }
 
 .identity-dot {
@@ -2517,6 +2523,13 @@ a:focus-visible {
     display: none;
   }
 
+  /* The overflow menu is the mobile route to ownership and account actions. */
+  .header-menu-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
   /* Connection is implicit when live — only "connecting" warrants a dot,
    * so the header doesn't carry a third orphaned visual system. */
   .doc-status--live {
@@ -2714,6 +2727,9 @@ a:focus-visible {
   position: absolute;
   top: 1rem;
   right: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .landing {
@@ -2724,77 +2740,132 @@ a:focus-visible {
   .doc-header .feedback-button > button {
     padding: 0.28rem 0.5rem !important;
   }
+
+  .landing-corner {
+    top: 0.75rem;
+    right: 0.75rem;
+  }
+
+  .landing-corner .feedback-button {
+    display: none;
+  }
 }
 /* Inline sketch editor ---------------------------------------------------- */
-.sketch-modal-open {
-  overflow: hidden;
+.thinkroom-sketch-editor-mount {
+  display: none;
 }
 
-.sketch-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: rgb(20 18 15 / 54%);
-  backdrop-filter: blur(4px);
+.thinkroom-sketch.is-editing {
+  cursor: default;
+  border-color: rgb(65 51 32 / 12%);
+  box-shadow:
+    0 1px 1px rgb(38 28 16 / 5%),
+    0 7px 18px rgb(38 28 16 / 7%);
 }
 
-.sketch-modal {
-  width: min(1180px, 100%);
-  height: min(820px, calc(100dvh - 40px));
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  background: var(--surface-raised);
-  box-shadow: 0 24px 80px rgb(20 18 15 / 26%);
+.thinkroom-sketch.is-editing .thinkroom-sketch-preview {
+  display: none;
 }
 
-.sketch-modal-header,
-.sketch-modal-footer {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 18px;
+.thinkroom-sketch.is-editing .thinkroom-sketch-editor-mount {
+  display: block;
 }
 
-.sketch-modal-header {
-  justify-content: space-between;
-  border-bottom: 1px solid var(--line);
-}
-
-.sketch-modal-header h2 {
-  margin: 0;
-  font: 600 16px/1.3 var(--font-ui);
-}
-
-.sketch-modal-header p {
-  margin: 2px 0 0;
-  color: var(--ink-soft);
-  font-size: 12px;
-}
-
-.sketch-modal-actions,
-.sketch-modal-footer-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.sketch-canvas-shell {
-  min-height: 0;
+.thinkroom-sketch-editor {
   position: relative;
-  background: #fff;
+  overflow: visible;
+  border-radius: 11px;
+  background: #fffef9;
+}
+
+.sketch-inline-canvas {
+  position: relative;
+  min-height: 180px;
+  overflow: hidden;
+  border-radius: 11px 11px 0 0;
+  background: #fffef9;
   touch-action: none;
 }
 
-.sketch-canvas-shell > div,
-.sketch-canvas-shell .excalidraw {
+.sketch-inline-canvas > div,
+.thinkroom-sketch-editor .sketch-inline-canvas .excalidraw {
   width: 100%;
   height: 100%;
+  background: transparent;
+  --island-bg-color: var(--surface-raised);
+  --popup-bg-color: var(--surface-raised);
+  --color-on-surface: var(--ink);
+  --color-primary: var(--accent);
+  --color-primary-darker: var(--accent);
+  --color-primary-darkest: color-mix(in srgb, var(--accent) 82%, var(--ink));
+  --color-primary-hover: color-mix(in srgb, var(--accent) 82%, var(--ink));
+  --color-primary-light: var(--accent-soft);
+  --color-primary-light-darker: color-mix(in srgb, var(--accent-soft) 82%, var(--accent));
+  --color-surface-high: color-mix(in srgb, var(--ink) 6%, var(--surface-raised));
+  --color-surface-mid: color-mix(in srgb, var(--ink) 4%, var(--surface-raised));
+  --color-surface-low: color-mix(in srgb, var(--ink) 3%, var(--surface-raised));
+  --color-surface-lowest: var(--surface-raised);
+  --default-border-color: color-mix(in srgb, var(--ink) 10%, transparent);
+  font-family: var(--font-ui);
+}
+
+.thinkroom-sketch-editor .excalidraw .Island {
+  border: 1px solid color-mix(in srgb, var(--ink) 9%, transparent);
+  border-radius: 10px;
+  box-shadow: 0 5px 16px rgb(38 28 16 / 8%);
+}
+
+.thinkroom-sketch-editor .excalidraw .ToolIcon__icon,
+.thinkroom-sketch-editor .excalidraw .dropdown-menu-button {
+  border-radius: 7px;
+}
+
+/* Thinkroom sketches stay intentionally small: drawing tools, not the
+   Excalidraw asset-library workflow. */
+.thinkroom-sketch-editor .library-button,
+.thinkroom-sketch-editor .ToolIcon__library,
+.thinkroom-sketch-editor [data-testid='library-button'],
+.thinkroom-sketch-editor button[aria-label='Library'],
+.thinkroom-sketch-editor label[title='Library'] {
+  display: none !important;
+}
+
+.thinkroom-sketch-editor .App-bottom-bar,
+.thinkroom-sketch-editor .mobile-misc-tools-container {
+  display: none !important;
+}
+
+.sketch-resize-handle {
+  position: absolute;
+  z-index: 6;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  place-items: center;
+  height: 20px;
+  border-top: 1px solid rgb(65 51 32 / 9%);
+  border-radius: 0;
+  background: #fffaf1;
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.sketch-resize-handle span {
+  width: 38px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgb(65 51 32 / 18%);
+}
+
+.sketch-resize-handle:hover span,
+.sketch-resize-handle:focus-visible span {
+  background: rgb(65 51 32 / 34%);
+}
+
+.sketch-resize-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .sketch-loading {
@@ -2818,30 +2889,6 @@ a:focus-visible {
 
 .sketch-load-error strong {
   color: var(--ink);
-}
-
-.sketch-modal-footer {
-  flex-wrap: wrap;
-  border-top: 1px solid var(--line);
-}
-
-.sketch-description {
-  min-width: min(360px, 100%);
-  flex: 1;
-  display: grid;
-  gap: 5px;
-  color: var(--ink-soft);
-  font-size: 11px;
-}
-
-.sketch-description input {
-  width: 100%;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-raised);
-  color: var(--ink);
-  padding: 8px 10px;
-  font-size: 13px;
 }
 
 .sketch-button {
@@ -2871,18 +2918,11 @@ a:focus-visible {
 }
 
 .sketch-error {
-  flex-basis: 100%;
   margin: 0;
+  border-top: 1px solid rgb(161 55 44 / 18%);
+  padding: 7px 10px;
   color: #a1372c;
   font-size: 12px;
-}
-
-@media (max-width: 700px) {
-  .sketch-modal-backdrop { padding: 0; }
-  .sketch-modal { width: 100%; height: 100dvh; border: 0; border-radius: 0; }
-  .sketch-modal-header { align-items: flex-start; }
-  .sketch-modal-header p { display: none; }
-  .sketch-modal-footer-actions { width: 100%; }
 }
 
 .sketch-insert-button {
@@ -2905,50 +2945,312 @@ a:focus-visible {
 }
 
 .thinkroom-sketch {
+  isolation: isolate;
+  position: relative;
   width: 100%;
   margin: 24px 0;
-  overflow: hidden;
-  border: 1px solid var(--line);
+  overflow: visible;
+  border: 1px solid rgb(65 51 32 / 12%);
   border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 1px 2px rgb(20 18 15 / 4%);
+  background: #fffef9;
+  box-shadow:
+    0 1px 1px rgb(38 28 16 / 5%),
+    0 7px 18px rgb(38 28 16 / 7%);
+}
+
+/* A fine inset edge keeps the paper tactile without reading as a stack. */
+.thinkroom-sketch::before {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 1px rgb(255 255 255 / 72%),
+    inset 0 -1px rgb(65 51 32 / 6%);
+  content: '';
+  pointer-events: none;
+}
+
+.thinkroom-sketch::after {
+  position: absolute;
+  z-index: 4;
+  top: -7px;
+  left: calc(50% + var(--sketch-tape-offset, 0px));
+  width: var(--sketch-tape-width, 94px);
+  height: 15px;
+  background: rgb(218 193 145 / 42%);
+  box-shadow: inset 0 0 0 1px rgb(112 83 45 / 8%);
+  content: '';
+  pointer-events: none;
+  transform: translateX(-50%) rotate(var(--sketch-tape-angle, -0.8deg));
 }
 
 .thinkroom-sketch.is-editable {
   cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
-.thinkroom-sketch.is-editable:hover,
-.thinkroom-sketch.is-selected {
+.thinkroom-sketch.is-editable:hover:not(.is-editing) {
   border-color: color-mix(in srgb, var(--ink) 42%, transparent);
-  box-shadow: 0 0 0 2px rgb(38 35 31 / 7%);
+  box-shadow:
+    0 1px 1px rgb(38 28 16 / 5%),
+    0 10px 23px rgb(38 28 16 / 9%);
+}
+
+.thinkroom-sketch.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent-soft) 45%, transparent),
+    0 8px 22px rgb(38 28 16 / 8%);
+}
+
+.thinkroom-sketch.is-editing.is-selected {
+  border-color: rgb(65 51 32 / 12%);
+  box-shadow:
+    0 1px 1px rgb(38 28 16 / 5%),
+    0 7px 18px rgb(38 28 16 / 7%);
+}
+
+.sketch-delete-tape {
+  position: absolute;
+  z-index: 5;
+  top: -12px;
+  left: calc(50% + var(--sketch-tape-offset, 0px));
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid rgb(112 83 45 / 12%);
+  border-radius: 999px;
+  background: #f1e2c5;
+  color: rgb(100 70 40 / 65%);
+  font: 500 18px/1 var(--font-ui);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.sketch-delete-tape[hidden] {
+  display: none;
+}
+
+.thinkroom-sketch.is-editable:hover .sketch-delete-tape,
+.sketch-delete-tape:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sketch-delete-tape:hover {
+  border-color: rgb(161 55 44 / 22%);
+  background: #f6ddd5;
+  color: #a1372c;
+}
+
+.sketch-delete-tape:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .thinkroom-sketch-preview {
   display: grid;
+  position: relative;
   place-items: center;
   min-height: 180px;
-  max-height: 520px;
   overflow: hidden;
+  border-radius: 11px 11px 0 0;
+  background-color: #fffef9;
+  background-image: radial-gradient(rgb(83 63 36 / 5%) 0.55px, transparent 0.55px);
+  background-size: 5px 5px;
 }
 
 .sketch-preview-svg {
   display: block;
   width: 100%;
-  max-height: 520px;
+  height: 100%;
 }
 
 .thinkroom-sketch-caption {
   min-height: 34px;
   margin: 0;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid rgb(65 51 32 / 10%);
+  border-radius: 0 0 11px 11px;
+  background: #fffaf1;
   padding: 9px 12px;
   color: var(--ink-soft);
   font: 500 12px/1.3 var(--font-ui);
 }
 
+.thinkroom-sketch-title {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+}
+
+.thinkroom-sketch-title::placeholder {
+  color: var(--ink-faint);
+}
+
+.thinkroom-sketch-caption.is-editable:focus-within {
+  background: color-mix(in srgb, #fffaf1 82%, var(--accent-soft));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.thinkroom-sketch-caption.is-empty:not(.is-editable) {
+  display: none;
+}
+
+/* Empty textblocks need a visible click target. This also makes the trailing
+   paragraph after an atom sketch discoverable instead of feeling like the
+   drawing swallowed the document. */
+.milkdown .ProseMirror > p:first-child:last-of-type:has(> br.ProseMirror-trailingBreak),
+.milkdown .ProseMirror > .thinkroom-sketch + p:last-of-type:has(> br.ProseMirror-trailingBreak) {
+  position: relative;
+  min-height: 1.72em;
+}
+
+.milkdown .ProseMirror > p:first-child:last-of-type:has(> br.ProseMirror-trailingBreak)::before,
+.milkdown .ProseMirror > .thinkroom-sketch + p:last-of-type:has(> br.ProseMirror-trailingBreak)::before {
+  position: absolute;
+  inset-inline-start: 0;
+  color: var(--ink-faint);
+  pointer-events: none;
+  content: 'Start writing…';
+}
+
+.milkdown .ProseMirror > .thinkroom-sketch + p:last-of-type:has(> br.ProseMirror-trailingBreak)::before {
+  content: 'Continue writing…';
+  animation:
+    thinkroom-writing-words 24s step-end infinite,
+    thinkroom-writing-fade 4s ease-in-out infinite;
+}
+
+@keyframes thinkroom-writing-words {
+  0% { content: 'Continue writing…'; }
+  16.667% { content: 'Keep thinking…'; }
+  33.333% { content: 'Keep jamming…'; }
+  50% { content: 'Keep brainstorming…'; }
+  66.667% { content: 'Follow the thread…'; }
+  83.333% { content: 'Ground the next idea…'; }
+}
+
+@keyframes thinkroom-writing-fade {
+  0%, 100% { opacity: 0; }
+  18%, 76% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .milkdown .ProseMirror > .thinkroom-sketch + p:last-of-type:has(> br.ProseMirror-trailingBreak)::before {
+    animation: none;
+  }
+}
+
+.sketch-add-inline {
+  margin-top: 0.35rem;
+  border: 1px dashed color-mix(in srgb, var(--ink-faint) 46%, transparent);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-faint);
+  padding: 5px 9px;
+  font: 500 12px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.sketch-add-inline:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent-soft) 26%, transparent);
+  color: var(--ink-soft);
+}
+
+.sketch-add-inline:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Notion-style block insert menu. It is attached to document.body so it can
+   float above the paper and side rails without inheriting editor clipping. */
+.thinkroom-slash-menu {
+  position: fixed;
+  z-index: 1000;
+  display: none;
+  width: min(310px, calc(100vw - 24px));
+  max-height: min(390px, calc(100vh - 24px));
+  overflow-y: auto;
+  border: 1px solid color-mix(in srgb, var(--ink) 11%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--surface-raised) 97%, transparent);
+  box-shadow: 0 14px 34px rgb(38 28 16 / 14%), 0 2px 7px rgb(38 28 16 / 8%);
+  padding: 5px;
+  backdrop-filter: blur(12px);
+}
+
+.thinkroom-slash-menu[data-visible='true'] {
+  display: block;
+}
+
+.thinkroom-slash-item {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  padding: 5px 7px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thinkroom-slash-item.is-active,
+.thinkroom-slash-item:hover {
+  background: color-mix(in srgb, var(--ink) 6%, var(--surface-raised));
+}
+
+.thinkroom-slash-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--ink) 9%, transparent);
+  border-radius: 7px;
+  background: var(--surface-raised);
+  color: var(--ink-soft);
+  font: 600 12px/1 var(--font-ui);
+}
+
+.thinkroom-slash-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.thinkroom-slash-copy strong {
+  font: 600 13px/1.2 var(--font-ui);
+}
+
+.thinkroom-slash-copy small {
+  overflow: hidden;
+  color: var(--ink-faint);
+  font: 450 11px/1.2 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thinkroom-slash-empty {
+  margin: 0;
+  padding: 12px;
+  color: var(--ink-faint);
+  font: 500 12px/1.3 var(--font-ui);
+}
+
 @media (max-width: 700px) {
-  .sketch-insert-button { display: none; }
+  .sketch-insert-button { padding-inline: 7px; }
   .thinkroom-sketch { margin: 18px 0; border-radius: 9px; }
   .thinkroom-sketch-preview { min-height: 150px; }
 }

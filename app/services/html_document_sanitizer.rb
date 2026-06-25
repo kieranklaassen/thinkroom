@@ -13,7 +13,7 @@ class HtmlDocumentSanitizer
     href title src alt start style colspan rowspan colwidth
     data-language data-item-type data-label data-list-type data-spread data-checked
     data-is-header data-provenance data-kind data-author data-state data-suggestion-id
-    data-thinkroom-sketch data-sketch-id data-scene data-description data-format-version
+    data-thinkroom-sketch data-sketch-id data-sketch-height data-scene data-description data-format-version
   ].freeze
 
   PROVENANCE_KINDS = %w[human ai].freeze
@@ -33,7 +33,7 @@ class HtmlDocumentSanitizer
   PROVENANCE_ATTRIBUTES = %w[data-provenance data-kind data-author data-state].freeze
   SUGGESTION_ATTRIBUTES = %w[data-suggestion-id data-author].freeze
   SKETCH_ATTRIBUTES = %w[
-    data-thinkroom-sketch data-sketch-id data-scene data-description data-format-version
+    data-thinkroom-sketch data-sketch-id data-sketch-height data-scene data-description data-format-version
   ].freeze
   THINKROOM_ATTRIBUTES = (PROVENANCE_ATTRIBUTES + SUGGESTION_ATTRIBUTES + SKETCH_ATTRIBUTES).uniq.freeze
   EXTERNAL_ATTRIBUTES = (ATTRIBUTES - THINKROOM_ATTRIBUTES).freeze
@@ -145,6 +145,8 @@ class HtmlDocumentSanitizer
     def valid_sketch?(node, metadata)
       return false unless node.name == "figure" && !metadata["data-thinkroom-sketch"].nil?
       return false unless metadata["data-sketch-id"].to_s.match?(/\A[a-zA-Z0-9_-]{1,100}\z/)
+      height = metadata["data-sketch-height"].to_s
+      return false if height.present? && !height.match?(/\A(?:1[89]\d|[2-9]\d{2}|1[01]\d{2}|1200)\z/)
 
       ThinkroomSketch.parse(
         metadata["data-scene"],

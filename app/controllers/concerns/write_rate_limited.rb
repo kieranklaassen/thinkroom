@@ -6,6 +6,7 @@ module WriteRateLimited
   DOCUMENT_CREATION_DAILY_LIMIT = 100
   CONTRIBUTION_BURST_LIMIT = 60
   CONTRIBUTION_DAILY_LIMIT = 500
+  AUTHENTICATION_BURST_LIMIT = 10
 
   class_methods do
     def rate_limit_document_creation
@@ -23,6 +24,12 @@ module WriteRateLimited
                  only: :create
       rate_limit to: CONTRIBUTION_DAILY_LIMIT, within: 1.day, by: -> { request.remote_ip },
                  with: :render_write_rate_limit, store: STORE, name: "contribution-daily",
+                 only: :create
+    end
+
+    def rate_limit_authentication
+      rate_limit to: AUTHENTICATION_BURST_LIMIT, within: 10.minutes, by: -> { request.remote_ip },
+                 with: :render_write_rate_limit, store: STORE, name: "authentication-burst",
                  only: :create
     end
   end

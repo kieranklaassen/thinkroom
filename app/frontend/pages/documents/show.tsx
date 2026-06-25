@@ -58,6 +58,7 @@ import { useMediaQuery } from '../../lib/use_media_query'
 import { useAnchoredPopover } from '../../lib/use_anchored_popover'
 import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
 import { patchJSON } from '../../lib/csrf'
+import type { ViewerPayload } from '../../types/viewer'
 import {
   getStoredFlag,
   getStoredString,
@@ -73,11 +74,6 @@ export interface ActivityPayload {
   action: string
   detail: string | null
   created_at: string
-}
-
-export interface ViewerPayload {
-  name: string | null
-  guest: boolean
 }
 
 export interface DocumentProps {
@@ -949,7 +945,12 @@ export default function DocumentShow({
           <div className="doc-header-right">
             {/* ≤4 groups: identity/presence · (mode control) · Share · ⋯ menu */}
             <div className="doc-header-people">
-              <IdentityChip identity={identity} guest={guest} onRenamed={handleRenamed} />
+              <IdentityChip
+                identity={identity}
+                guest={guest}
+                authenticated={Boolean(viewer.account)}
+                onRenamed={handleRenamed}
+              />
               {!isReading && <ProvenanceSummaryChip spans={spans} />}
               <PresenceBar humans={peers} agents={presences} compact={isMobile} />
             </div>
@@ -982,6 +983,7 @@ export default function DocumentShow({
               slug={doc.slug}
               ownership={ownership}
               claimerName={identity.name}
+              account={viewer.account}
             />
           </div>
         </header>

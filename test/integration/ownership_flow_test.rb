@@ -4,6 +4,7 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
   include ActionCable::TestHelper
 
   setup do
+    WriteRateLimited::STORE.clear
     @document = Document.create!(title: "Claimable")
   end
 
@@ -136,6 +137,74 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
     assert_equal "Maker", doc.owner_name
     # No claim activity for auto-claims — the doc was never up for grabs.
     assert_equal 0, doc.activities.where(action: "claimed_document").count
+  end
+
+  test "signed-in UI create assigns account ownership without an owner token" do
+    user = create_and_sign_in_user
+
+    post documents_path
+
+    assert_response :see_other
+    doc = Document.order(:created_at).last
+    assert_equal user, doc.user
+    assert_nil doc.owner_token
+    assert_equal user.name, doc.owner_name
+  end
+
+  test "signed-in claim assigns account ownership using the account name" do
+    user = create_and_sign_in_user
+
+    post claim_document_path(@document.slug), params: { name: "Spoofed name" }
+
+    assert_response :see_other
+    assert_equal user, @document.reload.user
+    assert_nil @document.owner_token
+    assert_equal user.name, @document.owner_name
+  end
+
+  test "account-owned document is yours after signing in from a fresh browser" do
+    user = create_and_sign_in_user
+    document = Document.create!(title: "Across browsers", user:, owner_name: user.name)
+
+    reset!
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase" }
+    get root_path
+
+    assert_inertia_props do |props|
+      props[:yours].any? { |doc| doc[:slug] == document.slug }
+    end
+  end
+
+  test "account owner can delete from another signed-in browser" do
+    user = create_and_sign_in_user
+    document = Document.create!(title: "Delete elsewhere", user:, owner_name: user.name)
+
+    reset!
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase" }
+    delete destroy_document_path(document.slug)
+
+    assert_redirected_to root_path
+    assert_not Document.exists?(document.id)
+  end
+
+  test "old guest token cannot delete a document after account promotion" do
+    establish_identity
+    post claim_document_path(@document.slug), params: { name: "Guest" }
+    old_cookie = cookies[:owner_token]
+    post signup_path, params: {
+      name: "Account owner",
+      email: "owner@example.com",
+      password: "thoughtful-passphrase",
+      password_confirmation: "thoughtful-passphrase"
+    }
+    assert_nil @document.reload.owner_token
+
+    reset!
+    cookies[:owner_token] = old_cookie
+    delete destroy_document_path(@document.slug)
+
+    assert_response :see_other
+    assert Document.exists?(@document.id)
   end
 
   test "API create leaves the doc unclaimed" do
@@ -281,6 +350,17 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
   end
 
   private
+
+  def create_and_sign_in_user
+    user = User.create!(
+      name: "Account owner",
+      email: "owner@example.com",
+      password: "thoughtful-passphrase"
+    )
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase" }
+    assert_response :see_other
+    user
+  end
 
   def browser
     { "User-Agent" => "Mozilla/5.0" }

@@ -21,7 +21,11 @@ const UI_OPTIONS = {
 
 function ExcalidrawCanvas({ scene, onSceneChange }: ExcalidrawCanvasProps) {
   const initialData = useMemo(
-    () => ({ elements: scene.elements, appState: scene.appState, files: {} }),
+    () => ({
+      elements: scene.elements,
+      appState: { ...scene.appState, viewBackgroundColor: '#fffef9' },
+      files: {},
+    }),
     [scene],
   )
   const handleChange = useCallback(

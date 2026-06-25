@@ -126,16 +126,27 @@ class HtmlDocumentSanitizerTest < ActiveSupport::TestCase
       type: "excalidraw", version: 2, elements: [ { type: "text", text: "Review" } ],
       appState: {}, files: {}
     }.to_json
-    source = %(<figure data-thinkroom-sketch data-sketch-id="flow_1" data-format-version="1" data-description="Flow" data-scene="#{CGI.escapeHTML(scene)}"><figcaption>Flow</figcaption></figure>)
+    source = %(<figure data-thinkroom-sketch data-sketch-id="flow_1" data-sketch-height="440" data-format-version="1" data-description="Flow" data-scene="#{CGI.escapeHTML(scene)}"><figcaption>Flow</figcaption></figure>)
 
     trusted = HtmlDocumentSanitizer.snapshot(source).content
     external = HtmlDocumentSanitizer.external(source).content
 
     assert_includes trusted, "data-thinkroom-sketch"
     assert_includes trusted, "data-scene="
+    assert_includes trusted, 'data-sketch-height="440"'
     assert_includes trusted, "<figcaption>Flow</figcaption>"
-    refute_match(/data-thinkroom-sketch|data-scene|data-description|data-format-version/, external)
+    refute_match(/data-thinkroom-sketch|data-sketch-height|data-scene|data-description|data-format-version/, external)
     assert_includes external, "<figcaption>Flow</figcaption>"
+  end
+
+  test "trusted snapshots reject sketch heights outside the paper limits" do
+    scene = { type: "excalidraw", version: 2, elements: [], appState: {}, files: {} }.to_json
+    source = %(<figure data-thinkroom-sketch data-sketch-id="too_tall" data-sketch-height="1201" data-format-version="1" data-scene="#{CGI.escapeHTML(scene)}"><figcaption>Visible fallback</figcaption></figure>)
+
+    result = HtmlDocumentSanitizer.snapshot(source).content
+
+    refute_match(/data-thinkroom-sketch|data-sketch-height|data-scene/, result)
+    assert_includes result, "Visible fallback"
   end
 
   test "trusted snapshots strip malformed or unsafe sketch data" do

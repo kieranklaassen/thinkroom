@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useState } from 'react'
 import { Head, Link, useForm } from '@inertiajs/react'
 import { FeedbackButton } from '../../components/feedback_button'
+import { AccountControl } from '../../components/account_control'
 import { userIdentity } from '../../editor/identity'
 import { useClaim } from '../../lib/use_claim'
 import type { OwnershipPayload } from '../../components/ownership_chip'
+import type { ViewerPayload } from '../../types/viewer'
 
 interface DocLink {
   title: string
@@ -16,8 +18,11 @@ interface RecentDoc extends DocLink, OwnershipPayload {}
 interface Props {
   yours: DocLink[]
   recent: RecentDoc[]
-  viewer: { name: string | null; guest: boolean }
+  viewer: ViewerPayload
 }
+
+const GITHUB_REPOSITORY_URL = 'https://github.com/kieranklaassen/thinkroom'
+const GITHUB_PROFILE_URL = 'https://github.com/kieranklaassen'
 
 /**
  * Inline claim icon for a claimable Recent row. On win the scoped reload
@@ -54,14 +59,10 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
   // random localStorage name as the fallback (the server prefers the
   // session name on create anyway). Staying on useForm keeps the
   // `processing` double-submit guard.
-  const { data, setData, post, processing, errors, clearErrors } = useForm(() => ({
+  const { post, processing } = useForm(() => ({
     name: userIdentity(viewer.name).name,
-    content_format: 'markdown' as 'markdown' | 'html',
   }))
-  const [creating, setCreating] = useState(false)
   const [copied, setCopied] = useState(false)
-  const newDocumentRef = useRef<HTMLButtonElement>(null)
-  const markdownFormatRef = useRef<HTMLInputElement>(null)
 
   const origin = typeof window === 'undefined' ? '' : window.location.origin
   const agentInstruction =
@@ -78,21 +79,6 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
     })
   }, [agentInstruction])
 
-  const createDocument = (event: FormEvent) => {
-    event.preventDefault()
-    post('/documents')
-  }
-
-  const closeCreator = () => {
-    clearErrors()
-    setCreating(false)
-    requestAnimationFrame(() => newDocumentRef.current?.focus())
-  }
-
-  useEffect(() => {
-    if (creating) markdownFormatRef.current?.focus()
-  }, [creating])
-
   const formatLabel = (format: DocLink['content_format']) =>
     format === 'html' ? 'HTML' : 'Markdown'
 
@@ -100,7 +86,10 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
     <>
       <Head title="Thinkroom" />
       <div className="landing">
-        <div className="landing-corner"><FeedbackButton /></div>
+        <div className="landing-corner">
+          <AccountControl viewer={viewer} />
+          <FeedbackButton />
+        </div>
         <main className="landing-main">
           <h1 className="landing-wordmark">
             <Link href="/" className="landing-wordmark-link">
@@ -109,66 +98,21 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
           </h1>
           <p className="landing-tagline">Where deeper thinking compounds.</p>
           <p className="landing-byline">From the creator of Compound Engineering.</p>
-          {!creating ? (
-            <div className="landing-actions">
-              <button
-                ref={newDocumentRef}
-                className="btn btn-primary"
-                type="button"
-                onClick={() => setCreating(true)}
-              >
-                New document
-              </button>
-              {recent.some((d) => d.slug === 'demo') && (
-                <Link href="/d/demo" className="btn btn-ghost" prefetch>
-                  Open the demo
-                </Link>
-              )}
-            </div>
-          ) : (
-            <form className="document-creator" onSubmit={createDocument}>
-              <fieldset>
-                <legend>Choose a document format</legend>
-                <div className="format-options">
-                  {(['markdown', 'html'] as const).map((format) => (
-                    <label
-                      key={format}
-                      className={`format-option ${data.content_format === format ? 'is-selected' : ''}`}
-                    >
-                      <input
-                        ref={format === 'markdown' ? markdownFormatRef : undefined}
-                        type="radio"
-                        name="format"
-                        value={format}
-                        checked={data.content_format === format}
-                        onChange={() => setData('content_format', format)}
-                      />
-                      <span className="format-option-copy">
-                        <strong>{format === 'html' ? 'HTML' : 'Markdown'}</strong>
-                        <small>
-                          {format === 'html'
-                            ? 'Semantic HTML for web-ready content'
-                            : 'Portable Markdown for prose and notes'}
-                        </small>
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-              <p className="format-help">Format is permanent for this document.</p>
-              {errors.content_format && (
-                <p className="form-error">{errors.content_format}</p>
-              )}
-              <div className="document-creator-actions">
-                <button className="btn btn-primary" type="submit" disabled={processing}>
-                  {processing ? 'Creating…' : `Create ${formatLabel(data.content_format)}`}
-                </button>
-                <button className="btn btn-quiet" type="button" onClick={closeCreator}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          )}
+          <div className="landing-actions">
+            <button
+              className="btn btn-primary"
+              type="button"
+              disabled={processing}
+              onClick={() => post('/documents')}
+            >
+              {processing ? 'Creating…' : 'New document'}
+            </button>
+            {recent.some((d) => d.slug === 'demo') && (
+              <Link href="/d/demo" className="btn btn-ghost" prefetch>
+                Open the demo
+              </Link>
+            )}
+          </div>
           {yours.length > 0 && (
             <section className="landing-recent">
               <h2 className="landing-recent-heading">Your docs</h2>
@@ -225,6 +169,29 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
             </div>
           </section>
         </main>
+        <footer className="landing-footer">
+          <a
+            className="landing-github"
+            href={GITHUB_REPOSITORY_URL}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M12 2C6.48 2 2 6.58 2 12.22c0 4.5 2.87 8.32 6.84 9.67.5.1.68-.22.68-.49v-1.91c-2.78.62-3.37-1.21-3.37-1.21-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.62.07-.62 1 .07 1.53 1.05 1.53 1.05.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.36-2.22-.26-4.56-1.14-4.56-5.05 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05A9.35 9.35 0 0 1 12 6.61c.85 0 1.7.12 2.5.34 1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.92-2.34 4.78-4.57 5.04.36.32.68.94.68 1.89v3.11c0 .27.18.59.69.49A10.24 10.24 0 0 0 22 12.22C22 6.58 17.52 2 12 2Z"
+              />
+            </svg>
+            <span>Open source on GitHub</span>
+            <span className="landing-github-star" aria-hidden="true">★</span>
+          </a>
+          <p>
+            Made with love <span aria-label="love">❤️</span> in Southern California by{' '}
+            <a href={GITHUB_PROFILE_URL} target="_blank" rel="noreferrer">
+              Kieran Klaassen
+            </a>
+          </p>
+        </footer>
       </div>
     </>
   )

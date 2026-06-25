@@ -1,6 +1,37 @@
 require "test_helper"
 
 class DocumentTest < ActiveSupport::TestCase
+  test "account ownership takes precedence over an anonymous token" do
+    user = User.create!(
+      name: "Kieran",
+      email: "kieran@example.com",
+      password: "thoughtful-passphrase"
+    )
+    document = Document.create!(title: "Account doc", user:, owner_name: "Kieran")
+
+    assert document.claimed?
+    assert document.owned_by?("stale-token", user:)
+    assert_not document.owned_by?("stale-token")
+    assert_equal(
+      { claimed: true, claimable: false, owner_name: "Kieran", yours: true },
+      document.ownership_props("stale-token", viewer_user: user)
+    )
+  end
+
+  test "account claim stores only the user owner" do
+    user = User.create!(
+      name: "Kieran",
+      email: "kieran@example.com",
+      password: "thoughtful-passphrase"
+    )
+    document = Document.create!(title: "Claim me")
+
+    document.claim!(token: "browser-token", user:, name: "Ignored")
+
+    assert_equal user, document.reload.user
+    assert_nil document.owner_token
+    assert_equal "Kieran", document.owner_name
+  end
   test "content format defaults to markdown" do
     assert_equal "markdown", Document.create!(title: "Default").content_format
   end
