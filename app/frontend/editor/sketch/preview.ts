@@ -10,6 +10,7 @@ import {
 } from './scene'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
+const SKETCH_PADDING = 24
 
 const number = (value: unknown, fallback = 0): number =>
   typeof value === 'number' && Number.isFinite(value) ? value : fallback
@@ -55,7 +56,7 @@ const svgElement = <K extends keyof SVGElementTagNameMap>(
  * is used for editing/export; this renderer keeps initial document load small. */
 export function renderSketchPreview(scene: SketchScene): SVGSVGElement {
   const { live, bounds, empty } = contentBounds(scene)
-  const padding = 24
+  const padding = SKETCH_PADDING
   const minX = empty ? 0 : bounds.minX - padding
   const minY = empty ? 0 : bounds.minY - padding
   const width = empty ? 640 : Math.max(240, bounds.maxX - bounds.minX + padding * 2)
@@ -164,9 +165,8 @@ export function renderSketchPreview(scene: SketchScene): SVGSVGElement {
 }
 
 /** Render the document preview with Excalidraw's own RoughJS/freehand
- * pipeline. The lightweight renderer above remains the immediate fallback
- * while this lazy chunk loads, but pen pressure, smoothing, roughness, and
- * stroke width ultimately come from the same renderer used while editing. */
+ * pipeline. The lightweight renderer above is only a failure fallback; the
+ * exact renderer replaces it in the pre-paint microtask. */
 export interface SketchViewport {
   height: number
   scrollX: number
@@ -182,7 +182,7 @@ export function fitSketchViewport(
   const { bounds, empty } = contentBounds(scene)
   if (empty) return { height: minimumHeight, scrollX: 0, scrollY: 0, zoom: 1 }
 
-  const padding = 24
+  const padding = SKETCH_PADDING
   const contentWidth = Math.max(1, bounds.maxX - bounds.minX)
   const contentHeight = Math.max(1, bounds.maxY - bounds.minY)
   const paddedWidth = contentWidth + padding * 2
@@ -203,6 +203,51 @@ export function fitSketchViewport(
   }
 }
 
+/** Preserve the viewport Excalidraw emitted while the user was editing.
+ * Re-fitting after save would make the closed preview visibly zoom. */
+export function sketchSceneViewport(scene: SketchScene, height: number): SketchViewport {
+  const zoom = scene.appState.zoom
+  const zoomValue = zoom && typeof zoom === 'object' && 'value' in zoom
+    ? number(zoom.value, 1)
+    : 1
+  return {
+    height,
+    scrollX: number(scene.appState.scrollX),
+    scrollY: number(scene.appState.scrollY),
+    zoom: zoomValue,
+  }
+}
+
+/** Reuse a persisted editor viewport when it still shows the complete scene.
+ * Agent-authored or legacy scenes with missing/clipped viewport state fall
+ * back to fitSketchViewport instead. */
+export function storedSketchViewport(
+  scene: SketchScene,
+  width: number,
+  height: number,
+): SketchViewport | null {
+  if (
+    typeof scene.appState.scrollX !== 'number' ||
+    typeof scene.appState.scrollY !== 'number' ||
+    !scene.appState.zoom ||
+    typeof scene.appState.zoom !== 'object' ||
+    !('value' in scene.appState.zoom) ||
+    typeof scene.appState.zoom.value !== 'number'
+  ) return null
+
+  const viewport = sketchSceneViewport(scene, height)
+  const { bounds, empty } = contentBounds(scene)
+  if (empty) return viewport
+  const left = (bounds.minX + viewport.scrollX) * viewport.zoom
+  const top = (bounds.minY + viewport.scrollY) * viewport.zoom
+  const right = (bounds.maxX + viewport.scrollX) * viewport.zoom
+  const bottom = (bounds.maxY + viewport.scrollY) * viewport.zoom
+  const guard = SKETCH_PADDING * viewport.zoom
+  return left >= guard && top >= guard && right <= width - guard && bottom <= height - guard
+    ? viewport
+    : null
+}
+
 export async function renderExactSketchPreview(
   scene: SketchScene,
   viewportWidth: number,
@@ -211,7 +256,7 @@ export async function renderExactSketchPreview(
   const elements = scene.elements.filter((element) => element.isDeleted !== true)
   if (elements.length === 0) return null
 
-  const exportPadding = 24
+  const exportPadding = SKETCH_PADDING
   const exported = await exportToSvg({
     elements: elements as never,
     appState: {

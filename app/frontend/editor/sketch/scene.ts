@@ -3,7 +3,7 @@ export const MAX_SKETCH_BYTES = 512 * 1024
 export const MAX_SKETCH_DESCRIPTION = 500
 export const MAX_SKETCH_ELEMENTS = 500
 export const MAX_SKETCH_POINTS = 20_000
-export const DEFAULT_SKETCH_HEIGHT = 320
+export const DEFAULT_SKETCH_HEIGHT = 448
 export const MIN_SKETCH_HEIGHT = 180
 export const MAX_SKETCH_HEIGHT = 1200
 

@@ -9,7 +9,12 @@ import {
 import { $ctx, $prose, $view } from '@milkdown/kit/utils'
 import { Plugin, TextSelection } from '@milkdown/kit/prose/state'
 import { attrsFromSketchData, dataFromSketchNode, sketchSchema } from './schema'
-import { fitSketchViewport, renderExactSketchPreview, renderSketchPreview } from './preview'
+import {
+  fitSketchViewport,
+  renderExactSketchPreview,
+  renderSketchPreview,
+  storedSketchViewport,
+} from './preview'
 import {
   EMPTY_SKETCH_SCENE,
   DEFAULT_SKETCH_HEIGHT,
@@ -121,22 +126,25 @@ const buildSketchView = (
       if (destroyed || generation !== previewGeneration) return
       const width = Math.max(1, preview.clientWidth || dom.clientWidth || 640)
       lastPreviewWidth = width
-      const fittedViewport = fitSketchViewport(data.scene, width, data.height)
-      displayData = {
-        ...data,
-        height: fittedViewport.height,
-        scene: {
-          ...data.scene,
-          appState: {
-            ...data.scene.appState,
-            scrollX: fittedViewport.scrollX,
-            scrollY: fittedViewport.scrollY,
-            zoom: { value: fittedViewport.zoom },
+      const storedViewport = storedSketchViewport(data.scene, width, data.height)
+      const viewport = storedViewport ?? fitSketchViewport(data.scene, width, data.height)
+      displayData = storedViewport
+        ? data
+        : {
+            ...data,
+            height: viewport.height,
+            scene: {
+              ...data.scene,
+              appState: {
+                ...data.scene.appState,
+                scrollX: viewport.scrollX,
+                scrollY: viewport.scrollY,
+                zoom: { value: viewport.zoom },
+              },
+            },
           },
-        },
-      }
-      preview.style.height = `${fittedViewport.height}px`
-      void renderExactSketchPreview(data.scene, width, fittedViewport).then((exactPreview) => {
+      preview.style.height = `${viewport.height}px`
+      void renderExactSketchPreview(data.scene, width, viewport).then((exactPreview) => {
         if (!destroyed && exactPreview && generation === previewGeneration) {
           preview.replaceChildren(exactPreview)
         }
@@ -172,6 +180,8 @@ const buildSketchView = (
     if (scene !== renderedScene) {
       preview.replaceChildren(renderSketchPreview(currentData.scene))
       const generation = ++previewGeneration
+      // Reuse the exact editor viewport when it contains the whole scene;
+      // legacy, agent-authored, or edge-clipped scenes are safely fitted.
       renderExactPreview(currentData, generation)
       renderedScene = scene
     }

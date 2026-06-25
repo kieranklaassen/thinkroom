@@ -400,6 +400,36 @@ try {
   } else {
     fail('sketch description or scene was lost on reload')
   }
+  await sketchA.locator('.thinkroom-sketch').click({ position: { x: 180, y: 180 } })
+  await sketchA.locator('.thinkroom-sketch.is-editing .excalidraw').waitFor({ timeout: 15000 })
+  const viewportCanvas = sketchA.locator('.thinkroom-sketch.is-editing canvas').last()
+  const viewportCanvasBox = await viewportCanvas.boundingBox()
+  if (!viewportCanvasBox) {
+    fail('active sketch canvas has no bounds for viewport persistence check')
+  } else {
+    await sketchA.mouse.move(
+      viewportCanvasBox.x + viewportCanvasBox.width / 2,
+      viewportCanvasBox.y + viewportCanvasBox.height / 2,
+    )
+    await sketchA.keyboard.down('Control')
+    await sketchA.mouse.wheel(0, 300)
+    await sketchA.keyboard.up('Control')
+  }
+  await sketchA.locator('.doc-title').click()
+  await sketchA.locator('.thinkroom-sketch [data-renderer="excalidraw"]').waitFor()
+  const closedViewportWidth = await sketchA.locator('[data-excalidraw-scene]').evaluate((node) =>
+    node.getBoundingClientRect().width,
+  )
+  await sketchA.reload()
+  await sketchA.locator('.thinkroom-sketch [data-renderer="excalidraw"]').waitFor({ timeout: 15000 })
+  const reloadedViewportWidth = await sketchA.locator('[data-excalidraw-scene]').evaluate((node) =>
+    node.getBoundingClientRect().width,
+  )
+  if (Math.abs(closedViewportWidth - reloadedViewportWidth) < 0.1) {
+    ok('the editor viewport survives click-away and reload without zooming')
+  } else {
+    fail(`the sketch viewport changed ${reloadedViewportWidth - closedViewportWidth}px on reload`)
+  }
   await sketchA.getByRole('button', { name: /Mode:/ }).click()
   await sketchA.getByRole('option', { name: /^Read/ }).click()
   await sketchA.locator('.thinkroom-sketch').click()
@@ -427,7 +457,16 @@ try {
     await fetch(`${BASE}/api/docs`, {
       method: 'POST',
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'Empty sketch affordance', markdown: '' }),
+      body: JSON.stringify({
+        title: 'Empty sketch affordance',
+        markdown: `\`\`\`excalidraw\n${JSON.stringify({
+          id: 'add_sketch_fixture',
+          formatVersion: 1,
+          description: '',
+          height: 320,
+          scene: { type: 'excalidraw', version: 2, elements: [], appState: {}, files: {} },
+        })}\n\`\`\`\n`,
+      }),
     })
   ).json()
   const insertSketchPage = await browser.newPage({ viewport: { width: 1280, height: 900 } })
@@ -437,9 +476,16 @@ try {
   await insertSketchPage.locator('.sketch-add-inline').click()
   await insertSketchPage.locator('.thinkroom-sketch.is-editing').waitFor({ timeout: 15000 })
   ok('empty trailing line offers a lightweight Add sketch action')
-  await insertSketchPage.locator('.thinkroom-sketch').hover()
-  await insertSketchPage.getByRole('button', { name: 'Delete sketch' }).click()
-  await insertSketchPage.locator('.thinkroom-sketch').waitFor({ state: 'detached', timeout: 10000 })
+  await insertSketchPage.locator('.thinkroom-sketch.is-editing').hover()
+  await insertSketchPage
+    .locator('.thinkroom-sketch.is-editing')
+    .getByRole('button', { name: 'Delete sketch' })
+    .click()
+  await insertSketchPage.waitForFunction(
+    () => document.querySelectorAll('.thinkroom-sketch').length === 1,
+    undefined,
+    { timeout: 10000 },
+  )
   ok('hovering the paper exposes a tape-mounted delete action')
 
   await insertSketchPage.locator('.ProseMirror > p:last-of-type').click()
