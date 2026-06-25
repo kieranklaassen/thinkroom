@@ -29,8 +29,18 @@ InertiaRails.configure do |config|
   # Bundle detection gates whether SSR is even attempted. In dev the Vite dev
   # server serves SSR (this check is bypassed when the dev server is running).
   # In production SSR proceeds only once the SSR bundle exists at this path —
-  # so until the production SSR build is wired (deploy unit, deferred), the doc
-  # page degrades cleanly to CSR instead of hammering a missing SSR server on
-  # every request. The plugin's SSR build emits the entry basename here.
-  config.ssr_bundle = Rails.root.join("public/vite-ssr/inertia.js").to_s
+  # so if the production SSR build is ever absent, the doc page degrades
+  # cleanly to CSR instead of hammering a missing SSR server on every request.
+  # `vite build --ssr` (vite-plugin-ruby) emits the entry chunk as ssr.js
+  # under its ssrOutputDir (public/vite-ssr); the Docker build produces it and
+  # the runtime image runs it as the Node SSR process (see Dockerfile).
+  config.ssr_bundle = Rails.root.join("public/vite-ssr/ssr.js").to_s
+
+  # In production point Inertia at the Node SSR process the container starts
+  # alongside Rails (backgrounded in bin/docker-entrypoint). Default matches
+  # @inertiajs/react/server's createServer port (13714) on localhost; override
+  # with INERTIA_SSR_URL if the SSR process is moved. In dev/test this stays
+  # nil so inertia-rails auto-detects the Vite dev server's /__inertia_ssr
+  # endpoint and no separate process is needed.
+  config.ssr_url = ENV.fetch("INERTIA_SSR_URL", "http://localhost:13714") if Rails.env.production?
 end
