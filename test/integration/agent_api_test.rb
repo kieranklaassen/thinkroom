@@ -402,6 +402,25 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     refute_includes body["plain_text"], "formatVersion"
   end
 
+  test "markdown create with a below-min sketch height is recognized without warning" do
+    # Issue #59: a finite height below MIN_HEIGHT used to render as raw JSON in
+    # the editor. Server recognition is height-independent, so the create
+    # response stays clean; the editor now clamps the height into range to
+    # render it (matching the server preview), rather than breaking silently.
+    low = sketch_fence({
+      id: "low1", formatVersion: 1, description: "Compact flow", height: 130,
+      scene: { type: "excalidraw", version: 2, elements: [ { type: "text", text: "Tight" } ] }
+    })
+    post "/api/docs", params: { title: "Low Sketch", content: low }, headers: AGENT, as: :json
+
+    assert_response :created
+    body = response.parsed_body
+    assert_equal false, body["normalized"], "a below-min height is not a recognition failure"
+    assert_nil body["warning"]
+    assert_includes body["plain_text"], "Sketch: Compact flow — Tight"
+    refute_includes body["plain_text"], "formatVersion"
+  end
+
   test "markdown create with an unrecognized sketch fence is non-silent" do
     # The documented-but-wrong shape from issue #55: top-level `version` and a
     # scene that is not a full excalidraw export. Previously this returned a 201

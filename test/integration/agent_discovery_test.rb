@@ -61,6 +61,13 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert_includes markdown_source.dig("schema", "formatVersion"), ThinkroomSketch::FORMAT_VERSION.to_s
     assert_includes markdown_source.dig("schema", "id"), "a-zA-Z0-9"
     assert_includes markdown_source.dig("schema", "height"), ThinkroomSketch::DEFAULT_HEIGHT.to_s
+    # Height documents its valid range and that out-of-range values clamp (not
+    # reject) — the editor now mirrors the server preview's clamp.
+    assert_includes markdown_source.dig("schema", "height"), ThinkroomSketch::MIN_HEIGHT.to_s
+    assert_includes markdown_source.dig("schema", "height"), ThinkroomSketch::MAX_HEIGHT.to_s
+    assert_includes markdown_source.dig("schema", "height"), "clamp"
+    refute_includes markdown_source.dig("schema", "height"), "rejected"
+    assert_includes markdown_source["enforcement"], "clamp"
     assert_equal %(must equal "excalidraw".), markdown_source.dig("schema", "scene", "type").split("(required) ").last
     assert_includes markdown_source["recognition"], "Sketch:"
     assert_includes markdown_source["recognition"], "—" # matches semantic_text's em-dash
