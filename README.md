@@ -7,10 +7,12 @@ agents can bring work in and pick up assignments, while people use deliberate
 modes to read, edit, comment, suggest, review, and endorse what they are willing
 to stand behind.
 
-AI makes generation cheap. Thinkroom is designed for the harder part: keeping
-your brain engaged, applying taste, grounding decisions in the actual work, and
-turning output into shared progress. Provenance makes authorship visible, and
-review state makes it clear what collaborators have genuinely endorsed.
+AI makes generation cheap. Thinkroom is designed for the harder part: activating
+your brain at the right moment. Reading deeply, judging critically, endorsing with
+conviction—these need focused interfaces, not a generic chat box. Thinkroom puts
+you in the right mode so you internalize the work before you stand behind it.
+Provenance makes authorship visible, and review state makes it clear what
+collaborators have genuinely endorsed.
 
 Thinkroom does not run an embedded agent. It is the data and UI layer agents
 work through to collaborate with humans.

@@ -13,6 +13,18 @@ Founder-writers increasingly delegate substantial creative work to AI, but gener
 
 Thinkroom is an open-source, agent-native data and UI layer: external agents bring work in and pick up assignments, while the interface puts humans into deliberate modes for reading, judging, suggesting, endorsing, and acting. We believe judgment and taste remain fundamentally human, so Thinkroom optimizes for deeper thinking and grounded progress—not more generation.
 
+## The brain model
+
+Start and end with your brain. Agents do the middle.
+
+Implementation is almost solved. Judgment isn't. The bottleneck in AI-assisted work has shifted: from writing code, to planning, to product direction, to taste. Generation outpaces the human ability to internalize, evaluate, and stand behind what was produced.
+
+The human brain is finite. It tires. It loses depth over the course of a day. AI systems don't. The natural response is to let AI take more cognitive load—but passive consumption is not judgment. Rubber-stamping output is not endorsement. Delegation without internalization is not progress.
+
+By extracting your thinking at the right moments—before and after agents work—you keep moving to bigger, harder problems. Each judgment you make and capture compounds. The next decision gets easier because the last one was preserved.
+
+Thinkroom's bet: the right interface activates the right kind of thinking. Reading deeply, judging critically, suggesting alternatives, endorsing with conviction—these are different cognitive modes. They need focused interfaces, not one generic chat box. When the interface puts you in the right mode at the right moment, you get genuine thought instead of reflexive approval.
+
 ## Who it's for
 
 **Primary:** Founder-writers - They're hiring Thinkroom to think more deeply while using AI, keep their brains engaged, and turn generated work into grounded decisions, actions, and progress.
