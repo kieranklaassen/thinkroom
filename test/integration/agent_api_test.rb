@@ -657,6 +657,34 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal "Author", doc.seed_author_name
   end
 
+  test "create response advertises the update endpoint to agents" do
+    post "/api/docs", params: { content: "# hi" }, headers: AGENT, as: :json
+
+    assert_response :created
+    update = response.parsed_body.dig("api", "update_document")
+    assert_equal "PATCH", update["method"]
+    assert_equal 409, update["conflict_status"]
+    assert_includes update["url"], "/api/docs/#{response.parsed_body['slug']}"
+    assert_includes update["purpose"], "seed-stage"
+  end
+
+  test "state payload advertises the update endpoint and explains it in notes" do
+    get "/api/docs/#{@document.slug}", headers: AGENT, as: :json
+
+    assert_response :success
+    assert_equal "PATCH", response.parsed_body.dig("api", "update_document", "method")
+    assert response.parsed_body["notes"].any? { |n| n.include?("PATCH /api/docs/:slug") }
+  end
+
+  test "plain-text share guide documents updating a created document" do
+    get "/d/#{@document.slug}", headers: { "User-Agent" => "curl/8.6.0" }
+
+    assert_response :success
+    assert_equal "text/plain", response.media_type
+    assert_includes response.body, "Revise a document you created"
+    assert_includes response.body, "-X PATCH"
+  end
+
   test "update of an unknown slug returns a clean 404" do
     patch "/api/docs/does-not-exist", params: { content: "# x" }, headers: AGENT, as: :json
 
