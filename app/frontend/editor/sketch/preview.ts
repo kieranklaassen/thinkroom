@@ -1,13 +1,15 @@
 import {
-  exportToSvg,
-  getCommonBounds,
-  sceneCoordsToViewportCoords,
-} from '@excalidraw/excalidraw'
-import {
   MAX_SKETCH_HEIGHT,
   MIN_SKETCH_HEIGHT,
   type SketchScene,
 } from './scene'
+
+// Excalidraw is loaded dynamically (like sketch/export.ts) so it never enters
+// the editor's static module graph. That keeps the editor bundle small AND
+// keeps the server-side render graph free of Excalidraw, whose eager
+// open-color.json import breaks Vite's SSR module loader. Only the exact
+// preview path below touches it, and it is already async + fire-and-forget.
+const loadExcalidraw = () => import('@excalidraw/excalidraw')
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const SKETCH_PADDING = 24
@@ -255,6 +257,8 @@ export async function renderExactSketchPreview(
 ): Promise<SVGSVGElement | null> {
   const elements = scene.elements.filter((element) => element.isDeleted !== true)
   if (elements.length === 0) return null
+
+  const { exportToSvg, getCommonBounds, sceneCoordsToViewportCoords } = await loadExcalidraw()
 
   const exportPadding = SKETCH_PADDING
   const exported = await exportToSvg({
