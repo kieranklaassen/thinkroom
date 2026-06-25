@@ -8,3 +8,74 @@
  *
  * Consider organizing styles into separate files for maintainability.
  */
+
+/* ---------------------------------------------------------------------------
+ * Static-preview reflow guard (on-load layout stability)
+ *
+ * The document page server-renders a static preview into
+ * `.doc-static-preview .ProseMirror` (see app/services/document_preview_html.rb
+ * and app/frontend/pages/documents/show.tsx) using the SAME .milkdown/.ProseMirror
+ * classes as the live Milkdown editor. ProseMirror's base stylesheets
+ * (@milkdown/kit -> prosemirror-view + prosemirror-tables) ship as CSS imported
+ * inside the editor island (app/frontend/editor/milkdown_editor.tsx). In a Vite
+ * production build that CSS lands in the code-split `show-*.css` chunk, which is
+ * INJECTED BY JS only after the editor chunk loads — a few hundred ms after first
+ * paint. So the preview first paints with browser defaults (white-space: normal,
+ * table-layout: auto) and then those rules retroactively restyle the shared
+ * .ProseMirror, reflowing the preview: a markdown table flips auto -> fixed
+ * (equal columns, cells wrap, ~+175px), and blockquotes/lists/paragraphs re-wrap
+ * (normal -> break-spaces, ~+30px each). Measured on prod: table 497px -> 672px.
+ *
+ * Fix: replicate exactly the layout-affecting properties ProseMirror injects, in
+ * THIS render-blocking Rails-pipeline stylesheet (served as the <link> in dev and
+ * prod alike), so the preview's geometry is fully determined at first paint and
+ * matches the editor's eventual state — no auto->fixed / normal->break-spaces jump.
+ *
+ * Scoped to .doc-static-preview so the live editor's own styling is untouched.
+ * Keep these in sync with node_modules/@milkdown/prose/lib/view/style/prosemirror.css
+ * and node_modules/@milkdown/prose/lib/tables/style/tables.css.
+ * ------------------------------------------------------------------------- */
+
+/* prosemirror-view base: text wrapping. Without this the preview wraps as
+   white-space: normal and blockquote/list/paragraph lines grow when the
+   editor's break-spaces is injected. */
+.doc-static-preview .ProseMirror {
+  word-wrap: break-word;
+  white-space: break-spaces;
+}
+
+/* prosemirror-tables base: the big one. A markdown table defaults to
+   table-layout: auto (content-sized columns) until the editor injects fixed +
+   width:100%, which redistributes columns to equal widths, wraps cells, and
+   grows the table ~175px. Pin the final geometry from first paint. */
+.doc-static-preview .ProseMirror table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Match the cell box model ProseMirror injects so cell content lays out
+   identically. --default-cell-min-width mirrors editor/table_block.css (6ch);
+   with fixed layout + equal columns this min-width stays inert here, but
+   keeping it makes the preview self-consistent if columns ever narrow. */
+.doc-static-preview .ProseMirror {
+  --default-cell-min-width: 6ch;
+}
+
+.doc-static-preview .ProseMirror td,
+.doc-static-preview .ProseMirror th {
+  vertical-align: top;
+  box-sizing: border-box;
+  position: relative;
+}
+
+.doc-static-preview .ProseMirror td:not([data-colwidth]),
+.doc-static-preview .ProseMirror th:not([data-colwidth]) {
+  min-width: var(--default-cell-min-width);
+}
+
+/* prosemirror-view base: list items are positioned for marker handling. */
+.doc-static-preview .ProseMirror li {
+  position: relative;
+}
