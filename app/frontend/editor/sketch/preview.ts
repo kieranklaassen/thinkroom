@@ -1,22 +1,15 @@
 import {
+  exportToSvg,
+  getCommonBounds,
+  sceneCoordsToViewportCoords,
+} from '@excalidraw/excalidraw'
+import {
   MAX_SKETCH_HEIGHT,
   MIN_SKETCH_HEIGHT,
   type SketchScene,
 } from './scene'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
-let rendererPromise: ReturnType<typeof importExactRenderer> | undefined
-
-const importExactRenderer = () => import('@excalidraw/excalidraw')
-
-/** Start fetching the exact renderer as soon as the Inertia document page
- * hydrates, while Milkdown and Yjs are still mounting. */
-export const preloadSketchRenderer = () => {
-  rendererPromise ??= importExactRenderer()
-  return rendererPromise
-}
-
-if (typeof window !== 'undefined') void preloadSketchRenderer()
 
 const number = (value: unknown, fallback = 0): number =>
   typeof value === 'number' && Number.isFinite(value) ? value : fallback
@@ -218,11 +211,6 @@ export async function renderExactSketchPreview(
   const elements = scene.elements.filter((element) => element.isDeleted !== true)
   if (elements.length === 0) return null
 
-  const {
-    exportToSvg,
-    getCommonBounds,
-    sceneCoordsToViewportCoords,
-  } = await preloadSketchRenderer()
   const exportPadding = 24
   const exported = await exportToSvg({
     elements: elements as never,

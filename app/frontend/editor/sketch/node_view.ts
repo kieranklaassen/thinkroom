@@ -27,10 +27,6 @@ interface SketchControls {
   enabled: () => boolean
 }
 
-// Chromium can briefly paint a newly attached nested SVG as a black box.
-// Keep the already-correct lightweight preview above it for one paint cycle.
-const EXACT_PREVIEW_PAINT_DELAY_MS = 180
-
 const syncSketchInteractivity = (dom: HTMLElement, interactive: boolean) => {
   const caption = dom.querySelector<HTMLElement>('.thinkroom-sketch-caption')
   const title = dom.querySelector<HTMLInputElement>('.thinkroom-sketch-title')
@@ -85,7 +81,6 @@ const buildSketchView = (
   let renderedScene = ''
   let renderedDescription = ''
   let titleTimer: ReturnType<typeof setTimeout> | null = null
-  let previewCommitTimer: ReturnType<typeof setTimeout> | null = null
   let previewGeneration = 0
   let destroyed = false
   let lastPreviewWidth = 0
@@ -119,9 +114,11 @@ const buildSketchView = (
   dom.append(preview, editorMount, caption, deleteButton)
 
   const renderExactPreview = (data: SketchData, generation: number) => {
-    requestAnimationFrame(() => {
+    // ProseMirror attaches the node view before the microtask queue drains.
+    // Measure and render there so the exact Excalidraw SVG replaces the
+    // fallback before the browser's first paint, without waiting for rAF.
+    queueMicrotask(() => {
       if (destroyed || generation !== previewGeneration) return
-      if (previewCommitTimer) clearTimeout(previewCommitTimer)
       const width = Math.max(1, preview.clientWidth || dom.clientWidth || 640)
       lastPreviewWidth = width
       const fittedViewport = fitSketchViewport(data.scene, width, data.height)
@@ -141,20 +138,10 @@ const buildSketchView = (
       preview.style.height = `${fittedViewport.height}px`
       void renderExactSketchPreview(data.scene, width, fittedViewport).then((exactPreview) => {
         if (!destroyed && exactPreview && generation === previewGeneration) {
-          const fallback = preview.querySelector('.sketch-preview-svg:not([data-renderer])')
-          fallback?.classList.add('is-covering')
-          exactPreview.classList.add('is-mounted')
-          preview.append(exactPreview)
-          previewCommitTimer = setTimeout(() => {
-            if (destroyed || generation !== previewGeneration) return
-            Array.from(preview.children).forEach((child) => {
-              if (child !== exactPreview) child.remove()
-            })
-            previewCommitTimer = null
-          }, EXACT_PREVIEW_PAINT_DELAY_MS)
+          preview.replaceChildren(exactPreview)
         }
       }).catch(() => {
-        // Keep the safe lightweight preview if the lazy renderer cannot load.
+        // Keep the safe lightweight preview if exact SVG generation fails.
       })
     })
   }
@@ -283,7 +270,6 @@ const buildSketchView = (
       titleInput.removeEventListener('blur', saveTitle)
       deleteButton.removeEventListener('click', onDelete)
       if (titleTimer) clearTimeout(titleTimer)
-      if (previewCommitTimer) clearTimeout(previewCommitTimer)
       if (currentData) close(currentData.id)
     },
   }

@@ -3045,21 +3045,6 @@ a:focus-visible {
   height: 100%;
 }
 
-.sketch-preview-svg[data-renderer='excalidraw'].is-mounted {
-  position: absolute;
-  z-index: 1;
-  inset: 0;
-}
-
-.sketch-preview-svg:not([data-renderer]).is-covering {
-  position: absolute;
-  z-index: 2;
-  inset: 0;
-  background-color: #fffef9;
-  background-image: radial-gradient(rgb(83 63 36 / 5%) 0.55px, transparent 0.55px);
-  background-size: 5px 5px;
-}
-
 .thinkroom-sketch-caption {
   min-height: 34px;
   margin: 0;

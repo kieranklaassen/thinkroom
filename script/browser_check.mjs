@@ -363,8 +363,26 @@ try {
     fail(`sketch API contract did not persist: ${JSON.stringify(sketchState)}`)
   }
 
+  await sketchA.addInitScript(() => {
+    const observer = new MutationObserver(() => {
+      const sketches = Array.from(document.querySelectorAll('.thinkroom-sketch'))
+      if (sketches.length === 0 || window.__firstSketchFrameExact !== undefined) return
+      requestAnimationFrame(() => {
+        window.__firstSketchFrameExact = sketches.every((node) =>
+          node.querySelector('[data-renderer="excalidraw"]'),
+        )
+      })
+    })
+    observer.observe(document, { childList: true, subtree: true })
+  })
   await sketchA.reload()
   await sketchA.locator('.thinkroom-sketch .sketch-preview-svg[data-renderer="excalidraw"]').waitFor({ timeout: 15000 })
+  await sketchA.waitForFunction(() => window.__firstSketchFrameExact !== undefined)
+  if (await sketchA.evaluate(() => window.__firstSketchFrameExact)) {
+    ok('the first visible sketch frame uses the exact Excalidraw renderer')
+  } else {
+    fail('the first visible sketch frame painted the fallback renderer')
+  }
   const hydratedSketchHeight = await sketchA.locator('.thinkroom-sketch').evaluate((node) =>
     node.getBoundingClientRect().height,
   )
