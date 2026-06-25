@@ -3,6 +3,9 @@ export const MAX_SKETCH_BYTES = 512 * 1024
 export const MAX_SKETCH_DESCRIPTION = 500
 export const MAX_SKETCH_ELEMENTS = 500
 export const MAX_SKETCH_POINTS = 20_000
+export const DEFAULT_SKETCH_HEIGHT = 320
+export const MIN_SKETCH_HEIGHT = 180
+export const MAX_SKETCH_HEIGHT = 1200
 
 const ELEMENT_TYPES = new Set([
   'rectangle',
@@ -30,6 +33,7 @@ export interface SketchData {
   id: string
   formatVersion: typeof SKETCH_FORMAT_VERSION
   description: string
+  height: number
   scene: SketchScene
 }
 
@@ -37,7 +41,7 @@ export const EMPTY_SKETCH_SCENE: SketchScene = {
   type: 'excalidraw',
   version: 2,
   elements: [],
-  appState: { viewBackgroundColor: '#ffffff' },
+  appState: { viewBackgroundColor: '#fffef9' },
   files: {},
 }
 
@@ -102,6 +106,13 @@ export function normalizeSketchScene(input: unknown): SketchScene | null {
     gridModeEnabled: (value) => typeof value === 'boolean',
     objectsSnapModeEnabled: (value) => typeof value === 'boolean',
     zenModeEnabled: (value) => typeof value === 'boolean',
+    scrollX: isFiniteNumber,
+    scrollY: isFiniteNumber,
+    zoom: (value) =>
+      isRecord(value) &&
+      isFiniteNumber(value.value) &&
+      value.value >= 0.1 &&
+      value.value <= 30,
   }
   for (const [key, valid] of Object.entries(retainedAppState)) {
     const value = sourceAppState[key]
@@ -127,7 +138,21 @@ export function normalizeSketchData(input: unknown): SketchData | null {
   if (!scene) return null
   const description = typeof input.description === 'string' ? input.description.trim() : ''
   if (Array.from(description).length > MAX_SKETCH_DESCRIPTION) return null
-  return { id: input.id, formatVersion: SKETCH_FORMAT_VERSION, description, scene }
+  const height = input.height === undefined || input.height === null
+    ? DEFAULT_SKETCH_HEIGHT
+    : input.height
+  if (
+    !isFiniteNumber(height) ||
+    height < MIN_SKETCH_HEIGHT ||
+    height > MAX_SKETCH_HEIGHT
+  ) return null
+  return {
+    id: input.id,
+    formatVersion: SKETCH_FORMAT_VERSION,
+    description,
+    height: Math.round(height),
+    scene,
+  }
 }
 
 export function parseSketchData(source: string): SketchData | null {

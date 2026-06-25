@@ -34,6 +34,7 @@ export const attrsFromSketchData = (data: SketchData) => ({
   id: data.id,
   scene: JSON.stringify(data.scene),
   description: data.description,
+  height: data.height,
   formatVersion: data.formatVersion,
 })
 
@@ -44,6 +45,7 @@ export const dataFromSketchNode = (node: {
     id: node.attrs.id,
     formatVersion: node.attrs.formatVersion,
     description: node.attrs.description,
+    height: node.attrs.height,
     scene:
       typeof node.attrs.scene === 'string'
         ? (() => {
@@ -66,6 +68,7 @@ export const sketchSchema = $nodeSchema('thinkroomSketch', () => ({
     id: { default: '' },
     scene: { default: '' },
     description: { default: '' },
+    height: { default: null },
     formatVersion: { default: SKETCH_FORMAT_VERSION },
   },
   parseDOM: [
@@ -77,6 +80,9 @@ export const sketchSchema = $nodeSchema('thinkroomSketch', () => ({
           id: element.dataset.sketchId,
           formatVersion: Number(element.dataset.formatVersion),
           description: element.dataset.description ?? '',
+          height: element.dataset.sketchHeight
+            ? Number(element.dataset.sketchHeight)
+            : undefined,
           scene: (() => {
             try {
               return JSON.parse(element.dataset.scene ?? '')
@@ -99,6 +105,7 @@ export const sketchSchema = $nodeSchema('thinkroomSketch', () => ({
         'data-sketch-id': data.id,
         'data-format-version': String(data.formatVersion),
         'data-description': data.description,
+        'data-sketch-height': String(data.height),
         'data-scene': JSON.stringify(data.scene),
         'aria-label': sketchAccessibleLabel(data),
       },

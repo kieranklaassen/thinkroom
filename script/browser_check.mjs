@@ -268,9 +268,9 @@ try {
   await taskA.close()
   await taskB.close()
 
-  // Inline sketches: Excalidraw loads only on demand, Save creates one atom
-  // update, the lightweight SVG preview syncs, and agent-readable source
-  // survives reload. Non-edit modes remain preview-only.
+  // Inline sketches: the action inserts an editable canvas directly in the
+  // document, changes autosave, the lightweight SVG preview syncs, and
+  // agent-readable source survives reload. Non-edit modes remain preview-only.
   const sketchDoc = await (
     await fetch(`${BASE}/api/docs`, {
       method: 'POST',
@@ -288,9 +288,11 @@ try {
     sketchA.waitForSelector('.doc-status--live', { timeout: 15000 }),
     sketchB.waitForSelector('.doc-status--live', { timeout: 15000 }),
   ])
+  await sketchA.locator('.milkdown .ProseMirror').click()
+  await sketchA.keyboard.press('Meta+ArrowDown')
   await sketchA.getByRole('button', { name: 'Sketch', exact: true }).click()
-  await sketchA.locator('.excalidraw').waitFor({ timeout: 15000 })
-  ok('sketch action lazy-loads the Excalidraw canvas')
+  await sketchA.locator('.thinkroom-sketch.is-editing .excalidraw').waitFor({ timeout: 15000 })
+  ok('sketch action inserts and lazy-loads an inline Excalidraw canvas')
   await sketchA.getByTitle('Rectangle — R or 2').click()
   const sketchCanvas = sketchA.locator('.excalidraw canvas').last()
   const sketchBox = await sketchCanvas.boundingBox()
@@ -303,12 +305,46 @@ try {
     fail('Excalidraw canvas has no drawable bounds')
   }
   const sketchDescription = `Approval flow ${Date.now()}`
-  await sketchA.getByPlaceholder('e.g. Signup approval flow').fill(sketchDescription)
-  await sketchA.getByRole('button', { name: 'Save sketch' }).click()
-  await sketchA.locator('.thinkroom-sketch .sketch-preview-svg').waitFor({ timeout: 5000 })
-  await sketchB
-    .locator('.thinkroom-sketch-caption', { hasText: sketchDescription })
-    .waitFor({ timeout: 10000 })
+  await sketchA.getByRole('textbox', { name: 'Sketch title' }).fill(sketchDescription)
+  await sketchA.locator('.doc-title').click()
+  await sketchA.locator('.thinkroom-sketch .sketch-preview-svg[data-renderer="excalidraw"]').waitFor({ timeout: 15000 })
+  const sketchFitsPaper = await sketchA.locator('.thinkroom-sketch').evaluate((node) => {
+    const paper = node.querySelector('svg[data-renderer="excalidraw"]')?.getBoundingClientRect()
+    const drawing = node.querySelector('[data-excalidraw-scene]')?.getBoundingClientRect()
+    return Boolean(
+      paper && drawing &&
+      drawing.top >= paper.top - 0.1 &&
+      drawing.right <= paper.right + 0.1 &&
+      drawing.bottom <= paper.bottom + 0.1 &&
+      drawing.left >= paper.left - 0.1
+    )
+  })
+  if (sketchFitsPaper) ok('the complete sketch fits inside its fixed-width paper')
+  else fail('the saved sketch preview clips content outside its paper')
+  const closedSketchHeight = await sketchA.locator('.thinkroom-sketch').evaluate((node) =>
+    node.getBoundingClientRect().height,
+  )
+  await sketchA.locator('.thinkroom-sketch').click({ position: { x: 100, y: 100 } })
+  await sketchA.locator('.thinkroom-sketch.is-editing').waitFor({ timeout: 10000 })
+  const openSketchHeight = await sketchA.locator('.thinkroom-sketch').evaluate((node) =>
+    node.getBoundingClientRect().height,
+  )
+  await sketchA.locator('.doc-title').click()
+  if (Math.abs(openSketchHeight - closedSketchHeight) < 0.1) {
+    ok('opening an inline sketch preserves its exact paper height')
+  } else {
+    fail(`opening a sketch shifted its height by ${openSketchHeight - closedSketchHeight}px`)
+  }
+  const afterSketchText = `Continue after sketch ${Date.now()}`
+  await sketchA.locator('.thinkroom-sketch + p').click()
+  await sketchA.keyboard.type(afterSketchText)
+  await sketchA.locator('.thinkroom-sketch + p', { hasText: afterSketchText }).waitFor({ timeout: 5000 })
+  ok('the visible trailing text line accepts writing after the inline sketch')
+  await sketchB.waitForFunction(
+    (title) => document.querySelector('.thinkroom-sketch-title')?.value === title,
+    sketchDescription,
+    { timeout: 10000 },
+  )
   ok('saved sketch renders as SVG and syncs to another editor')
 
   let sketchState = null
@@ -328,8 +364,20 @@ try {
   }
 
   await sketchA.reload()
-  await sketchA.locator('.thinkroom-sketch .sketch-preview-svg').waitFor({ timeout: 15000 })
-  if ((await sketchA.locator('.thinkroom-sketch-caption').innerText()) === sketchDescription) {
+  await sketchA.locator('.thinkroom-sketch .sketch-preview-svg[data-renderer="excalidraw"]').waitFor({ timeout: 15000 })
+  const hydratedSketchHeight = await sketchA.locator('.thinkroom-sketch').evaluate((node) =>
+    node.getBoundingClientRect().height,
+  )
+  await sketchA.waitForTimeout(400)
+  const settledSketchHeight = await sketchA.locator('.thinkroom-sketch').evaluate((node) =>
+    node.getBoundingClientRect().height,
+  )
+  if (Math.abs(hydratedSketchHeight - settledSketchHeight) < 0.1) {
+    ok('the preloaded exact sketch renderer does not shift after hydration')
+  } else {
+    fail(`the sketch shifted ${settledSketchHeight - hydratedSketchHeight}px after hydration`)
+  }
+  if ((await sketchA.locator('.thinkroom-sketch-title').inputValue()) === sketchDescription) {
     ok('editable sketch scene survives reload')
   } else {
     fail('sketch description or scene was lost on reload')
@@ -338,13 +386,14 @@ try {
   await sketchA.getByRole('option', { name: /^Read/ }).click()
   await sketchA.locator('.thinkroom-sketch').click()
   await sketchA.waitForTimeout(150)
-  if ((await sketchA.getByRole('dialog').count()) === 0) {
+  if ((await sketchA.locator('.thinkroom-sketch.is-editing').count()) === 0) {
     ok('Read mode keeps sketches preview-only')
   } else {
     fail('Read mode opened the sketch editor')
   }
   await sketchB.locator('.thinkroom-sketch').click()
-  await sketchB.getByRole('button', { name: 'Delete', exact: true }).click()
+  await sketchB.locator('.excalidraw canvas').last().click({ position: { x: 20, y: 20 } })
+  await sketchB.keyboard.press('Delete')
   await sketchA.locator('.thinkroom-sketch').waitFor({ state: 'detached', timeout: 10000 })
   await sketchB.reload()
   if ((await sketchB.locator('.thinkroom-sketch').count()) === 0) {
@@ -352,8 +401,41 @@ try {
   } else {
     fail('deleted sketch returned after reload')
   }
+
   await sketchA.close()
   await sketchB.close()
+
+  const emptySketchDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Empty sketch affordance', markdown: '' }),
+    })
+  ).json()
+  const insertSketchPage = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  await insertSketchPage.goto(`${BASE}/d/${emptySketchDoc.slug}`)
+  await insertSketchPage.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await insertSketchPage.locator('.sketch-add-inline').waitFor({ state: 'visible', timeout: 5000 })
+  await insertSketchPage.locator('.sketch-add-inline').click()
+  await insertSketchPage.locator('.thinkroom-sketch.is-editing').waitFor({ timeout: 15000 })
+  ok('empty trailing line offers a lightweight Add sketch action')
+  await insertSketchPage.locator('.thinkroom-sketch').hover()
+  await insertSketchPage.getByRole('button', { name: 'Delete sketch' }).click()
+  await insertSketchPage.locator('.thinkroom-sketch').waitFor({ state: 'detached', timeout: 10000 })
+  ok('hovering the paper exposes a tape-mounted delete action')
+
+  await insertSketchPage.locator('.ProseMirror > p:last-of-type').click()
+  await insertSketchPage.keyboard.type('/')
+  await insertSketchPage.locator('.thinkroom-slash-menu[data-visible="true"]').waitFor({ timeout: 5000 })
+  if ((await insertSketchPage.locator('.thinkroom-slash-item').count()) >= 10) {
+    ok('typing slash opens the populated block insert menu')
+  } else {
+    fail('slash menu did not expose the supported document blocks')
+  }
+  await insertSketchPage.keyboard.type('sketch')
+  await insertSketchPage.locator('.thinkroom-sketch.is-editing').waitFor({ timeout: 15000 })
+  ok('/sketch filters the insert menu and inserts an inline sketch')
+  await insertSketchPage.close()
 
   const malformedSketch = JSON.stringify({
     id: 'malformed_points',

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import * as Y from 'yjs'
 import type { Ctx } from '@milkdown/kit/ctx'
 import {
@@ -30,6 +31,7 @@ import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight'
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import type { Node as ProseNode } from '@milkdown/kit/prose/model'
+import { TextSelection } from '@milkdown/kit/prose/state'
 import { CableProvider, type DurableSnapshotPayload } from './cable_provider'
 import { lazyShikiParser, loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
@@ -44,12 +46,14 @@ import {
 import { frontmatter } from './frontmatter'
 import {
   attrsFromSketchData,
+  DEFAULT_SKETCH_HEIGHT,
+  EMPTY_SKETCH_SCENE,
   sketchControlsCtx,
   sketchNodeViewPlugins,
   sketchSchemaPlugins,
   type SketchData,
 } from './sketch'
-import { SketchModal } from './sketch/sketch_modal'
+import { InlineSketch } from './sketch/sketch_inline'
 import { suggestChangesMarks } from './suggest_changes'
 import { suggestState, suggestDispatch } from './suggest_changes/intercept'
 import { suggestGuard } from './suggest_changes/normalize'
@@ -78,6 +82,7 @@ import {
   serializeHtml,
   type DocumentFormat,
 } from './document_format'
+import { configureSlashMenu, slashMenu } from './slash_menu'
 
 export interface EditorHandle {
   editor: Editor
@@ -127,6 +132,12 @@ interface EditorProps {
   onSpans?: (spans: ProvenanceSpan[]) => void
   onSelection?: (view: EditorView) => void
   onTitleChange?: (title: string) => void
+}
+
+interface ActiveSketch {
+  data: SketchData
+  mount: HTMLElement
+  wrapper: HTMLElement
 }
 
 const SNAPSHOT_DEBOUNCE_MS = 900
@@ -334,7 +345,10 @@ function CollabEditor({
   onSelection,
   onTitleChange,
 }: EditorProps) {
-  const [sketchDraft, setSketchDraft] = useState<SketchData | null | undefined>(undefined)
+  const [sketchDraft, setSketchDraft] = useState<ActiveSketch | undefined>(undefined)
+  const insertSketchRef = useRef<() => void>(() => undefined)
+  const saveSketchRef = useRef<(data: SketchData) => void>(() => undefined)
+  const deleteSketchRef = useRef<(id: string) => void>(() => undefined)
   const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange })
   callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange }
   // Ref so the editable() closure always reads the live value; the effect
@@ -356,7 +370,11 @@ function CollabEditor({
           ctx.set(rootCtx, root)
           ctx.set(provenanceIdentityCtx.key, { name: identity.name })
           ctx.set(sketchControlsCtx.key, {
-            edit: (data) => setSketchDraft(data),
+            edit: (data, mount, wrapper) => setSketchDraft({ data, mount, wrapper }),
+            save: (data) => saveSketchRef.current(data),
+            insert: () => insertSketchRef.current(),
+            delete: (id) => deleteSketchRef.current(id),
+            close: (id) => setSketchDraft((current) => current?.data.id === id ? undefined : current),
             enabled: () => editableRef.current && !suggestingRef.current,
           })
           // Read-only modes gate USER input only — ProseMirror still accepts
@@ -386,6 +404,7 @@ function CollabEditor({
             enableHtmlFileUploader: true,
           }))
           configureCleanClipboard(ctx)
+          configureSlashMenu(ctx)
           renderSoftBreaks(ctx)
           // The defaults are bare text ('+', 'left', …) — real icons required.
           ctx.update(tableBlockConfig.key, (prev) => ({
@@ -426,6 +445,7 @@ function CollabEditor({
         .use(frontmatter)
         .use(sketchSchemaPlugins)
         .use(sketchNodeViewPlugins)
+        .use(slashMenu)
         .use(suggestChangesMarks)
         // Order matters: provenanceWriter (inside provenance) runs its
         // appendTransaction before suggestGuard's — the guard observes
@@ -542,7 +562,7 @@ function CollabEditor({
         if (title) callbacksRef.current.onTitleChange?.(title)
       })
 
-      const handle = { editor, ydoc, provider, openSketch: () => setSketchDraft(null) }
+      const handle = { editor, ydoc, provider, openSketch: () => insertSketchRef.current() }
       startedRef.current = true
       // Seed/initial sync ran with suggesting off; apply a pre-stored
       // suggest mode only now that the document content is settled.
@@ -621,7 +641,7 @@ function CollabEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggesting, loading])
 
-  const saveSketch = (data: SketchData) => {
+  const saveSketch = (data: SketchData, activate = false) => {
     if (!editableRef.current || suggestingRef.current) return
     const editor = get()
     if (!editor) return
@@ -648,10 +668,18 @@ function CollabEditor({
       tr.setMeta(suggestChangesKey, { skip: true })
       view.dispatch(tr)
 
+      if (activate) {
+        requestAnimationFrame(() => {
+          const sketch = view.dom.querySelector<HTMLElement>(
+            `.thinkroom-sketch[data-sketch-id="${data.id}"]`,
+          )
+          sketch?.click()
+        })
+      }
+
       const session = sessions.get(slug)
       if (session) void session.provider.persistCurrentState(buildSnapshotPayload(ctx, session.ydoc, contentFormat))
     })
-    setSketchDraft(undefined)
   }
 
   const deleteSketch = (id: string) => {
@@ -686,16 +714,69 @@ function CollabEditor({
     setSketchDraft(undefined)
   }
 
+  saveSketchRef.current = (data) => {
+    setSketchDraft((current) => current?.data.id === data.id ? { ...current, data } : current)
+    saveSketch(data)
+  }
+  deleteSketchRef.current = (id) => deleteSketch(id)
+
+  const focusAfterSketch = (id: string) => {
+    const editor = get()
+    if (!editor) return
+    editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx)
+      const type = view.state.schema.nodes.thinkroomSketch
+      if (!type) return
+      let after = -1
+      view.state.doc.descendants((node, pos) => {
+        if (node.type === type && node.attrs.id === id) {
+          after = pos + node.nodeSize
+          return false
+        }
+        return after < 0
+      })
+      if (after < 0) return
+      const nextNode = view.state.doc.nodeAt(after)
+      const textPosition = nextNode?.isTextblock ? after + 1 : after
+      const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, textPosition))
+      view.dispatch(tr.scrollIntoView())
+      requestAnimationFrame(() => view.focus())
+    })
+  }
+
+  insertSketchRef.current = () => {
+    if (!editableRef.current || suggestingRef.current) return
+    saveSketch({
+      id: crypto.randomUUID(),
+      formatVersion: 1,
+      description: '',
+      height: DEFAULT_SKETCH_HEIGHT,
+      scene: structuredClone(EMPTY_SKETCH_SCENE),
+    }, true)
+  }
+
+  useEffect(() => {
+    if (!sketchDraft) return
+    sketchDraft.wrapper.classList.add('is-editing')
+    return () => sketchDraft.wrapper.classList.remove('is-editing')
+  }, [sketchDraft])
+
   return (
     <>
       <Milkdown />
-      {sketchDraft !== undefined && (
-        <SketchModal
-          initialData={sketchDraft}
-          onCancel={() => setSketchDraft(undefined)}
-          onDelete={sketchDraft ? () => deleteSketch(sketchDraft.id) : undefined}
-          onSave={saveSketch}
-        />
+      {sketchDraft && sketchDraft.mount.isConnected && createPortal(
+        <InlineSketch
+          data={sketchDraft.data}
+          wrapper={sketchDraft.wrapper}
+          onChange={saveSketch}
+          onDelete={deleteSketch}
+          onDone={(focusAfter = false) => {
+            const id = sketchDraft.data.id
+            setSketchDraft(undefined)
+            if (focusAfter) focusAfterSketch(id)
+          }}
+        />,
+        sketchDraft.mount,
       )}
     </>
   )

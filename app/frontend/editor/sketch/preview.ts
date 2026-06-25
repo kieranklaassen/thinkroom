@@ -1,12 +1,53 @@
-import type { SketchScene } from './scene'
+import {
+  MAX_SKETCH_HEIGHT,
+  MIN_SKETCH_HEIGHT,
+  type SketchScene,
+} from './scene'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
+let rendererPromise: ReturnType<typeof importExactRenderer> | undefined
+
+const importExactRenderer = () => import('@excalidraw/excalidraw')
+
+/** Start fetching the exact renderer as soon as the Inertia document page
+ * hydrates, while Milkdown and Yjs are still mounting. */
+export const preloadSketchRenderer = () => {
+  rendererPromise ??= importExactRenderer()
+  return rendererPromise
+}
+
+if (typeof window !== 'undefined') void preloadSketchRenderer()
 
 const number = (value: unknown, fallback = 0): number =>
   typeof value === 'number' && Number.isFinite(value) ? value : fallback
 
 const string = (value: unknown, fallback: string): string =>
   typeof value === 'string' ? value : fallback
+
+const contentBounds = (scene: SketchScene) => {
+  const live = scene.elements.filter((element) => element.isDeleted !== true)
+  const bounds = live.reduce<{ minX: number; minY: number; maxX: number; maxY: number }>(
+    (box, element) => {
+      const x = number(element.x)
+      const y = number(element.y)
+      const width = Math.abs(number(element.width))
+      const height = Math.abs(number(element.height))
+      const angle = number(element.angle)
+      const rotatedWidth = Math.abs(width * Math.cos(angle)) + Math.abs(height * Math.sin(angle))
+      const rotatedHeight = Math.abs(width * Math.sin(angle)) + Math.abs(height * Math.cos(angle))
+      const centerX = x + number(element.width) / 2
+      const centerY = y + number(element.height) / 2
+      return {
+        minX: Math.min(box.minX, centerX - rotatedWidth / 2),
+        minY: Math.min(box.minY, centerY - rotatedHeight / 2),
+        maxX: Math.max(box.maxX, centerX + rotatedWidth / 2),
+        maxY: Math.max(box.maxY, centerY + rotatedHeight / 2),
+      }
+    },
+    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
+  )
+  return { live, bounds, empty: !Number.isFinite(bounds.minX) }
+}
 
 const svgElement = <K extends keyof SVGElementTagNameMap>(
   name: K,
@@ -20,23 +61,7 @@ const svgElement = <K extends keyof SVGElementTagNameMap>(
 /** Lightweight document preview. The full Excalidraw renderer stays lazy and
  * is used for editing/export; this renderer keeps initial document load small. */
 export function renderSketchPreview(scene: SketchScene): SVGSVGElement {
-  const live = scene.elements.filter((element) => element.isDeleted !== true)
-  const bounds = live.reduce<{ minX: number; minY: number; maxX: number; maxY: number }>(
-    (box, element) => {
-      const x = number(element.x)
-      const y = number(element.y)
-      const width = Math.abs(number(element.width))
-      const height = Math.abs(number(element.height))
-      return {
-        minX: Math.min(box.minX, x),
-        minY: Math.min(box.minY, y),
-        maxX: Math.max(box.maxX, x + width),
-        maxY: Math.max(box.maxY, y + height),
-      }
-    },
-    { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity },
-  )
-  const empty = !Number.isFinite(bounds.minX)
+  const { live, bounds, empty } = contentBounds(scene)
   const padding = 24
   const minX = empty ? 0 : bounds.minX - padding
   const minY = empty ? 0 : bounds.minY - padding
@@ -54,7 +79,7 @@ export function renderSketchPreview(scene: SketchScene): SVGSVGElement {
       y: minY,
       width,
       height,
-      fill: string(scene.appState.viewBackgroundColor, '#ffffff'),
+      fill: 'transparent',
     }),
   )
 
@@ -142,5 +167,108 @@ export function renderSketchPreview(scene: SketchScene): SVGSVGElement {
     label.textContent = 'Empty sketch'
     svg.appendChild(label)
   }
+  return svg
+}
+
+/** Render the document preview with Excalidraw's own RoughJS/freehand
+ * pipeline. The lightweight renderer above remains the immediate fallback
+ * while this lazy chunk loads, but pen pressure, smoothing, roughness, and
+ * stroke width ultimately come from the same renderer used while editing. */
+export interface SketchViewport {
+  height: number
+  scrollX: number
+  scrollY: number
+  zoom: number
+}
+
+export function fitSketchViewport(
+  scene: SketchScene,
+  viewportWidth: number,
+  minimumHeight: number,
+): SketchViewport {
+  const { bounds, empty } = contentBounds(scene)
+  if (empty) return { height: minimumHeight, scrollX: 0, scrollY: 0, zoom: 1 }
+
+  const padding = 24
+  const contentWidth = Math.max(1, bounds.maxX - bounds.minX)
+  const contentHeight = Math.max(1, bounds.maxY - bounds.minY)
+  const paddedWidth = contentWidth + padding * 2
+  const paddedHeight = contentHeight + padding * 2
+  const zoom = Math.max(
+    0.1,
+    Math.min(viewportWidth / paddedWidth, MAX_SKETCH_HEIGHT / paddedHeight),
+  )
+  const height = Math.min(
+    MAX_SKETCH_HEIGHT,
+    Math.max(MIN_SKETCH_HEIGHT, minimumHeight, Math.ceil(paddedHeight * zoom)),
+  )
+  return {
+    height,
+    scrollX: (viewportWidth / zoom - contentWidth) / 2 - bounds.minX,
+    scrollY: (height / zoom - contentHeight) / 2 - bounds.minY,
+    zoom,
+  }
+}
+
+export async function renderExactSketchPreview(
+  scene: SketchScene,
+  viewportWidth: number,
+  fittedViewport: SketchViewport,
+): Promise<SVGSVGElement | null> {
+  const elements = scene.elements.filter((element) => element.isDeleted !== true)
+  if (elements.length === 0) return null
+
+  const {
+    exportToSvg,
+    getCommonBounds,
+    sceneCoordsToViewportCoords,
+  } = await preloadSketchRenderer()
+  const exportPadding = 24
+  const exported = await exportToSvg({
+    elements: elements as never,
+    appState: {
+      ...scene.appState,
+      exportBackground: false,
+      exportWithDarkMode: false,
+      viewBackgroundColor: '#fffef9',
+    } as never,
+    files: null,
+    exportPadding,
+    skipInliningFonts: true,
+  })
+  const [minX, minY] = getCommonBounds(elements as never)
+  const viewportHeight = fittedViewport.height
+  const scrollX = fittedViewport.scrollX
+  const scrollY = fittedViewport.scrollY
+  const zoomValue = fittedViewport.zoom
+  const topLeft = sceneCoordsToViewportCoords(
+    { sceneX: minX - exportPadding, sceneY: minY - exportPadding },
+    {
+      zoom: { value: zoomValue } as never,
+      offsetLeft: 0,
+      offsetTop: 0,
+      scrollX,
+      scrollY,
+    },
+  )
+  const svg = svgElement('svg', {
+    viewBox: `0 0 ${viewportWidth} ${viewportHeight}`,
+    width: viewportWidth,
+    height: viewportHeight,
+    preserveAspectRatio: 'none',
+  })
+  const exportedWidth = number(Number(exported.getAttribute('width')))
+  const exportedHeight = number(Number(exported.getAttribute('height')))
+  exported.setAttribute('x', String(topLeft.x))
+  exported.setAttribute('y', String(topLeft.y))
+  exported.setAttribute('width', String(exportedWidth * zoomValue))
+  exported.setAttribute('height', String(exportedHeight * zoomValue))
+  exported.dataset.excalidrawScene = ''
+  svg.append(exported)
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet')
+  svg.setAttribute('role', 'img')
+  svg.setAttribute('focusable', 'false')
+  svg.dataset.renderer = 'excalidraw'
+  svg.classList.add('sketch-preview-svg')
   return svg
 }
