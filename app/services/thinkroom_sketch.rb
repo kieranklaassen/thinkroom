@@ -4,6 +4,12 @@ class ThinkroomSketch
   MAX_DESCRIPTION_LENGTH = 500
   MAX_ELEMENTS = 500
   MAX_POINTS = 20_000
+  # Render-hint bounds for a sketch's reserved height. Enforced TS-side by
+  # normalizeSketchData; mirrored here as the single Ruby source of truth so the
+  # agent contract and the preview skeleton clamp cannot drift apart.
+  DEFAULT_HEIGHT = 448
+  MIN_HEIGHT = 180
+  MAX_HEIGHT = 1200
   ELEMENT_TYPES = %w[
     rectangle diamond ellipse line arrow freedraw text frame
   ].freeze
