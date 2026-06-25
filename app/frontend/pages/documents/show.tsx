@@ -8,7 +8,15 @@ import {
   type EditorHandle,
 } from '../../editor/milkdown_editor'
 import type { DocumentFormat } from '../../editor/document_format'
-import { userIdentity, type UserIdentity } from '../../editor/identity'
+import {
+  userIdentity,
+  serverIdentity,
+  serverKnewGuest,
+  persistGuestIdentity,
+  reconcileGuestCookie,
+  storedGuestIdentity,
+  type UserIdentity,
+} from '../../editor/identity'
 import { provenanceIdentityCtx } from '../../editor/provenance'
 import {
   aiSpanAt,
@@ -150,17 +158,40 @@ export default function DocumentShow({
   // sync-on-prop-change effect, which a future reload batch listing
   // `viewer` would silently clobber mid-rename.
   //
-  // Hydration-safe init: server and the first client render derive identity
-  // from the server-provided viewer name only (userIdentity returns the SSR
-  // shape when window is absent, and we skip the localStorage guest read on the
-  // first client render). The stored guest identity (name + color) is applied
-  // in a post-hydration effect, one frame later, before the editor mounts.
+  // Hydration-safe init: server and the first client render BOTH derive
+  // identity from the viewer prop alone — the chosen session name, else the
+  // guest name + color the server read from the `pruf_guest` cookie, else
+  // Anonymous. No localStorage read during render, so the markup is
+  // byte-identical (zero hydration mismatch).
+  //
+  // When the cookie was present (the common returning-user case) the server
+  // already rendered the real guest identity → NOTHING changes post-hydration.
+  // Only when the cookie was absent (first-ever load, or a user whose identity
+  // predates the cookie) does the post-hydration effect reconcile from
+  // localStorage and write the cookie so the NEXT load is server-correct.
   const [identity, setIdentity] = useState<UserIdentity>(() =>
-    userIdentity(viewer.name, { allowStorage: false }),
+    serverIdentity(viewer.name, viewer),
   )
   useEffect(() => {
-    setIdentity(userIdentity(viewer.name))
-    // viewer.name is stable for the life of the page; the rename handler owns
+    // A chosen session name always wins and is server-known — never overridden
+    // by the guest identity.
+    if (viewer.name) return
+    if (serverKnewGuest(viewer)) {
+      // Server already rendered the cookie-backed guest identity. Re-seed
+      // localStorage from it when storage is empty (cookie present but storage
+      // cleared) so the cookie stays authoritative — never regenerate a fresh
+      // identity here, which would silently rename the user on the next load.
+      // Do NOT change React state: that would be the post-hydration flip we
+      // just worked to avoid.
+      if (!storedGuestIdentity()) persistGuestIdentity(identity)
+      return
+    }
+    // Cookie absent: reconcile from localStorage (one-time migration) and write
+    // the cookie. If there's no stored identity yet, generate + persist one.
+    const stored = storedGuestIdentity()
+    setIdentity(stored ?? reconcileGuestCookie())
+    if (stored) persistGuestIdentity(stored)
+    // viewer is stable for the life of the page; the rename handler owns
     // subsequent identity changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
