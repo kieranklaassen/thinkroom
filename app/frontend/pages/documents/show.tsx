@@ -36,6 +36,11 @@ import {
 import { refreshAgentCursors } from '../../editor/agent_cursors'
 import { editorViewCtx, parserCtx, schemaCtx } from '@milkdown/kit/core'
 import { sourceParser } from '../../editor/document_format'
+import {
+  downloadDocumentHtml,
+  downloadDocumentMarkdown,
+  printDocument,
+} from '../../editor/document_export'
 import { collectInlineSuggestions } from '../../editor/suggest_changes'
 import {
   MarginInlineSuggestions,
@@ -243,6 +248,16 @@ export default function DocumentShow({
   // a closure-captured handle goes stale when the editor remounts mid-flight.
   const handleRef = useRef<EditorHandle | null>(null)
   handleRef.current = handle
+  const exportMarkdown = useCallback(() => {
+    const live = handleRef.current
+    if (!live) throw new Error('Document editor is not ready')
+    downloadDocumentMarkdown(live.editor, documentTitle)
+  }, [documentTitle])
+  const exportHtml = useCallback(async () => {
+    const live = handleRef.current
+    if (!live) throw new Error('Document editor is not ready')
+    await downloadDocumentHtml(live.editor, documentTitle)
+  }, [documentTitle])
   // handleSelection is a stable callback — it reads the live mode via ref.
   const modeRef = useRef(effectiveMode)
   modeRef.current = effectiveMode
@@ -1070,7 +1085,14 @@ export default function DocumentShow({
                   : 'Read only — the document owner locked editing'
               }
             />
-            <SharePopover agentsActive={presences.length} onOpenChange={setShareOpen} />
+            <SharePopover
+              agentsActive={presences.length}
+              exportReady={Boolean(handle)}
+              onExportMarkdown={exportMarkdown}
+              onExportHtml={exportHtml}
+              onPrint={printDocument}
+              onOpenChange={setShareOpen}
+            />
             <HeaderMenu
               panelOpen={panelOpen}
               onTogglePanel={() => setPanelOpen((open) => !open)}

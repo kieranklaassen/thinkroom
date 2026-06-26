@@ -1,4 +1,5 @@
 import type { SketchScene } from './scene'
+import { downloadBlob } from '../../lib/download'
 
 export async function sketchToSvg(scene: SketchScene): Promise<SVGSVGElement> {
   const { exportToSvg } = await import('@excalidraw/excalidraw')
@@ -29,10 +30,6 @@ export async function copySketchSvg(scene: SketchScene): Promise<void> {
 
 export async function downloadSketchSvg(scene: SketchScene, name: string): Promise<void> {
   const markup = svgMarkup(await sketchToSvg(scene))
-  const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml' }))
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = `${name.trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'sketch'}.svg`
-  anchor.click()
-  URL.revokeObjectURL(url)
+  const filename = `${name.trim().replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'sketch'}.svg`
+  downloadBlob(new Blob([markup], { type: 'image/svg+xml' }), filename)
 }

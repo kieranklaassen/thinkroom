@@ -2308,6 +2308,11 @@ a:focus-visible {
   border-top: 1px solid var(--line);
 }
 
+.share-section--export {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
 .share-popover .theme-picker {
   display: flex;
   width: 100%;
@@ -2376,8 +2381,41 @@ a:focus-visible {
   border-color: var(--ink-faint);
 }
 
+.share-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.share-copy:disabled {
+  color: var(--ink-faint);
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .share-copy--wide {
   width: 100%;
+}
+
+.share-export-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.share-export-actions .share-copy {
+  min-width: 0;
+  padding-inline: 0.35rem;
+  white-space: normal;
+}
+
+.share-export-status {
+  margin: 0.45rem 0 0;
+  color: var(--ink-faint);
+  font: 500 0.68rem/1.35 var(--font-ui);
+}
+
+.share-export-status.is-error {
+  color: #a1372c;
 }
 
 .share-agent-dot {
@@ -3093,6 +3131,50 @@ a:focus-visible {
   outline-offset: 2px;
 }
 
+.sketch-download-button {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  right: 12px;
+  min-height: 32px;
+  border: 1px solid rgb(65 51 32 / 14%);
+  border-radius: 7px;
+  background: rgb(255 254 249 / 92%);
+  box-shadow: 0 3px 10px rgb(38 28 16 / 9%);
+  color: var(--ink-soft);
+  padding: 6px 10px;
+  font: 600 11px/1 var(--font-ui);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.sketch-download-button[hidden],
+.thinkroom-sketch.is-editing .sketch-download-button {
+  display: none;
+}
+
+.thinkroom-sketch:hover .sketch-download-button,
+.sketch-download-button:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sketch-download-button:hover {
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: #fffef9;
+}
+
+.sketch-download-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sketch-download-button:disabled {
+  cursor: wait;
+}
+
 .thinkroom-sketch-preview {
   display: grid;
   position: relative;
@@ -3293,4 +3375,85 @@ a:focus-visible {
 @media (max-width: 700px) {
   .thinkroom-sketch { margin: 18px 0; border-radius: 9px; }
   .thinkroom-sketch-preview { min-height: 150px; }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .sketch-download-button {
+    min-width: 44px;
+    min-height: 44px;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media print {
+  @page {
+    margin: 0.7in;
+  }
+
+  body,
+  .doc-page {
+    min-height: 0;
+    background: #fff;
+  }
+
+  .doc-header,
+  .claim-banner,
+  .doc-notice,
+  .margin-gutter,
+  .doc-rail,
+  .mobile-dock,
+  .mobile-sheet,
+  .selection-toolbar,
+  .review-popover,
+  .comment-composer--anchored,
+  .thinkroom-slash-menu,
+  .sketch-add-inline,
+  .sketch-delete-tape,
+  .sketch-download-button,
+  .thinkroom-sketch-editor-mount {
+    display: none !important;
+  }
+
+  .doc-body,
+  .doc-canvas,
+  .doc-main,
+  .doc-editor-stack,
+  .doc-live-editor {
+    display: block;
+    position: static !important;
+    width: auto;
+    min-height: 0;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    visibility: visible !important;
+  }
+
+  .doc-static-preview {
+    display: none !important;
+  }
+
+  .milkdown,
+  .milkdown .ProseMirror {
+    min-height: 0;
+  }
+
+  .milkdown .ProseMirror {
+    color: #28231d;
+    font-size: 11.5pt;
+  }
+
+  .thinkroom-sketch,
+  pre,
+  table,
+  blockquote {
+    break-inside: avoid;
+  }
+
+  a {
+    color: inherit;
+    text-decoration-color: currentColor;
+  }
 }
