@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_26_130100) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_26_133000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -144,6 +144,29 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_26_130100) do
     t.check_constraint "user_id IS NULL OR owner_token IS NULL", name: "documents_single_owner"
   end
 
+  create_table "feedback_runs", force: :cascade do |t|
+    t.string "client_session_id", null: false
+    t.datetime "completed_at"
+    t.datetime "created_at", null: false
+    t.string "cursor_agent_id"
+    t.string "cursor_agent_url"
+    t.string "cursor_branch_name"
+    t.string "cursor_pr_url"
+    t.string "cursor_run_id"
+    t.string "cursor_status"
+    t.text "error_message"
+    t.string "idempotency_key"
+    t.integer "launch_attempt", default: 0, null: false
+    t.datetime "launched_at"
+    t.text "result_text"
+    t.string "status", default: "uploaded", null: false
+    t.datetime "updated_at", null: false
+    t.integer "user_id", null: false
+    t.index ["user_id", "client_session_id"], name: "index_feedback_runs_on_user_id_and_client_session_id", unique: true
+    t.index ["user_id"], name: "index_feedback_runs_on_user_id"
+    t.check_constraint "status IN ('uploaded', 'running', 'finished', 'failed')", name: "feedback_runs_status_check"
+  end
+
   create_table "suggestions", force: :cascade do |t|
     t.text "anchor_text"
     t.string "author_kind", default: "ai", null: false
@@ -180,5 +203,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_26_130100) do
   add_foreign_key "comments", "documents"
   add_foreign_key "document_assets", "documents"
   add_foreign_key "documents", "users"
+  add_foreign_key "feedback_runs", "users"
   add_foreign_key "suggestions", "documents"
 end

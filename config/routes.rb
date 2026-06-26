@@ -7,6 +7,10 @@ Rails.application.routes.draw do
 
   post "identity", to: "identities#update", as: :identity
 
+  resources :feedback_runs, only: %i[create show]
+  get "feedback_runs/bundle/:token", to: "feedback_bundles#show",
+                                      as: :feedback_bundle
+
   get "login", to: "sessions#new", as: :login
   post "login", to: "sessions#create"
   delete "logout", to: "sessions#destroy", as: :logout
