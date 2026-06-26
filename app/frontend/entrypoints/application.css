@@ -1186,10 +1186,15 @@ a:focus-visible {
 
 /* Neutral box standing in for a sketch canvas until Excalidraw mounts, so a
    sketch doc reserves the right height instead of reflowing on swap. */
-.doc-sketch-skeleton {
+.doc-sketch-skeleton,
+.doc-mermaid-skeleton {
   margin: 1.5rem 0;
   border-radius: 12px;
   background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.doc-mermaid-skeleton {
+  min-height: 240px;
 }
 
 .milkdown .ProseMirror {
@@ -1405,6 +1410,67 @@ a:focus-visible {
   background: none;
   padding: 0;
   font-size: inherit;
+}
+
+/* Mermaid remains a native code block in the document; the figure before it
+   is a derived, disposable preview. That keeps Markdown, collaboration, undo,
+   and exports faithful while making diagrams readable in place. */
+.milkdown .ProseMirror .mermaid-diagram {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  margin: 1.5em 0 0.75em;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--paper) 94%, var(--ink) 6%);
+  padding: 1rem;
+}
+
+.milkdown .ProseMirror .mermaid-diagram-svg {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 70vh;
+}
+
+.milkdown .ProseMirror .mermaid-diagram-status {
+  color: var(--ink-soft);
+  font: 600 0.8rem/1.4 var(--font-ui);
+}
+
+.milkdown .ProseMirror .mermaid-diagram[data-state='error'] {
+  min-height: 96px;
+  border-style: dashed;
+}
+
+.milkdown .ProseMirror .mermaid-diagram + pre[data-language='mermaid'] {
+  position: relative;
+  margin-top: 0;
+}
+
+.milkdown .ProseMirror .mermaid-diagram + pre[data-language='mermaid']::before {
+  content: 'Mermaid source';
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--ink-faint);
+  font: 700 0.68rem/1 var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.milkdown .ProseMirror[contenteditable='false']
+  .mermaid-diagram:not([data-state='error']) + pre[data-language='mermaid'] {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .milkdown .ProseMirror .mermaid-diagram {
+    min-height: 150px;
+    margin-inline: -0.25rem;
+    padding: 0.75rem;
+  }
 }
 
 /* A section break deserves air — owl-conformant: extra space comes from

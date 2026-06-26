@@ -101,6 +101,10 @@ const buildItems = (ctx: Ctx): SlashItem[] => [
     run: setBlock('code_block'), available: nodeAvailable('code_block'),
   },
   {
+    label: 'Mermaid diagram', detail: 'Diagram from Mermaid source', icon: '◇', keywords: 'mermaid diagram flowchart graph sequence',
+    run: setBlock('code_block', { language: 'mermaid' }), available: nodeAvailable('code_block'),
+  },
+  {
     label: 'Divider', detail: 'Separate ideas', icon: '—', keywords: 'divider rule separator hr',
     run: insertDivider, available: nodeAvailable('hr'),
   },

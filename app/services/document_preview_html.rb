@@ -20,11 +20,12 @@ class DocumentPreviewHtml
         # "anchor">). The live Milkdown editor renders a bare <h1>, so without
         # this the preview's heading is structurally taller and the first
         # paragraph jumps ~30px when the editor swaps in.
-        Commonmarker.to_html(
+        rendered = Commonmarker.to_html(
           source,
           options: { extension: { header_ids: nil } },
           plugins: { table: true, strikethrough: true, tasklist: true }
         )
+        mark_mermaid_fences(rendered)
       end
 
       # Security boundary: document content is authored by humans and agents, so
@@ -33,6 +34,7 @@ class DocumentPreviewHtml
       fragment = Nokogiri::HTML5.fragment(sanitized)
       collapse_block_whitespace(fragment)
       skeletonize_sketches(fragment, format:)
+      skeletonize_mermaid(fragment) if format == "markdown"
       fragment.to_html
     end
 
@@ -43,6 +45,20 @@ class DocumentPreviewHtml
     WHITESPACE_BLOCK_PARENTS = %w[
       ul ol li blockquote table thead tbody tr figure dl
     ].freeze
+
+    # Commonmarker writes the fenced language to a `lang` attribute, which the
+    # document sanitizer intentionally drops. Translate only the Mermaid signal
+    # to the already-supported data-language attribute before sanitizing so the
+    # instant preview can reserve diagram space without trusting arbitrary HTML.
+    def mark_mermaid_fences(html)
+      fragment = Nokogiri::HTML5.fragment(html)
+      fragment.css("pre[lang]").each do |pre|
+        next unless pre["lang"].to_s.casecmp?("mermaid")
+
+        pre["data-language"] = "mermaid"
+      end
+      fragment.to_html
+    end
 
     # ProseMirror's DOM carries no whitespace text nodes between block elements,
     # but Commonmarker pretty-prints a "\n" between each one. The editor renders
@@ -73,6 +89,15 @@ class DocumentPreviewHtml
     def skeletonize_sketches(fragment, format:)
       sketch_nodes(fragment, format:).each do |node, height|
         node.replace(skeleton(node.document, height))
+      end
+    end
+
+    def skeletonize_mermaid(fragment)
+      fragment.css('pre[data-language="mermaid"]').each do |node|
+        figure = Nokogiri::XML::Node.new("figure", node.document)
+        figure["class"] = "doc-mermaid-skeleton"
+        figure["aria-hidden"] = "true"
+        node.replace(figure)
       end
     end
 
