@@ -17,7 +17,7 @@ proxy:
     requests: true
     responses: true
     memory: 2_097_152
-    max_request_body: 3_407_872
+    max_request_body: 67_108_864
 
 registry:
   server: <%= ENV.fetch("KAMAL_REGISTRY_SERVER", "ghcr.io") %>
@@ -28,6 +28,7 @@ registry:
 env:
   secret:
     - RAILS_MASTER_KEY
+    - CURSOR_API_KEY
 <% if ENV["KAMAL_GOOGLE_OAUTH"] == "1" %>
     - GOOGLE_CLIENT_ID
     - GOOGLE_CLIENT_SECRET
@@ -35,6 +36,8 @@ env:
   clear:
     # SQLite and the database-backed Cable adapter share one persistent volume.
     WEB_CONCURRENCY: "1"
+    # Empty disables Riffrec automation. Use a comma-separated allowlist.
+    RIFFREC_AUTOMATION_EMAILS: <%= ENV.fetch("RIFFREC_AUTOMATION_EMAILS", "") %>
 
 aliases:
   console: app exec --interactive --reuse "bin/rails console"

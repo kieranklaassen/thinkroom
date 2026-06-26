@@ -28,7 +28,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "remark-frontmatter": "^5.0.0",
-    "riffrec": "git+https://github.com/kieranklaassen/riffrec.git#9d3e2b5c62694049bcefec9370eaa9b30f41a60e",
+    "riffrec": "github:kieranklaassen/riffrec#23f99b6e735c431bfa6bc45460e86f98565dfb5e",
     "shiki": "^4.3.0",
     "tailwindcss": "^4.3.1",
     "typescript": "^6.0.3",

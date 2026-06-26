@@ -1264,6 +1264,7 @@ export default function DocumentShow({
               ownership={ownership}
               claimerName={identity.name}
               account={viewer.account}
+              feedbackAutomationEnabled={viewer.feedback_automation_enabled}
             />
           </div>
         </header>

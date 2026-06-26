@@ -7,6 +7,7 @@ class User < ApplicationRecord
   has_many :documents, dependent: :restrict_with_exception
   has_many :cli_access_tokens, dependent: :destroy
   has_many :cli_device_authorizations, dependent: :destroy
+  has_many :feedback_runs, dependent: :destroy
 
   before_validation :normalize_identity
 
