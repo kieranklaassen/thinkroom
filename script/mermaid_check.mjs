@@ -111,6 +111,22 @@ ${INVALID_SOURCE}
   check(!(await sources.nth(0).isVisible()), 'read mode hides source after a successful render')
   check(await sources.nth(1).isVisible(), 'read mode exposes source when rendering fails')
 
+  const desktop = await page.evaluate(() => {
+    const figure = document.querySelector('.mermaid-diagram[data-state="ready"]')
+    const prose = document.querySelector('.doc-live-editor .ProseMirror')
+    return {
+      figure: figure?.getBoundingClientRect().width ?? 0,
+      prose: prose?.getBoundingClientRect().width ?? 0,
+      richWidth: getComputedStyle(document.querySelector('.doc-page')).getPropertyValue('--rich-content-width').trim(),
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    }
+  })
+  check(
+    desktop.figure > desktop.prose && Math.abs(desktop.figure - 960) <= 4 && desktop.overflow === 0,
+    'read mode renders the Mermaid diagram at the shared 960px breakout width',
+    JSON.stringify(desktop),
+  )
+
   await page.setViewportSize({ width: 390, height: 844 })
   const geometry = await page.evaluate(() => ({
     overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
