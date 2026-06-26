@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useMediaQuery } from '../lib/use_media_query'
 import { useDismissable } from '../lib/use_dismissable'
-import { ThemePicker } from './theme_picker'
 
 /** Share is two audiences, one URL: humans get the editor, agents fetching the
  *  same link discover the API. The popover teaches both — copy the link for a
@@ -83,8 +82,8 @@ export function SharePopover({
       onClick={(event) => event.stopPropagation()}
     >
       <div className="share-section">
-        <div className="share-section-title">People</div>
-        <p className="share-section-hint">Anyone with the link joins this live document.</p>
+        <div className="share-section-title">Share link</div>
+        <p className="share-section-hint">Anyone with the link can open and join this live document.</p>
         <div className="share-copy-row">
           <code className="share-url">{url}</code>
           <button className="share-copy" onClick={() => copy('link', url)}>
@@ -94,15 +93,15 @@ export function SharePopover({
       </div>
       <div className="share-section share-section--agent">
         <div className="share-section-title">
-          Your agent
+          Agent invite
           <span className={`share-agent-dot ${agentsActive > 0 ? 'is-on' : ''}`} />
           <span className="share-agent-state">
-            {agentsActive > 0 ? `${agentsActive} active now` : 'same URL, different audience'}
+            {agentsActive > 0 ? `${agentsActive} active now` : 'for an API-capable agent'}
           </span>
         </div>
         <p className="share-section-hint">
-          Agents fetching this link discover the API: state, suggestions, comments,
-          presence — identified by <code>X-Agent-Name</code>.
+          Give an agent this invite to discover the document API and join as an
+          attributed collaborator.
         </p>
         <button className="share-copy share-copy--wide" onClick={() => copy('agent', agentInvite)}>
           {copied === 'agent' ? 'Copied — paste it to your agent' : 'Copy agent invite'}
@@ -143,12 +142,6 @@ export function SharePopover({
           </p>
         )}
       </div>
-      {/* The header stays minimal — the reading theme lives here, on every
-          surface (desktop popover and mobile sheet alike). */}
-      <div className="share-section share-section--theme">
-        <div className="share-section-title">Theme</div>
-        <ThemePicker />
-      </div>
     </div>
   )
 
@@ -157,6 +150,7 @@ export function SharePopover({
       <button
         className="share-button"
         aria-expanded={open}
+        aria-haspopup="dialog"
         onClick={() => setOpen((v) => !v)}
       >
         Share
