@@ -23,4 +23,11 @@ class DocumentTitleTest < ActiveSupport::TestCase
     assert_nil DocumentTitle.call(format: "markdown", content: "## Section\n\nBody")
     assert_nil DocumentTitle.call(format: "html", content: "<h1> </h1><p>Body</p>")
   end
+
+  test "normalizes binary source to UTF-8" do
+    assert_equal "bad � title", DocumentTitle.call(
+      format: "markdown",
+      content: "# bad \xFF title".b
+    )
+  end
 end

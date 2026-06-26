@@ -50,16 +50,18 @@ class DocumentsController < InertiaController
   # the guide invisibly so even a raw text fetch of the page surfaces it.
   def show
     document = Document.find_by!(slug: params[:slug])
+    link_preview_request = link_preview_user_agent?
 
     if request.format.json? || params[:format] == "json"
       return render json: AgentGuide.state(document, request.base_url)
     end
-    if params[:format] == "txt" || agent_user_agent?
+    if params[:format] == "txt" || (agent_user_agent? && !link_preview_request)
       return render plain: AgentGuide.text(document, request.base_url)
     end
 
-    remember_recent(document)
+    remember_recent(document) unless link_preview_request
     @agent_guide = AgentGuide.text(document, request.base_url)
+    @open_graph = document_open_graph(document)
 
     # Claim the seed at page-render time so a fresh document paints its
     # template from props instead of waiting for the WebSocket round-trip.
@@ -68,7 +70,7 @@ class DocumentsController < InertiaController
     # reloads and prefetch-shaped requests are also excluded: only an
     # initial render mounts an editor that will actually apply the grant,
     # and a burned grant blocks the channel fallback for SEED_CLAIM_TIMEOUT.
-    seed_granted = initial_render? && !prefetch_request? && document.try_claim_seed
+    seed_granted = initial_render? && !prefetch_request? && !link_preview_request && document.try_claim_seed
 
     render inertia: "documents/show", props: {
       # UI prefs ride server-readable cookies so SSR renders panel/focus/mode at
@@ -396,6 +398,11 @@ class DocumentsController < InertiaController
   # "1"/"0" flags and a "edit|suggest|comment|read" mode string; anything else
   # falls back to the default.
   UI_MODES = %w[edit suggest comment read].freeze
+  LINK_PREVIEW_USER_AGENTS = /(?:
+    facebookexternalhit|facebot|twitterbot|linkedinbot|slackbot-linkexpanding|
+    discordbot|whatsapp|telegrambot|googlebot|bingbot|pinterestbot|embedly|
+    iframely|opengraph
+  )/ix
 
   def ui_prefs
     {
@@ -403,6 +410,24 @@ class DocumentsController < InertiaController
       focus_mode: cookies[:pruf_focus] == "1",
       mode: UI_MODES.include?(cookies[:pruf_mode]) ? cookies[:pruf_mode] : "edit"
     }
+  end
+
+  def document_open_graph(document)
+    preview = DocumentSocialPreview.new(document)
+    {
+      title: preview.title,
+      description: preview.description,
+      url: document_page_url(document.slug),
+      image_url: document_og_image_url(
+        document.slug,
+        v: DocumentOgImage.url_version(document)
+      ),
+      image_alt: "Document preview: #{preview.title}"
+    }
+  end
+
+  def link_preview_user_agent?
+    request.user_agent.to_s.match?(LINK_PREVIEW_USER_AGENTS)
   end
 
   # Browsers identify as Mozilla/...; curl, wget, httpx, ruby, etc. don't.

@@ -7,7 +7,7 @@ class DocumentPlainText
 
   class << self
     def call(format:, content:)
-      source = content.to_s
+      source = content.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "�")
       html = if format == "html"
         source
       else

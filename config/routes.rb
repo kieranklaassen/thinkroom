@@ -15,6 +15,7 @@ Rails.application.routes.draw do
   match "/auth/:provider/callback", to: "oauth_callbacks#create", via: %i[get post]
   get "/auth/failure", to: "oauth_callbacks#failure"
 
+  get "d/:slug/og.png", to: "document_og_images#show", as: :document_og_image
   get "d/:slug", to: "documents#show", as: :document_page
   post "d/:slug/claim", to: "documents#claim", as: :claim_document
   patch "d/:slug/tags", to: "documents#update_tags", as: :document_tags

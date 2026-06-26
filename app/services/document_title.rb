@@ -3,11 +3,12 @@ class DocumentTitle
 
   class << self
     def call(format:, content:)
+      source = content.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "�")
       html = if format == "html"
-        content.to_s
+        source
       else
         Commonmarker.to_html(
-          content.to_s,
+          source,
           plugins: { table: true, strikethrough: true, tasklist: true }
         )
       end
