@@ -51,15 +51,32 @@ https://thinkroom.kieranklaassen.com/auth/google_oauth2/callback
 https://pruf.kieranklaassen.com/auth/google_oauth2/callback
 ```
 
-Both local files are ignored by Git. Never commit registry tokens, the Rails
-master key, SSH private keys, or production `.env` files.
+These local deployment files are ignored by Git. Never commit registry tokens,
+the Rails master key, SSH private keys, or production `.env` files.
 
 ## Deploy
 
-Load the non-secret deployment identifiers into the shell, validate the
-rendered configuration, and deploy:
+Run Kamal with the project Ruby from `.ruby-version`. macOS's system Ruby and
+Bundler cannot parse this application's Gemfile platforms and will fail before
+the deploy starts.
+
+An isolated Git worktree does not inherit ignored files from the primary
+checkout. Before deploying from a worktree, copy `.kamal/deploy.env`,
+`.kamal/secrets`, and `config/master.key` into it, then verify that all three are
+non-empty without printing their contents:
 
 ```bash
+test -s .kamal/deploy.env
+test -s .kamal/secrets
+test -s config/master.key
+```
+
+Load the non-secret deployment identifiers, validate the rendered
+configuration, and deploy:
+
+```bash
+export PATH="$HOME/.rbenv/versions/$(cat .ruby-version)/bin:$PATH"
+
 set -a
 source .kamal/deploy.env
 set +a
