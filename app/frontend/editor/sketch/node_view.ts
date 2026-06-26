@@ -262,11 +262,13 @@ const buildSketchView = (
     downloadButton.textContent = 'Preparing…'
     void downloadSketchSvg(currentData.scene, currentData.description || 'sketch')
       .then(() => {
+        if (destroyed) return
         downloadButton.textContent = 'Downloaded'
         downloadButton.setAttribute('aria-label', 'Sketch downloaded as SVG')
         downloadResetTimer = setTimeout(resetDownloadButton, 1600)
       })
       .catch((error) => {
+        if (destroyed) return
         console.warn('thinkroom: sketch export failed', error)
         downloadButton.disabled = false
         downloadButton.textContent = 'Retry'

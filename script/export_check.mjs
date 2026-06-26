@@ -82,10 +82,25 @@ await context.addCookies([
   },
 ])
 const page = await context.newPage()
+const failObjectUrlCreation = () =>
+  page.evaluate(() => {
+    window.__originalCreateObjectURL = URL.createObjectURL
+    URL.createObjectURL = () => { throw new Error('Forced object URL failure') }
+  })
+const restoreObjectUrlCreation = () =>
+  page.evaluate(() => {
+    URL.createObjectURL = window.__originalCreateObjectURL
+    delete window.__originalCreateObjectURL
+  })
 const errors = []
-page.on('pageerror', (error) => errors.push(error.stack ?? String(error)))
+const expectedBrowserNoise = (message) =>
+  message.includes('ResizeObserver loop completed with undelivered notifications')
+page.on('pageerror', (error) => {
+  const message = error.stack ?? String(error)
+  if (!expectedBrowserNoise(message)) errors.push(message)
+})
 page.on('console', (message) => {
-  if (message.type() === 'error') errors.push(message.text())
+  if (message.type() === 'error' && !expectedBrowserNoise(message.text())) errors.push(message.text())
 })
 
 try {
@@ -135,6 +150,19 @@ try {
   assert(/^<!doctype html>/i.test(html) && html.includes('Before export.'), 'HTML is a standalone current document')
   assert(html.includes('<svg') && !html.includes('data-scene='), 'HTML embeds sketch SVG without raw scene metadata')
 
+  await failObjectUrlCreation()
+  await exportSection.getByRole('button', { name: 'Markdown' }).click()
+  await exportSection.locator('.share-export-status.is-error').waitFor()
+  assert(
+    await exportSection.getByRole('button', { name: 'Markdown' }).isEnabled(),
+    'document export failure stays visible and retryable',
+  )
+  await restoreObjectUrlCreation()
+  const retryMarkdownEvent = page.waitForEvent('download')
+  await exportSection.getByRole('button', { name: 'Markdown' }).click()
+  await retryMarkdownEvent
+  assert((await exportSection.locator('.share-export-status.is-error').count()) === 0, 'document export retry clears the error')
+
   await page.evaluate(() => {
     window.__exportPrintCalled = false
     window.print = () => { window.__exportPrintCalled = true }
@@ -147,8 +175,14 @@ try {
   await sketchFigure.hover()
   const sketchButton = sketchFigure.getByRole('button', { name: 'Download sketch as SVG' })
   await sketchButton.waitFor()
-  const sketchEvent = page.waitForEvent('download')
+  await failObjectUrlCreation()
   await sketchButton.click()
+  const retrySketchButton = sketchFigure.getByRole('button', { name: 'Sketch export failed. Retry download' })
+  await retrySketchButton.waitFor()
+  assert(await retrySketchButton.isEnabled(), 'sketch export failure exposes an enabled Retry action')
+  await restoreObjectUrlCreation()
+  const sketchEvent = page.waitForEvent('download')
+  await retrySketchButton.click()
   const sketchDownload = await sketchEvent
   const svg = await downloadText(sketchDownload)
   assert(sketchDownload.suggestedFilename() === 'Export-flow.svg', 'sketch uses its title as the SVG filename')
