@@ -17,6 +17,7 @@ Rails.application.routes.draw do
 
   get "d/:slug", to: "documents#show", as: :document_page
   post "d/:slug/claim", to: "documents#claim", as: :claim_document
+  patch "d/:slug/tags", to: "documents#update_tags", as: :document_tags
   patch "d/:slug/editing_lock", to: "documents#update_editing_lock", as: :document_editing_lock
   delete "d/:slug", to: "documents#destroy", as: :destroy_document
   post "d/:slug/snapshot", to: "documents#snapshot", as: :document_snapshot

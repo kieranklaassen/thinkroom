@@ -40,6 +40,14 @@ try {
     fail('landing page does not use the approved Thinkroom tagline')
   }
   await landing.locator('.landing-byline', { hasText: 'creator of Compound Engineering' }).waitFor()
+  await landing.getByRole('heading', { name: 'Your documents' }).waitFor()
+  await landing.getByRole('heading', { name: 'Recently opened' }).waitFor()
+  if ((await landing.locator('.format-label').count()) === 0) {
+    ok('landing page organizes documents without format labels')
+  } else {
+    fail('landing page still exposes document format labels')
+  }
+
   await landing.close()
 
   const a = await makePage('a')

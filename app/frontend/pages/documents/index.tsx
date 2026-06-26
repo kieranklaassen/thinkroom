@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Head, Link, useForm } from '@inertiajs/react'
 import { FeedbackButton } from '../../components/feedback_button'
 import { AccountControl } from '../../components/account_control'
@@ -8,32 +8,39 @@ import { useIsClient } from '../../lib/use_is_client'
 import type { OwnershipPayload } from '../../components/ownership_chip'
 import type { ViewerPayload } from '../../types/viewer'
 
-interface DocLink {
+type AgeGroup = 'this_week' | 'earlier'
+
+type DocLink = {
   title: string
   slug: string
-  content_format: 'markdown' | 'html'
+  tags: string[]
+  created_at: string
+  created_label: string
+  age_group: AgeGroup
 }
 
-interface RecentDoc extends DocLink, OwnershipPayload {}
+type RecentDoc = DocLink & OwnershipPayload
 
-interface Props {
+type Props = {
   yours: DocLink[]
   recent: RecentDoc[]
   viewer: ViewerPayload
 }
 
+const EARLIER_PREVIEW_LIMIT = 8
 const GITHUB_REPOSITORY_URL = 'https://github.com/kieranklaassen/thinkroom'
 const GITHUB_PROFILE_URL = 'https://github.com/kieranklaassen'
 
-/**
- * Inline claim icon for a claimable Recent row. On win the scoped reload
- * moves the row to "Your docs"; on a lost race the row re-renders with the
- * winner's name — no error modal (the hook swallows the Inertia error).
- */
+const errorText = (error: unknown): string | null => {
+  if (Array.isArray(error)) return error.find((value) => typeof value === 'string') ?? null
+  return typeof error === 'string' ? error : null
+}
+
 function RecentClaimButton({ slug, claimerName }: { slug: string; claimerName: string }) {
   const { claim, claiming, claimFailed } = useClaim(slug, claimerName, {
     only: ['yours', 'recent'],
   })
+
   return (
     <button
       className="recent-claim"
@@ -55,27 +62,169 @@ function RecentClaimButton({ slug, claimerName }: { slug: string; claimerName: s
   )
 }
 
+function TagEditor({ document, onClose }: { document: DocLink; onClose: () => void }) {
+  const form = useForm(`DocumentTags:${document.slug}`, {
+    tags: document.tags.join(', '),
+  })
+  const tagError = errorText(form.errors.tags)
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    form.transform((data) => ({
+      tags: data.tags.split(',').map((tag) => tag.trim()),
+    }))
+    form.patch(`/d/${document.slug}/tags`, {
+      preserveScroll: true,
+      only: ['yours', 'recent'],
+      onSuccess: onClose,
+    })
+  }
+
+  return (
+    <form className="document-tag-editor" onSubmit={submit}>
+      <label htmlFor={`tags-${document.slug}`}>Tags</label>
+      <div className="document-tag-editor-controls">
+        <input
+          id={`tags-${document.slug}`}
+          value={form.data.tags}
+          onChange={(event) => form.setData('tags', event.target.value)}
+          placeholder="Research, planning"
+          autoFocus
+          aria-describedby={`tags-help-${document.slug}`}
+          aria-invalid={Boolean(tagError)}
+        />
+        <button className="document-tag-save" type="submit" disabled={form.processing}>
+          {form.processing ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          className="document-tag-cancel"
+          type="button"
+          onClick={() => {
+            form.clearErrors()
+            onClose()
+          }}
+        >
+          Cancel
+        </button>
+      </div>
+      <p id={`tags-help-${document.slug}`} className="document-tag-help">
+        Up to 8 tags, 32 characters each. Separate with commas.
+      </p>
+      {tagError && (
+        <p className="document-tag-error" role="alert">
+          {tagError}
+        </p>
+      )}
+    </form>
+  )
+}
+
+function DocumentTags({ tags }: { tags: string[] }) {
+  if (tags.length === 0) return null
+
+  return (
+    <div className="document-tags" aria-label="Tags">
+      {tags.map((tag) => (
+        <span className="document-tag" key={tag.toLowerCase()}>
+          {tag}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function DocumentRow({
+  document,
+  editable = false,
+  claimerName,
+}: {
+  document: DocLink | RecentDoc
+  editable?: boolean
+  claimerName?: string
+}) {
+  const [editingTags, setEditingTags] = useState(false)
+  const recentDocument = 'claimable' in document ? document : null
+
+  return (
+    <li className="document-row">
+      <div className="document-row-summary">
+        <div className="document-row-copy">
+          <Link className="document-row-title" href={`/d/${document.slug}`} prefetch>
+            {document.title}
+          </Link>
+          <time className="document-row-date" dateTime={document.created_at}>
+            Created {document.created_label}
+          </time>
+        </div>
+        <div className="document-row-actions">
+          {editable && (
+            <button
+              className="document-tag-edit"
+              type="button"
+              aria-expanded={editingTags}
+              onClick={() => setEditingTags((open) => !open)}
+            >
+              {document.tags.length > 0 ? 'Edit tags' : '+ Add tag'}
+            </button>
+          )}
+          {recentDocument?.claimable && claimerName && (
+            <RecentClaimButton slug={document.slug} claimerName={claimerName} />
+          )}
+          {recentDocument?.claimed && !recentDocument.yours && recentDocument.owner_name && (
+            <span className="recent-owner">Owned by {recentDocument.owner_name}</span>
+          )}
+        </div>
+      </div>
+      <DocumentTags tags={document.tags} />
+      {editingTags && <TagEditor document={document} onClose={() => setEditingTags(false)} />}
+    </li>
+  )
+}
+
+function DocumentGroup({
+  title,
+  documents,
+  editable,
+  claimerName,
+}: {
+  title: string
+  documents: Array<DocLink | RecentDoc>
+  editable?: boolean
+  claimerName?: string
+}) {
+  if (documents.length === 0) return null
+  const headingId = `document-group-${title.toLowerCase().replace(/\s+/g, '-')}`
+
+  return (
+    <section className="document-group" aria-labelledby={headingId}>
+      <div className="document-group-heading">
+        <h3 id={headingId}>{title}</h3>
+        <span>{documents.length}</span>
+      </div>
+      <ul className="document-list">
+        {documents.map((document) => (
+          <DocumentRow
+            key={document.slug}
+            document={document}
+            editable={editable}
+            claimerName={claimerName}
+          />
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 export default function DocumentsIndex({ yours, recent, viewer }: Props) {
-  // Lazy initializer: the chosen session name wins; guests post their
-  // random localStorage name as the fallback (the server prefers the
-  // session name on create anyway). Staying on useForm keeps the
-  // `processing` double-submit guard.
+  const [identityName] = useState(() => userIdentity(viewer.name).name)
   const { post, processing } = useForm(() => ({
-    name: userIdentity(viewer.name).name,
+    name: identityName,
   }))
   const [copied, setCopied] = useState(false)
-  // RiffrecRecorder (the Feedback button) is not SSR-isomorphic — its Node
-  // passthrough renders different markup than the browser build, so rendering
-  // it on the server would mismatch on hydration. Gate it as a client-only
-  // island: the corner shows AccountControl (SSR-safe) on first paint and the
-  // Feedback button mounts one frame later, after hydration. On the doc page
-  // FeedbackButton lives inside a closed HeaderMenu, so it never renders on
-  // first paint there — this gate is only needed where it renders eagerly.
+  const [selectedTag, setSelectedTag] = useState<string | null>(null)
+  const [showAllEarlier, setShowAllEarlier] = useState(false)
   const isClient = useIsClient()
 
-  // SSR-safe: the server and the client's first render both use an empty
-  // origin so the rendered agent instruction matches (no hydration mismatch);
-  // the real origin is filled in a post-hydration effect, one frame later.
   const [origin, setOrigin] = useState('')
   useEffect(() => {
     setOrigin(window.location.origin)
@@ -94,8 +243,26 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
     })
   }, [agentInstruction])
 
-  const formatLabel = (format: DocLink['content_format']) =>
-    format === 'html' ? 'HTML' : 'Markdown'
+  const availableTags = yours.reduce<string[]>((tags, document) => {
+    document.tags.forEach((tag) => {
+      if (!tags.some((existingTag) => existingTag.toLowerCase() === tag.toLowerCase())) {
+        tags.push(tag)
+      }
+    })
+    return tags
+  }, [])
+  const activeTag = availableTags.includes(selectedTag ?? '') ? selectedTag : null
+  const visibleDocuments = activeTag
+    ? yours.filter((document) =>
+        document.tags.some((tag) => tag.toLowerCase() === activeTag.toLowerCase()),
+      )
+    : yours
+  const thisWeek = visibleDocuments.filter((document) => document.age_group === 'this_week')
+  const earlier = visibleDocuments.filter((document) => document.age_group === 'earlier')
+  const visibleEarlier =
+    showAllEarlier || activeTag ? earlier : earlier.slice(0, EARLIER_PREVIEW_LIMIT)
+  const hiddenEarlierCount = earlier.length - visibleEarlier.length
+  const claimerName = identityName
 
   return (
     <>
@@ -106,71 +273,101 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
           {isClient && <FeedbackButton />}
         </div>
         <main className="landing-main">
-          <h1 className="landing-wordmark">
-            <Link href="/" className="landing-wordmark-link">
-              Thinkroom
-            </Link>
-          </h1>
-          <p className="landing-tagline">Where deeper thinking compounds.</p>
-          <p className="landing-byline">From the creator of Compound Engineering.</p>
-          <div className="landing-actions">
-            <button
-              className="btn btn-primary"
-              type="button"
-              disabled={processing}
-              onClick={() => post('/documents')}
-            >
-              {processing ? 'Creating…' : 'New document'}
-            </button>
-            {recent.some((d) => d.slug === 'demo') && (
-              <Link href="/d/demo" className="btn btn-ghost" prefetch>
-                Open the demo
+          <header className="landing-hero">
+            <h1 className="landing-wordmark">
+              <Link href="/" className="landing-wordmark-link">
+                Thinkroom
               </Link>
-            )}
-          </div>
-          {yours.length > 0 && (
-            <section className="landing-recent">
-              <h2 className="landing-recent-heading">Your docs</h2>
-              <ul>
-                {yours.map((doc) => (
-                  <li key={doc.slug} className="recent-row">
-                    <Link href={`/d/${doc.slug}`} prefetch>
-                      {doc.title}
-                    </Link>
-                    <span className="format-label">{formatLabel(doc.content_format)}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-          <section className="landing-recent">
-            <h2 className="landing-recent-heading">Recent</h2>
-            {recent.length > 0 ? (
-              <ul>
-                {recent.map((doc) => (
-                  <li key={doc.slug} className="recent-row">
-                    <Link href={`/d/${doc.slug}`} prefetch>
-                      {doc.title}
-                    </Link>
-                    <span className="format-label">{formatLabel(doc.content_format)}</span>
-                    {doc.claimable && (
-                      <RecentClaimButton
-                        slug={doc.slug}
-                        claimerName={userIdentity(viewer.name).name}
-                      />
-                    )}
-                    {doc.claimed && !doc.yours && doc.owner_name && (
-                      <span className="recent-owner">Owned by {doc.owner_name}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
+            </h1>
+            <p className="landing-tagline">Where deeper thinking compounds.</p>
+            <p className="landing-byline">From the creator of Compound Engineering.</p>
+            <div className="landing-actions">
+              <button
+                className="btn btn-primary"
+                type="button"
+                disabled={processing}
+                onClick={() => post('/documents')}
+              >
+                {processing ? 'Creating…' : 'New document'}
+              </button>
+              {recent.some((document) => document.slug === 'demo') && (
+                <Link href="/d/demo" className="btn btn-ghost" prefetch>
+                  Open the demo
+                </Link>
+              )}
+            </div>
+          </header>
+
+          <section className="document-library" aria-labelledby="your-documents-heading">
+            <div className="document-library-heading">
+              <div>
+                <h2 id="your-documents-heading">Your documents</h2>
+                <p>{yours.length === 1 ? '1 document' : `${yours.length} documents`}</p>
+              </div>
+              {availableTags.length > 0 && (
+                <div className="document-tag-filters" aria-label="Filter documents by tag">
+                  <button
+                    className={activeTag === null ? 'is-active' : undefined}
+                    type="button"
+                    aria-pressed={activeTag === null}
+                    onClick={() => setSelectedTag(null)}
+                  >
+                    All
+                  </button>
+                  {availableTags.map((tag) => (
+                    <button
+                      className={activeTag === tag ? 'is-active' : undefined}
+                      type="button"
+                      key={tag.toLowerCase()}
+                      aria-pressed={activeTag === tag}
+                      onClick={() => setSelectedTag(tag)}
+                    >
+                      {tag}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {yours.length === 0 ? (
+              <p className="document-library-empty">
+                Create a document and it will stay close at hand here.
+              </p>
+            ) : visibleDocuments.length === 0 ? (
+              <p className="document-library-empty">No documents use this tag yet.</p>
             ) : (
-              <p className="landing-recent-empty">
+              <div className="document-groups">
+                <DocumentGroup title="This week" documents={thisWeek} editable />
+                <DocumentGroup title="Earlier" documents={visibleEarlier} editable />
+                {hiddenEarlierCount > 0 && (
+                  <button
+                    className="document-reveal"
+                    type="button"
+                    onClick={() => setShowAllEarlier(true)}
+                  >
+                    Show {hiddenEarlierCount} more
+                  </button>
+                )}
+              </div>
+            )}
+          </section>
+
+          <section className="document-library document-library--recent" aria-labelledby="recent-documents-heading">
+            <div className="document-library-heading">
+              <div>
+                <h2 id="recent-documents-heading">Recently opened</h2>
+                <p>Documents from this browser</p>
+              </div>
+            </div>
+            {recent.length > 0 ? (
+              <DocumentGroup title="Recent" documents={recent} claimerName={claimerName} />
+            ) : (
+              <p className="document-library-empty">
                 Documents you open in this browser show up here.
               </p>
             )}
           </section>
+
           <section className="landing-agent">
             <h2 className="landing-recent-heading">Have an agent start a doc</h2>
             <p className="landing-agent-hint">

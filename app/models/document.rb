@@ -5,6 +5,8 @@ class Document < ApplicationRecord
   DEFAULT_HTML_SEED = "<h1>Untitled</h1><p>Start writing — everything you type is attributed to you.</p>"
   CONTENT_FORMATS = %w[markdown html].freeze
   MAX_CONTENT_BYTES = 2.megabytes
+  MAX_TAGS = 8
+  MAX_TAG_LENGTH = 32
 
   # A stale seed claim (seeder crashed or never connected before its first
   # update persisted) is reclaimable after this window.
@@ -33,6 +35,7 @@ class Document < ApplicationRecord
   belongs_to :user, optional: true
 
   before_validation :ensure_slug, on: :create
+  before_validation :normalize_tags
 
   validates :title, presence: true
   validates :slug, presence: true, uniqueness: true
@@ -49,6 +52,7 @@ class Document < ApplicationRecord
   # value written by a future code path would silently claim text as AI —
   # constrain the vocabulary at the model.
   validates :seed_author_kind, inclusion: { in: %w[human agent] }, allow_nil: true
+  validate :tags_are_bounded
 
   def to_param = slug
 
@@ -290,6 +294,27 @@ class Document < ApplicationRecord
   end
 
   private
+
+  def normalize_tags
+    seen = Set.new
+    self.tags = Array(tags).filter_map do |tag|
+      normalized = tag.to_s.squish
+      next if normalized.blank?
+
+      key = normalized.downcase
+      next if seen.include?(key)
+
+      seen << key
+      normalized
+    end
+  end
+
+  def tags_are_bounded
+    errors.add(:tags, "can include at most #{MAX_TAGS} tags") if tags.length > MAX_TAGS
+    return unless tags.any? { |tag| tag.length > MAX_TAG_LENGTH }
+
+    errors.add(:tags, "must be #{MAX_TAG_LENGTH} characters or fewer")
+  end
 
   def content_format_is_immutable
     errors.add(:content_format, "cannot be changed") if will_save_change_to_content_format?

@@ -13,6 +13,8 @@ class DocumentsController < InertiaController
   inertia_config ssr_enabled: -> { %w[show index].include?(action_name) }
 
   def index
+    now = Time.current
+    week_start = now.beginning_of_week
     # Signed-in ownership follows the account across browsers. Guests retain
     # the original permanent-cookie ownership model.
     yours = if current_user
@@ -28,13 +30,15 @@ class DocumentsController < InertiaController
     slugs = Array(session[:recent_slugs])
     docs = Document.where(slug: slugs).index_by(&:slug)
     render inertia: "documents/index", props: {
-      yours: yours.map { |d| d.slice(:title, :slug, :content_format) },
+      yours: yours.map do |document|
+        index_document_props(document, week_start:, current_year: now.year)
+      end,
       # Recent rows carry ownership state so claimable docs can offer an
       # inline claim affordance. Render-time staleness is fine: the claim
       # POST is race-tolerant and the scoped reload reconciles the lists.
       recent: slugs.filter_map { |slug| docs[slug] unless your_slugs.include?(slug) }
                    .map do |d|
-                     d.slice(:title, :slug, :content_format)
+                     index_document_props(d, week_start:, current_year: now.year)
                        .merge(d.ownership_props(owner_token, viewer_user: current_user))
                    end
     }
@@ -152,6 +156,29 @@ class DocumentsController < InertiaController
   rescue ActiveRecord::RecordNotFound
     # The doc was deleted while the claim was in flight — go home cleanly
     # instead of popping a 404 modal over a dead editor.
+    redirect_to root_path, status: :see_other
+  end
+
+  def update_tags
+    document = Document.find_by!(slug: params[:slug])
+    unless document.owned_by?(owner_token, user: current_user)
+      return redirect_back fallback_location: root_path, status: :see_other,
+                           inertia: { errors: { tags: "Only the owner can organize this document" } }
+    end
+
+    tags = params[:tags]
+    unless tags.is_a?(Array)
+      return redirect_back fallback_location: root_path, status: :see_other,
+                           inertia: { errors: { tags: "Tags must be a list" } }
+    end
+
+    if document.update(tags:)
+      redirect_back fallback_location: root_path, status: :see_other
+    else
+      redirect_back fallback_location: root_path, status: :see_other,
+                    inertia: { errors: { tags: document.errors[:tags].to_sentence } }
+    end
+  rescue ActiveRecord::RecordNotFound
     redirect_to root_path, status: :see_other
   end
 
@@ -318,6 +345,23 @@ class DocumentsController < InertiaController
 
   def broadcast_title(document)
     DocumentMetaChannel.broadcast_event(document, :title, title: document.title)
+  end
+
+  def index_document_props(document, week_start:, current_year:)
+    created_at = document.created_at.in_time_zone
+    created_label = if created_at.year == current_year
+      created_at.strftime("%b %-d")
+    else
+      created_at.strftime("%b %-d, %Y")
+    end
+    {
+      title: document.title,
+      slug: document.slug,
+      tags: document.tags,
+      created_at: created_at.iso8601,
+      created_label:,
+      age_group: created_at >= week_start ? "this_week" : "earlier"
+    }
   end
 
   def sanitize_snapshot_spans(raw_spans)

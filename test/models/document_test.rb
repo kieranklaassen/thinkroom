@@ -55,6 +55,38 @@ class DocumentTest < ActiveSupport::TestCase
     assert doc.errors[:content_format].present?
   end
 
+  test "tags default to an empty list" do
+    assert_equal [], Document.create!(title: "Untagged").tags
+  end
+
+  test "tags normalize whitespace and deduplicate without losing display case" do
+    doc = Document.create!(
+      title: "Tagged",
+      tags: [ "  Product   Strategy ", "product strategy", "", "Research" ]
+    )
+
+    assert_equal [ "Product Strategy", "Research" ], doc.tags
+  end
+
+  test "tags enforce count and length limits" do
+    valid = Document.new(
+      title: "At the boundary",
+      tags: Array.new(Document::MAX_TAGS) { |index| "#{index}-#{"x" * 30}" }
+    )
+    assert valid.valid?
+
+    too_many = Document.new(
+      title: "Too many",
+      tags: Array.new(Document::MAX_TAGS + 1) { |index| "tag-#{index}" }
+    )
+    assert_not too_many.valid?
+    assert_includes too_many.errors[:tags], "can include at most 8 tags"
+
+    too_long = Document.new(title: "Too long", tags: [ "x" * (Document::MAX_TAG_LENGTH + 1) ])
+    assert_not too_long.valid?
+    assert_includes too_long.errors[:tags], "must be 32 characters or fewer"
+  end
+
   test "format-neutral source accessors use existing columns" do
     doc = Document.new(seed_content: "<p>Seed</p>", content_snapshot: "<p>Snapshot</p>")
 
