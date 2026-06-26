@@ -9,7 +9,7 @@ class Activity < ApplicationRecord
   # Log and announce in one step — every activity is broadcast live.
   def self.log!(document:, actor_name:, actor_kind:, action:, detail: nil)
     activity = create!(document:, actor_name:, actor_kind:, action:, detail:)
-    DocumentMetaChannel.broadcast_event(document, :activities)
+    DocumentMetaChannel.broadcast_event_after_commit(document, :activities)
     activity
   end
 

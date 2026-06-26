@@ -117,6 +117,11 @@ interface EditorProps {
    *  mode-independent (a restored read-only mode must never burn the seed
    *  claim). Defaults to editable. */
   editable?: boolean
+  /** Server-authorized capability. Unlike `editable`, this gates every
+   * outgoing CRDT frame and durable snapshot while preserving inbound sync. */
+  canWrite?: boolean
+  /** Coarse server-known identity used to refresh Action Cable after auth changes. */
+  connectionIdentity?: string
   /** Suggest mode: typing is intercepted into tracked insertion/deletion
    *  marks. Synced into the suggest-changes plugin state only after the
    *  editor has started — seeding and initial sync always run with
@@ -212,6 +217,8 @@ interface CollabSession {
   provider: CableProvider
   refs: number
   destroyTimer: ReturnType<typeof setTimeout> | null
+  canWrite: boolean
+  connectionIdentity: string
 }
 
 // Sessions survive React StrictMode's mount→unmount→mount cycle. Without
@@ -223,9 +230,18 @@ const sessions = new Map<string, CollabSession>()
 function acquireSession(
   slug: string,
   identity: UserIdentity,
+  canWrite: boolean,
+  connectionIdentity: string,
   initialStateB64?: string | null,
 ): CollabSession {
   let session = sessions.get(slug)
+  if (session && (session.canWrite !== canWrite || session.connectionIdentity !== connectionIdentity)) {
+    if (session.destroyTimer) clearTimeout(session.destroyTimer)
+    session.provider.destroy()
+    session.ydoc.destroy()
+    sessions.delete(slug)
+    session = undefined
+  }
   if (!session) {
     const ydoc = new Y.Doc()
     // Hydrate from the server-rendered state the moment the doc exists, so
@@ -245,9 +261,9 @@ function acquireSession(
         // corrupt/stale prop — fall back to the wait-for-synced path
       }
     }
-    const provider = new CableProvider(ydoc, slug)
+    const provider = new CableProvider(ydoc, slug, { canWrite, connectionIdentity })
     provider.awareness.setLocalStateField('user', identity)
-    session = { ydoc, provider, refs: 0, destroyTimer: null }
+    session = { ydoc, provider, refs: 0, destroyTimer: null, canWrite, connectionIdentity }
     sessions.set(slug, session)
   }
   if (session.destroyTimer) {
@@ -335,6 +351,8 @@ function CollabEditor({
   seedGranted,
   seedAuthorKind,
   seedAuthorName,
+  canWrite = true,
+  connectionIdentity = 'guest',
   editable = true,
   suggesting = false,
   taskInteractive = editable,
@@ -358,6 +376,8 @@ function CollabEditor({
   suggestingRef.current = suggesting
   const taskInteractiveRef = useRef(taskInteractive)
   taskInteractiveRef.current = taskInteractive
+  const canWriteRef = useRef(canWrite)
+  canWriteRef.current = canWrite
   // Suggesting only syncs into plugin state after start() — the gate that
   // keeps seed/initial-sync transactions out of the dispatch transform.
   const startedRef = useRef(false)
@@ -462,13 +482,20 @@ function CollabEditor({
     const editor = get()
     if (!editor) return
 
-    const { ydoc, provider } = acquireSession(slug, identity, initialStateB64)
+    const { ydoc, provider } = acquireSession(
+      slug,
+      identity,
+      canWriteRef.current,
+      connectionIdentity,
+      initialStateB64,
+    )
     callbacksRef.current.onStatus?.('connecting')
 
     let snapshotTimer: ReturnType<typeof setTimeout> | null = null
     let snapshotRetryTimer: ReturnType<typeof setTimeout> | null = null
     let cancelled = false
     const pushSnapshot = (attempt = 0) => {
+      if (!canWriteRef.current) return
       editor.action((ctx) => {
         void postJSON(`/d/${slug}/snapshot`, buildSnapshotPayload(ctx, ydoc, contentFormat))
           .then((response) => {
@@ -602,7 +629,7 @@ function CollabEditor({
       releaseSession(slug)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, slug, contentFormat])
+  }, [loading, slug, contentFormat, canWrite, connectionIdentity])
 
   // ProseMirror caches editable at each state update; an empty transaction
   // makes it re-read the prop when the mode flips. Safe pre-bind: the action

@@ -141,6 +141,61 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert doc.reload.yjs_state.present?
   end
 
+  test "locked non-owner updates are rejected without persistence or relay" do
+    doc = Document.create!(
+      title: "Locked",
+      owner_token: "owner-token",
+      owner_name: "Owner",
+      editing_locked: true
+    )
+    subscribe slug: doc.slug
+    update = build_update_b64("forbidden")
+
+    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+      perform :receive, { "type" => "update", "update" => update, "cid" => "reader" }
+    end
+
+    assert_nil doc.reload.yjs_state
+    assert_equal "write-denied", transmissions.last["type"]
+  end
+
+  test "locked guest owner updates still persist and relay" do
+    doc = Document.create!(
+      title: "Locked",
+      owner_token: "owner-token",
+      owner_name: "Owner",
+      editing_locked: true
+    )
+    stub_connection(owner_token: "owner-token", current_user: nil)
+    subscribe slug: doc.slug
+    update = build_update_b64("owner edit")
+
+    assert_broadcast_on(
+      SyncChannel.broadcasting_for(doc),
+      type: "update", update:, cid: "owner"
+    ) do
+      perform :receive, { "type" => "update", "update" => update, "cid" => "owner" }
+    end
+    assert doc.reload.yjs_state.present?
+  end
+
+  test "locked readers still relay awareness" do
+    doc = Document.create!(
+      title: "Locked",
+      owner_token: "owner-token",
+      owner_name: "Owner",
+      editing_locked: true
+    )
+    subscribe slug: doc.slug
+
+    assert_broadcast_on(
+      SyncChannel.broadcasting_for(doc),
+      type: "awareness", update: "AAAA", cid: "reader"
+    ) do
+      perform :receive, { "type" => "awareness", "update" => "AAAA", "cid" => "reader" }
+    end
+  end
+
   test "malformed update frames are dropped without raising or relaying" do
     doc = Document.create!(title: "Poison")
     subscribe slug: doc.slug

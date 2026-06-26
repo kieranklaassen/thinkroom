@@ -13,7 +13,8 @@ class DocumentTest < ActiveSupport::TestCase
     assert document.owned_by?("stale-token", user:)
     assert_not document.owned_by?("stale-token")
     assert_equal(
-      { claimed: true, claimable: false, owner_name: "Kieran", yours: true },
+      { claimed: true, claimable: false, owner_name: "Kieran", yours: true,
+        editing_locked: false, can_write: true },
       document.ownership_props("stale-token", viewer_user: user)
     )
   end
@@ -279,6 +280,46 @@ class DocumentTest < ActiveSupport::TestCase
     assert_not doc.owned_by?("tok-b")
   end
 
+  test "editing lock allows only the owner to write" do
+    doc = Document.create!(title: "Mine", owner_token: "tok-a", owner_name: "Owner")
+    assert doc.writable_by?(nil)
+
+    doc.set_editing_locked!(locked: true, token: "tok-a")
+
+    assert doc.writable_by?("tok-a")
+    assert_not doc.writable_by?("tok-b")
+    assert_not doc.writable_by?(nil)
+    assert_raises(Document::EditingLockedError) do
+      doc.with_write_access(token: "tok-b") { flunk "write block must not run" }
+    end
+  end
+
+  test "only the owner can change the editing lock" do
+    doc = Document.create!(title: "Mine", owner_token: "tok-a", owner_name: "Owner")
+
+    assert_raises(Document::NotOwnerError) do
+      doc.set_editing_locked!(locked: true, token: "tok-b")
+    end
+    assert_not doc.reload.editing_locked?
+  end
+
+  test "editing lock changes log and broadcast once" do
+    doc = Document.create!(title: "Mine", owner_token: "tok-a", owner_name: "Owner")
+
+    assert_difference -> { doc.activities.count }, 1 do
+      assert_broadcasts(DocumentMetaChannel.broadcasting_for(doc), 2) do
+        doc.set_editing_locked!(locked: true, token: "tok-a")
+      end
+    end
+    assert_equal "locked_editing", doc.activities.last.action
+
+    assert_no_difference -> { doc.activities.count } do
+      assert_no_broadcasts(DocumentMetaChannel.broadcasting_for(doc)) do
+        doc.set_editing_locked!(locked: true, token: "tok-a")
+      end
+    end
+  end
+
   test "owner_name longer than 255 chars is rejected by validation" do
     doc = Document.new(title: "Long", owner_name: "x" * 256)
     assert_not doc.valid?
@@ -330,11 +371,26 @@ class DocumentTest < ActiveSupport::TestCase
   test "ownership_props shapes the client payload without leaking the token" do
     doc = Document.create!(title: "Free")
     props = doc.ownership_props(nil)
-    assert_equal({ claimed: false, claimable: true, owner_name: nil, yours: false }, props)
+    assert_equal(
+      { claimed: false, claimable: true, owner_name: nil, yours: false,
+        editing_locked: false, can_write: true },
+      props
+    )
 
     doc.claim!(token: "tok-a", name: "Owner")
-    assert_equal({ claimed: true, claimable: false, owner_name: "Owner", yours: true }, doc.ownership_props("tok-a"))
-    assert_equal({ claimed: true, claimable: false, owner_name: "Owner", yours: false }, doc.ownership_props("tok-b"))
+    assert_equal(
+      { claimed: true, claimable: false, owner_name: "Owner", yours: true,
+        editing_locked: false, can_write: true },
+      doc.ownership_props("tok-a")
+    )
+    assert_equal(
+      { claimed: true, claimable: false, owner_name: "Owner", yours: false,
+        editing_locked: false, can_write: true },
+      doc.ownership_props("tok-b")
+    )
+    doc.set_editing_locked!(locked: true, token: "tok-a")
+    assert doc.ownership_props("tok-a")[:can_write]
+    assert_not doc.ownership_props("tok-b")[:can_write]
     assert_not doc.ownership_props("tok-a").value?("tok-a")
   end
 

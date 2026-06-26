@@ -1,4 +1,5 @@
 class DocumentsController < InertiaController
+  include DocumentWriteAuthorization
   rate_limit_document_creation
 
   # SSR is scoped to the read-only document surfaces — #show (shell, header,
@@ -154,6 +155,34 @@ class DocumentsController < InertiaController
     redirect_to root_path, status: :see_other
   end
 
+  LOCK_VALUES = {
+    true => true, false => false,
+    "true" => true, "false" => false,
+    "1" => true, "0" => false,
+    1 => true, 0 => false
+  }.freeze
+
+  def update_editing_lock
+    document = Document.find_by!(slug: params[:slug])
+    raw_locked = params[:locked]
+    unless LOCK_VALUES.key?(raw_locked)
+      return redirect_back fallback_location: document_page_path(document.slug), status: :see_other,
+                           inertia: { errors: { editing_lock: "Choose whether others can edit" } }
+    end
+
+    document.set_editing_locked!(
+      locked: LOCK_VALUES.fetch(raw_locked),
+      token: owner_token,
+      user: current_user
+    )
+    redirect_back fallback_location: document_page_path(document.slug), status: :see_other
+  rescue Document::NotOwnerError
+    redirect_back fallback_location: document_page_path(params[:slug]), status: :see_other,
+                  inertia: { errors: { editing_lock: "Only the owner can change editing access" } }
+  rescue ActiveRecord::RecordNotFound
+    redirect_to root_path, status: :see_other
+  end
+
   # Owners only. The broadcast goes out after a successful destroy — the
   # stream name derives from the record's retained id, so it still reaches
   # every subscriber, and clients are only evicted when the delete actually
@@ -188,6 +217,8 @@ class DocumentsController < InertiaController
 
   def snapshot
     document = Document.find_by!(slug: params[:slug])
+    @write_document = document
+    document.assert_write_access!(token: owner_token, user: current_user)
     if params.key?(:content) && params.key?(:markdown)
       return render json: { error: "Send content or legacy markdown, not both." },
                     status: :unprocessable_entity
@@ -217,7 +248,9 @@ class DocumentsController < InertiaController
       state_vector_b64: state_vector.presence,
       content:,
       spans:,
-      title:
+      title:,
+      token: owner_token,
+      user: current_user
     )
     return render json: { error: "Snapshot is stale; retry from current document state." },
                   status: :conflict unless persisted
@@ -233,11 +266,13 @@ class DocumentsController < InertiaController
   # makes the same CRDT update durable and relays it to any connected clients.
   def sync_update
     document = Document.find_by!(slug: params[:slug])
+    @write_document = document
+    document.assert_write_access!(token: owner_token, user: current_user)
     update = params[:update].to_s
     decoded = Base64.strict_decode64(update)
     return head :content_too_large if decoded.bytesize > MAX_SYNC_UPDATE_BYTES
 
-    YjsPersistence.merge(document, update)
+    YjsPersistence.merge(document, update, token: owner_token, user: current_user)
     SyncChannel.broadcast_to(document, {
       type: "update",
       update:,
@@ -263,7 +298,9 @@ class DocumentsController < InertiaController
         state_vector_b64: state_vector,
         content:,
         spans:,
-        title:
+        title:,
+        token: owner_token,
+        user: current_user
       )
       return render json: { error: "Snapshot is stale; retry from current document state." },
                     status: :conflict unless persisted

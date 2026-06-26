@@ -1854,6 +1854,7 @@ a:focus-visible {
 }
 
 .header-menu-item,
+.header-menu-status,
 .header-menu-popover .chrome-toggle,
 .header-menu-popover .feedback-button {
   display: flex;
@@ -1869,6 +1870,16 @@ a:focus-visible {
   color: var(--ink);
   text-align: left;
   cursor: pointer;
+}
+
+.header-menu-status {
+  cursor: default;
+  color: var(--ink-faint);
+}
+
+.header-menu-item:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .header-menu-item:hover,

@@ -13,6 +13,14 @@ module Api
       render json: { error: e.record.errors.full_messages.to_sentence }, status: :unprocessable_entity
     end
 
+    rescue_from Document::EditingLockedError do
+      render json: {
+        error: "This document is read-only. Only its owner can make changes.",
+        editing_locked: true,
+        next_action: "Wait for the browser owner to turn off Read only for others, then retry."
+      }, status: :locked
+    end
+
     private
 
     def render_write_rate_limit
@@ -38,6 +46,10 @@ module Api
                             "provenance marks when humans accept your text, and the activity feed.",
         example: participation_example
       }, status: :unprocessable_entity
+    end
+
+    def with_document_write_access(&block)
+      document.with_write_access(&block)
     end
 
     def participation_example

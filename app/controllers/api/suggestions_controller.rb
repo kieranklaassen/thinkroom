@@ -7,17 +7,20 @@ module Api
     # POST /api/docs/:slug/suggestions — propose an edit. It appears live in
     # every connected editor as a pending, agent-attributed suggestion.
     def create
-      touch_presence(location: params[:anchor_text].presence || params[:replaces].presence)
-      suggestion = Suggestion.propose!(
-        document:,
-        author_name: current_agent,
-        author_kind: "agent",
-        body: params.require(:body),
-        intent: params[:intent].presence,
-        anchor_text: params[:anchor_text].presence,
-        replaces: params[:replaces].presence
-      )
-      DocumentAsset.claim_from_html!(document:, source: suggestion.body) if document.html?
+      suggestion = with_document_write_access do
+        touch_presence(location: params[:anchor_text].presence || params[:replaces].presence)
+        proposed = Suggestion.propose!(
+          document:,
+          author_name: current_agent,
+          author_kind: "agent",
+          body: params.require(:body),
+          intent: params[:intent].presence,
+          anchor_text: params[:anchor_text].presence,
+          replaces: params[:replaces].presence
+        )
+        DocumentAsset.claim_from_html!(document:, source: proposed.body) if document.html?
+        proposed
+      end
 
       # A markdown suggestion can carry an excalidraw sketch fence; audit it so a
       # malformed sketch is reported here rather than discovered only when a

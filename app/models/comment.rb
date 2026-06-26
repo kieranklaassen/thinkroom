@@ -21,7 +21,7 @@ class Comment < ApplicationRecord
       action: "commented",
       detail: body.to_s.truncate(80)
     )
-    DocumentMetaChannel.broadcast_event(document, :comments)
+    DocumentMetaChannel.broadcast_event_after_commit(document, :comments)
     comment
   end
 
