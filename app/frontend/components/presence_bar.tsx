@@ -8,11 +8,17 @@ export interface AgentPresencePayload {
   last_seen_at: string
 }
 
+export interface HumanPresence extends UserIdentity {
+  clientId: number
+}
+
 interface Props {
-  humans: UserIdentity[]
+  humans: HumanPresence[]
   agents: AgentPresencePayload[]
   /** Mobile header: 24px avatars, max 3 visible. */
   compact?: boolean
+  followingClientId?: number | null
+  onFollow?: (clientId: number) => void
 }
 
 const MAX_VISIBLE = 5
@@ -27,11 +33,18 @@ const initials = (name: string): string =>
     .map((word) => word[0]!.toUpperCase())
     .join('')
 
-export function PresenceBar({ humans, agents, compact = false }: Props) {
+export function PresenceBar({
+  humans,
+  agents,
+  compact = false,
+  followingClientId = null,
+  onFollow,
+}: Props) {
   const total = humans.length + agents.length
 
   const visibleHumans = humans.slice(0, compact ? MAX_VISIBLE_COMPACT : MAX_VISIBLE)
   const overflow = humans.length - visibleHumans.length
+  const following = humans.find((human) => human.clientId === followingClientId)
 
   // Always render the container — even with 0 collaborators — so its reserved
   // lane (a min-width in render-blocking CSS, scoped to .presence-bar) holds
@@ -58,15 +71,19 @@ export function PresenceBar({ humans, agents, compact = false }: Props) {
         </span>
       ))}
       <span className="presence-stack">
-        {visibleHumans.map((human, index) => (
-          <span
-            key={`human-${index}`}
-            className="presence-avatar"
+        {visibleHumans.map((human) => (
+          <button
+            type="button"
+            key={human.clientId}
+            className={`presence-avatar presence-avatar--human ${followingClientId === human.clientId ? 'is-following' : ''}`}
             style={{ background: human.color }}
-            title={human.name}
+            title={followingClientId === human.clientId ? `Stop following ${human.name}` : `Follow ${human.name}`}
+            aria-label={followingClientId === human.clientId ? `Stop following ${human.name}` : `Follow ${human.name}`}
+            aria-pressed={followingClientId === human.clientId}
+            onClick={() => onFollow?.(human.clientId)}
           >
             {initials(human.name)}
-          </span>
+          </button>
         ))}
         {overflow > 0 && (
           <span className="presence-avatar presence-overflow" title={`${overflow} more`}>
@@ -74,6 +91,11 @@ export function PresenceBar({ humans, agents, compact = false }: Props) {
           </span>
         )}
       </span>
+      {following && (
+        <span className="presence-following" aria-live="polite">
+          Following {following.name}
+        </span>
+      )}
       {total > 1 && <span className="presence-count">{total} here</span>}
     </span>
   )

@@ -3,12 +3,13 @@ import { $ctx, $prose } from '@milkdown/kit/utils'
 import { Plugin, PluginKey, type EditorState } from '@milkdown/kit/prose/state'
 import { Decoration, DecorationSet, type EditorView } from '@milkdown/kit/prose/view'
 import type { Awareness } from 'y-protocols/awareness'
-import * as Y from 'yjs'
-import {
-  absolutePositionToRelativePosition,
-  relativePositionToAbsolutePosition,
-} from 'y-prosemirror'
 import type { UserIdentity } from './identity'
+import {
+  collabSyncState,
+  fromRelativePosition,
+  toRelativePosition,
+  type CollabSyncState,
+} from './collab_positions'
 
 interface ReadPointerState {
   anchor?: unknown
@@ -19,14 +20,6 @@ interface AwarenessState {
   readPointer?: ReadPointerState | null
 }
 
-interface SyncState {
-  doc: Y.Doc
-  type: Y.XmlFragment
-  binding: {
-    mapping: Parameters<typeof absolutePositionToRelativePosition>[2]
-  }
-}
-
 export const readPointerAwarenessCtx = $ctx<Awareness | null, 'readPointerAwareness'>(
   null,
   'readPointerAwareness',
@@ -34,17 +27,6 @@ export const readPointerAwarenessCtx = $ctx<Awareness | null, 'readPointerAwaren
 
 const readPointerKey = new PluginKey('READ_POINTERS')
 const SAFE_COLOR = /^#[0-9a-f]{6}$/i
-
-// @milkdown/plugin-collab is prebundled by Vite, so importing its
-// ySyncPluginKey through the app can create a second key object. Locate the
-// installed y-sync plugin by its stable ProseMirror key instead.
-const syncStateFor = (state: EditorState): SyncState | undefined => {
-  const syncKey = state.plugins.map((plugin) => plugin.spec.key).find((pluginKey) => {
-    const runtimeKey = pluginKey as unknown as { key?: string } | undefined
-    return runtimeKey?.key === 'y-sync$'
-  })
-  return syncKey?.getState(state) as SyncState | undefined
-}
 
 const buildPointer = (user: UserIdentity | undefined): HTMLElement => {
   const color = user?.color && SAFE_COLOR.test(user.color) ? user.color : '#9d4edd'
@@ -62,7 +44,7 @@ const buildPointer = (user: UserIdentity | undefined): HTMLElement => {
 const decorationsFor = (
   state: EditorState,
   awareness: Awareness | null,
-  syncState: SyncState | undefined,
+  syncState: CollabSyncState | undefined,
 ): DecorationSet => {
   if (!awareness || !syncState || syncState.binding.mapping.size === 0) {
     return DecorationSet.empty
@@ -75,12 +57,7 @@ const decorationsFor = (
     const anchorJson = awarenessState.readPointer?.anchor
     if (!anchorJson) return
 
-    const position = relativePositionToAbsolutePosition(
-      syncState.doc,
-      syncState.type,
-      Y.createRelativePositionFromJSON(anchorJson),
-      syncState.binding.mapping,
-    )
+    const position = fromRelativePosition(state, anchorJson, syncState)
     if (position === null) return
 
     const boundedPosition = Math.min(position, state.doc.content.size)
@@ -106,7 +83,7 @@ const readPointerProse = $prose((ctx) => new Plugin({
         return decorationsFor(
           newState,
           ctx.get(readPointerAwarenessCtx.key),
-          syncStateFor(oldState),
+          collabSyncState(oldState),
         )
       }
       return previous.map(transaction.mapping, transaction.doc)
@@ -182,13 +159,8 @@ export function bindReadPointerBroadcast(
     const found = editorView.posAtCoords(latestPoint)
     if (!found || found.pos === lastPosition) return
 
-    const syncState = syncStateFor(editorView.state)
-    if (!syncState || syncState.binding.mapping.size === 0) return
-    const anchor = absolutePositionToRelativePosition(
-      found.pos,
-      syncState.type,
-      syncState.binding.mapping,
-    )
+    const anchor = toRelativePosition(editorView.state, found.pos)
+    if (!anchor) return
     lastPosition = found.pos
     awareness.setLocalStateField('readPointer', { anchor })
   }

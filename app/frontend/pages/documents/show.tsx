@@ -35,6 +35,7 @@ import {
 } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
 import { bindReadPointerBroadcast } from '../../editor/read_pointers'
+import { bindViewportBroadcast, bindViewportFollow } from '../../editor/viewport_follow'
 import { editorViewCtx, parserCtx, schemaCtx } from '@milkdown/kit/core'
 import { sourceParser } from '../../editor/document_format'
 import {
@@ -53,7 +54,11 @@ import { MarginSuggestions } from '../../components/margin_suggestions'
 import { CommentsPanel, type CommentPayload } from '../../components/comments_panel'
 import { AnchoredComposer } from '../../components/anchored_composer'
 import { SelectionToolbar } from '../../components/selection_toolbar'
-import { PresenceBar, type AgentPresencePayload } from '../../components/presence_bar'
+import {
+  PresenceBar,
+  type AgentPresencePayload,
+  type HumanPresence,
+} from '../../components/presence_bar'
 import { ActivityPanel } from '../../components/activity_panel'
 import { IdentityChip } from '../../components/identity_chip'
 import { type OwnershipPayload } from '../../components/ownership_chip'
@@ -233,7 +238,8 @@ export default function DocumentShow({
   } | null>(null)
   const [swappedEditorKey, setSwappedEditorKey] = useState<string | null>(null)
   const [spans, setSpans] = useState<ProvenanceSpan[]>([])
-  const [peers, setPeers] = useState<UserIdentity[]>([])
+  const [peers, setPeers] = useState<HumanPresence[]>([])
+  const [followingClientId, setFollowingClientId] = useState<number | null>(null)
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
   const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null)
   const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null)
@@ -338,6 +344,50 @@ export default function DocumentShow({
     return bindReadPointerBroadcast(handle.editor, handle.provider.awareness)
   }, [handle, isReading])
 
+  useEffect(() => {
+    if (!handle) return
+
+    return bindViewportBroadcast(handle.editor, handle.provider.awareness)
+  }, [handle])
+
+  useEffect(() => {
+    if (!handle || followingClientId === null) return
+    const targetId = followingClientId
+
+    return bindViewportFollow(
+      handle.editor,
+      handle.provider.awareness,
+      targetId,
+      () => setFollowingClientId((current) => current === targetId ? null : current),
+    )
+  }, [followingClientId, handle])
+
+  useEffect(() => {
+    if (followingClientId === null) return
+    const release = () => setFollowingClientId(null)
+    const releaseOutsidePresence = (event: PointerEvent | TouchEvent) => {
+      const target = event.target as Element | null
+      if (target?.closest('.presence-avatar--human')) return
+      release()
+    }
+    const releaseOnNavigationKey = (event: KeyboardEvent) => {
+      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) {
+        release()
+      }
+    }
+
+    window.addEventListener('wheel', release, { passive: true })
+    window.addEventListener('touchstart', releaseOutsidePresence, { passive: true })
+    window.addEventListener('pointerdown', releaseOutsidePresence, { passive: true })
+    window.addEventListener('keydown', releaseOnNavigationKey)
+    return () => {
+      window.removeEventListener('wheel', release)
+      window.removeEventListener('touchstart', releaseOutsidePresence)
+      window.removeEventListener('pointerdown', releaseOutsidePresence)
+      window.removeEventListener('keydown', releaseOnNavigationKey)
+    }
+  }, [followingClientId])
+
   // The comment composer lives in the comments panel — on mobile that means
   // opening its sheet when a selection chooses "Comment".
   useEffect(() => {
@@ -405,17 +455,38 @@ export default function DocumentShow({
     const selfId = handle.provider.doc.clientID
     const update = () => {
       const states = Array.from(awareness.getStates().entries())
-      setPeers(
-        states
-          .filter(([clientId]) => clientId !== selfId)
-          .map(([, state]) => (state as { user?: UserIdentity }).user)
-          .filter((user): user is UserIdentity => Boolean(user)),
+      const nextPeers = states
+        .filter(([clientId]) => clientId !== selfId)
+        .map(([clientId, state]) => {
+          const user = (state as { user?: UserIdentity }).user
+          return user ? { ...user, clientId } : null
+        })
+        .filter((user): user is HumanPresence => Boolean(user))
+      setPeers((current) =>
+        current.length === nextPeers.length && current.every((peer, index) => {
+          const next = nextPeers[index]
+          return next &&
+            peer.clientId === next.clientId &&
+            peer.name === next.name &&
+            peer.color === next.color
+        })
+          ? current
+          : nextPeers,
       )
     }
     update()
     awareness.on('change', update)
     return () => awareness.off('change', update)
   }, [handle])
+
+  useEffect(() => {
+    if (
+      followingClientId !== null &&
+      !peers.some((peer) => peer.clientId === followingClientId)
+    ) {
+      setFollowingClientId(null)
+    }
+  }, [followingClientId, peers])
 
   // Rename applies here AFTER the server confirms the session write (the
   // chip's POST onSuccess). The handler only moves React state — the live
@@ -1138,7 +1209,15 @@ export default function DocumentShow({
                 onRenamed={handleRenamed}
               />
               {!isReading && <ProvenanceSummaryChip spans={spans} />}
-              <PresenceBar humans={peers} agents={presences} compact={isMobile} />
+              <PresenceBar
+                humans={peers}
+                agents={presences}
+                compact={isMobile}
+                followingClientId={followingClientId}
+                onFollow={(clientId) => {
+                  setFollowingClientId((current) => current === clientId ? null : clientId)
+                }}
+              />
             </div>
             {!isReading && pendingSuggestionCount > 1 && (
               <button

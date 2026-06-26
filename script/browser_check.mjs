@@ -254,11 +254,22 @@ try {
     await fetch(`${BASE}/api/docs`, {
       method: 'POST',
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'Original title', content: '# Original title\n\nBody.\n' }),
+      body: JSON.stringify({
+        title: 'Original title',
+        content: [
+          '# Original title',
+          ...Array.from(
+            { length: 50 },
+            (_, index) => `## Follow section ${index + 1}\n\n${'Viewport follow text. '.repeat(8)}`,
+          ),
+        ].join('\n\n'),
+      }),
     })
   ).json()
   const titleA = await browser.newPage()
   const titleB = await browser.newPage()
+  await titleA.setViewportSize({ width: 1280, height: 700 })
+  await titleB.setViewportSize({ width: 1440, height: 900 })
   await titleA.goto(`${BASE}/d/${titleDoc.slug}/edit`)
   await titleB.goto(`${BASE}/d/${titleDoc.slug}/edit`)
   await titleA.waitForSelector('.doc-status--live', { timeout: 15000 })
@@ -297,6 +308,48 @@ try {
     ok('H1 title survives reload')
   } else {
     fail('H1 title was lost on reload')
+  }
+
+  const titleContentBeforeFollow = await titleA.locator('.milkdown .ProseMirror').innerText()
+  await titleA.getByRole('button', { name: /^Follow / }).click()
+  await titleA.locator('.presence-following').waitFor()
+  await titleB.evaluate(() => window.scrollTo(0, 5000))
+  await titleA.waitForFunction(() => window.scrollY > 4500, { timeout: 5000 })
+  const followedPosition = await titleA.evaluate(() => window.scrollY)
+  const followedSection = await titleA.evaluate(() =>
+    document.elementFromPoint(window.innerWidth / 2, window.innerHeight * 0.42)
+      ?.closest('h2, p')?.textContent,
+  )
+  const leaderSection = await titleB.evaluate(() =>
+    document.elementFromPoint(window.innerWidth / 2, window.innerHeight * 0.42)
+      ?.closest('h2, p')?.textContent,
+  )
+  if (
+    (await titleA.getByRole('button', { name: /^Stop following / }).getAttribute('aria-pressed')) === 'true' &&
+    followedPosition > 4500 &&
+    followedSection === leaderSection &&
+    (await titleA.locator('.milkdown .ProseMirror').innerText()) === titleContentBeforeFollow
+  ) {
+    ok('clicking a collaborator follows their live viewport without changing content')
+  } else {
+    fail(`collaborator follow did not track the remote viewport: ${followedPosition}`)
+  }
+  await titleA.getByRole('button', { name: /^Stop following / }).click()
+  await titleA.locator('.presence-following').waitFor({ state: 'detached' })
+  ok('clicking the active collaborator toggles follow off')
+
+  await titleA.getByRole('button', { name: /^Follow / }).click()
+  await titleA.locator('.presence-following').waitFor()
+  await titleA.mouse.wheel(0, -300)
+  await titleA.locator('.presence-following').waitFor({ state: 'detached' })
+  await titleA.waitForTimeout(100)
+  const releasedPosition = await titleA.evaluate(() => window.scrollY)
+  await titleB.evaluate(() => window.scrollTo(0, 1000))
+  await titleA.waitForTimeout(500)
+  if (Math.abs((await titleA.evaluate(() => window.scrollY)) - releasedPosition) < 5) {
+    ok('manual navigation releases collaborator follow')
+  } else {
+    fail('manual navigation did not release collaborator follow')
   }
   await titleA.close()
   await titleB.close()
