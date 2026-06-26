@@ -6,7 +6,7 @@ module Api
 
     # POST /api/docs/:slug/comments — leave a comment anchored to text.
     def create
-      comment = with_document_write_access do
+      comment = with_document_comment_access do
         posted = Comment.post!(
           document:,
           author_name: current_agent,
@@ -27,7 +27,7 @@ module Api
     # The web UI resolves over a CSRF-protected Inertia request; agents get the
     # same capability here over plain HTTP, attributed via X-Agent-Name.
     def resolve
-      comment = with_document_write_access do
+      comment = with_document_comment_access do
         found = document.comments.find(params[:id])
         found.resolve!
         Activity.log!(

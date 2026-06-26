@@ -142,6 +142,12 @@ interface CommentTarget {
 const documentModePath = (slug: string, mode: EditorMode) =>
   `/d/${encodeURIComponent(slug)}${mode === 'read' ? '' : `/${mode}`}`
 
+const availableDocumentModes = (ownership: OwnershipPayload): EditorMode[] => {
+  if (ownership.can_write) return ['edit', 'suggest', 'comment', 'read']
+  if (ownership.can_comment) return ['comment', 'read']
+  return ['read']
+}
+
 // Server-side anchor cap is 10 KB; a truncated anchor still matches as a
 // prefix within the block (findTextRange matches the exact search string).
 // Single encode + byte slice; a byte-boundary cut mid-codepoint decodes to
@@ -242,10 +248,15 @@ export default function DocumentShow({
   // take mode directly from the Inertia page props/history entry.
   const demoModeLocked = doc.slug === 'demo'
   const mode = demoModeLocked ? 'edit' : ui.mode
-  const effectiveMode: EditorMode = ownership.can_write ? mode : 'read'
-  const modeLocked = demoModeLocked || !ownership.can_write
+  const availableModes = useMemo(
+    () => availableDocumentModes(ownership),
+    [ownership.can_comment, ownership.can_write],
+  )
+  const modeAvailable = availableModes.includes(mode)
+  const effectiveMode: EditorMode = modeAvailable ? mode : 'read'
+  const modeLocked = demoModeLocked || availableModes.length === 1
   const changeMode = useCallback((nextMode: EditorMode) => {
-    if (modeLocked || nextMode === mode) return
+    if (modeLocked || !availableModes.includes(nextMode) || nextMode === mode) return
 
     // This is an Inertia client-side visit: it pushes URL + props into Inertia
     // history without fetching or remounting the collaborative editor. Native
@@ -259,7 +270,7 @@ export default function DocumentShow({
       preserveState: true,
       preserveScroll: true,
     })
-  }, [doc.slug, mode, modeLocked])
+  }, [availableModes, doc.slug, mode, modeLocked])
   const isReading = effectiveMode === 'read'
   const connectionIdentity = viewer.account ? `account:${viewer.account.id}` : 'guest'
   const editorSessionKey = `${doc.slug}:${ownership.can_write ? 'write' : 'read'}`
@@ -340,7 +351,7 @@ export default function DocumentShow({
   // Replace (rather than push) that now-invalid entry with canonical Read so
   // Back cannot return the viewer to an unavailable mode.
   useEffect(() => {
-    if (demoModeLocked || ownership.can_write || ui.mode === 'read') return
+    if (demoModeLocked || availableModes.includes(ui.mode)) return
 
     router.replace<DocumentProps>({
       url: documentModePath(doc.slug, 'read'),
@@ -351,7 +362,7 @@ export default function DocumentShow({
       preserveState: true,
       preserveScroll: true,
     })
-  }, [demoModeLocked, doc.slug, ownership.can_write, ui.mode])
+  }, [availableModes, demoModeLocked, doc.slug, ui.mode])
 
   // ⌘1–4 selects Edit/Suggest/Comment/Read. ⌘\ toggles the side panel,
   // and ⌘. toggles suggestion focus. Control mirrors Command for parity.
@@ -360,7 +371,7 @@ export default function DocumentShow({
       if (!(event.metaKey || event.ctrlKey)) return
       const shortcutMode = MODE_SHORTCUTS[event.code] ?? MODE_SHORTCUTS[`Digit${event.key}`]
       if (shortcutMode) {
-        if (modeLocked) return
+        if (modeLocked || !availableModes.includes(shortcutMode)) return
         event.preventDefault()
         changeMode(shortcutMode)
         return
@@ -377,7 +388,7 @@ export default function DocumentShow({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [changeMode, modeLocked])
+  }, [availableModes, changeMode, modeLocked])
 
   // Human presence from Yjs awareness. Self is filtered out — the
   // IdentityChip represents you; a duplicate avatar next to it is noise.
@@ -1088,11 +1099,12 @@ export default function DocumentShow({
             <ModeControl
               mode={effectiveMode}
               onChange={changeMode}
+              availableModes={availableModes}
               locked={modeLocked}
               lockedReason={
-                ownership.can_write
-                  ? undefined
-                  : 'Read only — the document owner locked editing'
+                modeLocked && !demoModeLocked
+                  ? 'Can view — the owner limited this link to reading'
+                  : undefined
               }
             />
             <span

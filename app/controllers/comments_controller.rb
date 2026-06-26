@@ -4,7 +4,7 @@ class CommentsController < InertiaController
 
   def create
     document = Document.find_by!(slug: params[:slug])
-    with_document_write_access(document) do
+    with_document_comment_access(document) do
       Comment.post!(
         document:,
         author_name: preferred_name(params[:author_name], fallback: "Anonymous"),
@@ -28,7 +28,7 @@ class CommentsController < InertiaController
   def resolve
     comment = Comment.find(params[:id])
     document = comment.document
-    with_document_write_access(document) do
+    with_document_comment_access(document) do
       comment.resolve!
       Activity.log!(
         document:,

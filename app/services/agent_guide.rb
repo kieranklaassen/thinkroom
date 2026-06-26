@@ -267,7 +267,7 @@ class AgentGuide
         "Tracked changes use <ins data-suggestion-id> / <del data-suggestion-id> in the source snapshot. They are human-typed suggestions pending review, not your proposals, and are not resolvable through this API.",
         "Review is human-gated by design: accepting/rejecting suggestions and advancing review states happen in the editor, by humans. Your job is to propose well.",
         "Ownership: a human can claim a document in the browser; claimed docs show an owner in this payload (claimable: false means nobody can ever claim it, e.g. the demo). Claiming is browser-only (cookie-based) — agents cannot claim, so don't POST to any claim path. When a human claims, a claimed_document activity appears in the event feed with their name.",
-        "Editing access: editing_locked=true means the owner made this document read-only for everyone else. You can keep reading state, presence, and events, but suggestions and comments return 423 until the browser owner unlocks it. Agents cannot change this setting.",
+        "Link access: link_access is edit, comment, or view. can_write permits document updates and suggestions; can_comment permits comments. Comment links allow comments but not suggestions or document writes, and View links allow reads/presence/events only. editing_locked remains a compatibility field and is true for both comment and view. Disallowed writes return 423. Agents cannot change this setting.",
         "A claimed document can be deleted by its owner, after which every endpoint here returns 404. Treat a 404 on a previously-working slug as deletion, not an outage to retry.",
         "Document creation, suggestion, and comment writes are rate-limited per source IP. A 429 response means retry later; inspect each endpoint's rate_limits field for the current windows."
       ]
@@ -421,10 +421,11 @@ class AgentGuide
         ## Ownership
         A human can claim a document in their browser; the claimed owner shows
         in the state payload. Claiming is browser-only (cookie-based) — agents
-        cannot claim. When editing_locked is true, everyone except the owner is
-        read-only: keep reading state and events, but wait for the browser owner
-        to unlock before proposing suggestions or comments. Agents cannot change
-        this setting. An owner can delete their document, after which every
+        cannot claim. link_access is edit, comment, or view: edit allows suggestions
+        and comments, comment allows comments but not suggestions or document
+        writes, and view is read-only. Inspect can_write and can_comment for the
+        effective capability; editing_locked remains a compatibility field. Agents
+        cannot change this setting. An owner can delete their document, after which every
         endpoint returns 404: treat a 404 on a previously-working slug as deletion,
         not an outage to retry.
 

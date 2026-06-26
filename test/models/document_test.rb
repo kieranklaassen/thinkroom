@@ -14,7 +14,7 @@ class DocumentTest < ActiveSupport::TestCase
     assert_not document.owned_by?("stale-token")
     assert_equal(
       { claimed: true, claimable: false, owner_name: "Kieran", yours: true,
-        editing_locked: false, can_write: true },
+        link_access: "edit", editing_locked: false, can_write: true, can_comment: true },
       document.ownership_props("stale-token", viewer_user: user)
     )
   end
@@ -343,12 +343,44 @@ class DocumentTest < ActiveSupport::TestCase
         doc.set_editing_locked!(locked: true, token: "tok-a")
       end
     end
-    assert_equal "locked_editing", doc.activities.last.action
+    assert_equal "changed_link_access", doc.activities.last.action
+    assert_equal "view", doc.reload.link_access
+    assert doc[:editing_locked], "legacy column should stay synchronized during rollout"
 
     assert_no_difference -> { doc.activities.count } do
       assert_no_broadcasts(DocumentMetaChannel.broadcasting_for(doc)) do
         doc.set_editing_locked!(locked: true, token: "tok-a")
       end
+    end
+  end
+
+  test "link access grants edit, comment, and view capabilities while owners retain all access" do
+    doc = Document.create!(title: "Mine", owner_token: "tok-a", owner_name: "Owner")
+
+    doc.set_link_access!(access: "comment", token: "tok-a")
+    assert doc.reload[:editing_locked], "comment access is editing-locked for legacy clients"
+    assert_not doc.writable_by?("tok-b")
+    assert doc.commentable_by?("tok-b")
+    assert doc.writable_by?("tok-a")
+    assert doc.commentable_by?("tok-a")
+    assert_raises(Document::EditingLockedError) { doc.assert_write_access!(token: "tok-b") }
+    assert doc.assert_comment_access!(token: "tok-b")
+
+    doc.set_link_access!(access: "view", token: "tok-a")
+    assert doc.reload[:editing_locked], "view access is editing-locked for legacy clients"
+    assert_not doc.commentable_by?("tok-b")
+    assert_raises(Document::CommentingLockedError) { doc.assert_comment_access!(token: "tok-b") }
+    assert doc.commentable_by?("tok-a")
+  end
+
+  test "link access rejects values outside the access lattice" do
+    doc = Document.new(title: "Mine", link_access: "suggest")
+    assert_not doc.valid?
+    assert_includes doc.errors[:link_access], "is not included in the list"
+
+    owner = Document.create!(title: "Owned", owner_token: "tok-a", owner_name: "Owner")
+    assert_raises(ArgumentError) do
+      owner.set_link_access!(access: "suggest", token: "tok-a")
     end
   end
 
@@ -405,19 +437,19 @@ class DocumentTest < ActiveSupport::TestCase
     props = doc.ownership_props(nil)
     assert_equal(
       { claimed: false, claimable: true, owner_name: nil, yours: false,
-        editing_locked: false, can_write: true },
+        link_access: "edit", editing_locked: false, can_write: true, can_comment: true },
       props
     )
 
     doc.claim!(token: "tok-a", name: "Owner")
     assert_equal(
       { claimed: true, claimable: false, owner_name: "Owner", yours: true,
-        editing_locked: false, can_write: true },
+        link_access: "edit", editing_locked: false, can_write: true, can_comment: true },
       doc.ownership_props("tok-a")
     )
     assert_equal(
       { claimed: true, claimable: false, owner_name: "Owner", yours: false,
-        editing_locked: false, can_write: true },
+        link_access: "edit", editing_locked: false, can_write: true, can_comment: true },
       doc.ownership_props("tok-b")
     )
     doc.set_editing_locked!(locked: true, token: "tok-a")
