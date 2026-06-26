@@ -162,7 +162,7 @@ class FeedbackRunsTest < ActionDispatch::IntegrationTest
 
   private
 
-  def sign_in(email: "kieranklaassen@gmail.com")
+  def sign_in(email: "maintainer@example.com")
     user = User.create!(name: "Feedback owner", email:, password: "thoughtful-passphrase")
     post login_path, params: { email:, password: "thoughtful-passphrase" }
     assert_response :see_other

@@ -37,7 +37,7 @@ and `RIFFREC_AUTOMATION_EMAILS` contains the signed-in account. Set the latter
 to a comma-separated allowlist in `.kamal/deploy.env`, for example:
 
 ```bash
-RIFFREC_AUTOMATION_EMAILS=kieranklaassen@gmail.com
+RIFFREC_AUTOMATION_EMAILS=maintainer@example.com
 ```
 
 Captured Riffrec ZIPs are private Active Storage attachments. Cursor receives a

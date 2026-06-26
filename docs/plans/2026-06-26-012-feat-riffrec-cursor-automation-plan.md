@@ -53,7 +53,7 @@ The desired loop is deliberately narrow: an approved maintainer records feedback
 
 ## Assumptions
 
-- The first production allowlist contains `kieranklaassen@gmail.com`; an empty allowlist disables automation safely.
+- The first production allowlist contains the maintainer's configured email; an empty allowlist disables automation safely.
 - Cursor resolves the private Thinkroom cloud environment by repository when the v1 request omits an explicit environment name. The verified test run already proved that environment can clone Thinkroom and decrypt Rails credentials.
 - Launch and status synchronization can happen in bounded HTTP requests for this maintainer-only first version. Durable background jobs and webhooks are deferred until volume or latency requires them.
 - A 60 MiB application limit and a slightly larger proxy limit are sufficient because Riffrec already excludes screen recordings larger than 50 MiB from ZIP output.
