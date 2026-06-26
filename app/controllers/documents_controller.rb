@@ -3,6 +3,8 @@ class DocumentsController < InertiaController
   rate_limit_document_creation
 
   SIGNED_IN_AUTO_CLAIM_WINDOW = 10.minutes
+  MIN_RICH_CONTENT_WIDTH = 640
+  MAX_RICH_CONTENT_WIDTH = 1_200
 
   # SSR is scoped to the read-only document surfaces — #show (shell, header,
   # static content_html preview) and #index (the landing page) — so their
@@ -452,11 +454,13 @@ class DocumentsController < InertiaController
 
   def ui_prefs(mode:)
     document_width = Integer(cookies[:pruf_width], exception: false)
+    rich_content_width = Integer(cookies[:pruf_rich_width], exception: false)
     {
       panel_open: cookies[:pruf_panel] != "0",
       focus_mode: cookies[:pruf_focus] == "1",
       mode:,
-      document_width: document_width&.clamp(MIN_DOCUMENT_WIDTH, MAX_DOCUMENT_WIDTH)
+      document_width: document_width&.clamp(MIN_DOCUMENT_WIDTH, MAX_DOCUMENT_WIDTH),
+      rich_content_width: rich_content_width&.clamp(MIN_RICH_CONTENT_WIDTH, MAX_RICH_CONTENT_WIDTH)
     }
   end
 

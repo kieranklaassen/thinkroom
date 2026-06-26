@@ -85,6 +85,10 @@ import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
 import { patchJSON } from '../../lib/csrf'
 import type { ViewerPayload } from '../../types/viewer'
 import { setCookie, setCookieFlag } from '../../lib/cookies'
+import {
+  RICH_BLOCK_WIDTH_EVENT,
+  type RichBlockWidthEventDetail,
+} from '../../editor/rich_block_width'
 import './show.css'
 
 export interface ActivityPayload {
@@ -119,6 +123,7 @@ export interface DocumentProps {
     focus_mode: boolean
     mode: EditorMode
     document_width: number | null
+    rich_content_width: number | null
   }
   ownership: OwnershipPayload
   suggestions: SuggestionPayload[]
@@ -251,6 +256,17 @@ export default function DocumentShow({
   const [panelOpen, setPanelOpen] = useState(ui.panel_open)
   const [focusMode, setFocusMode] = useState(ui.focus_mode)
   const [documentWidth, setDocumentWidth] = useState<number | null>(ui.document_width)
+  const [richContentWidth, setRichContentWidth] = useState<number | null>(ui.rich_content_width)
+
+  useEffect(() => {
+    const handleRichBlockWidth = (event: Event) => {
+      const detail = (event as CustomEvent<RichBlockWidthEventDetail>).detail
+      setRichContentWidth(detail.width)
+      if (detail.commit) setCookie('pruf_rich_width', detail.width === null ? 'default' : String(detail.width))
+    }
+    window.addEventListener(RICH_BLOCK_WIDTH_EVENT, handleRichBlockWidth)
+    return () => window.removeEventListener(RICH_BLOCK_WIDTH_EVENT, handleRichBlockWidth)
+  }, [])
   // Demo doc always opens in Edit and stays locked there. Ordinary documents
   // take mode directly from the Inertia page props/history entry.
   const demoModeLocked = doc.slug === 'demo'
@@ -1159,14 +1175,17 @@ export default function DocumentShow({
     view.focus()
   }, [])
 
+  const documentStyle = {
+    ...(documentWidth === null ? {} : { '--document-width': `${documentWidth}px` }),
+    ...(richContentWidth === null ? {} : { '--rich-content-width': `${richContentWidth}px` }),
+  } as CSSProperties
+
   return (
     <>
       <Head title={documentTitle} />
       <div
         className={`doc-page ${panelOpen ? '' : 'is-panel-hidden'} ${isReading ? 'is-read-mode' : ''}`}
-        style={documentWidth === null
-          ? undefined
-          : ({ '--document-width': `${documentWidth}px` } as CSSProperties)}
+        style={Object.keys(documentStyle).length === 0 ? undefined : documentStyle}
       >
         <header className="doc-header">
           <div className="doc-header-left">
