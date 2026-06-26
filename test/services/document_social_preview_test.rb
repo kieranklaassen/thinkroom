@@ -11,6 +11,7 @@ class DocumentSocialPreviewTest < ActiveSupport::TestCase
 
     assert_equal "Product & market", preview.title
     assert_equal "A focused explanation of the opportunity.", preview.description
+    assert_equal "Product & market — Open this shared document on Thinkroom", preview.page_title
   end
 
   test "projects HTML and sketch-aware content to plain text" do
@@ -40,6 +41,22 @@ class DocumentSocialPreviewTest < ActiveSupport::TestCase
                     DocumentSocialPreview::TITLE_MAX_GRAPHEMES
     assert_equal grapheme, preview.title.scan(/\X/).last(2).first
     assert_equal "…", preview.title.scan(/\X/).last
+    assert_operator preview.page_title.scan(/\X/).length, :<=,
+                    DocumentSocialPreview::PAGE_TITLE_MAX_GRAPHEMES
+    assert preview.page_title.end_with?(" · Thinkroom")
+  end
+
+  test "bounds social descriptions to mobile-friendly copy" do
+    document = Document.create!(
+      title: "A concise title",
+      seed_content: "# A concise title\n\n#{'word ' * 80}"
+    )
+
+    preview = DocumentSocialPreview.new(document)
+
+    assert_operator preview.description.scan(/\X/).length, :<=,
+                    DocumentSocialPreview::DESCRIPTION_MAX_GRAPHEMES
+    assert preview.description.end_with?("…")
   end
 
   test "falls back to the title for a title-only document" do

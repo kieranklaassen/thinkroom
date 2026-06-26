@@ -1,11 +1,11 @@
 class DocumentOgImage
   WIDTH = 1200
   HEIGHT = 630
-  VERSION = "1"
-  TITLE_LINE_WIDTH = 15.5
+  VERSION = "2"
+  TITLE_LINE_WIDTH = 16.5
   TITLE_MAX_LINES = 3
-  DESCRIPTION_LINE_WIDTH = 33.0
-  DESCRIPTION_MAX_LINES = 3
+  DESCRIPTION_LINE_WIDTH = 39.0
+  DESCRIPTION_MAX_LINES = 2
 
   class << self
     def call(document)
@@ -29,24 +29,50 @@ class DocumentOgImage
     def svg(document)
       preview = DocumentSocialPreview.new(document)
       title_lines = wrap(preview.title, width: TITLE_LINE_WIDTH, maximum: TITLE_MAX_LINES)
+      description_maximum = title_lines.length >= TITLE_MAX_LINES ? 1 : DESCRIPTION_MAX_LINES
       description_lines = wrap(
         preview.description,
         width: DESCRIPTION_LINE_WIDTH,
-        maximum: DESCRIPTION_MAX_LINES
+        maximum: description_maximum
       )
-      description_y = 154 + (title_lines.length * 76) + 36
+      description_y = 222 + (title_lines.length * 68)
 
       <<~SVG
         <svg xmlns="http://www.w3.org/2000/svg" width="#{WIDTH}" height="#{HEIGHT}" viewBox="0 0 #{WIDTH} #{HEIGHT}">
-          <rect width="#{WIDTH}" height="#{HEIGHT}" fill="#fbfaf8"/>
-          <line x1="96" y1="88" x2="1104" y2="88" stroke="#d8d5cf" stroke-width="2"/>
-          <line x1="96" y1="542" x2="1104" y2="542" stroke="#d8d5cf" stroke-width="2"/>
-          <text x="96" y="154" fill="#252525" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="64" font-weight="600" letter-spacing="-1.2">
-            #{tspans(title_lines, x: 96, line_height: 76)}
+          <defs>
+            <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#f4effa"/>
+              <stop offset="1" stop-color="#ece5f6"/>
+            </linearGradient>
+            <linearGradient id="accent" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#a755db"/>
+              <stop offset="1" stop-color="#7240c7"/>
+            </linearGradient>
+          </defs>
+          <rect width="#{WIDTH}" height="#{HEIGHT}" fill="url(#background)"/>
+          <circle cx="1090" cy="8" r="260" fill="#9d4edd" opacity="0.08"/>
+          <circle cx="1138" cy="72" r="126" fill="none" stroke="#9d4edd" stroke-width="2" opacity="0.16"/>
+          <rect x="48" y="48" width="1104" height="534" rx="28" fill="#fffdf9" stroke="#dcd2e8" stroke-width="2"/>
+          <path d="M76 48H62C54.268 48 48 54.268 48 62V568C48 575.732 54.268 582 62 582H76Z" fill="url(#accent)"/>
+
+          <circle cx="105" cy="112" r="6" fill="#9d4edd"/>
+          <text x="123" y="120" fill="#674e78" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="700" letter-spacing="2.6">THINKROOM · SHARED DOCUMENT</text>
+          <g opacity="0.72">
+            <circle cx="1040" cy="111" r="17" fill="#eadcf5" stroke="#fffdf9" stroke-width="4"/>
+            <circle cx="1072" cy="111" r="17" fill="#d6c2ec" stroke="#fffdf9" stroke-width="4"/>
+            <circle cx="1104" cy="111" r="17" fill="#9d4edd" stroke="#fffdf9" stroke-width="4"/>
+          </g>
+
+          <text x="100" y="198" fill="#252128" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="62" font-weight="650" letter-spacing="-1.5">
+            #{tspans(title_lines, x: 100, line_height: 68)}
           </text>
-          <text x="96" y="#{description_y}" fill="#666666" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="30" font-weight="400">
-            #{tspans(description_lines, x: 96, line_height: 42)}
+          <text x="100" y="#{description_y}" fill="#685f6c" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="28" font-weight="400">
+            #{tspans(description_lines, x: 100, line_height: 40)}
           </text>
+
+          <rect x="100" y="504" width="232" height="50" rx="25" fill="#8f46cf"/>
+          <text x="126" y="536" fill="#ffffff" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="19" font-weight="700">Open document →</text>
+          <text x="1100" y="535" text-anchor="end" fill="#827787" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18">A place for deeper thinking</text>
         </svg>
       SVG
     end

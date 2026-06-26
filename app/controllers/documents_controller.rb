@@ -461,13 +461,14 @@ class DocumentsController < InertiaController
     preview = DocumentSocialPreview.new(document)
     {
       title: preview.title,
+      page_title: preview.page_title,
       description: preview.description,
       url: document_page_url(document.slug),
       image_url: document_og_image_url(
         document.slug,
         v: DocumentOgImage.url_version(document)
       ),
-      image_alt: "Document preview: #{preview.title}"
+      image_alt: "Thinkroom shared document preview for “#{preview.title}” with an Open document button."
     }
   end
 
