@@ -1,11 +1,14 @@
 <!DOCTYPE html>
 <html data-theme="<%= cookies[:proof_theme].to_s.presence_in(%w[proof whitey]) || "proof" %>">
   <head>
-    <title data-inertia><%= content_for(:title) || "Thinkroom" %></title>
+    <title data-inertia><%= @open_graph&.dig(:page_title) || content_for(:title) || "Thinkroom" %></title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <% if @open_graph.present? %>
+      <%= tag.meta name: "description", content: @open_graph[:description] %>
       <%= tag.link rel: "canonical", href: @open_graph[:url] %>
       <%= tag.meta property: "og:type", content: "article" %>
+      <%= tag.meta property: "og:site_name", content: "Thinkroom" %>
+      <%= tag.meta property: "og:locale", content: "en_US" %>
       <%= tag.meta property: "og:title", content: @open_graph[:title] %>
       <%= tag.meta property: "og:description", content: @open_graph[:description] %>
       <%= tag.meta property: "og:url", content: @open_graph[:url] %>

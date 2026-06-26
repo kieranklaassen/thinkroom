@@ -56,4 +56,14 @@ class DocumentOgImageServiceTest < ActiveSupport::TestCase
       DocumentOgImage.send(:visual_width, line) <= DocumentOgImage::TITLE_LINE_WIDTH
     end
   end
+
+  test "renders source context and an honest call to action" do
+    document = Document.new(title: "Plan", seed_content: "# Plan\n\nA useful summary")
+    svg = DocumentOgImage.send(:svg, document)
+
+    assert_includes svg, "THINKROOM · SHARED DOCUMENT"
+    assert_includes svg, "Open document →"
+    assert_includes svg, "A place for deeper thinking"
+    refute_includes svg, "owner_token"
+  end
 end

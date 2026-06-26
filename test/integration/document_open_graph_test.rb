@@ -18,17 +18,25 @@ class DocumentOpenGraphTest < ActionDispatch::IntegrationTest
     image_url = property(page, "og:image")
 
     assert_equal "article", property(page, "og:type")
+    assert_equal "Thinkroom", property(page, "og:site_name")
+    assert_equal "en_US", property(page, "og:locale")
     assert_equal "Product & market", property(page, "og:title")
     assert_equal "A focused explanation with source text.", property(page, "og:description")
+    assert_equal property(page, "og:description"), named(page, "description")
     assert_equal "https://thinkroom.kieranklaassen.com/d/#{@document.slug}", property(page, "og:url")
     assert_equal "1200", property(page, "og:image:width")
     assert_equal "630", property(page, "og:image:height")
     assert_equal "summary_large_image", named(page, "twitter:card")
     assert_equal property(page, "og:title"), named(page, "twitter:title")
+    assert_equal property(page, "og:description"), named(page, "twitter:description")
     assert_equal image_url, named(page, "twitter:image")
     assert_equal URI(image_url).path, document_og_image_path(@document.slug)
     assert URI(image_url).query.include?("v=")
-    refute_includes property(page, "og:image:alt"), "Thinkroom"
+    assert_includes property(page, "og:image:alt"), "Thinkroom shared document"
+    assert_includes property(page, "og:image:alt"), "Open document"
+    assert_equal "Product & market — Open this shared document on Thinkroom", page.at_css("title").text
+    assert_includes 50..60, page.at_css("title").text.scan(/\X/).length
+    assert_operator named(page, "description").scan(/\X/).length, :<=, 125
     assert_equal property(page, "og:url"), page.at_css('link[rel="canonical"]')["href"]
   end
 
