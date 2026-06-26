@@ -46,18 +46,28 @@ try {
   } else {
     fail('fresh home still renders an empty recently-opened section')
   }
-  const agentDisclosure = landing.locator('.landing-agent')
+  const agentStart = landing.getByRole('button', { name: 'Have an agent start one' })
+  const newDocument = landing.getByRole('button', { name: 'New document' })
   if (
-    !(await agentDisclosure.evaluate((el) => el.open)) &&
-    (await landing.locator('.landing-agent-content').evaluate((el) => getComputedStyle(el).display)) === 'none'
+    (await agentStart.isVisible()) &&
+    (await newDocument.isVisible()) &&
+    (await agentStart.getAttribute('aria-expanded')) === 'false' &&
+    (await landing.locator('#agent-start-instructions').count()) === 0
   ) {
-    ok('agent creation instructions are collapsed by default')
+    ok('human and agent creation paths are prominent while instructions start closed')
   } else {
-    fail('agent creation instructions compete with the primary home content')
+    fail('home does not present both creation paths with closed agent instructions')
   }
-  await landing.locator('.landing-agent-summary').click()
+  await agentStart.click()
   await landing.locator('.landing-agent-block').waitFor({ state: 'visible' })
-  ok('agent creation disclosure reveals the copyable instructions')
+  if ((await agentStart.getAttribute('aria-expanded')) === 'true') {
+    ok('agent creation action reveals the copyable instructions and reports its state')
+  } else {
+    fail('agent creation action does not report its expanded state')
+  }
+  await landing.locator('.landing-agent-block .share-copy').click()
+  await landing.locator('.landing-agent-block .share-copy', { hasText: 'Copied' }).waitFor()
+  ok('agent creation instructions provide explicit copy confirmation')
   if ((await landing.locator('.format-label').count()) === 0) {
     ok('landing page organizes documents without format labels')
   } else {
