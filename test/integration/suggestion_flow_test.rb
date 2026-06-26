@@ -61,6 +61,46 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
     assert_empty @document.suggestions.pending
   end
 
+  test "locked non-owner cannot create or review suggestions" do
+    @document.update!(
+      owner_token: "someone-else",
+      owner_name: "Owner",
+      editing_locked: true
+    )
+
+    assert_no_difference -> { @document.suggestions.count } do
+      post document_suggestions_path(@document.slug), params: {
+        author_name: "Reader", body: "Forbidden"
+      }
+    end
+    assert_response :redirect
+
+    patch accept_suggestion_path(@suggestion), params: { by: "Reader" }, as: :json
+    assert_response :locked
+    assert_equal "pending", @suggestion.reload.status
+
+    patch reject_suggestion_path(@suggestion), params: { by: "Reader" }, as: :json
+    assert_response :locked
+    assert_equal "pending", @suggestion.reload.status
+
+    patch accept_all_document_suggestions_path(@document.slug),
+          params: { by: "Reader" }, as: :json
+    assert_response :locked
+    assert_equal "pending", @suggestion.reload.status
+  end
+
+  test "locked owner keeps browser contribution access" do
+    post claim_document_path(@document.slug), params: { name: "Owner" }
+    patch document_editing_lock_path(@document.slug), params: { locked: true }
+
+    assert_difference -> { @document.suggestions.count }, 1 do
+      post document_suggestions_path(@document.slug), params: {
+        author_name: "Owner", body: "Allowed"
+      }
+    end
+    assert_response :see_other
+  end
+
   test "resolving an already-resolved suggestion reports an error" do
     @suggestion.reject!
     patch accept_suggestion_path(@suggestion)

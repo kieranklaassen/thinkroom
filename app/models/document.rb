@@ -1,4 +1,6 @@
 class Document < ApplicationRecord
+  class EditingLockedError < StandardError; end
+  class NotOwnerError < StandardError; end
   DEFAULT_SEED = "# Untitled\n\nStart writing — everything you type is attributed to you.\n"
   DEFAULT_HTML_SEED = "<h1>Untitled</h1><p>Start writing — everything you type is attributed to you.</p>"
   CONTENT_FORMATS = %w[markdown html].freeze
@@ -113,6 +115,51 @@ class Document < ApplicationRecord
     token.present? && owner_token == token
   end
 
+  def writable_by?(token, user: nil)
+    !editing_locked? || owned_by?(token, user:)
+  end
+
+  def assert_write_access!(token: nil, user: nil)
+    raise EditingLockedError, "This document is read-only." unless writable_by?(token, user:)
+
+    self
+  end
+
+  def with_write_access(token: nil, user: nil)
+    with_lock do
+      reload
+      assert_write_access!(token:, user:)
+
+      yield
+    end
+  end
+
+  def set_editing_locked!(locked:, token:, user: nil)
+    changed = false
+    actor_name = user&.name || owner_name || "Anonymous"
+
+    with_lock do
+      reload
+      raise NotOwnerError, "Only the owner can change editing access." unless owned_by?(token, user:)
+      next if editing_locked? == locked
+
+      update!(editing_locked: locked)
+      activities.create!(
+        actor_name:,
+        actor_kind: "human",
+        action: locked ? "locked_editing" : "unlocked_editing",
+        detail: locked ? "made the document read-only for others" : "reopened the document for editing"
+      )
+      changed = true
+    end
+
+    if changed
+      DocumentMetaChannel.broadcast_event(self, :activities)
+      DocumentMetaChannel.broadcast_event(self, :editing_lock, locked:)
+    end
+    self
+  end
+
   # One normalization rule for display names: strip, cap, nil for blank.
   # nil matters — the identity endpoint clears the session on blank rather
   # than storing a fallback.
@@ -202,7 +249,9 @@ class Document < ApplicationRecord
       claimed: claimed?,
       claimable: claimable?,
       owner_name: owner_name,
-      yours: owned_by?(viewer_token, user: viewer_user)
+      yours: owned_by?(viewer_token, user: viewer_user),
+      editing_locked: editing_locked?,
+      can_write: writable_by?(viewer_token, user: viewer_user)
     }
   end
 
