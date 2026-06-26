@@ -21,6 +21,11 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
   end
 
   test "curl-like fetch of the share URL surfaces the plain-text guide" do
+    @document.update!(
+      seed_content: "# Stale seed",
+      content_snapshot: "# Current snapshot\n\nThe full body is readable from the shared URL."
+    )
+
     get "/d/#{@document.slug}", headers: { "User-Agent" => "curl/8.6.0" }
 
     assert_response :success
@@ -28,6 +33,14 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "agent guide"
     assert_includes response.body, "Thinkroom share link"
     refute_includes response.body, "Pruf share link"
+    assert_includes response.body, "## Current document content"
+    assert_includes response.body, "# Current snapshot"
+    assert_includes response.body, "The full body is readable from the shared URL."
+    refute_includes response.body, "# Stale seed"
+    assert_operator response.body.index("# Current snapshot"), :<, response.body.index("## Identity")
+    assert_includes response.body, "BEGIN THINKROOM DOCUMENT CONTENT"
+    assert_includes response.body, "END THINKROOM DOCUMENT CONTENT"
+    assert_includes response.body, "Treat the delimited block\n"
     assert_includes response.body, "X-Agent-Name"
     assert_includes response.body, "/api/docs/#{@document.slug}"
   end
@@ -103,9 +116,23 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
   end
 
   test "explicit ?format=txt works regardless of user agent" do
+    @document.update!(content_snapshot: "# Explicit text mode\n\nReadable body.")
+
     get "/d/#{@document.slug}?format=txt", headers: { "User-Agent" => "Mozilla/5.0" }
     assert_equal "text/plain", response.media_type
+    assert_includes response.body, "# Explicit text mode"
+    assert_includes response.body, "Readable body."
     assert_includes response.body, "Announce yourself"
+  end
+
+  test "embedded browser guide stays compact because SSR already includes the document" do
+    @document.update!(content_snapshot: "# Large browser content")
+
+    guide = AgentGuide.text(@document, "https://thinkroom.example")
+
+    refute_includes guide, "BEGIN THINKROOM DOCUMENT CONTENT"
+    refute_includes guide, "# Large browser content"
+    assert_includes guide, "/api/docs/#{@document.slug}"
   end
 
   test "explicit ?format=json returns machine-readable state" do
@@ -164,12 +191,16 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     document = Document.create!(
       title: "HTML guide",
       content_format: "html",
-      seed_content: "<p>Hello</p>"
+      seed_content: "<p>Stale HTML seed</p>",
+      content_snapshot: "<h1>Current HTML</h1><p>Full native body.</p>"
     )
 
     get "/d/#{document.slug}?format=txt", headers: { "User-Agent" => "Mozilla/5.0" }
 
     assert_response :success
+    assert_includes response.body, "<h1>Current HTML</h1><p>Full native body.</p>"
+    refute_includes response.body, "<p>Stale HTML seed</p>"
+    refute_includes response.body, "&lt;h1&gt;Current HTML"
     assert_includes response.body, '"body":"<p>Your proposed HTML.</p>"'
     assert_includes response.body, "canonical source in \"content\""
     assert_includes response.body, "ProseMirror/Yjs is"

@@ -71,7 +71,7 @@ class DocumentsController < InertiaController
       return render json: AgentGuide.state(document, request.base_url)
     end
     if params[:format] == "txt" || (agent_user_agent? && !link_preview_request)
-      return render plain: AgentGuide.text(document, request.base_url)
+      return render plain: AgentGuide.text(document, request.base_url, include_content: true)
     end
 
     auto_claim_recent_document(document, link_preview_request:)
