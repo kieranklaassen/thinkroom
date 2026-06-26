@@ -1,10 +1,11 @@
-import { useRef, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, router } from '@inertiajs/react'
 import { useMediaQuery } from '../lib/use_media_query'
 import { useDismissable } from '../lib/use_dismissable'
 import { OwnershipChip, type OwnershipPayload } from './ownership_chip'
 import { FeedbackButton } from './feedback_button'
+import { ThemePicker } from './theme_picker'
 import type { AccountPayload } from '../types/viewer'
 
 interface Props {
@@ -19,7 +20,7 @@ interface Props {
 }
 
 /**
- * The header's `⋯` overflow menu — content layer over the same popover
+ * The header's `⋯` document-options dialog — content layer over the same popover
  * mechanics as SharePopover (anchored absolute panel, outside-mousedown +
  * Escape to close). Holds the secondary chrome (Panel/Focus toggles,
  * Feedback) and the ownership section: "Yours" + delete confirm, "Owned by
@@ -40,6 +41,10 @@ export function HeaderMenu({
   const [lockFailed, setLockFailed] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
+  const viewLabelId = useId()
+  const accessLabelId = useId()
+  const accountLabelId = useId()
+  const helpLabelId = useId()
   // Same constraint as SharePopover: the sticky header's backdrop-filter is
   // the containing block for fixed descendants — the mobile sheet must
   // portal to body.
@@ -56,7 +61,7 @@ export function HeaderMenu({
       <button
         className="chrome-toggle header-menu-trigger"
         aria-expanded={open}
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-label="More options"
         title="More options"
         onClick={() => setOpen((v) => !v)}
@@ -69,42 +74,46 @@ export function HeaderMenu({
             <div
               className="share-popover header-menu-popover"
               ref={popoverRef}
-              role="menu"
+              role="dialog"
               aria-label="Document options"
               onClick={(event) => event.stopPropagation()}
             >
-              <button
-                className="header-menu-item"
-                role="menuitemcheckbox"
-                aria-checked={panelOpen}
-                onClick={onTogglePanel}
-              >
-                <span className="header-menu-check" aria-hidden>
-                  {panelOpen ? '✓' : ''}
-                </span>
-                Side panel
-                <span className="header-menu-hint">⌘\</span>
-              </button>
-              <button
-                className="header-menu-item"
-                role="menuitemcheckbox"
-                aria-checked={focusMode}
-                onClick={onToggleFocus}
-              >
-                <span className="header-menu-check" aria-hidden>
-                  {focusMode ? '✓' : ''}
-                </span>
-                Suggestion focus
-                <span className="header-menu-hint">⌘.</span>
-              </button>
+              <div className="header-menu-group" role="group" aria-labelledby={viewLabelId}>
+                <div className="header-menu-label" id={viewLabelId}>View</div>
+                <button
+                  className="header-menu-item"
+                  aria-pressed={panelOpen}
+                  onClick={onTogglePanel}
+                >
+                  <span className="header-menu-check" aria-hidden>
+                    {panelOpen ? '✓' : ''}
+                  </span>
+                  Side panel
+                  <span className="header-menu-hint">⌘\</span>
+                </button>
+                <button
+                  className="header-menu-item"
+                  aria-pressed={focusMode}
+                  onClick={onToggleFocus}
+                >
+                  <span className="header-menu-check" aria-hidden>
+                    {focusMode ? '✓' : ''}
+                  </span>
+                  Suggestion focus
+                  <span className="header-menu-hint">⌘.</span>
+                </button>
+                <div className="header-menu-theme">
+                  <span>Theme</span>
+                  <ThemePicker />
+                </div>
+              </div>
               {showOwnership && (
-                <>
-                  <div className="header-menu-sep" role="separator" />
+                <div className="header-menu-group" role="group" aria-labelledby={accessLabelId}>
+                  <div className="header-menu-label" id={accessLabelId}>Access</div>
                   {ownership.yours && (
                     <button
                       className="header-menu-item"
-                      role="menuitemcheckbox"
-                      aria-checked={ownership.editing_locked}
+                      aria-pressed={ownership.editing_locked}
                       disabled={lockUpdating}
                       onClick={() => {
                         const locked = !ownership.editing_locked
@@ -142,20 +151,22 @@ export function HeaderMenu({
                     </div>
                   )}
                   <OwnershipChip slug={slug} ownership={ownership} claimerName={claimerName} />
-                </>
+                </div>
               )}
               {account && (
-                <>
-                  <div className="header-menu-sep" role="separator" />
+                <div className="header-menu-group" role="group" aria-labelledby={accountLabelId}>
+                  <div className="header-menu-label" id={accountLabelId}>Account</div>
                   <div className="header-menu-account" title={account.email}>{account.name}</div>
                   <Link href="/logout" method="delete" as="button" className="header-menu-item">
                     <span className="header-menu-check" aria-hidden>↪</span>
                     Sign out
                   </Link>
-                </>
+                </div>
               )}
-              <div className="header-menu-sep" role="separator" />
-              <FeedbackButton />
+              <div className="header-menu-group" role="group" aria-labelledby={helpLabelId}>
+                <div className="header-menu-label" id={helpLabelId}>Help</div>
+                <FeedbackButton />
+              </div>
             </div>
           )
           return isMobile

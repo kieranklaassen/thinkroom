@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 export type ThemeName = 'proof' | 'whitey'
 
@@ -22,11 +22,9 @@ function applyTheme(theme: ThemeName): void {
 }
 
 export function ThemePicker() {
-  const [theme, setTheme] = useState<ThemeName>('proof')
-
-  useEffect(() => {
-    setTheme(currentTheme())
-  }, [])
+  const [theme, setTheme] = useState<ThemeName>(() =>
+    typeof document === 'undefined' ? 'proof' : currentTheme(),
+  )
 
   const pick = (next: ThemeName) => {
     setTheme(next)
@@ -34,7 +32,7 @@ export function ThemePicker() {
   }
 
   return (
-    <span className="theme-picker" role="radiogroup" aria-label="Reading theme">
+    <span className="theme-picker" role="radiogroup" aria-label="Theme">
       {(['proof', 'whitey'] as ThemeName[]).map((name) => (
         <button
           key={name}

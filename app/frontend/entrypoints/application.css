@@ -314,14 +314,6 @@ a:focus-visible {
   justify-content: center;
 }
 
-.landing-recent-heading {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--ink-faint);
-  margin-bottom: 0.5rem;
-}
-
 /* ---------------------------- Document library -------------------------- */
 .document-library {
   --document-library-muted: color-mix(in srgb, var(--ink-soft) 88%, var(--ink));
@@ -664,6 +656,58 @@ a:focus-visible {
 .landing-agent {
   margin-top: 2.5rem;
   text-align: left;
+}
+
+.landing-agent-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 18%, var(--line));
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 18%, var(--line));
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+
+.landing-agent-summary::-webkit-details-marker {
+  display: none;
+}
+
+.landing-agent-summary:hover {
+  color: var(--ink);
+}
+
+.landing-agent-summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.landing-agent-summary-action {
+  margin-left: auto;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+  font-weight: 550;
+}
+
+.landing-agent-summary-action--open,
+.landing-agent:not([open]) .landing-agent-content {
+  display: none;
+}
+
+.landing-agent[open] .landing-agent-summary-action--closed {
+  display: none;
+}
+
+.landing-agent[open] .landing-agent-summary-action--open {
+  display: inline;
+}
+
+.landing-agent-content {
+  padding-top: 0.9rem;
 }
 
 .landing-agent-hint {
@@ -2212,15 +2256,31 @@ a:focus-visible {
   padding: 0.28rem 0.5rem;
 }
 
-/* The ⋯ menu is a real menu: full-width rows, hover, no nested buttons.
- * OwnershipChip's chrome-toggles and the riffrec feedback button are
- * restyled into the same row register by scope. */
+/* The ⋯ surface is a grouped document-options dialog. OwnershipChip's
+ * chrome-toggles and the riffrec feedback button are restyled into the same
+ * full-width row register by scope. */
 .header-menu-popover {
-  width: 14.5rem;
+  width: 16.5rem;
   padding: 0.35rem;
   display: flex;
   flex-direction: column;
-  gap: 0.1rem;
+}
+
+.header-menu-group {
+  padding: 0.3rem;
+}
+
+.header-menu-group + .header-menu-group {
+  border-top: 1px solid var(--line);
+}
+
+.header-menu-label {
+  padding: 0.2rem 0.55rem 0.3rem;
+  color: var(--ink-faint);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .header-menu-item,
@@ -2273,12 +2333,6 @@ a:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-.header-menu-sep {
-  height: 1px;
-  background: var(--line);
-  margin: 0.3rem 0.35rem;
-}
-
 .header-menu-account {
   overflow: hidden;
   padding: 0.35rem 0.55rem 0.1rem;
@@ -2286,6 +2340,27 @@ a:focus-visible {
   font-size: 0.68rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.header-menu-theme {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.5rem 0.55rem 0.4rem;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 550;
+}
+
+.header-menu-theme .theme-picker {
+  display: flex;
+  width: 100%;
+}
+
+.header-menu-theme .theme-option {
+  flex: 1;
+  justify-content: center;
+  min-height: 2.25rem;
+  font-size: 0.74rem;
 }
 
 .header-menu-popover .ownership-owner {
@@ -2736,27 +2811,9 @@ a:focus-visible {
   background: var(--surface);
 }
 
-/* Reading theme lives in the share surface on every breakpoint —
- * the header stays minimal. */
-.share-section--theme {
-  border-top: 1px solid var(--line);
-}
-
 .share-section--export {
   border-top: 1px solid var(--line);
   background: var(--surface);
-}
-
-.share-popover .theme-picker {
-  display: flex;
-  width: 100%;
-}
-
-.share-popover .theme-option {
-  flex: 1;
-  justify-content: center;
-  min-height: 2.25rem;
-  font-size: 0.78rem;
 }
 
 .share-section-title {
@@ -2774,10 +2831,6 @@ a:focus-visible {
   font-size: 0.7rem;
   line-height: 1.45;
   color: var(--ink-faint);
-}
-
-.share-section-hint code {
-  font-size: 0.66rem;
 }
 
 .share-copy-row {
@@ -3143,7 +3196,7 @@ a:focus-visible {
     display: none;
   }
 
-  .share-popover .theme-option {
+  .header-menu-theme .theme-option {
     min-height: 44px;
   }
 
@@ -3846,6 +3899,15 @@ a:focus-visible {
 }
 
 @media (hover: none), (pointer: coarse) {
+  .header-menu-item,
+  .header-menu-status,
+  .header-menu-popover .chrome-toggle,
+  .header-menu-popover .feedback-button > button,
+  .header-menu-theme .theme-option,
+  .share-copy {
+    min-height: 44px;
+  }
+
   .sketch-download-button {
     min-width: 44px;
     min-height: 44px;

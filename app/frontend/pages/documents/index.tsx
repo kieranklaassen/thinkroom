@@ -352,34 +352,40 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
             )}
           </section>
 
-          <section className="document-library document-library--recent" aria-labelledby="recent-documents-heading">
-            <div className="document-library-heading">
-              <div>
-                <h2 id="recent-documents-heading">Recently opened</h2>
-                <p>Documents from this browser</p>
+          {recent.length > 0 && (
+            <section className="document-library document-library--recent" aria-labelledby="recent-documents-heading">
+              <div className="document-library-heading">
+                <div>
+                  <h2 id="recent-documents-heading">Recently opened</h2>
+                  <p>Documents from this browser</p>
+                </div>
+              </div>
+              <DocumentGroup title="Recent" documents={recent} claimerName={claimerName} />
+            </section>
+          )}
+
+          <details className="landing-agent">
+            <summary className="landing-agent-summary">
+              <span>Have an agent start a doc</span>
+              <span className="landing-agent-summary-action landing-agent-summary-action--closed">
+                Show instructions
+              </span>
+              <span className="landing-agent-summary-action landing-agent-summary-action--open">
+                Hide instructions
+              </span>
+            </summary>
+            <div className="landing-agent-content">
+              <p className="landing-agent-hint">
+                Paste this to any agent that can make HTTP requests:
+              </p>
+              <div className="landing-agent-block">
+                <code>{agentInstruction}</code>
+                <button className="share-copy" onClick={copyInstruction}>
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
               </div>
             </div>
-            {recent.length > 0 ? (
-              <DocumentGroup title="Recent" documents={recent} claimerName={claimerName} />
-            ) : (
-              <p className="document-library-empty">
-                Documents you open in this browser show up here.
-              </p>
-            )}
-          </section>
-
-          <section className="landing-agent">
-            <h2 className="landing-recent-heading">Have an agent start a doc</h2>
-            <p className="landing-agent-hint">
-              Paste this to any agent that can make HTTP requests:
-            </p>
-            <div className="landing-agent-block">
-              <code>{agentInstruction}</code>
-              <button className="share-copy" onClick={copyInstruction}>
-                {copied ? 'Copied' : 'Copy'}
-              </button>
-            </div>
-          </section>
+          </details>
         </main>
         <footer className="landing-footer">
           <a

@@ -41,7 +41,23 @@ try {
   }
   await landing.locator('.landing-byline', { hasText: 'creator of Compound Engineering' }).waitFor()
   await landing.getByRole('heading', { name: 'Your documents' }).waitFor()
-  await landing.getByRole('heading', { name: 'Recently opened' }).waitFor()
+  if ((await landing.getByRole('heading', { name: 'Recently opened' }).count()) === 0) {
+    ok('fresh home omits the redundant empty recently-opened section')
+  } else {
+    fail('fresh home still renders an empty recently-opened section')
+  }
+  const agentDisclosure = landing.locator('.landing-agent')
+  if (
+    !(await agentDisclosure.evaluate((el) => el.open)) &&
+    (await landing.locator('.landing-agent-content').evaluate((el) => getComputedStyle(el).display)) === 'none'
+  ) {
+    ok('agent creation instructions are collapsed by default')
+  } else {
+    fail('agent creation instructions compete with the primary home content')
+  }
+  await landing.locator('.landing-agent-summary').click()
+  await landing.locator('.landing-agent-block').waitFor({ state: 'visible' })
+  ok('agent creation disclosure reveals the copyable instructions')
   if ((await landing.locator('.format-label').count()) === 0) {
     ok('landing page organizes documents without format labels')
   } else {
@@ -1108,10 +1124,29 @@ try {
     .waitFor({ state: 'attached', timeout: 10000 })
   ok('image synced live to window B')
 
-  // --- Theme switch: instant, persistent ---
-  // The theme picker lives inside the Share popover since the header
-  // consolidation — open it first.
+  // --- Share/menu hierarchy + theme switch: instant, persistent ---
   await a.locator('.share-button').click()
+  if (
+    (await a.locator('.share-section-title', { hasText: 'Share link' }).count()) === 1 &&
+    (await a.locator('.share-section-title', { hasText: 'Agent invite' }).count()) === 1 &&
+    (await a.locator('.share-section-title', { hasText: 'Export' }).count()) === 1 &&
+    (await a.locator('.share-popover .theme-picker').count()) === 0
+  ) {
+    ok('Share contains collaboration and export without personal appearance')
+  } else {
+    fail('Share information architecture still mixes unrelated controls')
+  }
+  await a.keyboard.press('Escape')
+  await a.locator('.header-menu-trigger').click()
+  if (
+    (await a.locator('.header-menu-popover').getAttribute('role')) === 'dialog' &&
+    (await a.locator('.header-menu-label', { hasText: 'View' }).count()) === 1 &&
+    (await a.locator('.header-menu-theme .theme-picker').count()) === 1
+  ) {
+    ok('document options groups view controls and Theme in a dialog')
+  } else {
+    fail('document options did not expose the audited hierarchy')
+  }
   await a.locator('.theme-option', { hasText: 'Whitey' }).click()
   const themeNow = await a.evaluate(() => document.documentElement.dataset.theme)
   if (themeNow === 'whitey') ok('theme switched instantly (optimistic, no reload)')
@@ -1121,9 +1156,32 @@ try {
   const themeAfter = await a.evaluate(() => document.documentElement.dataset.theme)
   if (themeAfter === 'whitey') ok('theme persisted across reload')
   else fail(`theme lost on reload: ${themeAfter}`)
-  await a.locator('.share-button').click()
+  await a.locator('.header-menu-trigger').click()
   await a.locator('.theme-option', { hasText: 'Thinkroom' }).click()
   await a.keyboard.press('Escape')
+
+  await a.setViewportSize({ width: 390, height: 844 })
+  await a.locator('.header-menu-trigger').click()
+  const mobileMenuGeometry = await a.evaluate(() => ({
+    portaled: Boolean(document.querySelector('body > .share-backdrop .header-menu-popover')),
+    width: document.querySelector('.header-menu-popover')?.getBoundingClientRect().width,
+    themeHeights: Array.from(document.querySelectorAll('.header-menu-theme .theme-option')).map(
+      (el) => el.getBoundingClientRect().height,
+    ),
+    overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  }))
+  if (
+    mobileMenuGeometry.portaled &&
+    mobileMenuGeometry.width === 390 &&
+    mobileMenuGeometry.themeHeights.every((height) => height >= 44) &&
+    mobileMenuGeometry.overflow === 0
+  ) {
+    ok('mobile document options use a full-width, touch-sized sheet')
+  } else {
+    fail(`mobile document options geometry diverged: ${JSON.stringify(mobileMenuGeometry)}`)
+  }
+  await a.keyboard.press('Escape')
+  await a.setViewportSize({ width: 1280, height: 900 })
 
   // --- Agent loop: an agent joins over plain HTTP while humans watch ---
   const agentHeaders = { 'X-Agent-Name': 'Scout', 'Content-Type': 'application/json' }
