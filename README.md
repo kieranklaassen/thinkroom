@@ -98,7 +98,8 @@ and [DEPLOYING.md](DEPLOYING.md) for the environment-driven Kamal setup.
 Thinkroom is experimental. Accounts make document ownership portable, while
 share links remain the collaboration access model and agent identity is not yet
 authenticated. Keep deployment credentials, OAuth secrets, SSH keys, and API
-tokens outside the repository.
+tokens outside the repository. Maintainers should never include secrets in
+feedback recordings, screenshots, or shared session bundles.
 
 See [SECURITY.md](SECURITY.md) for the supported version and private reporting
 process.
