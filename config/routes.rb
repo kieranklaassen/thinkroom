@@ -12,6 +12,8 @@ Rails.application.routes.draw do
   delete "logout", to: "sessions#destroy", as: :logout
   get "signup", to: "registrations#new", as: :signup
   post "signup", to: "registrations#create"
+  get "cli/authorize", to: "cli_authorizations#show", as: :cli_authorize
+  post "cli/authorize", to: "cli_authorizations#create"
   match "/auth/:provider/callback", to: "oauth_callbacks#create", via: %i[get post]
   get "/auth/failure", to: "oauth_callbacks#failure"
 
@@ -39,6 +41,13 @@ Rails.application.routes.draw do
   post "/rails/active_storage/direct_uploads", to: "api/direct_uploads#create"
 
   namespace :api do
+    namespace :cli do
+      post "device_authorizations", to: "device_authorizations#create"
+      post "device_authorizations/token", to: "device_authorizations#token"
+      get "session", to: "sessions#show"
+      delete "session", to: "sessions#destroy"
+    end
+
     post "uploads", to: "uploads#create"
     post "docs", to: "docs#create"
     get "docs/:slug", to: "docs#show", as: :doc

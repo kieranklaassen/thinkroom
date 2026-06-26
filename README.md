@@ -35,6 +35,33 @@ Inspired by [Proof](https://proofeditor.ai) from Dan Shipper.
 - Local-first Yjs state synchronized through Action Cable
 - Optional password or Google sign-in so claimed documents follow you across browsers
 
+## Thinkroom CLI
+
+Install the zero-dependency CLI (Node 20 or newer), connect it to your account
+through a browser approval, and initialize the project-local agent skill:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kieranklaassen/thinkroom/main/script/install_thinkroom_cli.sh | sh
+thinkroom login
+thinkroom init
+```
+
+The login flow opens a browser and polls until you approve it—there is no token
+to copy and paste. Documents created through the connected CLI belong to that
+account while retaining the agent name as provenance:
+
+```bash
+thinkroom new draft.md --title "Decision memo" --agent "Codex"
+thinkroom show https://thinkroom.kieranklaassen.com/d/RETURNED_SLUG
+thinkroom suggest RETURNED_SLUG --replaces "Old text" --body "New text" --intent "Tighten the claim" --agent "Codex"
+```
+
+`thinkroom prime` works without a login or network connection. It points the
+agent at repository instructions, `CONCEPTS.md`, documented solutions, and
+active plans. For a self-hosted deployment, pass `--url https://your-host` to
+`thinkroom login` or set `THINKROOM_URL`; automation can use
+`THINKROOM_TOKEN` without writing a config file.
+
 ## Run locally
 
 Requires Ruby 3.4, Node 20 or newer, and SQLite.

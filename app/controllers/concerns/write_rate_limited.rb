@@ -7,6 +7,8 @@ module WriteRateLimited
   CONTRIBUTION_BURST_LIMIT = 60
   CONTRIBUTION_DAILY_LIMIT = 500
   AUTHENTICATION_BURST_LIMIT = 10
+  CLI_DEVICE_BURST_LIMIT = 10
+  CLI_POLL_BURST_LIMIT = 1_200
 
   class_methods do
     def rate_limit_document_creation
@@ -43,6 +45,18 @@ module WriteRateLimited
       rate_limit to: AUTHENTICATION_BURST_LIMIT, within: 10.minutes, by: -> { request.remote_ip },
                  with: :render_write_rate_limit, store: STORE, name: "authentication-burst",
                  only: :create
+    end
+
+    def rate_limit_cli_device_authorization
+      rate_limit to: CLI_DEVICE_BURST_LIMIT, within: 10.minutes, by: -> { request.remote_ip },
+                 with: :render_write_rate_limit, store: STORE, name: "cli-device-authorization",
+                 only: :create
+    end
+
+    def rate_limit_cli_token_polling
+      rate_limit to: CLI_POLL_BURST_LIMIT, within: 10.minutes, by: -> { request.remote_ip },
+                 with: :render_write_rate_limit, store: STORE, name: "cli-token-polling",
+                 only: :token
     end
   end
 end

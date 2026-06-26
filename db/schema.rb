@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_26_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_26_130100) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -61,6 +61,34 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_26_120000) do
     t.datetime "updated_at", null: false
     t.index ["document_id", "agent_name"], name: "index_agent_presences_on_document_id_and_agent_name", unique: true
     t.index ["document_id"], name: "index_agent_presences_on_document_id"
+  end
+
+  create_table "cli_access_tokens", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "last_used_at"
+    t.string "name", limit: 255, default: "Thinkroom CLI", null: false
+    t.datetime "revoked_at"
+    t.string "token_digest", limit: 64, null: false
+    t.datetime "updated_at", null: false
+    t.integer "user_id", null: false
+    t.index ["token_digest"], name: "index_cli_access_tokens_on_token_digest", unique: true
+    t.index ["user_id"], name: "index_cli_access_tokens_on_user_id"
+  end
+
+  create_table "cli_device_authorizations", force: :cascade do |t|
+    t.datetime "approved_at"
+    t.datetime "consumed_at"
+    t.datetime "created_at", null: false
+    t.string "device_code_digest", limit: 64, null: false
+    t.datetime "expires_at", null: false
+    t.datetime "last_polled_at"
+    t.datetime "updated_at", null: false
+    t.string "user_code", limit: 9, null: false
+    t.integer "user_id"
+    t.index ["device_code_digest"], name: "index_cli_device_authorizations_on_device_code_digest", unique: true
+    t.index ["expires_at"], name: "index_cli_device_authorizations_on_expires_at"
+    t.index ["user_code"], name: "index_cli_device_authorizations_on_user_code", unique: true
+    t.index ["user_id"], name: "index_cli_device_authorizations_on_user_id"
   end
 
   create_table "comments", force: :cascade do |t|
@@ -147,6 +175,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_26_120000) do
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "activities", "documents"
   add_foreign_key "agent_presences", "documents"
+  add_foreign_key "cli_access_tokens", "users"
+  add_foreign_key "cli_device_authorizations", "users"
   add_foreign_key "comments", "documents"
   add_foreign_key "document_assets", "documents"
   add_foreign_key "documents", "users"

@@ -1,0 +1,25 @@
+{
+  "name": "thinkroom",
+  "version": "0.1.0",
+  "description": "Account-linked CLI and agent skill for Thinkroom",
+  "type": "module",
+  "bin": {
+    "thinkroom": "bin/thinkroom.js"
+  },
+  "files": [
+    "bin/thinkroom.js",
+    "skill/thinkroom"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kieranklaassen/thinkroom.git"
+  },
+  "homepage": "https://thinkroom.kieranklaassen.com",
+  "bugs": {
+    "url": "https://github.com/kieranklaassen/thinkroom/issues"
+  }
+}
