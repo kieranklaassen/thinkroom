@@ -7,7 +7,9 @@
 
 # Deploying
 
-- Production runs on [Kamal](https://kamal-deploy.org/) (hosts: `thinkroom.kieranklaassen.com`, `pruf.kieranklaassen.com`). Deploy with `set -a; source .kamal/deploy.env; set +a; bin/kamal deploy`. See `DEPLOYING.md` for first-time setup and secrets.
+- Production runs on [Kamal](https://kamal-deploy.org/) (hosts: `thinkroom.kieranklaassen.com`, `pruf.kieranklaassen.com`). See `DEPLOYING.md` for first-time setup, secrets, and the complete deploy procedure.
+- Always run Kamal with the Ruby version from `.ruby-version`, not macOS's system Ruby/Bundler: `export PATH="$HOME/.rbenv/versions/$(cat .ruby-version)/bin:$PATH"` before `bin/kamal` commands.
+- Isolated worktrees do not inherit ignored deployment files. Before deploying from one, verify that `.kamal/deploy.env`, `.kamal/secrets`, and `config/master.key` exist and are non-empty; copy them from the primary checkout if needed without printing their contents.
 - There is no auto-deploy on merge — deploys are run manually after merging to `main`.
 
 # Documented knowledge
