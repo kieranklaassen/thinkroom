@@ -37,6 +37,28 @@ class CommentFlowTest < ActionDispatch::IntegrationTest
     assert_response :redirect
   end
 
+  test "locked non-owner cannot create or resolve comments" do
+    @document.update!(
+      owner_token: "someone-else",
+      owner_name: "Owner",
+      editing_locked: true
+    )
+    comment = @document.comments.create!(
+      author_name: "A", author_kind: "human", body: "Existing"
+    )
+
+    assert_no_difference -> { @document.comments.count } do
+      post document_comments_path(@document.slug), params: {
+        body: "Forbidden", author_name: "Reader"
+      }
+    end
+    assert_response :redirect
+
+    patch resolve_comment_path(comment), params: { by: "Reader" }, as: :json
+    assert_response :locked
+    assert_not comment.reload.resolved_at
+  end
+
   test "resolving a comment timestamps it and keeps it out of open scope" do
     comment = @document.comments.create!(author_name: "A", author_kind: "human", body: "Fix this")
 
@@ -78,6 +100,39 @@ class CommentFlowTest < ActionDispatch::IntegrationTest
     assert_empty @document.comments.open
     # The second resolve re-stamps but never un-resolves; both are accepted.
     assert_operator comment.resolved_at, :>=, first_resolved_at
+  end
+
+  test "an agent resolves a comment over the API (no CSRF) attributed to its name" do
+    comment = @document.comments.create!(author_name: "A", author_kind: "human", body: "Fix this")
+
+    post api_doc_resolve_comment_path(slug: @document.slug, id: comment.id),
+      headers: { "X-Agent-Name" => "Scout" }, as: :json
+
+    assert_response :success
+    assert comment.reload.resolved_at.present?
+    assert_empty @document.comments.open
+    # Logs a resolved_comment activity attributed to the agent (the first API
+    # call also logs a presence "joined", so don't assert an exact count).
+    activity = @document.activities.where(action: "resolved_comment").last
+    assert_equal "agent", activity.actor_kind
+    assert_equal "Scout", activity.actor_name
+  end
+
+  test "API resolve requires an X-Agent-Name header" do
+    comment = @document.comments.create!(author_name: "A", author_kind: "human", body: "Fix this")
+
+    post api_doc_resolve_comment_path(slug: @document.slug, id: comment.id), as: :json
+
+    assert_response :unprocessable_entity
+    assert_nil comment.reload.resolved_at
+  end
+
+  test "API resolve of an unknown comment id returns 404 with a clear error" do
+    post api_doc_resolve_comment_path(slug: @document.slug, id: -42),
+      headers: { "X-Agent-Name" => "Scout" }, as: :json
+
+    assert_response :not_found
+    assert_match(/no comment/i, JSON.parse(response.body)["error"])
   end
 end
 

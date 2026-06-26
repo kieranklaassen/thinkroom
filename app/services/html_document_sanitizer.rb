@@ -6,13 +6,14 @@ class HtmlDocumentSanitizer
   TAGS = %w[
     p h1 h2 h3 h4 h5 h6 blockquote pre code br hr
     ul ol li strong b em i s del a img
-    table thead tbody tr th td span ins
+    table thead tbody tr th td span ins figure figcaption
   ].freeze
 
   ATTRIBUTES = %w[
     href title src alt start style colspan rowspan colwidth
     data-language data-item-type data-label data-list-type data-spread data-checked
     data-is-header data-provenance data-kind data-author data-state data-suggestion-id
+    data-thinkroom-sketch data-sketch-id data-sketch-height data-scene data-description data-format-version
   ].freeze
 
   PROVENANCE_KINDS = %w[human ai].freeze
@@ -31,7 +32,10 @@ class HtmlDocumentSanitizer
   DROP_WITH_CONTENT = %w[script style iframe object embed template svg math].freeze
   PROVENANCE_ATTRIBUTES = %w[data-provenance data-kind data-author data-state].freeze
   SUGGESTION_ATTRIBUTES = %w[data-suggestion-id data-author].freeze
-  THINKROOM_ATTRIBUTES = (PROVENANCE_ATTRIBUTES + SUGGESTION_ATTRIBUTES).uniq.freeze
+  SKETCH_ATTRIBUTES = %w[
+    data-thinkroom-sketch data-sketch-id data-sketch-height data-scene data-description data-format-version
+  ].freeze
+  THINKROOM_ATTRIBUTES = (PROVENANCE_ATTRIBUTES + SUGGESTION_ATTRIBUTES + SKETCH_ATTRIBUTES).uniq.freeze
   EXTERNAL_ATTRIBUTES = (ATTRIBUTES - THINKROOM_ATTRIBUTES).freeze
 
   class << self
@@ -92,6 +96,7 @@ class HtmlDocumentSanitizer
 
       restore_provenance(node, metadata) if valid_provenance?(node, metadata)
       restore_suggestion(node, metadata) if valid_suggestion?(node, metadata)
+      restore_sketch(node, metadata) if valid_sketch?(node, metadata)
     end
 
     def valid_active_storage_src?(source)
@@ -135,6 +140,27 @@ class HtmlDocumentSanitizer
     def restore_suggestion(node, metadata)
       node["data-suggestion-id"] = metadata["data-suggestion-id"]
       node["data-author"] = metadata["data-author"].to_s
+    end
+
+    def valid_sketch?(node, metadata)
+      return false unless node.name == "figure" && !metadata["data-thinkroom-sketch"].nil?
+      return false unless metadata["data-sketch-id"].to_s.match?(/\A[a-zA-Z0-9_-]{1,100}\z/)
+      height = metadata["data-sketch-height"].to_s
+      return false if height.present? && !height.match?(/\A(?:1[89]\d|[2-9]\d{2}|1[01]\d{2}|1200)\z/)
+
+      ThinkroomSketch.parse(
+        metadata["data-scene"],
+        description: metadata["data-description"],
+        format_version: metadata["data-format-version"]
+      ).present?
+    end
+
+    def restore_sketch(node, metadata)
+      SKETCH_ATTRIBUTES.each do |attribute|
+        node[attribute] = metadata[attribute].to_s
+      end
+      node["data-thinkroom-sketch"] = ""
+      node["data-format-version"] = ThinkroomSketch::FORMAT_VERSION.to_s
     end
 
     def strip_thinkroom_metadata(node)

@@ -6,6 +6,7 @@ import {
   type Node,
   type Schema,
 } from '@milkdown/kit/prose/model'
+import { normalizeSketchData } from './sketch/scene'
 
 export type DocumentFormat = 'markdown' | 'html'
 export type HtmlTrust = 'external' | 'snapshot'
@@ -43,6 +44,8 @@ const ALLOWED_TAGS = [
   'td',
   'span',
   'ins',
+  'figure',
+  'figcaption',
 ]
 
 const ALLOWED_ATTR = [
@@ -67,6 +70,12 @@ const ALLOWED_ATTR = [
   'data-author',
   'data-state',
   'data-suggestion-id',
+  'data-thinkroom-sketch',
+  'data-sketch-id',
+  'data-sketch-height',
+  'data-scene',
+  'data-description',
+  'data-format-version',
 ]
 
 const ACTIVE_STORAGE_PATH =
@@ -77,7 +86,17 @@ const PROVENANCE_STATES = new Set(['verbatim', 'pending', 'reviewed', 'endorsed'
 const MAX_METADATA_LENGTH = 255
 const PROVENANCE_ATTRS = ['data-provenance', 'data-kind', 'data-author', 'data-state']
 const SUGGESTION_ATTRS = ['data-suggestion-id', 'data-author']
-const THINKROOM_ATTRS = Array.from(new Set([...PROVENANCE_ATTRS, ...SUGGESTION_ATTRS]))
+const SKETCH_ATTRS = [
+  'data-thinkroom-sketch',
+  'data-sketch-id',
+  'data-sketch-height',
+  'data-scene',
+  'data-description',
+  'data-format-version',
+]
+const THINKROOM_ATTRS = Array.from(
+  new Set([...PROVENANCE_ATTRS, ...SUGGESTION_ATTRS, ...SKETCH_ATTRS]),
+)
 
 const removeAttrs = (element: Element, attrs: string[]) => {
   attrs.forEach((attr) => element.removeAttribute(attr))
@@ -137,6 +156,25 @@ const sanitizeMetadata = (element: HTMLElement, trust: HtmlTrust) => {
   if (validSuggestion) {
     element.setAttribute('data-suggestion-id', suggestionId)
     element.setAttribute('data-author', author)
+  }
+
+  if (element.tagName === 'FIGURE' && metadata['data-thinkroom-sketch'] !== null) {
+    try {
+      const validSketch = normalizeSketchData({
+        id: metadata['data-sketch-id'],
+        height: metadata['data-sketch-height'] === null
+          ? undefined
+          : Number(metadata['data-sketch-height']),
+        formatVersion: Number(metadata['data-format-version']),
+        description: metadata['data-description'],
+        scene: JSON.parse(metadata['data-scene'] ?? ''),
+      })
+      if (validSketch) {
+        for (const attr of SKETCH_ATTRS) element.setAttribute(attr, metadata[attr] ?? '')
+      }
+    } catch {
+      // Invalid trusted metadata stays stripped.
+    }
   }
 }
 

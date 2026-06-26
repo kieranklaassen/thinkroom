@@ -1,5 +1,6 @@
 class ApplicationController < ActionController::Base
   include WriteRateLimited
+  include AuthenticatesUser
 
   # Only allow modern browsers supporting webp images, web push, badges, import maps, CSS nesting, and CSS :has.
   allow_browser versions: :modern
@@ -11,6 +12,8 @@ class ApplicationController < ActionController::Base
   # complements CSRF protection on the claim/delete POSTs.
   before_action :ensure_owner_token
 
+  helper_method :current_user
+
   private
 
   def render_write_rate_limit
@@ -20,6 +23,10 @@ class ApplicationController < ActionController::Base
   def ensure_owner_token
     return if cookies.signed[:owner_token].present?
 
+    replace_owner_token!
+  end
+
+  def replace_owner_token!
     cookies.permanent.signed[:owner_token] = {
       value: SecureRandom.hex(16),
       same_site: :lax,
@@ -30,5 +37,11 @@ class ApplicationController < ActionController::Base
   # The browser's ownership identity. Never rendered into props or payloads.
   def owner_token
     cookies.signed[:owner_token]
+  end
+
+  def current_user
+    return @current_user if defined?(@current_user)
+
+    @current_user = User.find_by(id: session[:user_id])
   end
 end

@@ -36,6 +36,14 @@
 !/app/assets/builds/.keep
 /public/assets
 
+# Ignore Vite build output — the image rebuilds these (client via
+# assets:precompile, SSR via `vite build --ssr`). Excluding them keeps the
+# build context small and prevents stale host artifacts from leaking in.
+/public/vite
+/public/vite-ssr
+/public/vite-dev
+/public/vite-test
+
 # Ignore CI service files.
 /.github
 

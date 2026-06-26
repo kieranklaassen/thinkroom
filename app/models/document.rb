@@ -1,8 +1,12 @@
 class Document < ApplicationRecord
+  class EditingLockedError < StandardError; end
+  class NotOwnerError < StandardError; end
   DEFAULT_SEED = "# Untitled\n\nStart writing — everything you type is attributed to you.\n"
   DEFAULT_HTML_SEED = "<h1>Untitled</h1><p>Start writing — everything you type is attributed to you.</p>"
   CONTENT_FORMATS = %w[markdown html].freeze
   MAX_CONTENT_BYTES = 2.megabytes
+  MAX_TAGS = 8
+  MAX_TAG_LENGTH = 32
 
   # A stale seed claim (seeder crashed or never connected before its first
   # update persisted) is reclaimable after this window.
@@ -28,8 +32,10 @@ class Document < ApplicationRecord
   has_many :activities, dependent: :destroy
   has_many :agent_presences, dependent: :destroy
   has_many :document_assets, dependent: :destroy
+  belongs_to :user, optional: true
 
   before_validation :ensure_slug, on: :create
+  before_validation :normalize_tags
 
   validates :title, presence: true
   validates :slug, presence: true, uniqueness: true
@@ -46,6 +52,7 @@ class Document < ApplicationRecord
   # value written by a future code path would silently claim text as AI —
   # constrain the vocabulary at the model.
   validates :seed_author_kind, inclusion: { in: %w[human agent] }, allow_nil: true
+  validate :tags_are_bounded
 
   def to_param = slug
 
@@ -71,18 +78,90 @@ class Document < ApplicationRecord
     content_snapshot.nil? ? seed_content : content_snapshot
   end
 
+  # True while the seed is still what every reader sees: no editor has pushed a
+  # snapshot (content_snapshot nil) and no live CRDT exists (yjs_state blank).
+  # This is the only state where overwriting the seed actually changes what
+  # humans and agents read — once either is set, current_content shadows the
+  # seed, so a seed write would be a silent no-op.
+  def seed_stage?
+    content_snapshot.nil? && yjs_state.blank?
+  end
+
   def plain_text
     DocumentPlainText.call(format: content_format, content: current_content)
   end
 
-  def claimed? = owner_token.present?
+  # Sanitized HTML of the current content, painted on first load so the editor
+  # frame shows real text before Milkdown finishes binding the hydrated state.
+  def preview_html
+    DocumentPreviewHtml.call(format: content_format, content: current_content)
+  end
+
+  # The title to show before the editor mounts. The editor derives the header
+  # title from the document's first H1; deriving the same thing here means the
+  # header reads correctly on first paint instead of flashing the stored title.
+  def display_title
+    content = current_content
+    return title if content.blank?
+
+    DocumentTitle.call(format: content_format, content: content).presence || title
+  end
+
+  def claimed? = user_id.present? || owner_token.present?
 
   def claimable? = !claimed? && UNCLAIMABLE_SLUGS.exclude?(slug)
 
   # Never true for blank tokens — the delete-authorization predicate must not
   # match an unclaimed doc against a missing cookie.
-  def owned_by?(token)
+  def owned_by?(token, user: nil)
+    return user.present? && user_id == user.id if user_id.present?
+
     token.present? && owner_token == token
+  end
+
+  def writable_by?(token, user: nil)
+    !editing_locked? || owned_by?(token, user:)
+  end
+
+  def assert_write_access!(token: nil, user: nil)
+    raise EditingLockedError, "This document is read-only." unless writable_by?(token, user:)
+
+    self
+  end
+
+  def with_write_access(token: nil, user: nil)
+    with_lock do
+      reload
+      assert_write_access!(token:, user:)
+
+      yield
+    end
+  end
+
+  def set_editing_locked!(locked:, token:, user: nil)
+    changed = false
+    actor_name = user&.name || owner_name || "Anonymous"
+
+    with_lock do
+      reload
+      raise NotOwnerError, "Only the owner can change editing access." unless owned_by?(token, user:)
+      next if editing_locked? == locked
+
+      update!(editing_locked: locked)
+      activities.create!(
+        actor_name:,
+        actor_kind: "human",
+        action: locked ? "locked_editing" : "unlocked_editing",
+        detail: locked ? "made the document read-only for others" : "reopened the document for editing"
+      )
+      changed = true
+    end
+
+    if changed
+      DocumentMetaChannel.broadcast_event(self, :activities)
+      DocumentMetaChannel.broadcast_event(self, :editing_lock, locked:)
+    end
+    self
   end
 
   # One normalization rule for display names: strip, cap, nil for blank.
@@ -104,22 +183,34 @@ class Document < ApplicationRecord
   # convention). Re-claim by the owning token is a no-op success — checked
   # again after reload so even two same-token requests racing each other
   # (double-click, second tab) never surface a fake lost-race error.
-  def claim!(token:, name:)
+  def claim!(token:, name:, user: nil)
     raise UnclaimableError, "This document cannot be claimed." if UNCLAIMABLE_SLUGS.include?(slug)
-    return self if owned_by?(token)
+    raise ArgumentError, "token required" if token.blank? && user.nil?
+    return self if owned_by?(token, user:)
 
-    name = self.class.normalize_owner_name(name)
+    name = user&.name || self.class.normalize_owner_name(name)
     activity = nil
     # Ownership and its activity commit together: a failed activity insert
     # must not leave the doc silently claimed with no feed entry and no
     # broadcast. Broadcasts happen after commit — they can't be rolled back.
     transaction do
-      won = self.class.where(id: id, owner_token: nil)
-        .update_all(owner_token: token, owner_name: name, claimed_at: Time.current, updated_at: Time.current) == 1
+      attributes = {
+        owner_name: name,
+        claimed_at: Time.current,
+        updated_at: Time.current
+      }
+      if user
+        attributes[:user_id] = user.id
+        attributes[:owner_token] = nil
+      else
+        attributes[:owner_token] = token
+      end
+      won = self.class.where(id: id, owner_token: nil, user_id: nil)
+        .update_all(attributes) == 1
 
       reload
       unless won
-        return self if owned_by?(token) # lost to ourselves: another tab/click with this token won
+        return self if owned_by?(token, user:) # lost to ourselves: another tab/click won
 
         raise ClaimRaceError, "already claimed"
       end
@@ -157,12 +248,14 @@ class Document < ApplicationRecord
       .update_all(seed_state: "claimed", seed_claimed_at: Time.current) == 1
   end
 
-  def ownership_props(viewer_token)
+  def ownership_props(viewer_token, viewer_user: nil)
     {
       claimed: claimed?,
       claimable: claimable?,
       owner_name: owner_name,
-      yours: owned_by?(viewer_token)
+      yours: owned_by?(viewer_token, user: viewer_user),
+      editing_locked: editing_locked?,
+      can_write: writable_by?(viewer_token, user: viewer_user)
     }
   end
 
@@ -201,6 +294,27 @@ class Document < ApplicationRecord
   end
 
   private
+
+  def normalize_tags
+    seen = Set.new
+    self.tags = Array(tags).filter_map do |tag|
+      normalized = tag.to_s.squish
+      next if normalized.blank?
+
+      key = normalized.downcase
+      next if seen.include?(key)
+
+      seen << key
+      normalized
+    end
+  end
+
+  def tags_are_bounded
+    errors.add(:tags, "can include at most #{MAX_TAGS} tags") if tags.length > MAX_TAGS
+    return unless tags.any? { |tag| tag.length > MAX_TAG_LENGTH }
+
+    errors.add(:tags, "must be #{MAX_TAG_LENGTH} characters or fewer")
+  end
 
   def content_format_is_immutable
     errors.add(:content_format, "cannot be changed") if will_save_change_to_content_format?

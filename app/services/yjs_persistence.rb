@@ -13,11 +13,14 @@ class YjsPersistence
 
   class << self
     # Merge a base64-encoded Yjs update into the document's persisted state.
-    def merge(document, base64_update)
+    def merge(document, base64_update, token: nil, user: nil)
       update = decode(base64_update)
       lock_for(document.id).synchronize do
         document.with_lock do
-          ydoc = load_ydoc(document.reload)
+          document.reload
+          raise Document::EditingLockedError, "This document is read-only." unless document.writable_by?(token, user:)
+
+          ydoc = load_ydoc(document)
           before = ydoc.state
           ydoc.sync(update)
           # A no-op update (e.g. the empty sync-reply a client joining an
@@ -47,12 +50,15 @@ class YjsPersistence
     # client has observed every Yjs update currently stored by the server.
     # A client may be ahead (its own cable frame is still in flight), but it
     # may not overwrite the API read model from behind.
-    def persist_snapshot(document, state_vector_b64:, content:, spans:, title: document.title)
+    def persist_snapshot(document, state_vector_b64:, content:, spans:, title: document.title,
+                         token: nil, user: nil)
       client_state = decode_state_vector(decode(state_vector_b64)) if state_vector_b64.present?
 
       lock_for(document.id).synchronize do
         document.with_lock do
           document.reload
+          raise Document::EditingLockedError, "This document is read-only." unless document.writable_by?(token, user:)
+
           if client_state && document.yjs_state.present?
             server_state = decode_state_vector(load_ydoc(document).state)
             current = server_state.all? do |client_id, clock|

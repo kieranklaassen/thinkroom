@@ -1,6 +1,7 @@
 import type { MilkdownPlugin } from '@milkdown/kit/ctx'
 import { insertionSchema, deletionSchema, modificationSchema } from './marks'
 import { suggestParse, suggestStringify } from './remark'
+import { allowBlockSuggestionMarks } from './block_marks'
 
 /**
  * Track-changes foundation: marks + markdown serialization. The interception
@@ -13,6 +14,7 @@ export const suggestChangesMarks: MilkdownPlugin[] = [
   modificationSchema,
   suggestStringify,
   suggestParse,
+  allowBlockSuggestionMarks,
 ].flat()
 
 export * from './marks'

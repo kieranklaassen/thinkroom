@@ -49,7 +49,7 @@ class Suggestion < ApplicationRecord
       action: "suggested",
       detail: intent.presence || body.truncate(80)
     )
-    DocumentMetaChannel.broadcast_event(document, :suggestions)
+    DocumentMetaChannel.broadcast_event_after_commit(document, :suggestions)
     suggestion
   end
 

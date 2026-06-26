@@ -10,7 +10,7 @@ import {
 } from 'y-protocols/awareness'
 
 type SyncMessage = {
-  type: 'sync' | 'sync-reply' | 'update' | 'awareness' | 'awareness-query'
+  type: 'sync' | 'sync-reply' | 'update' | 'awareness' | 'awareness-query' | 'write-denied'
   update?: string
   sv?: string
   seed?: boolean
@@ -66,12 +66,18 @@ export class CableProvider {
   private updateSequence = 0
   private serverStateVector: Uint8Array | null = null
   private readonly slug: string
+  private readonly canWrite: boolean
 
-  constructor(doc: Y.Doc, slug: string, consumer?: Consumer) {
+  constructor(
+    doc: Y.Doc,
+    slug: string,
+    options?: { consumer?: Consumer; canWrite?: boolean; connectionIdentity?: string },
+  ) {
     this.doc = doc
     this.slug = slug
+    this.canWrite = options?.canWrite ?? true
     this.awareness = new Awareness(doc)
-    this.consumer = consumer ?? getConsumer()
+    this.consumer = options?.consumer ?? getConsumer(options?.connectionIdentity)
 
     this.subscription = this.consumer.subscriptions.create(
       { channel: 'SyncChannel', slug },
@@ -100,12 +106,12 @@ export class CableProvider {
     window.addEventListener('beforeunload', this.handleUnload)
   }
 
-  on(event: 'synced' | 'seed' | 'rejected', handler: () => void): void {
+  on(event: 'synced' | 'seed' | 'rejected' | 'write-denied', handler: () => void): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set())
     this.listeners.get(event)!.add(handler as never)
   }
 
-  off(event: 'synced' | 'seed' | 'rejected', handler: () => void): void {
+  off(event: 'synced' | 'seed' | 'rejected' | 'write-denied', handler: () => void): void {
     this.listeners.get(event)?.delete(handler as never)
   }
 
@@ -147,6 +153,7 @@ export class CableProvider {
    * request finish when a click is immediately followed by navigation.
    */
   persistCurrentState = (snapshot: DurableSnapshotPayload): void => {
+    if (!this.canWrite) return
     const update = this.serverStateVector
       ? Y.encodeStateAsUpdate(this.doc, this.serverStateVector)
       : Y.encodeStateAsUpdate(this.doc)
@@ -189,7 +196,9 @@ export class CableProvider {
         const serverVector = fromBase64(data.sv!)
         this.serverStateVector = serverVector
         this.updateSequence = 0
-        this.sendUpdate('sync-reply', Y.encodeStateAsUpdate(this.doc, serverVector))
+        if (this.canWrite) {
+          this.sendUpdate('sync-reply', Y.encodeStateAsUpdate(this.doc, serverVector))
+        }
         const seedContent = data.seed_content ?? data.seed_markdown
         if (data.seed && seedContent) {
           // No one listens to 'seed' by design: the editor reads
@@ -226,12 +235,15 @@ export class CableProvider {
       case 'awareness-query':
         this.broadcastAwareness()
         break
+      case 'write-denied':
+        this.emit('write-denied')
+        break
     }
   }
 
   private handleDocUpdate = (update: Uint8Array, origin: unknown): void => {
     // Updates we applied from the wire carry `this` as origin — don't echo them.
-    if (origin === this || !this.synced) return
+    if (origin === this || !this.synced || !this.canWrite) return
     this.sendUpdate('update', update)
   }
 
