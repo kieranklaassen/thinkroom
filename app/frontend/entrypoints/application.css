@@ -272,6 +272,8 @@ a:focus-visible {
 
 /* ---------------------------- Document library -------------------------- */
 .document-library {
+  --document-library-muted: color-mix(in srgb, var(--ink-soft) 88%, var(--ink));
+
   margin-top: 3.5rem;
   text-align: left;
 }
@@ -300,7 +302,7 @@ a:focus-visible {
 
 .document-library-heading p {
   margin: 0.2rem 0 0;
-  color: var(--ink-soft);
+  color: var(--document-library-muted);
   font-size: 0.75rem;
 }
 
@@ -313,10 +315,10 @@ a:focus-visible {
 
 .document-tag-filters button {
   min-height: 1.85rem;
-  border: 1px solid var(--ink-soft);
+  border: 1px solid var(--document-library-muted);
   border-radius: 999px;
   background: transparent;
-  color: var(--ink-soft);
+  color: var(--document-library-muted);
   padding: 0.28rem 0.65rem;
   font-size: 0.7rem;
   font-weight: 600;
@@ -339,7 +341,7 @@ a:focus-visible {
 .document-library-empty {
   margin: 0;
   padding: 1.2rem 0;
-  color: var(--ink-soft);
+  color: var(--document-library-muted);
   font-size: 0.85rem;
   line-height: 1.5;
 }
@@ -361,7 +363,7 @@ a:focus-visible {
 
 .document-group-heading h3 {
   margin: 0;
-  color: var(--ink-soft);
+  color: var(--document-library-muted);
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -369,7 +371,7 @@ a:focus-visible {
 }
 
 .document-group-heading span {
-  color: var(--ink-soft);
+  color: var(--document-library-muted);
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
 }
@@ -426,7 +428,7 @@ a:focus-visible {
 }
 
 .document-row-date {
-  color: var(--ink-soft);
+  color: var(--document-library-muted);
   font-size: 0.7rem;
   font-variant-numeric: tabular-nums;
 }
@@ -462,7 +464,7 @@ a:focus-visible {
 .document-tag-cancel {
   border: 0;
   background: transparent;
-  color: var(--ink-soft);
+  color: var(--document-library-muted);
   font-size: 0.7rem;
   font-weight: 650;
   cursor: pointer;
@@ -503,7 +505,7 @@ a:focus-visible {
   flex: 1;
   min-width: 0;
   height: 2.15rem;
-  border: 1px solid var(--ink-soft);
+  border: 1px solid var(--document-library-muted);
   border-radius: 7px;
   background: var(--surface);
   color: var(--ink);
@@ -537,7 +539,7 @@ a:focus-visible {
 }
 
 .document-tag-help {
-  color: var(--ink-soft);
+  color: var(--document-library-muted);
 }
 
 .document-tag-error {
@@ -550,10 +552,10 @@ a:focus-visible {
   justify-content: center;
   width: 1.9rem;
   height: 1.9rem;
-  border: 1px solid var(--ink-soft);
+  border: 1px solid var(--document-library-muted);
   border-radius: 6px;
   background: transparent;
-  color: var(--ink-soft);
+  color: var(--document-library-muted);
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
@@ -570,7 +572,7 @@ a:focus-visible {
 
 .recent-owner {
   font-size: 0.72rem;
-  color: var(--ink-soft);
+  color: var(--document-library-muted);
   white-space: nowrap;
 }
 

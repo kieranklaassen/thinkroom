@@ -162,20 +162,20 @@ class DocumentsController < InertiaController
   def update_tags
     document = Document.find_by!(slug: params[:slug])
     unless document.owned_by?(owner_token, user: current_user)
-      return redirect_back fallback_location: root_path, status: :see_other,
+      return redirect_back fallback_location: root_path,
                            inertia: { errors: { tags: "Only the owner can organize this document" } }
     end
 
     tags = params[:tags]
     unless tags.is_a?(Array)
-      return redirect_back fallback_location: root_path, status: :see_other,
+      return redirect_back fallback_location: root_path,
                            inertia: { errors: { tags: "Tags must be a list" } }
     end
 
     if document.update(tags:)
       redirect_back fallback_location: root_path, status: :see_other
     else
-      redirect_back fallback_location: root_path, status: :see_other,
+      redirect_back fallback_location: root_path,
                     inertia: { errors: { tags: document.errors[:tags].to_sentence } }
     end
   rescue ActiveRecord::RecordNotFound

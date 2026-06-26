@@ -48,6 +48,34 @@ try {
     fail('landing page still exposes document format labels')
   }
 
+  await landing.getByRole('button', { name: 'New document' }).click()
+  await landing.waitForURL(/\/d\//)
+  await landing.goto(BASE)
+  await landing.getByRole('button', { name: /Add tag/ }).first().click()
+  await landing
+    .getByLabel('Tags')
+    .fill('one, two, three, four, five, six, seven, eight, nine')
+  await landing.getByRole('button', { name: 'Save' }).click()
+  await landing.getByRole('alert').waitFor()
+  if (
+    (await landing.getByLabel('Tags').isVisible()) &&
+    (await landing.getByRole('alert').innerText()).includes('at most 8 tags')
+  ) {
+    ok('invalid tags keep the inline editor open with an error')
+  } else {
+    fail('invalid tags did not remain visible in the inline editor')
+  }
+  await landing.getByLabel('Tags').fill('Research, Planning')
+  await landing.getByRole('button', { name: 'Save' }).click()
+  await landing.locator('.document-tag-editor input').waitFor({ state: 'detached' })
+  if (
+    (await landing.locator('.document-tag', { hasText: 'Research' }).count()) === 1 &&
+    (await landing.locator('.document-tag', { hasText: 'Planning' }).count()) === 1
+  ) {
+    ok('valid tags update the row without leaving the index')
+  } else {
+    fail('saved tags did not update the document row')
+  }
   await landing.close()
 
   const a = await makePage('a')

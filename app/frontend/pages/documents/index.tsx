@@ -75,7 +75,7 @@ function TagEditor({ document, onClose }: { document: DocLink; onClose: () => vo
     }))
     form.patch(`/d/${document.slug}/tags`, {
       preserveScroll: true,
-      only: ['yours', 'recent'],
+      only: ['yours', 'recent', 'errors'],
       onSuccess: onClose,
     })
   }

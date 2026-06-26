@@ -80,7 +80,9 @@ class DocumentIndexTest < ActionDispatch::IntegrationTest
     )
     establish_identity
 
-    patch document_tags_path(document.slug), params: { tags: [ "Changed" ] }
+    patch document_tags_path(document.slug),
+          params: { tags: [ "Changed" ] },
+          headers: inertia_headers
 
     assert_response :see_other
     assert_equal [ "Original" ], document.reload.tags
@@ -92,12 +94,16 @@ class DocumentIndexTest < ActionDispatch::IntegrationTest
     document = Document.order(:created_at).last
     document.update!(tags: [ "Original" ])
 
-    patch document_tags_path(document.slug), params: {
-      tags: Array.new(Document::MAX_TAGS + 1) { |index| "tag-#{index}" }
-    }
+    patch document_tags_path(document.slug),
+          params: { tags: Array.new(Document::MAX_TAGS + 1) { |index| "tag-#{index}" } },
+          headers: inertia_headers
 
     assert_response :see_other
     assert_equal [ "Original" ], document.reload.tags
+    get root_path, headers: inertia_headers
+    assert_inertia_props do |props|
+      props.dig(:errors, :tags) == "can include at most 8 tags"
+    end
   end
 
   test "tag endpoint rejects non list input and redirects missing documents safely" do
@@ -105,7 +111,9 @@ class DocumentIndexTest < ActionDispatch::IntegrationTest
     post documents_path, params: { name: "Guest owner" }
     document = Document.order(:created_at).last
 
-    patch document_tags_path(document.slug), params: { tags: "not-a-list" }
+    patch document_tags_path(document.slug),
+          params: { tags: "not-a-list" },
+          headers: inertia_headers
     assert_response :see_other
     assert_equal [], document.reload.tags
 
@@ -114,6 +122,14 @@ class DocumentIndexTest < ActionDispatch::IntegrationTest
   end
 
   private
+
+  def inertia_headers
+    {
+      "X-Inertia" => "true",
+      "X-Inertia-Partial-Component" => "documents/index",
+      "X-Inertia-Partial-Data" => "yours,recent,errors"
+    }
+  end
 
   def create_and_sign_in_user
     user = User.create!(
