@@ -35,6 +35,41 @@
 
   --code-bg: #f3f0e9;
   --measure: 44rem;
+
+  --sketch-surface: #fffef9;
+  --sketch-surface-muted: #fffaf1;
+  --sketch-border: rgb(65 51 32 / 12%);
+  --sketch-border-soft: rgb(65 51 32 / 10%);
+  --sketch-caption-ink: #6f6a60;
+  --sketch-radius: 12px;
+  --sketch-radius-mobile: 9px;
+  --sketch-inner-radius: 11px;
+  --sketch-island-radius: 10px;
+  --sketch-control-radius: 7px;
+  --sketch-shadow:
+    0 1px 1px rgb(38 28 16 / 5%),
+    0 7px 18px rgb(38 28 16 / 7%);
+  --sketch-shadow-hover:
+    0 1px 1px rgb(38 28 16 / 5%),
+    0 10px 23px rgb(38 28 16 / 9%);
+  --sketch-shadow-selected:
+    0 0 0 2px color-mix(in srgb, var(--accent-soft) 45%, transparent),
+    0 8px 22px rgb(38 28 16 / 8%);
+  --sketch-edge:
+    inset 0 1px rgb(255 255 255 / 72%),
+    inset 0 -1px rgb(65 51 32 / 6%);
+  --sketch-island-shadow: 0 5px 16px rgb(38 28 16 / 8%);
+  --sketch-control-shadow: 0 3px 10px rgb(38 28 16 / 9%);
+  --sketch-texture: radial-gradient(rgb(83 63 36 / 5%) 0.55px, transparent 0.55px);
+  --sketch-texture-size: 5px 5px;
+  --sketch-resize-border: rgb(65 51 32 / 9%);
+  --sketch-resize-thumb: rgb(65 51 32 / 18%);
+  --sketch-resize-thumb-active: rgb(65 51 32 / 34%);
+  --sketch-danger: #a1372c;
+  --sketch-danger-border: rgb(161 55 44 / 35%);
+  --sketch-danger-soft-border: rgb(161 55 44 / 18%);
+  --sketch-danger-hover-border: rgb(161 55 44 / 22%);
+  --sketch-danger-hover-bg: #f6ddd5;
 }
 
 /* Whitey — homage to Typora's Whitey theme: clean white, minimal chrome,
@@ -65,6 +100,33 @@
 
   --code-bg: #f8f8f8;
   --measure: 47rem;
+
+  --sketch-surface: #ffffff;
+  --sketch-surface-muted: #f8f8f8;
+  --sketch-border: rgb(43 43 43 / 18%);
+  --sketch-border-soft: rgb(43 43 43 / 12%);
+  --sketch-caption-ink: #666666;
+  --sketch-radius: 0px;
+  --sketch-radius-mobile: 0px;
+  --sketch-inner-radius: 0px;
+  --sketch-island-radius: 0px;
+  --sketch-control-radius: 0px;
+  --sketch-shadow: none;
+  --sketch-shadow-hover: none;
+  --sketch-shadow-selected: 0 0 0 2px rgb(65 131 196 / 18%);
+  --sketch-edge: none;
+  --sketch-island-shadow: none;
+  --sketch-control-shadow: none;
+  --sketch-texture: none;
+  --sketch-texture-size: auto;
+  --sketch-resize-border: rgb(43 43 43 / 14%);
+  --sketch-resize-thumb: rgb(43 43 43 / 28%);
+  --sketch-resize-thumb-active: rgb(43 43 43 / 50%);
+  --sketch-danger: #4f4f4f;
+  --sketch-danger-border: rgb(43 43 43 / 28%);
+  --sketch-danger-soft-border: rgb(43 43 43 / 14%);
+  --sketch-danger-hover-border: rgb(43 43 43 / 42%);
+  --sketch-danger-hover-bg: #eeeeee;
 }
 
 [data-theme='whitey'] .milkdown .ProseMirror {
@@ -3122,10 +3184,8 @@ a:focus-visible {
 
 .thinkroom-sketch.is-editing {
   cursor: default;
-  border-color: rgb(65 51 32 / 12%);
-  box-shadow:
-    0 1px 1px rgb(38 28 16 / 5%),
-    0 7px 18px rgb(38 28 16 / 7%);
+  border-color: var(--sketch-border);
+  box-shadow: var(--sketch-shadow);
 }
 
 .thinkroom-sketch.is-editing .thinkroom-sketch-preview {
@@ -3139,16 +3199,16 @@ a:focus-visible {
 .thinkroom-sketch-editor {
   position: relative;
   overflow: visible;
-  border-radius: 11px;
-  background: #fffef9;
+  border-radius: var(--sketch-inner-radius);
+  background: var(--sketch-surface);
 }
 
 .sketch-inline-canvas {
   position: relative;
   min-height: 180px;
   overflow: hidden;
-  border-radius: 11px 11px 0 0;
-  background: #fffef9;
+  border-radius: var(--sketch-inner-radius) var(--sketch-inner-radius) 0 0;
+  background: var(--sketch-surface);
   touch-action: none;
 }
 
@@ -3176,13 +3236,13 @@ a:focus-visible {
 
 .thinkroom-sketch-editor .excalidraw .Island {
   border: 1px solid color-mix(in srgb, var(--ink) 9%, transparent);
-  border-radius: 10px;
-  box-shadow: 0 5px 16px rgb(38 28 16 / 8%);
+  border-radius: var(--sketch-island-radius);
+  box-shadow: var(--sketch-island-shadow);
 }
 
 .thinkroom-sketch-editor .excalidraw .ToolIcon__icon,
 .thinkroom-sketch-editor .excalidraw .dropdown-menu-button {
-  border-radius: 7px;
+  border-radius: var(--sketch-control-radius);
 }
 
 /* Thinkroom sketches stay intentionally small: drawing tools, not the
@@ -3209,9 +3269,9 @@ a:focus-visible {
   display: grid;
   place-items: center;
   height: 20px;
-  border-top: 1px solid rgb(65 51 32 / 9%);
+  border-top: 1px solid var(--sketch-resize-border);
   border-radius: 0;
-  background: #fffaf1;
+  background: var(--sketch-surface-muted);
   cursor: row-resize;
   touch-action: none;
 }
@@ -3219,13 +3279,13 @@ a:focus-visible {
 .sketch-resize-handle span {
   width: 38px;
   height: 4px;
-  border-radius: 999px;
-  background: rgb(65 51 32 / 18%);
+  border-radius: var(--sketch-control-radius);
+  background: var(--sketch-resize-thumb);
 }
 
 .sketch-resize-handle:hover span,
 .sketch-resize-handle:focus-visible span {
-  background: rgb(65 51 32 / 34%);
+  background: var(--sketch-resize-thumb-active);
 }
 
 .sketch-resize-handle:focus-visible {
@@ -3259,7 +3319,7 @@ a:focus-visible {
 .sketch-button {
   min-height: 34px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--sketch-control-radius);
   background: var(--surface-raised);
   color: var(--ink);
   padding: 6px 11px;
@@ -3278,15 +3338,15 @@ a:focus-visible {
 }
 
 .sketch-button-danger {
-  border-color: rgb(161 55 44 / 35%);
-  color: #a1372c;
+  border-color: var(--sketch-danger-border);
+  color: var(--sketch-danger);
 }
 
 .sketch-error {
   margin: 0;
-  border-top: 1px solid rgb(161 55 44 / 18%);
+  border-top: 1px solid var(--sketch-danger-soft-border);
   padding: 7px 10px;
-  color: #a1372c;
+  color: var(--sketch-danger);
   font-size: 12px;
 }
 
@@ -3296,12 +3356,10 @@ a:focus-visible {
   width: 100%;
   margin: 24px 0;
   overflow: visible;
-  border: 1px solid rgb(65 51 32 / 12%);
-  border-radius: 12px;
-  background: #fffef9;
-  box-shadow:
-    0 1px 1px rgb(38 28 16 / 5%),
-    0 7px 18px rgb(38 28 16 / 7%);
+  border: 1px solid var(--sketch-border);
+  border-radius: var(--sketch-radius);
+  background: var(--sketch-surface);
+  box-shadow: var(--sketch-shadow);
 }
 
 /* A fine inset edge keeps the paper tactile without reading as a stack. */
@@ -3310,9 +3368,7 @@ a:focus-visible {
   z-index: 3;
   inset: 0;
   border-radius: inherit;
-  box-shadow:
-    inset 0 1px rgb(255 255 255 / 72%),
-    inset 0 -1px rgb(65 51 32 / 6%);
+  box-shadow: var(--sketch-edge);
   content: '';
   pointer-events: none;
 }
@@ -3338,23 +3394,17 @@ a:focus-visible {
 
 .thinkroom-sketch.is-editable:hover:not(.is-editing) {
   border-color: color-mix(in srgb, var(--ink) 42%, transparent);
-  box-shadow:
-    0 1px 1px rgb(38 28 16 / 5%),
-    0 10px 23px rgb(38 28 16 / 9%);
+  box-shadow: var(--sketch-shadow-hover);
 }
 
 .thinkroom-sketch.is-selected {
   border-color: color-mix(in srgb, var(--accent) 34%, transparent);
-  box-shadow:
-    0 0 0 2px color-mix(in srgb, var(--accent-soft) 45%, transparent),
-    0 8px 22px rgb(38 28 16 / 8%);
+  box-shadow: var(--sketch-shadow-selected);
 }
 
 .thinkroom-sketch.is-editing.is-selected {
-  border-color: rgb(65 51 32 / 12%);
-  box-shadow:
-    0 1px 1px rgb(38 28 16 / 5%),
-    0 7px 18px rgb(38 28 16 / 7%);
+  border-color: var(--sketch-border);
+  box-shadow: var(--sketch-shadow);
 }
 
 .sketch-delete-tape {
@@ -3388,9 +3438,9 @@ a:focus-visible {
 }
 
 .sketch-delete-tape:hover {
-  border-color: rgb(161 55 44 / 22%);
-  background: #f6ddd5;
-  color: #a1372c;
+  border-color: var(--sketch-danger-hover-border);
+  background: var(--sketch-danger-hover-bg);
+  color: var(--sketch-danger);
 }
 
 .sketch-delete-tape:focus-visible {
@@ -3404,11 +3454,11 @@ a:focus-visible {
   top: 12px;
   right: 12px;
   min-height: 32px;
-  border: 1px solid rgb(65 51 32 / 14%);
-  border-radius: 7px;
-  background: rgb(255 254 249 / 92%);
-  box-shadow: 0 3px 10px rgb(38 28 16 / 9%);
-  color: var(--ink-soft);
+  border: 1px solid var(--sketch-border);
+  border-radius: var(--sketch-control-radius);
+  background: color-mix(in srgb, var(--sketch-surface) 92%, transparent);
+  box-shadow: var(--sketch-control-shadow);
+  color: var(--sketch-caption-ink);
   padding: 6px 10px;
   font: 600 11px/1 var(--font-ui);
   cursor: pointer;
@@ -3430,7 +3480,7 @@ a:focus-visible {
 
 .sketch-download-button:hover {
   border-color: color-mix(in srgb, var(--accent) 32%, transparent);
-  background: #fffef9;
+  background: var(--sketch-surface);
 }
 
 .sketch-download-button:focus-visible {
@@ -3448,10 +3498,10 @@ a:focus-visible {
   place-items: center;
   min-height: 180px;
   overflow: hidden;
-  border-radius: 11px 11px 0 0;
-  background-color: #fffef9;
-  background-image: radial-gradient(rgb(83 63 36 / 5%) 0.55px, transparent 0.55px);
-  background-size: 5px 5px;
+  border-radius: var(--sketch-inner-radius) var(--sketch-inner-radius) 0 0;
+  background-color: var(--sketch-surface);
+  background-image: var(--sketch-texture);
+  background-size: var(--sketch-texture-size);
 }
 
 .sketch-preview-svg {
@@ -3463,11 +3513,11 @@ a:focus-visible {
 .thinkroom-sketch-caption {
   min-height: 34px;
   margin: 0;
-  border-top: 1px solid rgb(65 51 32 / 10%);
-  border-radius: 0 0 11px 11px;
-  background: #fffaf1;
+  border-top: 1px solid var(--sketch-border-soft);
+  border-radius: 0 0 var(--sketch-inner-radius) var(--sketch-inner-radius);
+  background: var(--sketch-surface-muted);
   padding: 9px 12px;
-  color: var(--ink-soft);
+  color: var(--sketch-caption-ink);
   font: 500 12px/1.3 var(--font-ui);
 }
 
@@ -3476,7 +3526,7 @@ a:focus-visible {
   border: 0;
   outline: 0;
   background: transparent;
-  color: var(--ink-soft);
+  color: var(--sketch-caption-ink);
   font: inherit;
 }
 
@@ -3485,8 +3535,42 @@ a:focus-visible {
 }
 
 .thinkroom-sketch-caption.is-editable:focus-within {
-  background: color-mix(in srgb, #fffaf1 82%, var(--accent-soft));
+  background: color-mix(in srgb, var(--sketch-surface-muted) 82%, var(--accent-soft));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+[data-theme='whitey'] .thinkroom-sketch::after {
+  display: none;
+}
+
+[data-theme='whitey'] .thinkroom-sketch.is-editable {
+  transition: none;
+}
+
+[data-theme='whitey'] .thinkroom-sketch-editor .sketch-inline-canvas .excalidraw {
+  --button-gray-1: #f8f8f8;
+  --button-gray-2: #eeeeee;
+  --button-gray-3: #e3e3e3;
+  --color-on-primary-container: #2b2b2b;
+  --color-surface-primary-container: #eeeeee;
+}
+
+[data-theme='whitey'] .sketch-delete-tape {
+  top: 12px;
+  right: auto;
+  left: 12px;
+  border-color: var(--sketch-border);
+  border-radius: var(--sketch-control-radius);
+  background: color-mix(in srgb, var(--sketch-surface) 94%, transparent);
+  box-shadow: var(--sketch-control-shadow);
+  color: var(--sketch-caption-ink);
+  transform: none;
+}
+
+[data-theme='whitey'] .sketch-delete-tape:hover {
+  border-color: var(--sketch-danger-hover-border);
+  background: var(--sketch-danger-hover-bg);
+  color: var(--sketch-danger);
 }
 
 .thinkroom-sketch-caption.is-empty:not(.is-editable) {
@@ -3640,7 +3724,7 @@ a:focus-visible {
 }
 
 @media (max-width: 700px) {
-  .thinkroom-sketch { margin: 18px 0; border-radius: 9px; }
+  .thinkroom-sketch { margin: 18px 0; border-radius: var(--sketch-radius-mobile); }
   .thinkroom-sketch-preview { min-height: 150px; }
 }
 

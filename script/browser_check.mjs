@@ -101,7 +101,7 @@ try {
     await fetch(`${BASE}/api/docs`, {
       method: 'POST',
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'Shortcut check', markdown: 'Start here.' }),
+      body: JSON.stringify({ title: 'Shortcut check', content: 'Start here.' }),
     })
   ).json()
   const c = await browser.newPage()
@@ -127,7 +127,7 @@ try {
     await fetch(`${BASE}/api/docs`, {
       method: 'POST',
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'Original title', markdown: '# Original title\n\nBody.\n' }),
+      body: JSON.stringify({ title: 'Original title', content: '# Original title\n\nBody.\n' }),
     })
   ).json()
   const titleA = await browser.newPage()
@@ -182,7 +182,7 @@ try {
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: 'Task list check',
-        markdown: '- [ ] First task\n- [x] Second task\n',
+        content: '- [ ] First task\n- [x] Second task\n',
       }),
     })
   ).json()
@@ -235,7 +235,7 @@ try {
   let taskMarkdown = ''
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const taskState = await (await fetch(`${BASE}/api/docs/${taskDoc.slug}`)).json()
-    taskMarkdown = taskState.markdown ?? ''
+    taskMarkdown = taskState.content ?? ''
     const plainTaskMarkdown = taskMarkdown.replace(/<\/?(?:span|ins|del)[^>]*>/g, '')
     if (/^[*-] \[x\] First task/m.test(plainTaskMarkdown)) break
     await taskA.waitForTimeout(300)
@@ -292,7 +292,7 @@ try {
   let suggestTaskMarkdown = ''
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const taskState = await (await fetch(`${BASE}/api/docs/${taskDoc.slug}`)).json()
-    suggestTaskMarkdown = (taskState.markdown ?? '').replace(/<\/?(?:span|ins|del)[^>]*>/g, '')
+    suggestTaskMarkdown = (taskState.content ?? '').replace(/<\/?(?:span|ins|del)[^>]*>/g, '')
     if (/^[*-] \[x\] First task/m.test(suggestTaskMarkdown)) break
     await taskA.waitForTimeout(300)
   }
@@ -311,7 +311,7 @@ try {
     await fetch(`${BASE}/api/docs`, {
       method: 'POST',
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'Sketch check', markdown: '# Sketch check\n\nBody.\n' }),
+      body: JSON.stringify({ title: 'Sketch check', content: '# Sketch check\n\nBody.\n' }),
     })
   ).json()
   const sketchA = await browser.newPage({ viewport: { width: 1280, height: 900 } })
@@ -326,7 +326,10 @@ try {
   ])
   await sketchA.locator('.milkdown .ProseMirror').click()
   await sketchA.keyboard.press('Meta+ArrowDown')
-  await sketchA.getByRole('button', { name: 'Sketch', exact: true }).click()
+  await sketchA.keyboard.press('Enter')
+  await sketchA.keyboard.type('/')
+  await sketchA.locator('.thinkroom-slash-menu[data-visible="true"]').waitFor({ timeout: 5000 })
+  await sketchA.keyboard.type('sketch')
   await sketchA.locator('.thinkroom-sketch.is-editing .excalidraw').waitFor({ timeout: 15000 })
   ok('sketch action inserts and lazy-loads an inline Excalidraw canvas')
   await sketchA.getByTitle('Rectangle — R or 2').click()
@@ -344,6 +347,164 @@ try {
   await sketchA.getByRole('textbox', { name: 'Sketch title' }).fill(sketchDescription)
   await sketchA.locator('.doc-title').click()
   await sketchA.locator('.thinkroom-sketch .sketch-preview-svg[data-renderer="excalidraw"]').waitFor({ timeout: 15000 })
+  await sketchA.evaluate(() => { document.documentElement.dataset.theme = 'whitey' })
+  await sketchA.locator('.thinkroom-sketch').hover()
+  await sketchA.locator('.sketch-delete-tape').hover()
+  const whiteyPreviewTheme = await sketchA.locator('.thinkroom-sketch').evaluate((node) => {
+    const preview = node.querySelector('.thinkroom-sketch-preview')
+    const caption = node.querySelector('.thinkroom-sketch-caption')
+    const title = node.querySelector('.thinkroom-sketch-title')
+    const download = node.querySelector('.sketch-download-button')
+    const deleteButton = node.querySelector('.sketch-delete-tape')
+    if (!preview || !caption || !title || !download || !deleteButton) return null
+
+    const parseColor = (value) => {
+      const rgb = value.match(/^rgba?\(([^)]+)\)$/)
+      if (rgb) {
+        const values = rgb[1].split(/[\s,/]+/).filter(Boolean).map(Number)
+        return [values[0] / 255, values[1] / 255, values[2] / 255, values[3] ?? 1]
+      }
+      const srgb = value.match(/^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+))?\)$/)
+      return srgb ? [Number(srgb[1]), Number(srgb[2]), Number(srgb[3]), Number(srgb[4] ?? 1)] : null
+    }
+    const contrast = (foreground, background) => {
+      const fg = parseColor(foreground)
+      const bg = parseColor(background)
+      if (!fg || !bg) return 0
+      const blended = fg.slice(0, 3).map((channel, index) => channel * fg[3] + bg[index] * (1 - fg[3]))
+      const luminance = (channels) => channels.reduce((sum, channel, index) => {
+        const linear = channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+        return sum + linear * [0.2126, 0.7152, 0.0722][index]
+      }, 0)
+      const lighter = Math.max(luminance(blended), luminance(bg))
+      const darker = Math.min(luminance(blended), luminance(bg))
+      return (lighter + 0.05) / (darker + 0.05)
+    }
+
+    const wrapperStyle = getComputedStyle(node)
+    const previewStyle = getComputedStyle(preview)
+    const captionStyle = getComputedStyle(caption)
+    const titleStyle = getComputedStyle(title)
+    const downloadStyle = getComputedStyle(download)
+    return {
+      wrapperRadius: wrapperStyle.borderRadius,
+      wrapperShadow: wrapperStyle.boxShadow,
+      tapeDisplay: getComputedStyle(node, '::after').display,
+      previewRadius: previewStyle.borderRadius,
+      previewBackground: previewStyle.backgroundColor,
+      previewTexture: previewStyle.backgroundImage,
+      captionRadius: captionStyle.borderRadius,
+      captionBackground: captionStyle.backgroundColor,
+      captionContrast: contrast(titleStyle.color, captionStyle.backgroundColor),
+      downloadRadius: downloadStyle.borderRadius,
+      downloadContrast: contrast(downloadStyle.color, previewStyle.backgroundColor),
+      deleteRadius: getComputedStyle(deleteButton).borderRadius,
+      deleteLeft: getComputedStyle(deleteButton).left,
+      deleteBackground: getComputedStyle(deleteButton).backgroundColor,
+      deleteColor: getComputedStyle(deleteButton).color,
+    }
+  })
+  if (
+    whiteyPreviewTheme &&
+    whiteyPreviewTheme.wrapperRadius === '0px' &&
+    whiteyPreviewTheme.wrapperShadow === 'none' &&
+    whiteyPreviewTheme.tapeDisplay === 'none' &&
+    whiteyPreviewTheme.previewRadius === '0px' &&
+    whiteyPreviewTheme.previewBackground === 'rgb(255, 255, 255)' &&
+    whiteyPreviewTheme.previewTexture === 'none' &&
+    whiteyPreviewTheme.captionRadius === '0px' &&
+    whiteyPreviewTheme.captionBackground === 'rgb(248, 248, 248)' &&
+    whiteyPreviewTheme.captionContrast >= 4.5 &&
+    whiteyPreviewTheme.downloadRadius === '0px' &&
+    whiteyPreviewTheme.downloadContrast >= 4.5 &&
+    whiteyPreviewTheme.deleteRadius === '0px' &&
+    whiteyPreviewTheme.deleteLeft === '12px' &&
+    whiteyPreviewTheme.deleteBackground === 'rgb(238, 238, 238)' &&
+    whiteyPreviewTheme.deleteColor === 'rgb(79, 79, 79)'
+  ) {
+    ok('Whitey makes saved sketches square, flat, neutral, tape-free, and high contrast')
+  } else {
+    fail(`Whitey preview styling leaked warm paper: ${JSON.stringify(whiteyPreviewTheme)}`)
+  }
+
+  await sketchA.locator('.thinkroom-sketch').click({ position: { x: 100, y: 100 } })
+  await sketchA.locator('.thinkroom-sketch.is-editing .excalidraw').waitFor({ timeout: 15000 })
+  const whiteyEditorTheme = await sketchA.locator('.thinkroom-sketch.is-editing').evaluate((node) => {
+    const selectors = [
+      '.thinkroom-sketch-editor',
+      '.sketch-inline-canvas',
+      '.sketch-resize-handle',
+      '.excalidraw .Island',
+      '.excalidraw .ToolIcon__icon',
+    ]
+    return selectors.map((selector) => {
+      const element = node.querySelector(selector)
+      if (!element) return null
+      const style = getComputedStyle(element)
+      return { selector, radius: style.borderRadius, background: style.backgroundColor, shadow: style.boxShadow }
+    })
+  })
+  if (
+    whiteyEditorTheme.every((style) => style && style.radius === '0px') &&
+    whiteyEditorTheme.filter((style) => style?.selector === '.thinkroom-sketch-editor' || style?.selector === '.sketch-inline-canvas')
+      .every((style) => style.background === 'rgb(255, 255, 255)') &&
+    whiteyEditorTheme.find((style) => style?.selector === '.sketch-resize-handle')?.background === 'rgb(248, 248, 248)' &&
+    whiteyEditorTheme.find((style) => style?.selector === '.excalidraw .Island')?.shadow === 'none' &&
+    whiteyEditorTheme.find((style) => style?.selector === '.excalidraw .ToolIcon__icon')?.background === 'rgb(238, 238, 238)'
+  ) {
+    ok('Whitey keeps the active sketch canvas and drawing tools square and neutral')
+  } else {
+    fail(`Whitey editor styling leaked rounded or warm chrome: ${JSON.stringify(whiteyEditorTheme)}`)
+  }
+  await sketchA.locator('.doc-title').click()
+
+  await sketchA.setViewportSize({ width: 390, height: 844 })
+  const whiteyNarrowLayout = await sketchA.locator('.thinkroom-sketch').evaluate((node) => {
+    const bounds = node.getBoundingClientRect()
+    return {
+      radius: getComputedStyle(node).borderRadius,
+      left: bounds.left,
+      right: bounds.right,
+      viewportWidth: document.documentElement.clientWidth,
+    }
+  })
+  if (
+    whiteyNarrowLayout.radius === '0px' &&
+    whiteyNarrowLayout.left >= -0.1 &&
+    whiteyNarrowLayout.right <= whiteyNarrowLayout.viewportWidth + 0.1
+  ) {
+    ok('Whitey sketches remain square and contained at the narrow breakpoint')
+  } else {
+    fail(`Whitey narrow sketch overflowed or regained rounding: ${JSON.stringify(whiteyNarrowLayout)}`)
+  }
+  await sketchA.setViewportSize({ width: 1280, height: 900 })
+
+  const thinkroomPreviewTheme = await sketchA.locator('.thinkroom-sketch').evaluate((node) => {
+    document.documentElement.dataset.theme = 'proof'
+    const preview = node.querySelector('.thinkroom-sketch-preview')
+    if (!preview) return null
+    const wrapperStyle = getComputedStyle(node)
+    const previewStyle = getComputedStyle(preview)
+    return {
+      wrapperRadius: wrapperStyle.borderRadius,
+      wrapperShadow: wrapperStyle.boxShadow,
+      tapeDisplay: getComputedStyle(node, '::after').display,
+      previewBackground: previewStyle.backgroundColor,
+      previewTexture: previewStyle.backgroundImage,
+    }
+  })
+  if (
+    thinkroomPreviewTheme &&
+    thinkroomPreviewTheme.wrapperRadius === '12px' &&
+    thinkroomPreviewTheme.wrapperShadow !== 'none' &&
+    thinkroomPreviewTheme.tapeDisplay !== 'none' &&
+    thinkroomPreviewTheme.previewBackground === 'rgb(255, 254, 249)' &&
+    thinkroomPreviewTheme.previewTexture !== 'none'
+  ) {
+    ok('switching back restores Thinkroom sketch paper, tape, texture, and depth')
+  } else {
+    fail(`Thinkroom sketch styling did not return: ${JSON.stringify(thinkroomPreviewTheme)}`)
+  }
   const sketchFitsPaper = await sketchA.locator('.thinkroom-sketch').evaluate((node) => {
     const paper = node.querySelector('svg[data-renderer="excalidraw"]')?.getBoundingClientRect()
     const drawing = node.querySelector('[data-excalidraw-scene]')?.getBoundingClientRect()
@@ -519,7 +680,7 @@ try {
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: 'Empty sketch affordance',
-        markdown: `\`\`\`excalidraw\n${JSON.stringify({
+        content: `\`\`\`excalidraw\n${JSON.stringify({
           id: 'add_sketch_fixture',
           formatVersion: 1,
           description: '',
@@ -579,7 +740,7 @@ try {
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: 'Malformed sketch check',
-        markdown: `\`\`\`excalidraw\n${malformedSketch}\n\`\`\`\n`,
+        content: `\`\`\`excalidraw\n${malformedSketch}\n\`\`\`\n`,
       }),
     })
   ).json()
@@ -602,7 +763,10 @@ try {
     route.abort(),
   )
   await failedChunkPage.goto(`${BASE}/d/${malformedDoc.slug}`)
-  await failedChunkPage.getByRole('button', { name: 'Sketch', exact: true }).click()
+  await failedChunkPage.locator('.milkdown .ProseMirror').click()
+  await failedChunkPage.keyboard.press('Meta+ArrowDown')
+  await failedChunkPage.keyboard.press('Enter')
+  await failedChunkPage.keyboard.type('/sketch')
   await failedChunkPage.locator('.sketch-load-error').waitFor({ timeout: 15000 })
   if ((await failedChunkPage.locator('.milkdown .ProseMirror').count()) === 1) {
     ok('canvas chunk failure leaves the document mounted')
@@ -619,7 +783,7 @@ try {
       headers: { 'X-Agent-Name': 'clipboard-check', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: 'Clipboard check',
-        markdown:
+        content:
           '# Checklist\n\n- [ ] **Keep formatting**\n\nA [useful link](https://example.com).\n',
       }),
     })
@@ -657,7 +821,7 @@ try {
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: 'Soft break check',
-        markdown:
+        content:
           '# Soft breaks\n\n**Date:** 2026-06-07\n**Source:** transcripts\n**Goal:** sharper plugin\n\n```\ncode line one\ncode line two\n```\n',
       }),
     })
@@ -717,7 +881,7 @@ try {
   let softPlain = ''
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const softState = await (await fetch(`${BASE}/api/docs/${softDoc.slug}`)).json()
-    softPlain = stripMarkup(softState.markdown)
+    softPlain = stripMarkup(softState.content)
     if (softPlain.includes(expectedMeta)) break
     await sb.waitForTimeout(300)
   }
@@ -743,7 +907,7 @@ try {
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: 'Frontmatter check',
-        markdown:
+        content:
           '---\ndate: 2026-06-08\ntopic: frontmatter-check\ntags:\n  - alpha\n  - beta\n---\n\n# Frontmatter doc\n\nBody paragraph.\n',
       }),
     })
@@ -794,7 +958,7 @@ try {
   let fmSnapshot = ''
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const fmState = await (await fetch(`${BASE}/api/docs/${fmDoc.slug}`)).json()
-    fmSnapshot = stripMarkup(fmState.markdown)
+    fmSnapshot = stripMarkup(fmState.content)
     if (fmSnapshot.includes('Typed after seed.')) break
     await fmPage.waitForTimeout(300)
   }
@@ -1176,7 +1340,7 @@ try {
     await fetch(`${BASE}/api/docs`, {
       method: 'POST',
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'Track changes check', markdown: 'Suggest target alpha beta gamma.' }),
+      body: JSON.stringify({ title: 'Track changes check', content: 'Suggest target alpha beta gamma.' }),
     })
   ).json()
   const winA = await makePage('a')
@@ -1291,7 +1455,7 @@ try {
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: 'Placement check',
-        markdown: Array.from(
+        content: Array.from(
           { length: 12 },
           (_, i) =>
             `Placement paragraph number ${i} with enough words to span a comfortable line of prose in the editor.`,
@@ -1418,7 +1582,7 @@ try {
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: 'Persistence check',
-        markdown: 'Persistence paragraph alpha bravo charlie delta echo foxtrot golf hotel.',
+        content: 'Persistence paragraph alpha bravo charlie delta echo foxtrot golf hotel.',
       }),
     })
   ).json()
@@ -1545,7 +1709,7 @@ try {
       headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: 'Accept all check',
-        markdown:
+        content:
           '# Bulk doc\n\n## Talk outline (~60 minutes: 45 talk + Q&A)\n\nIntro paragraph stays.\n\n### 1. Cold open (3 min)\n\nOriginal cold open copy.\n\n### 2. Receipts (5 min)\n\nOriginal receipts copy.\n',
       }),
     })
