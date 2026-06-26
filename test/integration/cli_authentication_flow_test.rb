@@ -6,6 +6,10 @@ class CliAuthenticationFlowTest < ActionDispatch::IntegrationTest
     @user = User.create!(name: "Kieran", email: "cli-flow@example.com", password: "thoughtful-passphrase")
   end
 
+  teardown do
+    WriteRateLimited::STORE.clear
+  end
+
   test "device authorization exposes a browser link and polling status" do
     post "/api/cli/device_authorizations", as: :json
 
