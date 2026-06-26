@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_08_200000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_26_110000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -92,6 +92,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_08_200000) do
     t.string "content_format", default: "markdown", null: false
     t.text "content_markdown"
     t.datetime "created_at", null: false
+    t.boolean "editing_locked", default: false, null: false
     t.string "owner_name", limit: 255
     t.string "owner_token"
     t.json "provenance_spans", default: []
@@ -101,12 +102,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_08_200000) do
     t.text "seed_markdown"
     t.string "seed_state", default: "pending", null: false
     t.string "slug", null: false
+    t.json "tags", default: [], null: false
     t.string "title", default: "Untitled", null: false
     t.datetime "updated_at", null: false
+    t.integer "user_id"
     t.binary "yjs_state"
     t.index ["owner_token"], name: "index_documents_on_owner_token"
     t.index ["slug"], name: "index_documents_on_slug", unique: true
+    t.index ["user_id"], name: "index_documents_on_user_id"
     t.check_constraint "content_format IN ('markdown', 'html')", name: "documents_content_format"
+    t.check_constraint "user_id IS NULL OR owner_token IS NULL", name: "documents_single_owner"
   end
 
   create_table "suggestions", force: :cascade do |t|
@@ -125,11 +130,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_08_200000) do
     t.index ["document_id"], name: "index_suggestions_on_document_id"
   end
 
+  create_table "users", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "email", limit: 320, null: false
+    t.string "google_uid"
+    t.string "name", limit: 255, null: false
+    t.string "password_digest"
+    t.datetime "updated_at", null: false
+    t.index ["email"], name: "index_users_on_email", unique: true
+    t.index ["google_uid"], name: "index_users_on_google_uid", unique: true
+  end
+
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "activities", "documents"
   add_foreign_key "agent_presences", "documents"
   add_foreign_key "comments", "documents"
   add_foreign_key "document_assets", "documents"
+  add_foreign_key "documents", "users"
   add_foreign_key "suggestions", "documents"
 end

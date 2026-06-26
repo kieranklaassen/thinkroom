@@ -21,6 +21,21 @@ Put secret values in `.kamal/secrets`:
 ```bash
 KAMAL_REGISTRY_PASSWORD=$KAMAL_REGISTRY_PASSWORD
 RAILS_MASTER_KEY=$RAILS_MASTER_KEY
+GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET
+```
+
+`.kamal/secrets.example` contains the complete safe-to-copy key list. Google
+sign-in is enabled only when both Google values are present. Set
+`KAMAL_GOOGLE_OAUTH=1` in `.kamal/deploy.env` when those secrets are configured;
+leave it unset to deploy without Google. Password accounts and anonymous
+documents do not require an email provider.
+
+Create a Google OAuth web application with these production redirect URIs:
+
+```text
+https://thinkroom.kieranklaassen.com/auth/google_oauth2/callback
+https://pruf.kieranklaassen.com/auth/google_oauth2/callback
 ```
 
 Both local files are ignored by Git. Never commit registry tokens, the Rails

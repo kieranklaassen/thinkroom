@@ -4,6 +4,7 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
   include ActionCable::TestHelper
 
   setup do
+    WriteRateLimited::STORE.clear
     @document = Document.create!(title: "Claimable")
   end
 
@@ -138,6 +139,74 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
     assert_equal 0, doc.activities.where(action: "claimed_document").count
   end
 
+  test "signed-in UI create assigns account ownership without an owner token" do
+    user = create_and_sign_in_user
+
+    post documents_path
+
+    assert_response :see_other
+    doc = Document.order(:created_at).last
+    assert_equal user, doc.user
+    assert_nil doc.owner_token
+    assert_equal user.name, doc.owner_name
+  end
+
+  test "signed-in claim assigns account ownership using the account name" do
+    user = create_and_sign_in_user
+
+    post claim_document_path(@document.slug), params: { name: "Spoofed name" }
+
+    assert_response :see_other
+    assert_equal user, @document.reload.user
+    assert_nil @document.owner_token
+    assert_equal user.name, @document.owner_name
+  end
+
+  test "account-owned document is yours after signing in from a fresh browser" do
+    user = create_and_sign_in_user
+    document = Document.create!(title: "Across browsers", user:, owner_name: user.name)
+
+    reset!
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase" }
+    get root_path
+
+    assert_inertia_props do |props|
+      props[:yours].any? { |doc| doc[:slug] == document.slug }
+    end
+  end
+
+  test "account owner can delete from another signed-in browser" do
+    user = create_and_sign_in_user
+    document = Document.create!(title: "Delete elsewhere", user:, owner_name: user.name)
+
+    reset!
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase" }
+    delete destroy_document_path(document.slug)
+
+    assert_redirected_to root_path
+    assert_not Document.exists?(document.id)
+  end
+
+  test "old guest token cannot delete a document after account promotion" do
+    establish_identity
+    post claim_document_path(@document.slug), params: { name: "Guest" }
+    old_cookie = cookies[:owner_token]
+    post signup_path, params: {
+      name: "Account owner",
+      email: "owner@example.com",
+      password: "thoughtful-passphrase",
+      password_confirmation: "thoughtful-passphrase"
+    }
+    assert_nil @document.reload.owner_token
+
+    reset!
+    cookies[:owner_token] = old_cookie
+    delete destroy_document_path(@document.slug)
+
+    assert_response :see_other
+    assert Document.exists?(@document.id)
+  end
+
   test "API create leaves the doc unclaimed" do
     post "/api/docs",
          params: { title: "Agent Doc" }.to_json,
@@ -185,6 +254,67 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
 
     get document_page_path(@document.slug), headers: browser
     refute_match(/owner_token/, response.body)
+  end
+
+  test "owner can lock and unlock editing" do
+    establish_identity
+    post claim_document_path(@document.slug), params: { name: "Owner" }
+
+    assert_difference -> { @document.activities.count }, 1 do
+      patch document_editing_lock_path(@document.slug), params: { locked: true }
+    end
+    assert_response :see_other
+    assert @document.reload.editing_locked?
+
+    patch document_editing_lock_path(@document.slug), params: { locked: false }
+    assert_response :see_other
+    assert_not @document.reload.editing_locked?
+  end
+
+  test "show exposes viewer-specific write access for a locked document" do
+    establish_identity
+    post claim_document_path(@document.slug), params: { name: "Owner" }
+    patch document_editing_lock_path(@document.slug), params: { locked: true }
+
+    get document_page_path(@document.slug), headers: browser
+    assert_inertia_props do |props|
+      props.dig(:ownership, :editing_locked) == true &&
+        props.dig(:ownership, :can_write) == true &&
+        props.dig(:ownership, :yours) == true
+    end
+
+    reset!
+    get document_page_path(@document.slug), headers: browser
+    assert_inertia_props do |props|
+      props.dig(:ownership, :editing_locked) == true &&
+        props.dig(:ownership, :can_write) == false &&
+        props.dig(:ownership, :yours) == false
+    end
+  end
+
+  test "non-owner cannot change editing lock" do
+    Document.where(id: @document.id).update_all(
+      owner_token: "someone-else", owner_name: "Owner", claimed_at: Time.current
+    )
+    establish_identity
+
+    patch document_editing_lock_path(@document.slug), params: { locked: true }
+
+    assert_response :see_other
+    assert_not @document.reload.editing_locked?
+  end
+
+  test "editing lock rejects missing and invalid values" do
+    establish_identity
+    post claim_document_path(@document.slug), params: { name: "Owner" }
+
+    patch document_editing_lock_path(@document.slug), params: {}
+    assert_response :see_other
+    assert_not @document.reload.editing_locked?
+
+    patch document_editing_lock_path(@document.slug), params: { locked: "sometimes" }
+    assert_response :see_other
+    assert_not @document.reload.editing_locked?
   end
 
   # --- home page: Your docs + deduped recents ---
@@ -280,7 +410,30 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "forged editing lock PATCH without CSRF token is rejected" do
+    establish_identity
+    post claim_document_path(@document.slug), params: { name: "Owner" }
+
+    with_forgery_protection do
+      patch document_editing_lock_path(@document.slug), params: { locked: true }
+
+      assert_response :unprocessable_entity
+      assert_not @document.reload.editing_locked?
+    end
+  end
+
   private
+
+  def create_and_sign_in_user
+    user = User.create!(
+      name: "Account owner",
+      email: "owner@example.com",
+      password: "thoughtful-passphrase"
+    )
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase" }
+    assert_response :see_other
+    user
+  end
 
   def browser
     { "User-Agent" => "Mozilla/5.0" }

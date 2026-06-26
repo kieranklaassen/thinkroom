@@ -8,3 +8,115 @@
  *
  * Consider organizing styles into separate files for maintainability.
  */
+
+/* ---------------------------------------------------------------------------
+ * Static-preview reflow guard (on-load layout stability)
+ *
+ * The document page server-renders a static preview into
+ * `.doc-static-preview .ProseMirror` (see app/services/document_preview_html.rb
+ * and app/frontend/pages/documents/show.tsx) using the SAME .milkdown/.ProseMirror
+ * classes as the live Milkdown editor. ProseMirror's base stylesheets
+ * (@milkdown/kit -> prosemirror-view + prosemirror-tables) ship as CSS imported
+ * inside the editor island (app/frontend/editor/milkdown_editor.tsx). In a Vite
+ * production build that CSS lands in the code-split `show-*.css` chunk, which is
+ * INJECTED BY JS only after the editor chunk loads — a few hundred ms after first
+ * paint. So the preview first paints with browser defaults (white-space: normal,
+ * table-layout: auto) and then those rules retroactively restyle the shared
+ * .ProseMirror, reflowing the preview: a markdown table flips auto -> fixed
+ * (equal columns, cells wrap, ~+175px), and blockquotes/lists/paragraphs re-wrap
+ * (normal -> break-spaces, ~+30px each). Measured on prod: table 497px -> 672px.
+ *
+ * Fix: replicate exactly the layout-affecting properties ProseMirror injects, in
+ * THIS render-blocking Rails-pipeline stylesheet (served as the <link> in dev and
+ * prod alike), so the preview's geometry is fully determined at first paint and
+ * matches the editor's eventual state — no auto->fixed / normal->break-spaces jump.
+ *
+ * Scoped to .doc-static-preview so the live editor's own styling is untouched.
+ * Keep these in sync with node_modules/@milkdown/prose/lib/view/style/prosemirror.css
+ * and node_modules/@milkdown/prose/lib/tables/style/tables.css.
+ * ------------------------------------------------------------------------- */
+
+/* prosemirror-view base: text wrapping. Without this the preview wraps as
+   white-space: normal and blockquote/list/paragraph lines grow when the
+   editor's break-spaces is injected. */
+.doc-static-preview .ProseMirror {
+  word-wrap: break-word;
+  white-space: break-spaces;
+}
+
+/* prosemirror-tables base: the big one. A markdown table defaults to
+   table-layout: auto (content-sized columns) until the editor injects fixed +
+   width:100%, which redistributes columns to equal widths, wraps cells, and
+   grows the table ~175px. Pin the final geometry from first paint. */
+.doc-static-preview .ProseMirror table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Match the cell box model ProseMirror injects so cell content lays out
+   identically. --default-cell-min-width mirrors editor/table_block.css (6ch);
+   with fixed layout + equal columns this min-width stays inert here, but
+   keeping it makes the preview self-consistent if columns ever narrow. */
+.doc-static-preview .ProseMirror {
+  --default-cell-min-width: 6ch;
+}
+
+.doc-static-preview .ProseMirror td,
+.doc-static-preview .ProseMirror th {
+  vertical-align: top;
+  box-sizing: border-box;
+  position: relative;
+}
+
+.doc-static-preview .ProseMirror td:not([data-colwidth]),
+.doc-static-preview .ProseMirror th:not([data-colwidth]) {
+  min-width: var(--default-cell-min-width);
+}
+
+/* prosemirror-view base: list items are positioned for marker handling. */
+.doc-static-preview .ProseMirror li {
+  position: relative;
+}
+
+/* ---------------------------------------------------------------------------
+ * Header presence-bar reserved lane (on-load layout stability)
+ *
+ * The document header's people cluster (.doc-header-people in
+ * app/frontend/pages/documents/show.tsx) holds: identity chip · provenance
+ * chip · PresenceBar. Human peers join via Yjs awareness over the websocket,
+ * so they CANNOT be server-rendered — they fade in a beat after first paint.
+ * Before this, the empty bar took zero width, so the first peer (0→N avatars +
+ * "N here") widened the cluster and shoved the Edit/Share/⋯ controls left.
+ *
+ * Fix: reserve a fixed-width lane for .presence-bar in THIS render-blocking
+ * Rails-pipeline stylesheet, so the lane's geometry is determined at first
+ * paint. Avatars then appear WITHIN the lane (acceptable) instead of pushing
+ * the neighbouring controls (a layout shift, not acceptable). The bar always
+ * renders now (even empty, data-empty) so the lane exists from the first frame.
+ *
+ * Scoped to .presence-bar in the header; the editor body is untouched. The
+ * Vite stylesheet (app/frontend/entrypoints/application.css) styles the bar's
+ * internals (avatars, count) — these rules only pin the lane width.
+ * ------------------------------------------------------------------------- */
+.doc-header-people .presence-bar {
+  /* Room for a couple of overlapping 28px avatars + the "N here" count, so a
+   * small group fits without reflow; larger groups collapse into the +N
+   * overflow chip, which also stays within the lane. */
+  min-width: 7.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+/* The empty bar reserves its lane but shows nothing — no stray gap from the
+ * inherited flex gap on a childless box. */
+.doc-header-people .presence-bar[data-empty] {
+  gap: 0;
+}
+
+/* Compact (mobile) header: 24px avatars, max 3 — a tighter lane. */
+.doc-header-people .presence-bar--compact {
+  min-width: 5rem;
+}

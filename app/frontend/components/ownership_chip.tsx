@@ -7,6 +7,8 @@ export interface OwnershipPayload {
   claimable: boolean
   owner_name: string | null
   yours: boolean
+  editing_locked: boolean
+  can_write: boolean
 }
 
 interface Props {

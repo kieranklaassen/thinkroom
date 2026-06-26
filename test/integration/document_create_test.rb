@@ -24,22 +24,20 @@ class DocumentCreateTest < ActionDispatch::IntegrationTest
     assert_equal "Anonymous", doc.seed_author_name
   end
 
-  test "human can create an HTML document with the HTML default seed" do
+  test "browser creation stays Markdown when an HTML format is requested" do
     post documents_path, params: { content_format: "html" }, headers: browser
 
     assert_response :see_other
     doc = Document.order(:created_at).last
-    assert_equal "html", doc.content_format
-    assert_equal Document::DEFAULT_HTML_SEED, doc.seed_content
+    assert_equal "markdown", doc.content_format
+    assert_equal Document::DEFAULT_SEED, doc.seed_content
   end
 
-  test "unknown human format does not create a document" do
-    assert_no_difference -> { Document.count } do
-      post documents_path, params: { content_format: "xml" }, headers: browser
-    end
+  test "browser creation ignores unknown format parameters" do
+    post documents_path, params: { content_format: "xml" }, headers: browser
 
-    assert_response :redirect
-    assert_equal "Choose Markdown or HTML", session[:inertia_errors][:content_format]
+    assert_response :see_other
+    assert_equal "markdown", Document.order(:created_at).last.content_format
   end
 
   private

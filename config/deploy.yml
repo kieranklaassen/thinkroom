@@ -28,6 +28,10 @@ registry:
 env:
   secret:
     - RAILS_MASTER_KEY
+<% if ENV["KAMAL_GOOGLE_OAUTH"] == "1" %>
+    - GOOGLE_CLIENT_ID
+    - GOOGLE_CLIENT_SECRET
+<% end %>
   clear:
     # SQLite and the database-backed Cable adapter share one persistent volume.
     WEB_CONCURRENCY: "1"

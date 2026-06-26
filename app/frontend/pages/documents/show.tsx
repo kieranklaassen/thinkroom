@@ -8,7 +8,15 @@ import {
   type EditorHandle,
 } from '../../editor/milkdown_editor'
 import type { DocumentFormat } from '../../editor/document_format'
-import { userIdentity, type UserIdentity } from '../../editor/identity'
+import {
+  userIdentity,
+  serverIdentity,
+  serverKnewGuest,
+  persistGuestIdentity,
+  reconcileGuestCookie,
+  storedGuestIdentity,
+  type UserIdentity,
+} from '../../editor/identity'
 import { provenanceIdentityCtx } from '../../editor/provenance'
 import {
   aiSpanAt,
@@ -28,6 +36,11 @@ import {
 import { refreshAgentCursors } from '../../editor/agent_cursors'
 import { editorViewCtx, parserCtx, schemaCtx } from '@milkdown/kit/core'
 import { sourceParser } from '../../editor/document_format'
+import {
+  downloadDocumentHtml,
+  downloadDocumentMarkdown,
+  printDocument,
+} from '../../editor/document_export'
 import { collectInlineSuggestions } from '../../editor/suggest_changes'
 import {
   MarginInlineSuggestions,
@@ -55,15 +68,12 @@ import {
 } from '../../components/mobile_dock'
 import { useMetaChannel } from '../../lib/use_meta_channel'
 import { useMediaQuery } from '../../lib/use_media_query'
+import { useIsClient } from '../../lib/use_is_client'
 import { useAnchoredPopover } from '../../lib/use_anchored_popover'
 import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
 import { patchJSON } from '../../lib/csrf'
-import {
-  getStoredFlag,
-  getStoredString,
-  setStoredFlag,
-  setStoredString,
-} from '../../lib/local_storage'
+import type { ViewerPayload } from '../../types/viewer'
+import { setCookie, setCookieFlag } from '../../lib/cookies'
 import './show.css'
 
 export interface ActivityPayload {
@@ -73,11 +83,6 @@ export interface ActivityPayload {
   action: string
   detail: string | null
   created_at: string
-}
-
-export interface ViewerPayload {
-  name: string | null
-  guest: boolean
 }
 
 export interface DocumentProps {
@@ -92,8 +97,17 @@ export interface DocumentProps {
     seed_author_name: string | null
     has_state: boolean
     yjs_state_b64: string | null
+    content_html: string
+    display_title: string
   }
   viewer: ViewerPayload
+  // Server-rendered UI prefs from cookies — the source of truth for first
+  // paint so SSR and the client's first render agree (no post-hydration flip).
+  ui: {
+    panel_open: boolean
+    focus_mode: boolean
+    mode: EditorMode
+  }
   ownership: OwnershipPayload
   suggestions: SuggestionPayload[]
   comments: CommentPayload[]
@@ -130,33 +144,78 @@ const capAnchor = (text: string): string => {
   return new TextDecoder().decode(bytes.slice(0, ANCHOR_BYTE_CAP)).replace(/�+$/, '')
 }
 
-// Editor mode persists per doc (Google-Docs semantics: your mode, your
-// browser). Client-side only by design — never server state, never shared.
-const modeKey = (slug: string) => `pruf:mode:${slug}`
-
-const readStoredMode = (slug: string): EditorMode => {
-  const raw = getStoredString(modeKey(slug))
-  return raw === 'suggest' || raw === 'comment' || raw === 'read' ? raw : 'edit'
-}
-
 export default function DocumentShow({
   document: doc,
   viewer,
+  ui,
   ownership,
   suggestions,
   comments,
   activities,
   presences,
 }: DocumentProps) {
+  // SSR/hydration island flag: the live editor and any render-time browser
+  // reads are gated on this so the server (and the client's first hydration
+  // render) produce identical markup. It flips true on the next client commit.
+  const isClient = useIsClient()
+
   // Initializer-only state plus an explicit rename handler — NOT a
   // sync-on-prop-change effect, which a future reload batch listing
   // `viewer` would silently clobber mid-rename.
-  const [identity, setIdentity] = useState<UserIdentity>(() => userIdentity(viewer.name))
+  //
+  // Hydration-safe init: server and the first client render BOTH derive
+  // identity from the viewer prop alone — the chosen session name, else the
+  // guest name + color the server read from the `pruf_guest` cookie, else
+  // Anonymous. No localStorage read during render, so the markup is
+  // byte-identical (zero hydration mismatch).
+  //
+  // When the cookie was present (the common returning-user case) the server
+  // already rendered the real guest identity → NOTHING changes post-hydration.
+  // Only when the cookie was absent (first-ever load, or a user whose identity
+  // predates the cookie) does the post-hydration effect reconcile from
+  // localStorage and write the cookie so the NEXT load is server-correct.
+  const [identity, setIdentity] = useState<UserIdentity>(() =>
+    serverIdentity(viewer.name, viewer),
+  )
+  useEffect(() => {
+    // A chosen session name always wins and is server-known — never overridden
+    // by the guest identity.
+    if (viewer.name) return
+    if (serverKnewGuest(viewer)) {
+      // Server already rendered the cookie-backed guest identity. Re-seed
+      // localStorage from it when storage is empty (cookie present but storage
+      // cleared) so the cookie stays authoritative — never regenerate a fresh
+      // identity here, which would silently rename the user on the next load.
+      // Do NOT change React state: that would be the post-hydration flip we
+      // just worked to avoid.
+      if (!storedGuestIdentity()) persistGuestIdentity(identity)
+      return
+    }
+    // Cookie absent: reconcile from localStorage (one-time migration) and write
+    // the cookie. If there's no stored identity yet, generate + persist one.
+    const stored = storedGuestIdentity()
+    setIdentity(stored ?? reconcileGuestCookie())
+    if (stored) persistGuestIdentity(stored)
+    // viewer is stable for the life of the page; the rename handler owns
+    // subsequent identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [guest, setGuest] = useState(viewer.guest)
-  const [status, setStatus] = useState<ConnectionStatus>('connecting')
-  const [documentTitle, setDocumentTitle] = useState(doc.title)
+  // Optimistic: a hydrated or freshly-seeded doc is functionally live the
+  // moment it paints — the websocket only confirms it. Starting at 'live'
+  // avoids the connecting→live dot flash on every load.
+  const [status, setStatus] = useState<ConnectionStatus>(
+    doc.has_state || doc.seed_granted ? 'live' : 'connecting',
+  )
+  // Server-derived first-H1 title so the header reads correctly on first paint;
+  // the editor keeps it live via onTitleChange once it mounts.
+  const [documentTitle, setDocumentTitle] = useState(doc.display_title || doc.title)
   const [newVersionAvailable, setNewVersionAvailable] = useState(false)
-  const [handle, setHandle] = useState<EditorHandle | null>(null)
+  const [readyEditor, setReadyEditor] = useState<{
+    key: string
+    handle: EditorHandle
+  } | null>(null)
+  const [swappedEditorKey, setSwappedEditorKey] = useState<string | null>(null)
   const [spans, setSpans] = useState<ProvenanceSpan[]>([])
   const [peers, setPeers] = useState<UserIdentity[]>([])
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
@@ -165,29 +224,55 @@ export default function DocumentShow({
   const [suggestionNotice, setSuggestionNotice] = useState<string | null>(null)
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
   const viewRef = useRef<EditorView | null>(null)
+  // Hydration-safe init from server-rendered cookie prefs: SSR and the client's
+  // first render derive panel/focus/mode from the same `ui` props, so a user
+  // who closed the panel (etc.) sees it closed at first paint — no flip. The
+  // client writes the cookie on change (effects below); cookies, not
+  // localStorage, are now the source of truth for first paint.
+  const [panelOpen, setPanelOpen] = useState(ui.panel_open)
+  const [focusMode, setFocusMode] = useState(ui.focus_mode)
+  // Demo doc always opens in Edit and stays locked there — a stale mode cookie
+  // can't override it (the server also defaults it; this is the client guard).
+  const demoModeLocked = doc.slug === 'demo'
+  const [mode, setMode] = useState<EditorMode>(demoModeLocked ? 'edit' : ui.mode)
+  const effectiveMode: EditorMode = ownership.can_write ? mode : 'read'
+  const modeLocked = demoModeLocked || !ownership.can_write
+  const isReading = effectiveMode === 'read'
+  const connectionIdentity = viewer.account ? `account:${viewer.account.id}` : 'guest'
+  const editorSessionKey = `${doc.slug}:${ownership.can_write ? 'write' : 'read'}`
+  const handle = readyEditor?.key === editorSessionKey ? readyEditor.handle : null
+  // Tie the instant-paint swap to the exact permission-keyed editor. A delayed
+  // callback from the old editor can never hide the preview for a new remount.
+  const editorSwapped = swappedEditorKey === editorSessionKey
   // Live handle for code that runs after awaits or inside stable callbacks —
   // a closure-captured handle goes stale when the editor remounts mid-flight.
   const handleRef = useRef<EditorHandle | null>(null)
   handleRef.current = handle
-  const [panelOpen, setPanelOpen] = useState(() => getStoredFlag('pruf:panel', true))
-  const [focusMode, setFocusMode] = useState(() => getStoredFlag('pruf:focus', false))
-  // Demo doc always opens in Edit and stays locked there.
-  const modeLocked = doc.slug === 'demo'
-  const [mode, setMode] = useState<EditorMode>(() =>
-    modeLocked ? 'edit' : readStoredMode(doc.slug),
-  )
-  const isReading = mode === 'read'
+  const exportMarkdown = useCallback(() => {
+    const live = handleRef.current
+    if (!live) throw new Error('Document editor is not ready')
+    downloadDocumentMarkdown(live.editor, documentTitle)
+  }, [documentTitle])
+  const exportHtml = useCallback(async () => {
+    const live = handleRef.current
+    if (!live) throw new Error('Document editor is not ready')
+    await downloadDocumentHtml(live.editor, documentTitle)
+  }, [documentTitle])
   // handleSelection is a stable callback — it reads the live mode via ref.
-  const modeRef = useRef(mode)
-  modeRef.current = mode
+  const modeRef = useRef(effectiveMode)
+  modeRef.current = effectiveMode
   // Leaving Comment mode dismisses any pending click-to-comment affordance.
   useEffect(() => {
-    if (mode !== 'comment') setCommentTarget(null)
-  }, [mode])
+    if (effectiveMode !== 'comment') setCommentTarget(null)
+  }, [effectiveMode])
 
   // ≤64rem: rail and margin cards give way to anchor markers, a bottom dock,
-  // and sheets — the full product, rearranged for one hand.
-  const isMobile = useMediaQuery('(max-width: 64rem)')
+  // and sheets — the full product, rearranged for one hand. Masked by isClient
+  // so the first render is the desktop layout on both server and client (the
+  // matchMedia read happens only after mount) — the responsive collapse then
+  // applies one frame later, matching the editor mount.
+  const rawIsMobile = useMediaQuery('(max-width: 64rem)')
+  const isMobile = isClient && rawIsMobile
   const [activeSheet, setActiveSheet] = useState<SheetKind | null>(null)
   const [sheetFocusId, setSheetFocusId] = useState<number | null>(null)
   const suggestionsRef = useRef(suggestions)
@@ -217,11 +302,19 @@ export default function DocumentShow({
     if (isMobile && composerAnchor !== null) setActiveSheet('comments')
   }, [isMobile, composerAnchor])
 
-  useEffect(() => setStoredFlag('pruf:panel', panelOpen), [panelOpen])
-  useEffect(() => setStoredFlag('pruf:focus', focusMode), [focusMode])
+  // Persist prefs to server-readable cookies on change so the next first paint
+  // (SSR) matches. No hydration gate is needed: state initializes from the same
+  // cookie-backed props, so the first commit writes back the value it just read
+  // — idempotent, not a clobber. Demo doc never persists mode (it's locked).
   useEffect(() => {
-    if (!modeLocked) setStoredString(modeKey(doc.slug), mode)
-  }, [mode, modeLocked, doc.slug])
+    setCookieFlag('pruf_panel', panelOpen)
+  }, [panelOpen])
+  useEffect(() => {
+    setCookieFlag('pruf_focus', focusMode)
+  }, [focusMode])
+  useEffect(() => {
+    if (!demoModeLocked) setCookie('pruf_mode', mode)
+  }, [mode, demoModeLocked])
 
   // ⌘\ toggles the side panel, ⌘. toggles suggestion focus.
   useEffect(() => {
@@ -309,10 +402,21 @@ export default function DocumentShow({
     presencePoll.stop()
     router.visit('/')
   }, [presencePoll])
+  const reloadEditingAccess = useCallback(() => {
+    router.reload({
+      only: ownership.yours ? ['ownership'] : ['document', 'ownership'],
+      async: true,
+    })
+  }, [ownership.yours])
+  const recoverDeniedWrite = useCallback(() => {
+    router.reload({ only: ['document', 'ownership', 'viewer'], async: true })
+  }, [])
   useMetaChannel(doc.slug, {
     onDeleted: onDocumentGone,
     onTitle: setDocumentTitle,
     onVersionAvailable: () => setNewVersionAvailable(true),
+    onEditingLock: reloadEditingAccess,
+    connectionIdentity,
   })
 
   // The sync channel rejects its resubscription when the doc is gone —
@@ -321,8 +425,12 @@ export default function DocumentShow({
     if (!handle) return
     const provider = handle.provider
     provider.on('rejected', onDocumentGone)
-    return () => provider.off('rejected', onDocumentGone)
-  }, [handle, onDocumentGone])
+    provider.on('write-denied', recoverDeniedWrite)
+    return () => {
+      provider.off('rejected', onDocumentGone)
+      provider.off('write-denied', recoverDeniedWrite)
+    }
+  }, [handle, onDocumentGone, recoverDeniedWrite])
 
   const handleSelection = useCallback((view: EditorView) => {
     viewRef.current = view
@@ -872,7 +980,7 @@ export default function DocumentShow({
   // Mode switches close the composer without posting (same as Cancel).
   useEffect(() => {
     setComposerAnchor(null)
-  }, [mode])
+  }, [effectiveMode])
 
   // The anchored text stays visibly marked while the composer is open —
   // the editor selection itself collapses when focus moves to the textarea.
@@ -949,7 +1057,12 @@ export default function DocumentShow({
           <div className="doc-header-right">
             {/* ≤4 groups: identity/presence · (mode control) · Share · ⋯ menu */}
             <div className="doc-header-people">
-              <IdentityChip identity={identity} guest={guest} onRenamed={handleRenamed} />
+              <IdentityChip
+                identity={identity}
+                guest={guest}
+                authenticated={Boolean(viewer.account)}
+                onRenamed={handleRenamed}
+              />
               {!isReading && <ProvenanceSummaryChip spans={spans} />}
               <PresenceBar humans={peers} agents={presences} compact={isMobile} />
             </div>
@@ -962,8 +1075,24 @@ export default function DocumentShow({
                 {acceptingAll ? 'Accepting…' : `Accept all ${pendingSuggestionCount}`}
               </button>
             )}
-            <ModeControl mode={mode} onChange={setMode} locked={modeLocked} />
-            <SharePopover agentsActive={presences.length} onOpenChange={setShareOpen} />
+            <ModeControl
+              mode={effectiveMode}
+              onChange={setMode}
+              locked={modeLocked}
+              lockedReason={
+                ownership.can_write
+                  ? undefined
+                  : 'Read only — the document owner locked editing'
+              }
+            />
+            <SharePopover
+              agentsActive={presences.length}
+              exportReady={Boolean(handle)}
+              onExportMarkdown={exportMarkdown}
+              onExportHtml={exportHtml}
+              onPrint={printDocument}
+              onOpenChange={setShareOpen}
+            />
             <HeaderMenu
               panelOpen={panelOpen}
               onTogglePanel={() => setPanelOpen((open) => !open)}
@@ -972,6 +1101,7 @@ export default function DocumentShow({
               slug={doc.slug}
               ownership={ownership}
               claimerName={identity.name}
+              account={viewer.account}
             />
           </div>
         </header>
@@ -993,24 +1123,65 @@ export default function DocumentShow({
         <main className="doc-body">
           <div className={`doc-canvas ${focusMode ? 'is-focus' : ''}`}>
             <article className="doc-main">
-              <DocumentEditor
-                slug={doc.slug}
-                identity={identity}
-                contentFormat={doc.content_format}
-                initialStateB64={doc.yjs_state_b64}
-                seedContent={doc.seed_content}
-                seedGranted={doc.seed_granted}
-                seedAuthorKind={doc.seed_author_kind}
-                seedAuthorName={doc.seed_author_name}
-                editable={mode === 'edit' || mode === 'suggest'}
-                suggesting={mode === 'suggest'}
-                taskInteractive={mode !== 'comment'}
-                onReady={setHandle}
-                onStatus={setStatus}
-                onSpans={setSpans}
-                onSelection={isReading ? undefined : handleSelection}
-                onTitleChange={setDocumentTitle}
-              />
+              {/* Instant first paint: server-rendered prose fills the reserved
+                  editor frame and holds the layout height. The live editor sits
+                  on top of it (transparent) while Milkdown boots, so its synced
+                  content paints over the identical preview — then the preview is
+                  dropped a couple frames later. The preview is always behind the
+                  editor until then, so content is never momentarily blank. */}
+              <div
+                className="doc-editor-stack"
+                data-phase={editorSwapped ? 'live' : handle ? 'revealing' : 'booting'}
+              >
+                {!editorSwapped && doc.content_html && (
+                  <div className="doc-static-preview milkdown" aria-hidden="true">
+                    <div
+                      className="ProseMirror"
+                      dangerouslySetInnerHTML={{ __html: doc.content_html }}
+                    />
+                  </div>
+                )}
+                {/* The editor is a client-only island: Milkdown/ProseMirror,
+                    Yjs, the ActionCable provider, and Excalidraw never render
+                    on the server. The server emits an empty doc-live-editor
+                    shell (identical on the client's first hydration render) and
+                    the static preview above carries first paint until the
+                    editor mounts post-hydration and the swap takes over. */}
+                <div className="doc-live-editor">
+                  {isClient && (
+                    <DocumentEditor
+                      key={editorSessionKey}
+                      slug={doc.slug}
+                      identity={identity}
+                      canWrite={ownership.can_write}
+                      connectionIdentity={connectionIdentity}
+                      contentFormat={doc.content_format}
+                      initialStateB64={doc.yjs_state_b64}
+                      seedContent={doc.seed_content}
+                      seedGranted={doc.seed_granted}
+                      seedAuthorKind={doc.seed_author_kind}
+                      seedAuthorName={doc.seed_author_name}
+                      editable={ownership.can_write && (effectiveMode === 'edit' || effectiveMode === 'suggest')}
+                      suggesting={ownership.can_write && effectiveMode === 'suggest'}
+                      taskInteractive={ownership.can_write && effectiveMode !== 'comment'}
+                      onReady={(h) => {
+                        setReadyEditor({ key: editorSessionKey, handle: h })
+                        // Wait two frames so ProseMirror has painted the synced
+                        // content before the preview is removed.
+                        requestAnimationFrame(() =>
+                          requestAnimationFrame(() =>
+                            setSwappedEditorKey(editorSessionKey),
+                          ),
+                        )
+                      }}
+                      onStatus={setStatus}
+                      onSpans={setSpans}
+                      onSelection={isReading ? undefined : handleSelection}
+                      onTitleChange={setDocumentTitle}
+                    />
+                  )}
+                </div>
+              </div>
             </article>
             {!isReading && (
               <div className="margin-gutter">

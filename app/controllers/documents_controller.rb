@@ -1,9 +1,27 @@
 class DocumentsController < InertiaController
+  include DocumentWriteAuthorization
   rate_limit_document_creation
 
+  # SSR is scoped to the read-only document surfaces — #show (shell, header,
+  # static content_html preview) and #index (the landing page) — so their
+  # content is on screen at first byte. Both pages are SSR-safe: the live
+  # editor is a client-only island (useIsClient), and the landing reads no
+  # browser globals at render time (origin is filled post-hydration). Other
+  # actions (create, claim, …) stay CSR. The lambda is instance_exec'd per
+  # request. Browser-only branches of #show (agent UA / .txt / .json) return
+  # before the inertia render, so SSR never touches them.
+  inertia_config ssr_enabled: -> { %w[show index].include?(action_name) }
+
   def index
-    # Your docs: claimed by this browser's ownership token, newest first.
-    yours = Document.where(owner_token: owner_token).order(created_at: :desc).limit(50)
+    now = Time.current
+    week_start = now.beginning_of_week
+    # Signed-in ownership follows the account across browsers. Guests retain
+    # the original permanent-cookie ownership model.
+    yours = if current_user
+      current_user.documents.order(created_at: :desc).limit(50)
+    else
+      Document.where(owner_token: owner_token).order(created_at: :desc).limit(50)
+    end
     your_slugs = yours.map(&:slug).to_set
 
     # Recents are session-scoped: you see the documents you opened, not a
@@ -12,12 +30,17 @@ class DocumentsController < InertiaController
     slugs = Array(session[:recent_slugs])
     docs = Document.where(slug: slugs).index_by(&:slug)
     render inertia: "documents/index", props: {
-      yours: yours.map { |d| d.slice(:title, :slug, :content_format) },
+      yours: yours.map do |document|
+        index_document_props(document, week_start:, current_year: now.year)
+      end,
       # Recent rows carry ownership state so claimable docs can offer an
       # inline claim affordance. Render-time staleness is fine: the claim
       # POST is race-tolerant and the scoped reload reconciles the lists.
       recent: slugs.filter_map { |slug| docs[slug] unless your_slugs.include?(slug) }
-                   .map { |d| d.slice(:title, :slug, :content_format).merge(d.ownership_props(owner_token)) }
+                   .map do |d|
+                     index_document_props(d, week_start:, current_year: now.year)
+                       .merge(d.ownership_props(owner_token, viewer_user: current_user))
+                   end
     }
   end
 
@@ -48,6 +71,13 @@ class DocumentsController < InertiaController
     seed_granted = initial_render? && !prefetch_request? && document.try_claim_seed
 
     render inertia: "documents/show", props: {
+      # UI prefs ride server-readable cookies so SSR renders panel/focus/mode at
+      # their stored values on first paint — no post-hydration flip for users
+      # who closed the panel, enabled focus, or picked a non-Edit mode. The
+      # client writes these cookies on change (see show.tsx). mode for the demo
+      # doc is forced to "edit" client-side (modeLocked), so any stale cookie is
+      # ignored there.
+      ui: ui_prefs,
       document: document.slice(:id, :slug, :title, :content_format).merge(
         seed_content: document.seed_content,
         seed_granted: seed_granted,
@@ -55,11 +85,17 @@ class DocumentsController < InertiaController
         seed_author_name: document.seed_author_name,
         has_state: document.yjs_state.present?,
         yjs_state_b64: (Base64.strict_encode64(document.yjs_state) if document.yjs_state.present?),
+        # Server-rendered prose for an instant first paint; the live editor
+        # swaps in over it once Milkdown binds the hydrated Yjs state.
+        content_html: document.preview_html,
+        # First-H1 title derived on the server so the header reads correctly on
+        # first paint, before the editor mounts and derives the same title.
+        display_title: document.display_title,
         **(document.content_format == "markdown" ? { seed_markdown: document.seed_content } : {})
       ),
       # Ownership rides its own lazy prop so claim events reload cheaply —
       # never re-shipping the Yjs state embedded in the document prop above.
-      ownership: -> { document.ownership_props(owner_token) },
+      ownership: -> { document.ownership_props(owner_token, viewer_user: current_user) },
       suggestions: -> { document.suggestions.pending.order(:created_at).map(&:as_props) },
       comments: -> { document.comments.order(:created_at).map(&:as_props) },
       activities: -> { document.activities.recent.map(&:as_props) },
@@ -70,18 +106,11 @@ class DocumentsController < InertiaController
   def create
     # UI-created docs are owned by their creator from the same INSERT — a UI
     # doc never exists momentarily unclaimed, and no claim activity is logged
-    # (the doc was never up for grabs).
-    format = params[:content_format].presence || request.request_parameters["format"].presence || "markdown"
-    unless Document::CONTENT_FORMATS.include?(format)
-      return redirect_to root_path, inertia: { errors: { content_format: "Choose Markdown or HTML" } }
-    end
+    # (the doc was never up for grabs). Browser-created documents are always
+    # portable Markdown; agents can create typed HTML documents through the API.
     if params.key?(:content) && params.key?(:markdown)
       return redirect_to root_path,
                          inertia: { errors: { content: "Send content or legacy markdown, not both" } }
-    end
-    if params[:markdown].present? && format != "markdown"
-      return redirect_to root_path,
-                         inertia: { errors: { content: "The markdown field can only create Markdown documents" } }
     end
 
     raw_content = params[:content].presence || params[:markdown].presence
@@ -89,22 +118,21 @@ class DocumentsController < InertiaController
       return redirect_to root_path,
                          inertia: { errors: { content: "Document content is too long" } }
     end
-    source = raw_content
-    source ||= format == "html" ? Document::DEFAULT_HTML_SEED : Document::DEFAULT_SEED
-    source = HtmlDocumentSanitizer.external(source).content if format == "html"
+    source = raw_content || Document::DEFAULT_SEED
 
-    creator_name = Document.normalize_owner_name(preferred_name(params[:name], fallback: nil))
+    creator_name = current_user&.name ||
+      Document.normalize_owner_name(preferred_name(params[:name], fallback: nil))
+    ownership = current_user ? { user: current_user } : { owner_token: owner_token }
     document = Document.create!(
       title: params[:title].presence || "Untitled",
-      content_format: format,
+      content_format: "markdown",
       seed_content: source,
-      owner_token: owner_token,
       owner_name: creator_name,
       seed_author_kind: "human",
       seed_author_name: creator_name,
-      claimed_at: Time.current
+      claimed_at: Time.current,
+      **ownership
     )
-    DocumentAsset.claim_from_html!(document:, source:) if document.html?
     remember_recent(document)
     redirect_to document_page_path(document.slug), status: :see_other
   end
@@ -113,7 +141,11 @@ class DocumentsController < InertiaController
   # prefetchers and unfurlers can't claim. First claim wins atomically.
   def claim
     document = Document.find_by!(slug: params[:slug])
-    document.claim!(token: owner_token, name: preferred_name(params[:name], fallback: nil))
+    document.claim!(
+      token: owner_token,
+      user: current_user,
+      name: preferred_name(params[:name], fallback: nil)
+    )
     redirect_back fallback_location: document_page_path(document.slug), status: :see_other
   rescue Document::UnclaimableError
     redirect_back fallback_location: document_page_path(document.slug), status: :see_other,
@@ -127,6 +159,57 @@ class DocumentsController < InertiaController
     redirect_to root_path, status: :see_other
   end
 
+  def update_tags
+    document = Document.find_by!(slug: params[:slug])
+    unless document.owned_by?(owner_token, user: current_user)
+      return redirect_back fallback_location: root_path,
+                           inertia: { errors: { tags: "Only the owner can organize this document" } }
+    end
+
+    tags = params[:tags]
+    unless tags.is_a?(Array)
+      return redirect_back fallback_location: root_path,
+                           inertia: { errors: { tags: "Tags must be a list" } }
+    end
+
+    if document.update(tags:)
+      redirect_back fallback_location: root_path, status: :see_other
+    else
+      redirect_back fallback_location: root_path,
+                    inertia: { errors: { tags: document.errors[:tags].to_sentence } }
+    end
+  rescue ActiveRecord::RecordNotFound
+    redirect_to root_path, status: :see_other
+  end
+
+  LOCK_VALUES = {
+    true => true, false => false,
+    "true" => true, "false" => false,
+    "1" => true, "0" => false,
+    1 => true, 0 => false
+  }.freeze
+
+  def update_editing_lock
+    document = Document.find_by!(slug: params[:slug])
+    raw_locked = params[:locked]
+    unless LOCK_VALUES.key?(raw_locked)
+      return redirect_back fallback_location: document_page_path(document.slug), status: :see_other,
+                           inertia: { errors: { editing_lock: "Choose whether others can edit" } }
+    end
+
+    document.set_editing_locked!(
+      locked: LOCK_VALUES.fetch(raw_locked),
+      token: owner_token,
+      user: current_user
+    )
+    redirect_back fallback_location: document_page_path(document.slug), status: :see_other
+  rescue Document::NotOwnerError
+    redirect_back fallback_location: document_page_path(params[:slug]), status: :see_other,
+                  inertia: { errors: { editing_lock: "Only the owner can change editing access" } }
+  rescue ActiveRecord::RecordNotFound
+    redirect_to root_path, status: :see_other
+  end
+
   # Owners only. The broadcast goes out after a successful destroy — the
   # stream name derives from the record's retained id, so it still reaches
   # every subscriber, and clients are only evicted when the delete actually
@@ -136,7 +219,7 @@ class DocumentsController < InertiaController
     document = Document.find_by(slug: params[:slug])
     return redirect_to root_path, status: :see_other if document.nil?
 
-    unless document.owned_by?(owner_token)
+    unless document.owned_by?(owner_token, user: current_user)
       return redirect_back fallback_location: document_page_path(document.slug), status: :see_other,
                            inertia: { errors: { document: "Only the owner can delete this document" } }
     end
@@ -161,6 +244,8 @@ class DocumentsController < InertiaController
 
   def snapshot
     document = Document.find_by!(slug: params[:slug])
+    @write_document = document
+    document.assert_write_access!(token: owner_token, user: current_user)
     if params.key?(:content) && params.key?(:markdown)
       return render json: { error: "Send content or legacy markdown, not both." },
                     status: :unprocessable_entity
@@ -190,7 +275,9 @@ class DocumentsController < InertiaController
       state_vector_b64: state_vector.presence,
       content:,
       spans:,
-      title:
+      title:,
+      token: owner_token,
+      user: current_user
     )
     return render json: { error: "Snapshot is stale; retry from current document state." },
                   status: :conflict unless persisted
@@ -206,11 +293,13 @@ class DocumentsController < InertiaController
   # makes the same CRDT update durable and relays it to any connected clients.
   def sync_update
     document = Document.find_by!(slug: params[:slug])
+    @write_document = document
+    document.assert_write_access!(token: owner_token, user: current_user)
     update = params[:update].to_s
     decoded = Base64.strict_decode64(update)
     return head :content_too_large if decoded.bytesize > MAX_SYNC_UPDATE_BYTES
 
-    YjsPersistence.merge(document, update)
+    YjsPersistence.merge(document, update, token: owner_token, user: current_user)
     SyncChannel.broadcast_to(document, {
       type: "update",
       update:,
@@ -236,7 +325,9 @@ class DocumentsController < InertiaController
         state_vector_b64: state_vector,
         content:,
         spans:,
-        title:
+        title:,
+        token: owner_token,
+        user: current_user
       )
       return render json: { error: "Snapshot is stale; retry from current document state." },
                     status: :conflict unless persisted
@@ -254,6 +345,23 @@ class DocumentsController < InertiaController
 
   def broadcast_title(document)
     DocumentMetaChannel.broadcast_event(document, :title, title: document.title)
+  end
+
+  def index_document_props(document, week_start:, current_year:)
+    created_at = document.created_at.in_time_zone
+    created_label = if created_at.year == current_year
+      created_at.strftime("%b %-d")
+    else
+      created_at.strftime("%b %-d, %Y")
+    end
+    {
+      title: document.title,
+      slug: document.slug,
+      tags: document.tags,
+      created_at: created_at.iso8601,
+      created_label:,
+      age_group: created_at >= week_start ? "this_week" : "earlier"
+    }
   end
 
   def sanitize_snapshot_spans(raw_spans)
@@ -280,6 +388,21 @@ class DocumentsController < InertiaController
 
   def remember_recent(document)
     session[:recent_slugs] = ([ document.slug ] + Array(session[:recent_slugs])).uniq.first(12)
+  end
+
+  # Cookie-backed UI prefs, read server-side so SSR's first paint matches the
+  # user's stored panel/focus/mode (no flip). Defaults match the historical
+  # localStorage fallbacks: panel open, focus off, Edit mode. Cookies are
+  # "1"/"0" flags and a "edit|suggest|comment|read" mode string; anything else
+  # falls back to the default.
+  UI_MODES = %w[edit suggest comment read].freeze
+
+  def ui_prefs
+    {
+      panel_open: cookies[:pruf_panel] != "0",
+      focus_mode: cookies[:pruf_focus] == "1",
+      mode: UI_MODES.include?(cookies[:pruf_mode]) ? cookies[:pruf_mode] : "edit"
+    }
   end
 
   # Browsers identify as Mozilla/...; curl, wget, httpx, ruby, etc. don't.

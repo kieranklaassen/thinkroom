@@ -28,7 +28,7 @@ gem "bootsnap", require: false
 
 # Deploy this application as a Docker container. Match the version used by
 # the existing Hetzner stack and its shared proxy.
-gem "kamal", "~> 2.11.0", require: false
+gem "kamal", "~> 2.12.0", require: false
 
 
 group :development, :test do
@@ -63,3 +63,7 @@ gem "commonmarker", "~> 2.8"
 
 # Decode and re-encode public image uploads before Active Storage persistence.
 gem "ruby-vips", "~> 2.3"
+
+gem "bcrypt", "~> 3.1"
+gem "omniauth-google-oauth2", "~> 1.2"
+gem "omniauth-rails_csrf_protection", "~> 2.0"
