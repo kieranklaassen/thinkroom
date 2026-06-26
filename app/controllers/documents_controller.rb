@@ -2,6 +2,8 @@ class DocumentsController < InertiaController
   include DocumentWriteAuthorization
   rate_limit_document_creation
 
+  SIGNED_IN_AUTO_CLAIM_WINDOW = 10.minutes
+
   # SSR is scoped to the read-only document surfaces — #show (shell, header,
   # static content_html preview) and #index (the landing page) — so their
   # content is on screen at first byte. Both pages are SSR-safe: the live
@@ -70,6 +72,7 @@ class DocumentsController < InertiaController
       return render plain: AgentGuide.text(document, request.base_url)
     end
 
+    auto_claim_recent_document(document, link_preview_request:)
     remember_recent(document) unless link_preview_request
     @agent_guide = AgentGuide.text(document, request.base_url)
     @open_graph = document_open_graph(document)
@@ -474,6 +477,22 @@ class DocumentsController < InertiaController
 
   def link_preview_user_agent?
     request.user_agent.to_s.match?(LINK_PREVIEW_USER_AGENTS)
+  end
+
+  # A freshly agent-created handoff is overwhelmingly likely to belong to the
+  # authenticated person who opens it. Keep this GET-side convenience narrow:
+  # only a real, full browser navigation may claim, and the model's conditional
+  # update remains the authority if another owner wins concurrently.
+  def auto_claim_recent_document(document, link_preview_request:)
+    user = current_user
+    return unless user && request.get? && initial_render?
+    return if link_preview_request || prefetch_request?
+    return unless document.claimable?
+    return if document.created_at < SIGNED_IN_AUTO_CLAIM_WINDOW.ago
+
+    document.claim!(token: owner_token, user:, name: user.name)
+  rescue Document::ClaimRaceError
+    document.reload
   end
 
   # Browsers identify as Mozilla/...; curl, wget, httpx, ruby, etc. don't.
