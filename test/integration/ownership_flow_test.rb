@@ -48,8 +48,83 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
     assert_not Document.find_by(slug: "demo").claimed?
   end
 
-  test "GET show never sets ownership" do
+  test "guest GET show never sets ownership" do
     get document_page_path(@document.slug), headers: browser
+    assert_response :success
+    assert_not @document.reload.claimed?
+  end
+
+  test "signed-in browser auto-claims a fresh unclaimed document" do
+    user = create_and_sign_in_user
+    @document.update!(created_at: 9.minutes.ago)
+
+    assert_broadcasts(DocumentMetaChannel.broadcasting_for(@document), 2) do
+      get document_page_path(@document.slug), headers: browser
+    end
+
+    assert_response :success
+    assert_equal user, @document.reload.user
+    assert_nil @document.owner_token
+    assert_equal user.name, @document.owner_name
+    assert_equal "claimed_document", @document.activities.last.action
+    assert_inertia_props do |props|
+      props.dig(:ownership, :yours) == true &&
+        props.dig(:ownership, :claimable) == false
+    end
+  end
+
+  test "signed-in browser leaves an older unclaimed document claimable" do
+    create_and_sign_in_user
+    @document.update!(created_at: 11.minutes.ago)
+
+    get document_page_path(@document.slug), headers: browser
+
+    assert_response :success
+    assert_not @document.reload.claimed?
+  end
+
+  test "signed-in prefetch never auto-claims a fresh document" do
+    create_and_sign_in_user
+
+    get document_page_path(@document.slug), headers: browser.merge("Sec-Purpose" => "prefetch")
+
+    assert_response :success
+    assert_not @document.reload.claimed?
+  end
+
+  test "signed-in Inertia partial reload never auto-claims a fresh document" do
+    create_and_sign_in_user
+
+    get document_page_path(@document.slug), headers: browser.merge(
+      "X-Inertia" => "true",
+      "X-Inertia-Version" => InertiaController.safe_vite_digest.to_s,
+      "X-Inertia-Partial-Component" => "documents/show",
+      "X-Inertia-Partial-Data" => "ownership"
+    )
+
+    assert_response :success
+    assert_not @document.reload.claimed?
+  end
+
+  test "signed-in link preview never auto-claims a fresh document" do
+    create_and_sign_in_user
+
+    get document_page_path(@document.slug), headers: {
+      "User-Agent" => "Slackbot-LinkExpanding 1.0"
+    }
+
+    assert_response :success
+    assert_not @document.reload.claimed?
+  end
+
+  test "signed-in agent and JSON reads never auto-claim a fresh document" do
+    create_and_sign_in_user
+
+    get document_page_path(@document.slug), headers: { "User-Agent" => "curl/8.0" }
+    assert_response :success
+    assert_not @document.reload.claimed?
+
+    get document_page_path(@document.slug, format: :json), headers: browser
     assert_response :success
     assert_not @document.reload.claimed?
   end
