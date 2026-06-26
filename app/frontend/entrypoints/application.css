@@ -2854,6 +2854,14 @@ a:focus-visible {
   background: color-mix(in srgb, var(--user-color, var(--accent)) 18%, transparent);
 }
 
+.read-pointer-cursor {
+  border-left-style: dashed;
+}
+
+.read-pointer-cursor > div {
+  border-radius: 999px;
+}
+
 /* ----------------------------- Share popover ----------------------------- */
 
 .share-root {

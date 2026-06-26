@@ -34,6 +34,7 @@ import {
   type SuggestionPayload,
 } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
+import { bindReadPointerBroadcast } from '../../editor/read_pointers'
 import { editorViewCtx, parserCtx, schemaCtx } from '@milkdown/kit/core'
 import { sourceParser } from '../../editor/document_format'
 import {
@@ -330,6 +331,12 @@ export default function DocumentShow({
     setSuggestionNotice(null)
     setActiveSheet(null)
   }, [isReading])
+
+  useEffect(() => {
+    if (!handle || !isReading) return
+
+    return bindReadPointerBroadcast(handle.editor, handle.provider.awareness)
+  }, [handle, isReading])
 
   // The comment composer lives in the comments panel — on mobile that means
   // opening its sheet when a selection chooses "Comment".
