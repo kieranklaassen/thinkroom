@@ -58,13 +58,35 @@ COPY . .
 RUN bundle exec bootsnap precompile -j 1 app/ lib/
 
 # Precompiling assets for production without requiring secret RAILS_MASTER_KEY
+# (this runs the Vite CLIENT build via vite-plugin-ruby).
 RUN SECRET_KEY_BASE_DUMMY=1 ./bin/rails assets:precompile
+
+# Build the Inertia SSR bundle. `bin/vite build --ssr` (vite-ruby's flavor)
+# insists on its own app/frontend/ssr/ssr.js entry; we use the @inertiajs/vite
+# plugin path instead. vite-plugin-ruby resolves the SSR entrypoint from
+# config/vite.json (ssrEntrypoint) and emits the entry chunk to
+# public/vite-ssr/ssr.js — exactly where config.ssr_bundle expects it. The
+# emitted file is a standalone Node server (createServer on port 13714).
+RUN npx vite build --ssr
 
 
 
 
 # Final stage for app image
 FROM base
+
+# Install a minimal Node.js runtime so the final image can run the Inertia SSR
+# bundle (public/vite-ssr/ssr.js). The build stage installed Node from
+# nodesource; mirror that here. node_modules are NOT copied into the runtime
+# image — the SSR bundle is self-contained (Vite bundles its deps), so only the
+# `node` binary is needed. If this install ever fails the image build fails
+# loudly rather than shipping a runtime that silently can't run SSR.
+ARG NODE_VERSION=22
+RUN apt-get update -qq && \
+    apt-get install --no-install-recommends -y curl && \
+    curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
+    apt-get install --no-install-recommends -y nodejs && \
+    rm -rf /var/lib/apt/lists /var/cache/apt/archives
 
 # Run and own only the runtime files as a non-root user for security
 RUN groupadd --system --gid 1000 rails && \

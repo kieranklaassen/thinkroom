@@ -1,11 +1,12 @@
 {
   "all": {
     "sourceCodeDir": "app/frontend",
-    "watchAdditionalPaths": []
+    "watchAdditionalPaths": [],
+    "ssrEntrypoint": "~/entrypoints/inertia.tsx"
   },
   "development": {
     "autoBuild": true,
-    "skipProxy": true,
+    "skipProxy": false,
     "publicOutputDir": "vite-dev",
     "port": 3036
   },

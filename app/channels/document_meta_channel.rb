@@ -13,4 +13,10 @@ class DocumentMetaChannel < ApplicationCable::Channel
   def self.broadcast_event(document, event, **payload)
     broadcast_to(document, { event: event.to_s, **payload })
   end
+
+  def self.broadcast_event_after_commit(document, event, **payload)
+    ActiveRecord.after_all_transactions_commit do
+      broadcast_event(document, event, **payload)
+    end
+  end
 end

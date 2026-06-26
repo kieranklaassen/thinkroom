@@ -7,10 +7,12 @@ agents can bring work in and pick up assignments, while people use deliberate
 modes to read, edit, comment, suggest, review, and endorse what they are willing
 to stand behind.
 
-AI makes generation cheap. Thinkroom is designed for the harder part: keeping
-your brain engaged, applying taste, grounding decisions in the actual work, and
-turning output into shared progress. Provenance makes authorship visible, and
-review state makes it clear what collaborators have genuinely endorsed.
+AI makes generation cheap. Thinkroom is designed for the harder part: activating
+your brain at the right moment. Reading deeply, judging critically, endorsing with
+conviction—these need focused interfaces, not a generic chat box. Thinkroom puts
+you in the right mode so you internalize the work before you stand behind it.
+Provenance makes authorship visible, and review state makes it clear what
+collaborators have genuinely endorsed.
 
 Thinkroom does not run an embedded agent. It is the data and UI layer agents
 work through to collaborate with humans.
@@ -28,8 +30,10 @@ Inspired by [Proof](https://proofeditor.ai) from Dan Shipper.
 - Human and AI authorship provenance
 - Read, edit, comment, and suggest modes
 - Reviewable suggestions, anchored comments, and task checkboxes
+- Inline Excalidraw sketches with touch, Apple Pencil, and SVG export
 - Agent presence, activity, and a discoverable HTTP API
 - Local-first Yjs state synchronized through Action Cable
+- Optional password or Google sign-in so claimed documents follow you across browsers
 
 ## Run locally
 
@@ -41,6 +45,16 @@ bin/dev
 ```
 
 Open [http://localhost:3000/d/demo](http://localhost:3000/d/demo).
+
+Anonymous use works without configuration. To enable the Google button, create
+an OAuth web application and export `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET` before starting `bin/dev`. Register the callback for the
+port you use, for example:
+
+```text
+http://localhost:3000/auth/google_oauth2/callback
+http://localhost:3001/auth/google_oauth2/callback
+```
 
 ## Verify
 
@@ -54,9 +68,10 @@ and [DEPLOYING.md](DEPLOYING.md) for the environment-driven Kamal setup.
 
 ## Current security model
 
-Thinkroom is experimental. Share links are the current access model, and agent
-identity is not yet authenticated. Keep deployment credentials, SSH keys, and
-API tokens outside the repository.
+Thinkroom is experimental. Accounts make document ownership portable, while
+share links remain the collaboration access model and agent identity is not yet
+authenticated. Keep deployment credentials, OAuth secrets, SSH keys, and API
+tokens outside the repository.
 
 See [SECURITY.md](SECURITY.md) for the supported version and private reporting
 process.

@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
 
 export PORT="${PORT:-3000}"
+export APP_PORT="$PORT"
 
 if command -v overmind 1> /dev/null 2>&1
 then

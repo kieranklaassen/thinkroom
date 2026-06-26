@@ -11,6 +11,45 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     @document = Document.create!(title: "Snap", content_markdown: "original")
   end
 
+  test "locked non-owner cannot persist a snapshot or sync update" do
+    @document.update!(
+      owner_token: "someone-else",
+      owner_name: "Owner",
+      editing_locked: true,
+      content_snapshot: "original"
+    )
+    ydoc = Y::Doc.new
+    ydoc.get_text("t") << "forbidden"
+    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
+    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+
+    post document_snapshot_path(@document.slug), params: {
+      content: "changed", spans: [], state_vector:
+    }, as: :json
+    assert_response :locked
+    assert_equal "original", @document.reload.content_snapshot
+
+    post document_sync_update_path(@document.slug), params: { update: }, as: :json
+    assert_response :locked
+    assert_nil @document.reload.yjs_state
+  end
+
+  test "locked requests are denied before snapshot and sync payload validation" do
+    @document.update!(
+      owner_token: "someone-else",
+      owner_name: "Owner",
+      editing_locked: true
+    )
+
+    post document_snapshot_path(@document.slug), params: {
+      content: "changed", markdown: "conflict", spans: []
+    }, as: :json
+    assert_response :locked
+
+    post document_sync_update_path(@document.slug), params: { update: "not-base64" }, as: :json
+    assert_response :locked
+  end
+
   test "persists markdown and sanitized spans" do
     assert_broadcast_on(
       DocumentMetaChannel.broadcasting_for(@document),
@@ -66,6 +105,30 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert_includes content, "data-provenance"
     assert_includes content, 'data-suggestion-id="s1"'
     refute_match(/onclick|script/, content)
+  end
+
+  test "HTML snapshot preserves a valid sketch and exposes its semantics" do
+    document = Document.create!(
+      title: "HTML sketch",
+      content_format: "html",
+      content_snapshot: "<p>original</p>"
+    )
+    scene = {
+      type: "excalidraw", version: 2,
+      elements: [ { type: "text", text: "Review" }, { type: "rectangle" } ],
+      appState: { viewBackgroundColor: "#ffffff" }, files: {}
+    }.to_json
+    figure = %(<figure data-thinkroom-sketch data-sketch-id="flow_1" data-format-version="1" data-description="Approval flow" data-scene="#{CGI.escapeHTML(scene)}"><figcaption>Approval flow</figcaption></figure>)
+
+    post document_snapshot_path(document.slug), params: {
+      content: "<p>Before</p>#{figure}<p>After</p>",
+      spans: [],
+      state_vector: Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+    }, as: :json
+
+    assert_response :ok
+    assert_includes document.reload.content_snapshot, "data-thinkroom-sketch"
+    assert_equal "Before Sketch: Approval flow — Review After", document.plain_text
   end
 
   test "HTML snapshot claims an image uploaded by the browser API" do

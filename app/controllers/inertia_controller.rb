@@ -19,11 +19,46 @@ class InertiaController < ApplicationController
 
   # Share data with all Inertia responses
   # see https://inertia-rails.dev/guide/shared-data
-  # The viewer's chosen display name lives in the session; no name set means
-  # guest mode (the client falls back to its random localStorage identity).
-  inertia_share viewer: -> { { name: session[:display_name], guest: session[:display_name].blank? } }
+  # Account identity wins over the optional guest display name. Only the
+  # small public account shape reaches the client.
+  #
+  # The guest identity (random name + presence color) lives only in the
+  # browser, so it rides a plain `pruf_guest` cookie (written client-side,
+  # see app/frontend/lib/cookies.ts) so SSR can render the real guest name +
+  # color at first paint — no Anonymous→name flash post-hydration. Signed-in
+  # users ignore it (their account name wins).
+  inertia_share viewer: -> {
+    account = current_user&.slice(:id, :name, :email)
+    name = current_user&.name || session[:display_name]
+    guest = guest_identity_cookie
+    {
+      name:,
+      guest: current_user.nil? && name.blank?,
+      account:,
+      guest_name: (guest["name"] if current_user.nil?),
+      guest_color: (guest["color"] if current_user.nil?)
+    }
+  }
 
   private
+
+  # Parse the client-written `pruf_guest` JSON cookie ({name, color}). It's
+  # presentation-only (a random label + a paper-friendly color), so a plain
+  # cookie is fine — no signing. Malformed/oversized values degrade to {}.
+  def guest_identity_cookie
+    raw = cookies[:pruf_guest]
+    return {} if raw.blank? || raw.bytesize > 512
+
+    parsed = JSON.parse(raw)
+    return {} unless parsed.is_a?(Hash)
+
+    {
+      "name" => (parsed["name"] if parsed["name"].is_a?(String) && parsed["name"].present?),
+      "color" => (parsed["color"] if parsed["color"].is_a?(String) && parsed["color"].match?(/\A#[0-9a-fA-F]{3,8}\z/))
+    }.compact
+  rescue JSON::ParserError
+    {}
+  end
 
   # Session name wins over client-posted names on every attribution write —
   # a stale tab can't sign your old guest name once you've introduced
@@ -31,6 +66,7 @@ class InertiaController < ApplicationController
   # Non-string params (name[x]=1 produces ActionController::Parameters) are
   # treated as absent rather than stringified into garbage attribution.
   def preferred_name(raw, fallback:)
-    session[:display_name].presence || (raw.presence if raw.is_a?(String)) || fallback
+    current_user&.name || session[:display_name].presence ||
+      (raw.presence if raw.is_a?(String)) || fallback
   end
 end

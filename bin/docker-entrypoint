@@ -3,6 +3,24 @@
 # If running the rails server then create or migrate existing database
 if [ "${@: -2:1}" == "./bin/rails" ] && [ "${@: -1:1}" == "server" ]; then
   ./bin/rails db:prepare
+
+  # Start the Inertia SSR server alongside the web server. inertia-rails only
+  # attempts SSR when this bundle exists AND it can reach the SSR process, and
+  # ssr_raise_on_error is false in production — so a missing bundle or a dead
+  # SSR process degrades the document page to client-side rendering, never a
+  # 500. We background SSR here (never exec it, never `&&` it to the web boot)
+  # so that:
+  #   - if `node` or the bundle is missing/broken, the web server still boots
+  #     (the container stays healthy and serves CSR — no crash loop), and
+  #   - Thruster + Rails remain the container's foreground/PID-tracked process,
+  #     so Kamal's health check follows the web server, not this side process.
+  SSR_BUNDLE="/rails/public/vite-ssr/ssr.js"
+  if [ -f "$SSR_BUNDLE" ]; then
+    echo "[ssr] starting Inertia SSR server: node $SSR_BUNDLE"
+    node "$SSR_BUNDLE" &
+  else
+    echo "[ssr] bundle not found at $SSR_BUNDLE — serving client-side rendering only"
+  fi
 fi
 
 exec "${@}"

@@ -40,6 +40,42 @@ try {
     fail('landing page does not use the approved Thinkroom tagline')
   }
   await landing.locator('.landing-byline', { hasText: 'creator of Compound Engineering' }).waitFor()
+  await landing.getByRole('heading', { name: 'Your documents' }).waitFor()
+  await landing.getByRole('heading', { name: 'Recently opened' }).waitFor()
+  if ((await landing.locator('.format-label').count()) === 0) {
+    ok('landing page organizes documents without format labels')
+  } else {
+    fail('landing page still exposes document format labels')
+  }
+
+  await landing.getByRole('button', { name: 'New document' }).click()
+  await landing.waitForURL(/\/d\//)
+  await landing.goto(BASE)
+  await landing.getByRole('button', { name: /Add tag/ }).first().click()
+  await landing
+    .getByLabel('Tags')
+    .fill('one, two, three, four, five, six, seven, eight, nine')
+  await landing.getByRole('button', { name: 'Save' }).click()
+  await landing.getByRole('alert').waitFor()
+  if (
+    (await landing.getByLabel('Tags').isVisible()) &&
+    (await landing.getByRole('alert').innerText()).includes('at most 8 tags')
+  ) {
+    ok('invalid tags keep the inline editor open with an error')
+  } else {
+    fail('invalid tags did not remain visible in the inline editor')
+  }
+  await landing.getByLabel('Tags').fill('Research, Planning')
+  await landing.getByRole('button', { name: 'Save' }).click()
+  await landing.locator('.document-tag-editor input').waitFor({ state: 'detached' })
+  if (
+    (await landing.locator('.document-tag', { hasText: 'Research' }).count()) === 1 &&
+    (await landing.locator('.document-tag', { hasText: 'Planning' }).count()) === 1
+  ) {
+    ok('valid tags update the row without leaving the index')
+  } else {
+    fail('saved tags did not update the document row')
+  }
   await landing.close()
 
   const a = await makePage('a')
@@ -267,6 +303,313 @@ try {
   }
   await taskA.close()
   await taskB.close()
+
+  // Inline sketches: the action inserts an editable canvas directly in the
+  // document, changes autosave, the lightweight SVG preview syncs, and
+  // agent-readable source survives reload. Non-edit modes remain preview-only.
+  const sketchDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Sketch check', markdown: '# Sketch check\n\nBody.\n' }),
+    })
+  ).json()
+  const sketchA = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  const sketchB = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  await Promise.all([
+    sketchA.goto(`${BASE}/d/${sketchDoc.slug}`),
+    sketchB.goto(`${BASE}/d/${sketchDoc.slug}`),
+  ])
+  await Promise.all([
+    sketchA.waitForSelector('.doc-status--live', { timeout: 15000 }),
+    sketchB.waitForSelector('.doc-status--live', { timeout: 15000 }),
+  ])
+  await sketchA.locator('.milkdown .ProseMirror').click()
+  await sketchA.keyboard.press('Meta+ArrowDown')
+  await sketchA.getByRole('button', { name: 'Sketch', exact: true }).click()
+  await sketchA.locator('.thinkroom-sketch.is-editing .excalidraw').waitFor({ timeout: 15000 })
+  ok('sketch action inserts and lazy-loads an inline Excalidraw canvas')
+  await sketchA.getByTitle('Rectangle — R or 2').click()
+  const sketchCanvas = sketchA.locator('.excalidraw canvas').last()
+  const sketchBox = await sketchCanvas.boundingBox()
+  if (sketchBox) {
+    await sketchA.mouse.move(sketchBox.x + 300, sketchBox.y + 180)
+    await sketchA.mouse.down()
+    await sketchA.mouse.move(sketchBox.x + 520, sketchBox.y + 320, { steps: 8 })
+    await sketchA.mouse.up()
+  } else {
+    fail('Excalidraw canvas has no drawable bounds')
+  }
+  const sketchDescription = `Approval flow ${Date.now()}`
+  await sketchA.getByRole('textbox', { name: 'Sketch title' }).fill(sketchDescription)
+  await sketchA.locator('.doc-title').click()
+  await sketchA.locator('.thinkroom-sketch .sketch-preview-svg[data-renderer="excalidraw"]').waitFor({ timeout: 15000 })
+  const sketchFitsPaper = await sketchA.locator('.thinkroom-sketch').evaluate((node) => {
+    const paper = node.querySelector('svg[data-renderer="excalidraw"]')?.getBoundingClientRect()
+    const drawing = node.querySelector('[data-excalidraw-scene]')?.getBoundingClientRect()
+    return Boolean(
+      paper && drawing &&
+      drawing.top >= paper.top - 0.1 &&
+      drawing.right <= paper.right + 0.1 &&
+      drawing.bottom <= paper.bottom + 0.1 &&
+      drawing.left >= paper.left - 0.1
+    )
+  })
+  if (sketchFitsPaper) ok('the complete sketch fits inside its fixed-width paper')
+  else fail('the saved sketch preview clips content outside its paper')
+  const closedSketchHeight = await sketchA.locator('.thinkroom-sketch').evaluate((node) =>
+    node.getBoundingClientRect().height,
+  )
+  await sketchA.locator('.thinkroom-sketch').click({ position: { x: 100, y: 100 } })
+  await sketchA.locator('.thinkroom-sketch.is-editing').waitFor({ timeout: 10000 })
+  const openSketchHeight = await sketchA.locator('.thinkroom-sketch').evaluate((node) =>
+    node.getBoundingClientRect().height,
+  )
+  await sketchA.locator('.doc-title').click()
+  if (Math.abs(openSketchHeight - closedSketchHeight) < 0.1) {
+    ok('opening an inline sketch preserves its exact paper height')
+  } else {
+    fail(`opening a sketch shifted its height by ${openSketchHeight - closedSketchHeight}px`)
+  }
+  const afterSketchText = `Continue after sketch ${Date.now()}`
+  await sketchA.locator('.thinkroom-sketch + p').click()
+  await sketchA.keyboard.type(afterSketchText)
+  await sketchA.locator('.thinkroom-sketch + p', { hasText: afterSketchText }).waitFor({ timeout: 5000 })
+  ok('the visible trailing text line accepts writing after the inline sketch')
+  await sketchB.waitForFunction(
+    (title) => document.querySelector('.thinkroom-sketch-title')?.value === title,
+    sketchDescription,
+    { timeout: 10000 },
+  )
+  ok('saved sketch renders as SVG and syncs to another editor')
+
+  let sketchState = null
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    sketchState = await (await fetch(`${BASE}/api/docs/${sketchDoc.slug}`)).json()
+    if (sketchState.content?.includes('```excalidraw') && sketchState.plain_text?.includes(sketchDescription)) break
+    await sketchA.waitForTimeout(250)
+  }
+  if (
+    sketchState?.content?.includes('```excalidraw') &&
+    sketchState.content.includes('"elements":[{"id"') &&
+    sketchState.plain_text.includes(sketchDescription)
+  ) {
+    ok('sketch source and human-readable semantics persist for agents')
+  } else {
+    fail(`sketch API contract did not persist: ${JSON.stringify(sketchState)}`)
+  }
+
+  await sketchA.addInitScript(() => {
+    const observer = new MutationObserver(() => {
+      const sketches = Array.from(document.querySelectorAll('.thinkroom-sketch'))
+      if (sketches.length === 0 || window.__firstSketchFrameExact !== undefined) return
+      requestAnimationFrame(() => {
+        window.__firstSketchFrameExact = sketches.every((node) =>
+          node.querySelector('[data-renderer="excalidraw"]'),
+        )
+      })
+    })
+    observer.observe(document, { childList: true, subtree: true })
+  })
+  await sketchA.reload()
+  await sketchA.locator('.thinkroom-sketch .sketch-preview-svg[data-renderer="excalidraw"]').waitFor({ timeout: 15000 })
+  await sketchA.waitForFunction(() => window.__firstSketchFrameExact !== undefined)
+  if (await sketchA.evaluate(() => window.__firstSketchFrameExact)) {
+    ok('the first visible sketch frame uses the exact Excalidraw renderer')
+  } else {
+    fail('the first visible sketch frame painted the fallback renderer')
+  }
+  const hydratedSketchHeight = await sketchA.locator('.thinkroom-sketch').evaluate((node) =>
+    node.getBoundingClientRect().height,
+  )
+  await sketchA.waitForTimeout(400)
+  const settledSketchHeight = await sketchA.locator('.thinkroom-sketch').evaluate((node) =>
+    node.getBoundingClientRect().height,
+  )
+  if (Math.abs(hydratedSketchHeight - settledSketchHeight) < 0.1) {
+    ok('the preloaded exact sketch renderer does not shift after hydration')
+  } else {
+    fail(`the sketch shifted ${settledSketchHeight - hydratedSketchHeight}px after hydration`)
+  }
+  if ((await sketchA.locator('.thinkroom-sketch-title').inputValue()) === sketchDescription) {
+    ok('editable sketch scene survives reload')
+  } else {
+    fail('sketch description or scene was lost on reload')
+  }
+  await sketchA.locator('.thinkroom-sketch').click({ position: { x: 180, y: 180 } })
+  await sketchA.locator('.thinkroom-sketch.is-editing .excalidraw').waitFor({ timeout: 15000 })
+  const viewportCanvas = sketchA.locator('.thinkroom-sketch.is-editing canvas').last()
+  const viewportCanvasBox = await viewportCanvas.boundingBox()
+  if (!viewportCanvasBox) {
+    fail('active sketch canvas has no bounds for viewport persistence check')
+  } else {
+    await sketchA.mouse.move(
+      viewportCanvasBox.x + viewportCanvasBox.width / 2,
+      viewportCanvasBox.y + viewportCanvasBox.height / 2,
+    )
+    await sketchA.keyboard.down('Control')
+    await sketchA.mouse.wheel(0, 300)
+    await sketchA.keyboard.up('Control')
+  }
+  await sketchA.locator('.doc-title').click()
+  await sketchA.locator('.thinkroom-sketch [data-renderer="excalidraw"]').waitFor()
+  const closedViewportWidth = await sketchA.locator('[data-excalidraw-scene]').evaluate((node) =>
+    node.getBoundingClientRect().width,
+  )
+  await sketchA.reload()
+  await sketchA.locator('.thinkroom-sketch [data-renderer="excalidraw"]').waitFor({ timeout: 15000 })
+  const reloadedViewportWidth = await sketchA.locator('[data-excalidraw-scene]').evaluate((node) =>
+    node.getBoundingClientRect().width,
+  )
+  if (Math.abs(closedViewportWidth - reloadedViewportWidth) < 0.1) {
+    ok('the editor viewport survives click-away and reload without zooming')
+  } else {
+    fail(`the sketch viewport changed ${reloadedViewportWidth - closedViewportWidth}px on reload`)
+  }
+  const retinaContext = await browser.newContext({
+    viewport: { width: 1280, height: 900 },
+    deviceScaleFactor: 2,
+  })
+  const retinaPage = await retinaContext.newPage()
+  await retinaPage.goto(`${BASE}/d/${sketchDoc.slug}`)
+  await retinaPage.locator('.thinkroom-sketch [data-renderer="excalidraw"]').waitFor({ timeout: 15000 })
+  const retinaPreviewFits = await retinaPage.locator('.thinkroom-sketch').evaluate((node) => {
+    const paper = node.querySelector('.sketch-preview-svg')?.getBoundingClientRect()
+    const drawing = node.querySelector('[data-excalidraw-scene]')?.getBoundingClientRect()
+    return Boolean(
+      paper && drawing &&
+      drawing.top >= paper.top - 0.5 &&
+      drawing.left >= paper.left - 0.5 &&
+      drawing.right <= paper.right + 0.5 &&
+      drawing.bottom <= paper.bottom + 0.5
+    )
+  })
+  if (retinaPreviewFits) {
+    ok('Retina Chrome renders the closed sketch in CSS pixels without 2x zoom')
+  } else {
+    fail('Retina Chrome device-scaled the closed sketch preview')
+  }
+  await retinaContext.close()
+  await sketchA.getByRole('button', { name: /Mode:/ }).click()
+  await sketchA.getByRole('option', { name: /^Read/ }).click()
+  await sketchA.locator('.thinkroom-sketch').click()
+  await sketchA.waitForTimeout(150)
+  if ((await sketchA.locator('.thinkroom-sketch.is-editing').count()) === 0) {
+    ok('Read mode keeps sketches preview-only')
+  } else {
+    fail('Read mode opened the sketch editor')
+  }
+  await sketchB.locator('.thinkroom-sketch').click()
+  await sketchB.locator('.excalidraw canvas').last().click({ position: { x: 20, y: 20 } })
+  await sketchB.keyboard.press('Delete')
+  await sketchA.locator('.thinkroom-sketch').waitFor({ state: 'detached', timeout: 10000 })
+  await sketchB.reload()
+  if ((await sketchB.locator('.thinkroom-sketch').count()) === 0) {
+    ok('deleting a sketch syncs and survives reload')
+  } else {
+    fail('deleted sketch returned after reload')
+  }
+
+  await sketchA.close()
+  await sketchB.close()
+
+  const emptySketchDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Empty sketch affordance',
+        markdown: `\`\`\`excalidraw\n${JSON.stringify({
+          id: 'add_sketch_fixture',
+          formatVersion: 1,
+          description: '',
+          height: 320,
+          scene: { type: 'excalidraw', version: 2, elements: [], appState: {}, files: {} },
+        })}\n\`\`\`\n`,
+      }),
+    })
+  ).json()
+  const insertSketchPage = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  await insertSketchPage.goto(`${BASE}/d/${emptySketchDoc.slug}`)
+  await insertSketchPage.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await insertSketchPage.locator('.sketch-add-inline').waitFor({ state: 'visible', timeout: 5000 })
+  await insertSketchPage.locator('.sketch-add-inline').click()
+  await insertSketchPage.locator('.thinkroom-sketch.is-editing').waitFor({ timeout: 15000 })
+  ok('empty trailing line offers a lightweight Add sketch action')
+  await insertSketchPage.locator('.thinkroom-sketch.is-editing').hover()
+  await insertSketchPage
+    .locator('.thinkroom-sketch.is-editing')
+    .getByRole('button', { name: 'Delete sketch' })
+    .click()
+  await insertSketchPage.waitForFunction(
+    () => document.querySelectorAll('.thinkroom-sketch').length === 1,
+    undefined,
+    { timeout: 10000 },
+  )
+  ok('hovering the paper exposes a tape-mounted delete action')
+
+  await insertSketchPage.locator('.ProseMirror > p:last-of-type').click()
+  await insertSketchPage.keyboard.type('/')
+  await insertSketchPage.locator('.thinkroom-slash-menu[data-visible="true"]').waitFor({ timeout: 5000 })
+  if ((await insertSketchPage.locator('.thinkroom-slash-item').count()) >= 10) {
+    ok('typing slash opens the populated block insert menu')
+  } else {
+    fail('slash menu did not expose the supported document blocks')
+  }
+  await insertSketchPage.keyboard.type('sketch')
+  await insertSketchPage.locator('.thinkroom-sketch.is-editing').waitFor({ timeout: 15000 })
+  ok('/sketch filters the insert menu and inserts an inline sketch')
+  await insertSketchPage.close()
+
+  const malformedSketch = JSON.stringify({
+    id: 'malformed_points',
+    formatVersion: 1,
+    description: 'Malformed sketch',
+    scene: {
+      type: 'excalidraw',
+      version: 2,
+      elements: [{ type: 'arrow', points: [null, null] }],
+      appState: {},
+      files: {},
+    },
+  })
+  const malformedDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Malformed sketch check',
+        markdown: `\`\`\`excalidraw\n${malformedSketch}\n\`\`\`\n`,
+      }),
+    })
+  ).json()
+  const malformedPage = await browser.newPage()
+  await malformedPage.goto(`${BASE}/d/${malformedDoc.slug}`)
+  await malformedPage.waitForSelector('.doc-status--live', { timeout: 15000 })
+  if (
+    (await malformedPage.locator('.thinkroom-sketch').count()) === 0 &&
+    (await malformedPage.locator('pre code').innerText()).includes('malformed_points')
+  ) {
+    ok('invalid sketch source stays visible without crashing the document')
+  } else {
+    fail('invalid sketch source was hidden or treated as an executable sketch')
+  }
+  await malformedPage.close()
+
+  const failedChunkContext = await browser.newContext()
+  const failedChunkPage = await failedChunkContext.newPage()
+  await failedChunkPage.route('**/vite-dev/editor/sketch/excalidraw_canvas.tsx*', (route) =>
+    route.abort(),
+  )
+  await failedChunkPage.goto(`${BASE}/d/${malformedDoc.slug}`)
+  await failedChunkPage.getByRole('button', { name: 'Sketch', exact: true }).click()
+  await failedChunkPage.locator('.sketch-load-error').waitFor({ timeout: 15000 })
+  if ((await failedChunkPage.locator('.milkdown .ProseMirror').count()) === 1) {
+    ok('canvas chunk failure leaves the document mounted')
+  } else {
+    fail('canvas chunk failure unmounted the document editor')
+  }
+  await failedChunkContext.close()
 
   // Clipboard: users should get portable Markdown, not Thinkroom's internal
   // provenance/suggestion wrappers. Ordinary Markdown formatting must stay.

@@ -161,14 +161,62 @@ a:focus-visible {
 /* --------------------------------- Landing ------------------------------- */
 .landing {
   min-height: 100vh;
-  display: grid;
-  place-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   padding: 2rem;
 }
 
+.account-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink-soft);
+  padding: 0.35rem 0.65rem;
+  font-size: 0.74rem;
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.account-control--guest:hover {
+  border-color: var(--ink-faint);
+  color: var(--ink);
+}
+
+.account-control--signed-in > span {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-control--signed-in button {
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-faint);
+  padding: 0 0 0 0.5rem;
+  cursor: pointer;
+}
+
+.account-control--signed-in button:hover {
+  color: var(--ink);
+}
+
 .landing-main {
-  max-width: 26rem;
+  width: 100%;
+  max-width: 44rem;
+  margin-block: auto;
   text-align: center;
+}
+
+.landing-hero {
+  max-width: 28rem;
+  margin-inline: auto;
 }
 
 .landing-wordmark {
@@ -203,127 +251,6 @@ a:focus-visible {
   justify-content: center;
 }
 
-.document-creator {
-  margin-top: 1.5rem;
-  text-align: left;
-  animation: creator-in 160ms ease-out;
-}
-
-.document-creator fieldset {
-  border: 0;
-  padding: 0;
-  margin: 0;
-}
-
-.document-creator legend {
-  width: 100%;
-  text-align: center;
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--ink-soft);
-  margin-bottom: 0.65rem;
-}
-
-.format-options {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.55rem;
-}
-
-.format-option {
-  position: relative;
-  display: flex;
-  min-width: 0;
-  cursor: pointer;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--surface);
-  padding: 0.7rem 0.75rem;
-  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
-}
-
-.format-option:hover {
-  border-color: var(--ink-faint);
-  transform: translateY(-1px);
-}
-
-.format-option.is-selected {
-  border-color: var(--ink);
-  background: var(--surface-raised);
-}
-
-.format-option input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.format-option:has(input:focus-visible) {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.format-option-copy {
-  display: grid;
-  gap: 0.2rem;
-}
-
-.format-option-copy strong {
-  font-size: 0.82rem;
-  font-weight: 650;
-}
-
-.format-option-copy small {
-  color: var(--ink-faint);
-  font-size: 0.68rem;
-  line-height: 1.35;
-}
-
-.format-help {
-  margin-top: 0.55rem;
-  text-align: center;
-  color: var(--ink-faint);
-  font-size: 0.68rem;
-}
-
-.document-creator-actions {
-  margin-top: 0.8rem;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.btn-quiet {
-  border: 0;
-  background: transparent;
-  color: var(--ink-faint);
-}
-
-.btn-quiet:hover {
-  color: var(--ink);
-  background: var(--accent-soft);
-}
-
-.form-error {
-  margin-top: 0.45rem;
-  color: #a33b2d;
-  font-size: 0.72rem;
-  text-align: center;
-}
-
-@keyframes creator-in {
-  from {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-}
-
-.landing-recent {
-  margin-top: 3rem;
-  text-align: left;
-}
-
 .landing-recent-heading {
   font-size: 0.7rem;
   text-transform: uppercase;
@@ -332,47 +259,6 @@ a:focus-visible {
   margin-bottom: 0.5rem;
 }
 
-.landing-recent ul {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.landing-recent a {
-  color: var(--ink-soft);
-  font-size: 0.9rem;
-  text-decoration: none;
-  border-radius: 6px;
-  padding: 0.3rem 0.5rem;
-  margin: 0 -0.5rem;
-  display: block;
-  transition: background 120ms ease, color 120ms ease;
-}
-
-.landing-recent a:hover {
-  background: var(--accent-soft);
-  color: var(--ink);
-}
-
-.landing-recent-empty {
-  font-size: 0.8rem;
-  color: var(--ink-faint);
-  line-height: 1.5;
-}
-
-/* Recent rows: title link + optional claim icon / owner label inline. */
-.recent-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.recent-row a {
-  flex: 1;
-  min-width: 0;
-}
-
-.format-label,
 .doc-format {
   flex: none;
   color: var(--ink-faint);
@@ -384,16 +270,292 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+/* ---------------------------- Document library -------------------------- */
+.document-library {
+  --document-library-muted: color-mix(in srgb, var(--ink-soft) 88%, var(--ink));
+
+  margin-top: 3.5rem;
+  text-align: left;
+}
+
+.document-library--recent {
+  margin-top: 2.75rem;
+}
+
+.document-library-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 28%, var(--line));
+}
+
+.document-library-heading h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-doc);
+  font-size: 1.22rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.document-library-heading p {
+  margin: 0.2rem 0 0;
+  color: var(--document-library-muted);
+  font-size: 0.75rem;
+}
+
+.document-tag-filters {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.document-tag-filters button {
+  min-height: 1.85rem;
+  border: 1px solid var(--document-library-muted);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--document-library-muted);
+  padding: 0.28rem 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.document-tag-filters button:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.document-tag-filters button.is-active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.document-library-empty {
+  margin: 0;
+  padding: 1.2rem 0;
+  color: var(--document-library-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.document-groups {
+  display: grid;
+  gap: 1.5rem;
+  padding-top: 1.25rem;
+}
+
+.document-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.45rem;
+  padding-inline: 0.15rem;
+}
+
+.document-group-heading h3 {
+  margin: 0;
+  color: var(--document-library-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.document-group-heading span {
+  color: var(--document-library-muted);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.document-list {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--ink) 24%, var(--line));
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: 0 1px 2px rgb(38 28 16 / 4%);
+}
+
+.document-row {
+  padding: 0.78rem 0.9rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 16%, var(--line));
+  transition: background 120ms ease;
+}
+
+.document-row:last-child {
+  border-bottom: 0;
+}
+
+.document-row:has(.document-row-title:hover),
+.document-row:has(.document-row-title:focus-visible) {
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-raised));
+}
+
+.document-row-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.document-row-copy {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.document-row-title {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.93rem;
+  font-weight: 620;
+  line-height: 1.35;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-row-title:hover {
+  color: color-mix(in srgb, var(--accent) 68%, var(--ink));
+}
+
+.document-row-date {
+  color: var(--document-library-muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.document-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex: none;
+}
+
+.document-tags {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  margin-top: 0.55rem;
+}
+
+.document-tag {
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: color-mix(in srgb, var(--accent) 58%, var(--ink));
+  padding: 0.2rem 0.48rem;
+  font-size: 0.65rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.document-tag-edit,
+.document-reveal,
+.document-tag-save,
+.document-tag-cancel {
+  border: 0;
+  background: transparent;
+  color: var(--document-library-muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.document-tag-edit:hover,
+.document-reveal:hover,
+.document-tag-cancel:hover {
+  color: var(--ink);
+}
+
+.document-reveal {
+  justify-self: start;
+  padding: 0.2rem 0.15rem;
+}
+
+.document-tag-editor {
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 16%, var(--line));
+}
+
+.document-tag-editor > label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--ink);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.document-tag-editor-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.document-tag-editor input {
+  flex: 1;
+  min-width: 0;
+  height: 2.15rem;
+  border: 1px solid var(--document-library-muted);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0.4rem 0.55rem;
+  font-size: 0.78rem;
+}
+
+.document-tag-save {
+  height: 2.15rem;
+  border-radius: 7px;
+  background: var(--ink);
+  color: var(--surface);
+  padding: 0.4rem 0.72rem;
+}
+
+.document-tag-save:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.document-tag-cancel {
+  height: 2.15rem;
+  padding: 0.4rem 0.3rem;
+}
+
+.document-tag-help,
+.document-tag-error {
+  margin: 0.32rem 0 0;
+  font-size: 0.67rem;
+  line-height: 1.4;
+}
+
+.document-tag-help {
+  color: var(--document-library-muted);
+}
+
+.document-tag-error {
+  color: #9b2f27;
+}
+
 .recent-claim {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.6rem;
-  height: 1.6rem;
-  border: none;
+  width: 1.9rem;
+  height: 1.9rem;
+  border: 1px solid var(--document-library-muted);
   border-radius: 6px;
   background: transparent;
-  color: var(--ink-faint);
+  color: var(--document-library-muted);
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease;
 }
@@ -410,8 +572,40 @@ a:focus-visible {
 
 .recent-owner {
   font-size: 0.72rem;
-  color: var(--ink-faint);
+  color: var(--document-library-muted);
   white-space: nowrap;
+}
+
+@media (max-width: 40rem) {
+  .landing {
+    padding-inline: 1rem;
+  }
+
+  .document-library-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .document-tag-filters {
+    justify-content: flex-start;
+  }
+
+  .document-row-summary {
+    align-items: flex-start;
+  }
+
+  .document-row-actions {
+    flex-wrap: wrap;
+  }
+
+  .document-tag-editor-controls {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .document-tag-editor input {
+    flex-basis: 100%;
+  }
 }
 
 /* --------------------------- Agent create card ---------------------------- */
@@ -449,6 +643,72 @@ a:focus-visible {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
+}
+
+.landing-footer {
+  display: grid;
+  justify-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  margin-top: 3rem;
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.landing-github {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-height: 2rem;
+  padding: 0.36rem 0.62rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: 0 1px 1px rgb(38 28 16 / 4%);
+  transition: border-color 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.landing-github:hover {
+  border-color: var(--ink-faint);
+  color: var(--ink);
+  transform: translateY(-1px);
+}
+
+.landing-github:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.landing-github svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.landing-github-star {
+  margin-left: 0.08rem;
+  padding-left: 0.45rem;
+  border-left: 1px solid var(--line);
+  color: #a06a21;
+  font-size: 0.75rem;
+}
+
+.landing-footer p {
+  margin: 0;
+}
+
+.landing-footer p a {
+  color: var(--ink-soft);
+  text-underline-offset: 2px;
+}
+
+.landing-footer p a:hover {
+  color: var(--ink);
 }
 
 .btn {
@@ -734,6 +994,55 @@ a:focus-visible {
 .milkdown {
   outline: none;
   min-height: 50vh;
+}
+
+/* Instant first paint: a server-rendered prose preview and the live editor
+   share one stacking context. The preview (in flow) holds the layout height;
+   the live editor overlays it while Milkdown boots and binds the synced state,
+   painting its content directly over the identical preview. Once painted, the
+   preview is dropped and the editor returns to normal flow. The preview stays
+   behind the editor until that handoff, so content is never blank — it is
+   replaced, not deleted and re-added. */
+.doc-editor-stack {
+  position: relative;
+  min-height: 50vh;
+}
+
+/* booting + revealing: the editor is an absolute overlay sharing the preview's
+   box; it doesn't intercept pointer events until it owns the flow at 'live'. */
+.doc-editor-stack[data-phase='booting'] .doc-live-editor,
+.doc-editor-stack[data-phase='revealing'] .doc-live-editor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Exactly ONE text layer is ever visible — no doubled/ghosted text at the swap.
+   ProseMirror paints its content during boot, so a transparent editor overlaid
+   on the visible preview would render the same text twice (heavier/anti-aliased
+   shimmer), then drop to one layer when the preview is removed — a visible
+   flicker. Instead: while booting the preview is the sole visible layer and the
+   editor stays hidden behind it (still laid out, so Milkdown measures fine). The
+   instant the editor has painted (revealing, fired on onReady) we flip in a
+   single style recalc — reveal the editor and hide the preview — same content at
+   the same position, so the text never doubles and never blanks. */
+.doc-editor-stack[data-phase='booting'] .doc-live-editor {
+  visibility: hidden;
+}
+.doc-editor-stack[data-phase='revealing'] .doc-static-preview {
+  visibility: hidden;
+}
+
+.doc-static-preview {
+  user-select: none;
+}
+
+/* Neutral box standing in for a sketch canvas until Excalidraw mounts, so a
+   sketch doc reserves the right height instead of reflowing on swap. */
+.doc-sketch-skeleton {
+  margin: 1.5rem 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, currentColor 6%, transparent);
 }
 
 .milkdown .ProseMirror {
@@ -1812,6 +2121,7 @@ a:focus-visible {
 }
 
 .header-menu-item,
+.header-menu-status,
 .header-menu-popover .chrome-toggle,
 .header-menu-popover .feedback-button {
   display: flex;
@@ -1827,6 +2137,16 @@ a:focus-visible {
   color: var(--ink);
   text-align: left;
   cursor: pointer;
+}
+
+.header-menu-status {
+  cursor: default;
+  color: var(--ink-faint);
+}
+
+.header-menu-item:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .header-menu-item:hover,
@@ -1854,6 +2174,15 @@ a:focus-visible {
   height: 1px;
   background: var(--line);
   margin: 0.3rem 0.35rem;
+}
+
+.header-menu-account {
+  overflow: hidden;
+  padding: 0.35rem 0.55rem 0.1rem;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .header-menu-popover .ownership-owner {
@@ -1988,6 +2317,10 @@ a:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: 0.38rem;
+}
+
+.identity-chip--account {
+  cursor: default;
 }
 
 .identity-dot {
@@ -2242,6 +2575,11 @@ a:focus-visible {
   border-top: 1px solid var(--line);
 }
 
+.share-section--export {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+
 .share-popover .theme-picker {
   display: flex;
   width: 100%;
@@ -2310,8 +2648,41 @@ a:focus-visible {
   border-color: var(--ink-faint);
 }
 
+.share-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.share-copy:disabled {
+  color: var(--ink-faint);
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .share-copy--wide {
   width: 100%;
+}
+
+.share-export-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.share-export-actions .share-copy {
+  min-width: 0;
+  padding-inline: 0.35rem;
+  white-space: normal;
+}
+
+.share-export-status {
+  margin: 0.45rem 0 0;
+  color: var(--ink-faint);
+  font: 500 0.68rem/1.35 var(--font-ui);
+}
+
+.share-export-status.is-error {
+  color: #a1372c;
 }
 
 .share-agent-dot {
@@ -2517,6 +2888,13 @@ a:focus-visible {
     display: none;
   }
 
+  /* The overflow menu is the mobile route to ownership and account actions. */
+  .header-menu-trigger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
   /* Connection is implicit when live — only "connecting" warrants a dot,
    * so the header doesn't carry a third orphaned visual system. */
   .doc-status--live {
@@ -2714,6 +3092,9 @@ a:focus-visible {
   position: absolute;
   top: 1rem;
   right: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .landing {
@@ -2723,5 +3104,623 @@ a:focus-visible {
 @media (max-width: 30rem) {
   .doc-header .feedback-button > button {
     padding: 0.28rem 0.5rem !important;
+  }
+
+  .landing-corner {
+    top: 0.75rem;
+    right: 0.75rem;
+  }
+
+  .landing-corner .feedback-button {
+    display: none;
+  }
+}
+/* Inline sketch editor ---------------------------------------------------- */
+.thinkroom-sketch-editor-mount {
+  display: none;
+}
+
+.thinkroom-sketch.is-editing {
+  cursor: default;
+  border-color: rgb(65 51 32 / 12%);
+  box-shadow:
+    0 1px 1px rgb(38 28 16 / 5%),
+    0 7px 18px rgb(38 28 16 / 7%);
+}
+
+.thinkroom-sketch.is-editing .thinkroom-sketch-preview {
+  display: none;
+}
+
+.thinkroom-sketch.is-editing .thinkroom-sketch-editor-mount {
+  display: block;
+}
+
+.thinkroom-sketch-editor {
+  position: relative;
+  overflow: visible;
+  border-radius: 11px;
+  background: #fffef9;
+}
+
+.sketch-inline-canvas {
+  position: relative;
+  min-height: 180px;
+  overflow: hidden;
+  border-radius: 11px 11px 0 0;
+  background: #fffef9;
+  touch-action: none;
+}
+
+.sketch-inline-canvas > div,
+.thinkroom-sketch-editor .sketch-inline-canvas .excalidraw {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  --island-bg-color: var(--surface-raised);
+  --popup-bg-color: var(--surface-raised);
+  --color-on-surface: var(--ink);
+  --color-primary: var(--accent);
+  --color-primary-darker: var(--accent);
+  --color-primary-darkest: color-mix(in srgb, var(--accent) 82%, var(--ink));
+  --color-primary-hover: color-mix(in srgb, var(--accent) 82%, var(--ink));
+  --color-primary-light: var(--accent-soft);
+  --color-primary-light-darker: color-mix(in srgb, var(--accent-soft) 82%, var(--accent));
+  --color-surface-high: color-mix(in srgb, var(--ink) 6%, var(--surface-raised));
+  --color-surface-mid: color-mix(in srgb, var(--ink) 4%, var(--surface-raised));
+  --color-surface-low: color-mix(in srgb, var(--ink) 3%, var(--surface-raised));
+  --color-surface-lowest: var(--surface-raised);
+  --default-border-color: color-mix(in srgb, var(--ink) 10%, transparent);
+  font-family: var(--font-ui);
+}
+
+.thinkroom-sketch-editor .excalidraw .Island {
+  border: 1px solid color-mix(in srgb, var(--ink) 9%, transparent);
+  border-radius: 10px;
+  box-shadow: 0 5px 16px rgb(38 28 16 / 8%);
+}
+
+.thinkroom-sketch-editor .excalidraw .ToolIcon__icon,
+.thinkroom-sketch-editor .excalidraw .dropdown-menu-button {
+  border-radius: 7px;
+}
+
+/* Thinkroom sketches stay intentionally small: drawing tools, not the
+   Excalidraw asset-library workflow. */
+.thinkroom-sketch-editor .library-button,
+.thinkroom-sketch-editor .ToolIcon__library,
+.thinkroom-sketch-editor [data-testid='library-button'],
+.thinkroom-sketch-editor button[aria-label='Library'],
+.thinkroom-sketch-editor label[title='Library'] {
+  display: none !important;
+}
+
+.thinkroom-sketch-editor .App-bottom-bar,
+.thinkroom-sketch-editor .mobile-misc-tools-container {
+  display: none !important;
+}
+
+.sketch-resize-handle {
+  position: absolute;
+  z-index: 6;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  place-items: center;
+  height: 20px;
+  border-top: 1px solid rgb(65 51 32 / 9%);
+  border-radius: 0;
+  background: #fffaf1;
+  cursor: row-resize;
+  touch-action: none;
+}
+
+.sketch-resize-handle span {
+  width: 38px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgb(65 51 32 / 18%);
+}
+
+.sketch-resize-handle:hover span,
+.sketch-resize-handle:focus-visible span {
+  background: rgb(65 51 32 / 34%);
+}
+
+.sketch-resize-handle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sketch-loading {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.sketch-load-error {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  height: 100%;
+  padding: 24px;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+.sketch-load-error strong {
+  color: var(--ink);
+}
+
+.sketch-button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  padding: 6px 11px;
+  font: 500 12px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.sketch-button:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.sketch-button-primary {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--surface-raised);
+}
+
+.sketch-button-danger {
+  border-color: rgb(161 55 44 / 35%);
+  color: #a1372c;
+}
+
+.sketch-error {
+  margin: 0;
+  border-top: 1px solid rgb(161 55 44 / 18%);
+  padding: 7px 10px;
+  color: #a1372c;
+  font-size: 12px;
+}
+
+.thinkroom-sketch {
+  isolation: isolate;
+  position: relative;
+  width: 100%;
+  margin: 24px 0;
+  overflow: visible;
+  border: 1px solid rgb(65 51 32 / 12%);
+  border-radius: 12px;
+  background: #fffef9;
+  box-shadow:
+    0 1px 1px rgb(38 28 16 / 5%),
+    0 7px 18px rgb(38 28 16 / 7%);
+}
+
+/* A fine inset edge keeps the paper tactile without reading as a stack. */
+.thinkroom-sketch::before {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow:
+    inset 0 1px rgb(255 255 255 / 72%),
+    inset 0 -1px rgb(65 51 32 / 6%);
+  content: '';
+  pointer-events: none;
+}
+
+.thinkroom-sketch::after {
+  position: absolute;
+  z-index: 4;
+  top: -7px;
+  left: calc(50% + var(--sketch-tape-offset, 0px));
+  width: var(--sketch-tape-width, 94px);
+  height: 15px;
+  background: rgb(218 193 145 / 42%);
+  box-shadow: inset 0 0 0 1px rgb(112 83 45 / 8%);
+  content: '';
+  pointer-events: none;
+  transform: translateX(-50%) rotate(var(--sketch-tape-angle, -0.8deg));
+}
+
+.thinkroom-sketch.is-editable {
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.thinkroom-sketch.is-editable:hover:not(.is-editing) {
+  border-color: color-mix(in srgb, var(--ink) 42%, transparent);
+  box-shadow:
+    0 1px 1px rgb(38 28 16 / 5%),
+    0 10px 23px rgb(38 28 16 / 9%);
+}
+
+.thinkroom-sketch.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent-soft) 45%, transparent),
+    0 8px 22px rgb(38 28 16 / 8%);
+}
+
+.thinkroom-sketch.is-editing.is-selected {
+  border-color: rgb(65 51 32 / 12%);
+  box-shadow:
+    0 1px 1px rgb(38 28 16 / 5%),
+    0 7px 18px rgb(38 28 16 / 7%);
+}
+
+.sketch-delete-tape {
+  position: absolute;
+  z-index: 5;
+  top: -12px;
+  left: calc(50% + var(--sketch-tape-offset, 0px));
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border: 1px solid rgb(112 83 45 / 12%);
+  border-radius: 999px;
+  background: #f1e2c5;
+  color: rgb(100 70 40 / 65%);
+  font: 500 18px/1 var(--font-ui);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.sketch-delete-tape[hidden] {
+  display: none;
+}
+
+.thinkroom-sketch.is-editable:hover .sketch-delete-tape,
+.sketch-delete-tape:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sketch-delete-tape:hover {
+  border-color: rgb(161 55 44 / 22%);
+  background: #f6ddd5;
+  color: #a1372c;
+}
+
+.sketch-delete-tape:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sketch-download-button {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  right: 12px;
+  min-height: 32px;
+  border: 1px solid rgb(65 51 32 / 14%);
+  border-radius: 7px;
+  background: rgb(255 254 249 / 92%);
+  box-shadow: 0 3px 10px rgb(38 28 16 / 9%);
+  color: var(--ink-soft);
+  padding: 6px 10px;
+  font: 600 11px/1 var(--font-ui);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.sketch-download-button[hidden],
+.thinkroom-sketch.is-editing .sketch-download-button {
+  display: none;
+}
+
+.thinkroom-sketch:hover .sketch-download-button,
+.sketch-download-button:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sketch-download-button:hover {
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+  background: #fffef9;
+}
+
+.sketch-download-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.sketch-download-button:disabled {
+  cursor: wait;
+}
+
+.thinkroom-sketch-preview {
+  display: grid;
+  position: relative;
+  place-items: center;
+  min-height: 180px;
+  overflow: hidden;
+  border-radius: 11px 11px 0 0;
+  background-color: #fffef9;
+  background-image: radial-gradient(rgb(83 63 36 / 5%) 0.55px, transparent 0.55px);
+  background-size: 5px 5px;
+}
+
+.sketch-preview-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.thinkroom-sketch-caption {
+  min-height: 34px;
+  margin: 0;
+  border-top: 1px solid rgb(65 51 32 / 10%);
+  border-radius: 0 0 11px 11px;
+  background: #fffaf1;
+  padding: 9px 12px;
+  color: var(--ink-soft);
+  font: 500 12px/1.3 var(--font-ui);
+}
+
+.thinkroom-sketch-title {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font: inherit;
+}
+
+.thinkroom-sketch-title::placeholder {
+  color: var(--ink-faint);
+}
+
+.thinkroom-sketch-caption.is-editable:focus-within {
+  background: color-mix(in srgb, #fffaf1 82%, var(--accent-soft));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.thinkroom-sketch-caption.is-empty:not(.is-editable) {
+  display: none;
+}
+
+/* Empty textblocks need a visible click target. This also makes the trailing
+   paragraph after an atom sketch discoverable instead of feeling like the
+   drawing swallowed the document. */
+.milkdown .ProseMirror > p:first-child:last-of-type:has(> br.ProseMirror-trailingBreak),
+.milkdown .ProseMirror > .thinkroom-sketch + p:last-of-type:has(> br.ProseMirror-trailingBreak) {
+  position: relative;
+  min-height: 1.72em;
+}
+
+.milkdown .ProseMirror > p:first-child:last-of-type:has(> br.ProseMirror-trailingBreak)::before,
+.milkdown .ProseMirror > .thinkroom-sketch + p:last-of-type:has(> br.ProseMirror-trailingBreak)::before {
+  position: absolute;
+  inset-inline-start: 0;
+  color: var(--ink-faint);
+  pointer-events: none;
+  content: 'Start writing…';
+}
+
+.milkdown .ProseMirror > .thinkroom-sketch + p:last-of-type:has(> br.ProseMirror-trailingBreak)::before {
+  content: 'Continue writing…';
+  animation:
+    thinkroom-writing-words 24s step-end infinite,
+    thinkroom-writing-fade 4s ease-in-out infinite;
+}
+
+@keyframes thinkroom-writing-words {
+  0% { content: 'Continue writing…'; }
+  16.667% { content: 'Keep thinking…'; }
+  33.333% { content: 'Keep jamming…'; }
+  50% { content: 'Keep brainstorming…'; }
+  66.667% { content: 'Follow the thread…'; }
+  83.333% { content: 'Ground the next idea…'; }
+}
+
+@keyframes thinkroom-writing-fade {
+  0%, 100% { opacity: 0; }
+  18%, 76% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .milkdown .ProseMirror > .thinkroom-sketch + p:last-of-type:has(> br.ProseMirror-trailingBreak)::before {
+    animation: none;
+  }
+}
+
+.sketch-add-inline {
+  margin-top: 0.35rem;
+  border: 1px dashed color-mix(in srgb, var(--ink-faint) 46%, transparent);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-faint);
+  padding: 5px 9px;
+  font: 500 12px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.sketch-add-inline:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent-soft) 26%, transparent);
+  color: var(--ink-soft);
+}
+
+.sketch-add-inline:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Notion-style block insert menu. It is attached to document.body so it can
+   float above the paper and side rails without inheriting editor clipping. */
+.thinkroom-slash-menu {
+  position: fixed;
+  z-index: 1000;
+  display: none;
+  width: min(310px, calc(100vw - 24px));
+  max-height: min(390px, calc(100vh - 24px));
+  overflow-y: auto;
+  border: 1px solid color-mix(in srgb, var(--ink) 11%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--surface-raised) 97%, transparent);
+  box-shadow: 0 14px 34px rgb(38 28 16 / 14%), 0 2px 7px rgb(38 28 16 / 8%);
+  padding: 5px;
+  backdrop-filter: blur(12px);
+}
+
+.thinkroom-slash-menu[data-visible='true'] {
+  display: block;
+}
+
+.thinkroom-slash-item {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  min-height: 46px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  padding: 5px 7px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.thinkroom-slash-item.is-active,
+.thinkroom-slash-item:hover {
+  background: color-mix(in srgb, var(--ink) 6%, var(--surface-raised));
+}
+
+.thinkroom-slash-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--ink) 9%, transparent);
+  border-radius: 7px;
+  background: var(--surface-raised);
+  color: var(--ink-soft);
+  font: 600 12px/1 var(--font-ui);
+}
+
+.thinkroom-slash-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.thinkroom-slash-copy strong {
+  font: 600 13px/1.2 var(--font-ui);
+}
+
+.thinkroom-slash-copy small {
+  overflow: hidden;
+  color: var(--ink-faint);
+  font: 450 11px/1.2 var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thinkroom-slash-empty {
+  margin: 0;
+  padding: 12px;
+  color: var(--ink-faint);
+  font: 500 12px/1.3 var(--font-ui);
+}
+
+@media (max-width: 700px) {
+  .thinkroom-sketch { margin: 18px 0; border-radius: 9px; }
+  .thinkroom-sketch-preview { min-height: 150px; }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .sketch-download-button {
+    min-width: 44px;
+    min-height: 44px;
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media print {
+  @page {
+    margin: 0.7in;
+  }
+
+  body,
+  .doc-page {
+    min-height: 0;
+    background: #fff;
+  }
+
+  .doc-header,
+  .claim-banner,
+  .doc-notice,
+  .margin-gutter,
+  .doc-rail,
+  .mobile-dock,
+  .mobile-sheet,
+  .selection-toolbar,
+  .review-popover,
+  .comment-composer--anchored,
+  .thinkroom-slash-menu,
+  .sketch-add-inline,
+  .sketch-delete-tape,
+  .sketch-download-button,
+  .thinkroom-sketch-editor-mount {
+    display: none !important;
+  }
+
+  .doc-body,
+  .doc-canvas,
+  .doc-main,
+  .doc-editor-stack,
+  .doc-live-editor {
+    display: block;
+    position: static !important;
+    width: auto;
+    min-height: 0;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    visibility: visible !important;
+  }
+
+  .doc-static-preview {
+    display: none !important;
+  }
+
+  .milkdown,
+  .milkdown .ProseMirror {
+    min-height: 0;
+  }
+
+  .milkdown .ProseMirror {
+    color: #28231d;
+    font-size: 11.5pt;
+  }
+
+  .thinkroom-sketch,
+  pre,
+  table,
+  blockquote {
+    break-inside: avoid;
+  }
+
+  a {
+    color: inherit;
+    text-decoration-color: currentColor;
   }
 }
