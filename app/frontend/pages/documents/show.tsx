@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Head, Link, router, usePoll } from '@inertiajs/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { TextSelection } from '@milkdown/kit/prose/state'
@@ -58,6 +58,7 @@ import { IdentityChip } from '../../components/identity_chip'
 import { type OwnershipPayload } from '../../components/ownership_chip'
 import { ClaimBanner } from '../../components/claim_banner'
 import { HeaderMenu } from '../../components/header_menu'
+import { DocumentWidthHandle } from '../../components/document_width_handle'
 import {
   MODE_SHORTCUTS,
   ModeControl,
@@ -111,6 +112,7 @@ export interface DocumentProps {
     panel_open: boolean
     focus_mode: boolean
     mode: EditorMode
+    document_width: number | null
   }
   ownership: OwnershipPayload
   suggestions: SuggestionPayload[]
@@ -229,12 +231,13 @@ export default function DocumentShow({
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   // Hydration-safe init from server-rendered cookie prefs: SSR and the client's
-  // first render derive panel/focus/mode from the same `ui` props, so a user
+  // first render derive panel/focus/mode/width from the same `ui` props, so a user
   // who closed the panel (etc.) sees it closed at first paint — no flip. The
   // client writes the cookie on change (effects below); cookies, not
   // localStorage, are now the source of truth for first paint.
   const [panelOpen, setPanelOpen] = useState(ui.panel_open)
   const [focusMode, setFocusMode] = useState(ui.focus_mode)
+  const [documentWidth, setDocumentWidth] = useState<number | null>(ui.document_width)
   // Demo doc always opens in Edit and stays locked there — a stale mode cookie
   // can't override it (the server also defaults it; this is the client guard).
   const demoModeLocked = doc.slug === 'demo'
@@ -273,12 +276,13 @@ export default function DocumentShow({
     if (effectiveMode !== 'comment') setCommentTarget(null)
   }, [effectiveMode])
 
-  // ≤64rem: rail and margin cards give way to anchor markers, a bottom dock,
-  // and sheets — the full product, rearranged for one hand. Masked by isClient
+  // Compact or coarse-pointer screens: rail and margin cards give way to
+  // anchor markers, a bottom dock, and sheets — the full product, rearranged
+  // for one hand. The pointer branch catches wide landscape iPads. Masked by isClient
   // so the first render is the desktop layout on both server and client (the
   // matchMedia read happens only after mount) — the responsive collapse then
   // applies one frame later, matching the editor mount.
-  const rawIsMobile = useMediaQuery('(max-width: 64rem)')
+  const rawIsMobile = useMediaQuery('(max-width: 72rem), (hover: none) and (pointer: coarse)')
   const isMobile = isClient && rawIsMobile
   const [activeSheet, setActiveSheet] = useState<SheetKind | null>(null)
   const [sheetFocusId, setSheetFocusId] = useState<number | null>(null)
@@ -1045,6 +1049,9 @@ export default function DocumentShow({
       <Head title={documentTitle} />
       <div
         className={`doc-page ${panelOpen ? '' : 'is-panel-hidden'} ${isReading ? 'is-read-mode' : ''}`}
+        style={documentWidth === null
+          ? undefined
+          : ({ '--document-width': `${documentWidth}px` } as CSSProperties)}
       >
         <header className="doc-header">
           <div className="doc-header-left">
@@ -1195,6 +1202,15 @@ export default function DocumentShow({
                 </div>
               </div>
             </article>
+            <DocumentWidthHandle
+              width={documentWidth}
+              onChange={setDocumentWidth}
+              onCommit={(width) => setCookie('pruf_width', String(width))}
+              onReset={() => {
+                setDocumentWidth(null)
+                setCookie('pruf_width', 'default')
+              }}
+            />
             {!isReading && (
               <div className="margin-gutter">
                 <MarginInlineSuggestions

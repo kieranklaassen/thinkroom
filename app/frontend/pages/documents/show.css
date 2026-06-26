@@ -1,7 +1,13 @@
 /* Read mode is the clean document surface: no review gutters or provenance
  * decoration, and unresolved tracked edits render as ordinary reading copy. */
 .doc-page.is-read-mode .doc-canvas {
-  max-width: var(--measure);
+  max-width: var(--document-width);
+}
+
+@media (max-width: 72rem), (hover: none) and (pointer: coarse) {
+  .doc-page.is-read-mode .doc-canvas {
+    max-width: none;
+  }
 }
 
 .doc-page.is-read-mode .milkdown .prov--ai,
