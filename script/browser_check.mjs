@@ -271,10 +271,7 @@ try {
   // tracked as suggestions. Attr-only task transactions must bypass the
   // suggest-changes transform or the native control toggles without changing
   // ProseMirror/Yjs and silently reverts on reload.
-  await taskA.evaluate(
-    (slug) => localStorage.setItem(`pruf:mode:${slug}`, 'suggest'),
-    taskDoc.slug,
-  )
+  await taskA.context().addCookies([{ name: 'pruf_mode', value: 'suggest', url: BASE }])
   await taskA.reload()
   await taskA.waitForSelector('.doc-status--live', { timeout: 15000 })
   await taskA.waitForFunction(
@@ -1473,6 +1470,186 @@ try {
     fail('demo doc changed mode through a locked shortcut')
   }
   await demoPage.close()
+
+  // --- Document width: desktop resize + tablet/mobile full-width geometry ---
+  const widthDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Width check',
+        content: [
+          '# Width check',
+          '',
+          '| A deliberately wide column | Another deliberately wide column | Third wide column |',
+          '| --- | --- | --- |',
+          '| unbreakable-width-check-aaaaaaaaaaaaaaaa | unbreakable-width-check-bbbbbbbbbbbbbbbb | unbreakable-width-check-cccccccccccccccc |',
+        ].join('\n'),
+      }),
+    })
+  ).json()
+  const widthContext = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const widthPage = await widthContext.newPage()
+  await widthPage.goto(`${BASE}/d/${widthDoc.slug}`)
+  await widthPage.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await widthPage.waitForSelector('.document-width-handle')
+
+  const defaultWidth = await widthPage.locator('.doc-main').evaluate((el) => el.getBoundingClientRect().width)
+  await widthContext.addCookies([{ name: 'pruf_width', value: '1120', url: BASE }])
+  await widthPage.reload()
+  await widthPage.waitForSelector('.doc-status--live', { timeout: 15000 })
+  const constrainedWidth = await widthPage.locator('.doc-main').evaluate((el) => el.getBoundingClientRect().width)
+  await widthPage.locator('.document-width-handle').focus()
+  await widthPage.keyboard.press('ArrowLeft')
+  const constrainedStep = await widthPage.locator('.doc-main').evaluate((el) => el.getBoundingClientRect().width)
+  if (constrainedStep === constrainedWidth - 16) {
+    ok('a saved width wider than the screen resizes from its visible edge immediately')
+  } else {
+    fail(`constrained width did not move immediately: ${constrainedWidth}px -> ${constrainedStep}px`)
+  }
+  await widthPage.locator('.document-width-handle span').dblclick()
+
+  await widthPage.locator('.document-width-handle').focus()
+  await widthPage.keyboard.press('ArrowRight')
+  const keyboardWidth = await widthPage.locator('.doc-main').evaluate((el) => el.getBoundingClientRect().width)
+  const widthCookie = (await widthContext.cookies()).find((cookie) => cookie.name === 'pruf_width')
+  if (keyboardWidth === defaultWidth + 16 && widthCookie?.value === String(keyboardWidth)) {
+    ok('document width handle resizes by keyboard and persists the preference')
+  } else {
+    fail(`document keyboard resize diverged: default=${defaultWidth}, next=${keyboardWidth}, cookie=${widthCookie?.value}`)
+  }
+
+  const handleBox = await widthPage.locator('.document-width-handle span').boundingBox()
+  if (!handleBox) {
+    fail('document width handle has no draggable bounds')
+  } else {
+    await widthPage.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + handleBox.height / 2)
+    await widthPage.mouse.down()
+    await widthPage.mouse.move(handleBox.x + handleBox.width / 2 + 64, handleBox.y + handleBox.height / 2)
+    await widthPage.mouse.up()
+    const draggedWidth = await widthPage.locator('.doc-main').evaluate((el) => el.getBoundingClientRect().width)
+    if (draggedWidth === keyboardWidth + 64) ok('document edge drag resizes the prose continuously')
+    else fail(`document edge drag expected ${keyboardWidth + 64}px, got ${draggedWidth}px`)
+  }
+
+  const beforeReloadWidth = await widthPage.locator('.doc-main').evaluate((el) => el.getBoundingClientRect().width)
+  await widthPage.reload()
+  await widthPage.waitForSelector('.doc-status--live', { timeout: 15000 })
+  const reloadedWidth = await widthPage.locator('.doc-main').evaluate((el) => el.getBoundingClientRect().width)
+  if (reloadedWidth === beforeReloadWidth) ok('custom document width survives reload at first paint')
+  else fail(`custom width changed on reload: ${beforeReloadWidth}px -> ${reloadedWidth}px`)
+
+  const tableContained = await widthPage.evaluate(() => {
+    const wrapper = document.querySelector('.milkdown-table-block .table-wrapper')
+    return Boolean(wrapper) &&
+      document.documentElement.scrollWidth === document.documentElement.clientWidth &&
+      wrapper.scrollWidth >= wrapper.clientWidth
+  })
+  if (tableContained) ok('wide table stays in its scroll wrapper without page overflow')
+  else fail('wide table escaped its wrapper or forced page overflow')
+
+  await widthPage.click('.mode-control-trigger')
+  await widthPage.locator('.mode-control-option', { hasText: 'Read' }).click()
+  const readGeometry = await widthPage.evaluate(() => ({
+    main: document.querySelector('.doc-main').getBoundingClientRect().width,
+    canvas: document.querySelector('.doc-canvas').getBoundingClientRect().width,
+  }))
+  if (readGeometry.main === beforeReloadWidth && readGeometry.canvas === beforeReloadWidth) {
+    ok('Read mode uses the same custom document width')
+  } else {
+    fail(`Read mode width diverged: ${JSON.stringify(readGeometry)}`)
+  }
+
+  for (const viewport of [1152, 1024, 768, 390]) {
+    await widthPage.setViewportSize({ width: viewport, height: 900 })
+    const geometry = await widthPage.evaluate(() => ({
+      viewport: window.innerWidth,
+      canvas: document.querySelector('.doc-canvas').getBoundingClientRect().width,
+      main: document.querySelector('.doc-main').getBoundingClientRect().width,
+      handle: getComputedStyle(document.querySelector('.document-width-handle')).display,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    }))
+    if (
+      geometry.canvas === geometry.viewport &&
+      geometry.main === geometry.viewport &&
+      geometry.handle === 'none' &&
+      geometry.overflow === 0
+    ) {
+      ok(`Read mode fills the ${viewport}px viewport without resize chrome or overflow`)
+    } else {
+      fail(`Read mode ${viewport}px geometry diverged: ${JSON.stringify(geometry)}`)
+    }
+  }
+
+  await widthPage.setViewportSize({ width: 1024, height: 900 })
+  await widthPage.click('.mode-control-trigger')
+  await widthPage.locator('.mode-control-option', { hasText: 'Edit' }).click()
+  const tabletEditGeometry = await widthPage.evaluate(() => ({
+    viewport: window.innerWidth,
+    canvas: document.querySelector('.doc-canvas').getBoundingClientRect().width,
+    main: document.querySelector('.doc-main').getBoundingClientRect().width,
+    gutter: document.querySelector('.margin-gutter').getBoundingClientRect().width,
+    handle: getComputedStyle(document.querySelector('.document-width-handle')).display,
+    overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  }))
+  if (
+    tabletEditGeometry.canvas === tabletEditGeometry.viewport &&
+    tabletEditGeometry.main + tabletEditGeometry.gutter === tabletEditGeometry.viewport &&
+    tabletEditGeometry.handle === 'none' &&
+    tabletEditGeometry.overflow === 0
+  ) {
+    ok('Edit mode fills the iPad-width viewport around its review marker strip')
+  } else {
+    fail(`Edit mode iPad geometry diverged: ${JSON.stringify(tabletEditGeometry)}`)
+  }
+
+  await widthPage.setViewportSize({ width: 1440, height: 900 })
+  await widthPage.locator('.document-width-handle span').dblclick()
+  const resetGeometry = await widthPage.evaluate(() => ({
+    width: document.querySelector('.doc-main').getBoundingClientRect().width,
+    style: document.querySelector('.doc-page').style.getPropertyValue('--document-width'),
+  }))
+  if (resetGeometry.width === defaultWidth && resetGeometry.style === '') {
+    ok('double-click resets document width to the active theme measure')
+  } else {
+    fail(`document width reset diverged: ${JSON.stringify(resetGeometry)}`)
+  }
+  await widthPage.evaluate(() => { document.documentElement.dataset.theme = 'whitey' })
+  const whiteyDefaultWidth = await widthPage.locator('.doc-main').evaluate((el) => el.getBoundingClientRect().width)
+  if (whiteyDefaultWidth === 752) ok('width reset preserves Whitey’s wider theme measure')
+  else fail(`Whitey default width expected 752px, got ${whiteyDefaultWidth}px`)
+  await widthContext.close()
+
+  const ipadContext = await browser.newContext({
+    viewport: { width: 1366, height: 1024 },
+    hasTouch: true,
+    isMobile: true,
+    userAgent: 'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+  })
+  const ipadPage = await ipadContext.newPage()
+  await ipadPage.goto(`${BASE}/d/${widthDoc.slug}`)
+  await ipadPage.waitForSelector('.doc-canvas')
+  const ipadGeometry = await ipadPage.evaluate(() => ({
+    coarse: matchMedia('(hover: none) and (pointer: coarse)').matches,
+    viewport: window.innerWidth,
+    canvas: document.querySelector('.doc-canvas').getBoundingClientRect().width,
+    main: document.querySelector('.doc-main').getBoundingClientRect().width,
+    gutter: document.querySelector('.margin-gutter').getBoundingClientRect().width,
+    handle: getComputedStyle(document.querySelector('.document-width-handle')).display,
+    overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  }))
+  if (
+    ipadGeometry.coarse &&
+    ipadGeometry.canvas === ipadGeometry.viewport &&
+    ipadGeometry.main + ipadGeometry.gutter === ipadGeometry.viewport &&
+    ipadGeometry.handle === 'none' &&
+    ipadGeometry.overflow === 0
+  ) {
+    ok('wide landscape iPad uses the full-width compact layout')
+  } else {
+    fail(`landscape iPad geometry diverged: ${JSON.stringify(ipadGeometry)}`)
+  }
+  await ipadContext.close()
 
   // --- Floating chrome placement: measured, centered, never covering ---
   const placeDoc = await (

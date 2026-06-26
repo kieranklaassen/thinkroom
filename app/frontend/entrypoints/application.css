@@ -35,6 +35,7 @@
 
   --code-bg: #f3f0e9;
   --measure: 44rem;
+  --document-width: var(--measure);
 
   --sketch-surface: #fffef9;
   --sketch-surface-muted: #fffaf1;
@@ -1001,7 +1002,7 @@ a:focus-visible {
   align-items: stretch;
   min-width: 0;
   flex: 1;
-  max-width: calc(var(--measure) + 15rem);
+  max-width: calc(var(--document-width) + 15rem);
 }
 
 .margin-gutter {
@@ -1017,7 +1018,7 @@ a:focus-visible {
 
 /* Mobile keeps the gutter as a slim marker strip — suggestions stay
  * discoverable at their anchors; the cards live in a bottom sheet. */
-@media (max-width: 64rem) {
+@media (max-width: 72rem), (hover: none) and (pointer: coarse) {
   .margin-gutter,
   .doc-canvas.is-focus .margin-gutter {
     width: 1.75rem;
@@ -1027,8 +1028,65 @@ a:focus-visible {
 .doc-main {
   flex: 1;
   min-width: 0;
-  max-width: var(--measure);
+  max-width: var(--document-width);
   padding: 3rem 2rem 6rem;
+}
+
+/* A zero-width flex item keeps the grip exactly on the document edge without
+ * stealing space from prose or the suggestion gutter. It is deliberately
+ * quiet, but visible enough to advertise that the edge can move. */
+.document-width-handle {
+  position: relative;
+  z-index: 5;
+  width: 0;
+  flex: none;
+  align-self: stretch;
+  color: var(--ink-faint);
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+
+.document-width-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -12px;
+  width: 24px;
+}
+
+.document-width-handle span {
+  position: sticky;
+  top: calc(50vh - 1.5rem);
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 40px;
+  margin-left: -9px;
+  border: 1px solid color-mix(in srgb, var(--ink-faint) 38%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-raised) 90%, transparent);
+  box-shadow: 0 1px 5px rgb(0 0 0 / 0.05);
+  font: 600 7px/1 var(--font-ui);
+  letter-spacing: -1px;
+  writing-mode: vertical-rl;
+  opacity: 0.48;
+  transition: opacity 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.document-width-handle:hover span,
+.document-width-handle:focus-visible span,
+.document-width-handle.is-dragging span {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  opacity: 1;
+}
+
+.document-width-handle:focus-visible span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ----------------------------- Editor typography ------------------------- */
@@ -1349,7 +1407,7 @@ a:focus-visible {
   display: none;
 }
 
-@media (max-width: 64rem) {
+@media (max-width: 72rem), (hover: none) and (pointer: coarse) {
   .doc-rail {
     display: none;
   }
@@ -2479,7 +2537,7 @@ a:focus-visible {
   white-space: nowrap;
 }
 
-@media (max-width: 64rem) {
+@media (max-width: 72rem), (hover: none) and (pointer: coarse) {
   .identity-name {
     max-width: 5.5rem;
   }
@@ -2515,7 +2573,7 @@ a:focus-visible {
   color: var(--accent);
 }
 
-@media (max-width: 64rem) {
+@media (max-width: 72rem), (hover: none) and (pointer: coarse) {
   .ownership-owner {
     max-width: 6rem;
   }
@@ -2991,7 +3049,7 @@ a:focus-visible {
 }
 
 /* --------------------------------- Mobile --------------------------------- */
-@media (max-width: 64rem) {
+@media (max-width: 72rem), (hover: none) and (pointer: coarse) {
   /* No rail, no margin cards — their toggles go too. */
   .chrome-toggle {
     display: none;
@@ -3020,13 +3078,19 @@ a:focus-visible {
    * instead of forcing horizontal overflow. */
   .doc-canvas {
     width: 100%;
+    max-width: none;
   }
 
   .doc-main {
     flex: 1;
     width: auto;
     min-width: 0;
+    max-width: none;
     padding: 2rem 1.25rem calc(7rem + env(safe-area-inset-bottom));
+  }
+
+  .document-width-handle {
+    display: none;
   }
 
   .milkdown .ProseMirror {

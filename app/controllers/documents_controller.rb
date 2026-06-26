@@ -73,9 +73,9 @@ class DocumentsController < InertiaController
     seed_granted = initial_render? && !prefetch_request? && !link_preview_request && document.try_claim_seed
 
     render inertia: "documents/show", props: {
-      # UI prefs ride server-readable cookies so SSR renders panel/focus/mode at
-      # their stored values on first paint — no post-hydration flip for users
-      # who closed the panel, enabled focus, or picked a non-Edit mode. The
+      # UI prefs ride server-readable cookies so SSR renders panel/focus/mode/
+      # width at their stored values on first paint — no post-hydration flip for
+      # users who closed the panel, enabled focus, or resized the document. The
       # client writes these cookies on change (see show.tsx). mode for the demo
       # doc is forced to "edit" client-side (modeLocked), so any stale cookie is
       # ignored there.
@@ -393,11 +393,13 @@ class DocumentsController < InertiaController
   end
 
   # Cookie-backed UI prefs, read server-side so SSR's first paint matches the
-  # user's stored panel/focus/mode (no flip). Defaults match the historical
+  # user's stored panel/focus/mode/width (no flip). Defaults match the historical
   # localStorage fallbacks: panel open, focus off, Edit mode. Cookies are
-  # "1"/"0" flags and a "edit|suggest|comment|read" mode string; anything else
-  # falls back to the default.
+  # "1"/"0" flags, a "edit|suggest|comment|read" mode string, and a clamped
+  # pixel width; anything else falls back to the default.
   UI_MODES = %w[edit suggest comment read].freeze
+  MIN_DOCUMENT_WIDTH = 576
+  MAX_DOCUMENT_WIDTH = 1120
   LINK_PREVIEW_USER_AGENTS = /(?:
     facebookexternalhit|facebot|twitterbot|linkedinbot|slackbot-linkexpanding|
     discordbot|whatsapp|telegrambot|googlebot|bingbot|pinterestbot|embedly|
@@ -405,10 +407,12 @@ class DocumentsController < InertiaController
   )/ix
 
   def ui_prefs
+    document_width = Integer(cookies[:pruf_width], exception: false)
     {
       panel_open: cookies[:pruf_panel] != "0",
       focus_mode: cookies[:pruf_focus] == "1",
-      mode: UI_MODES.include?(cookies[:pruf_mode]) ? cookies[:pruf_mode] : "edit"
+      mode: UI_MODES.include?(cookies[:pruf_mode]) ? cookies[:pruf_mode] : "edit",
+      document_width: document_width&.clamp(MIN_DOCUMENT_WIDTH, MAX_DOCUMENT_WIDTH)
     }
   end
 
