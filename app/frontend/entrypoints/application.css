@@ -315,8 +315,13 @@ a:focus-visible {
 .landing-actions {
   margin-top: 1.75rem;
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
   justify-content: center;
+}
+
+.landing-actions .btn {
+  min-height: 2.75rem;
 }
 
 /* ---------------------------- Document library -------------------------- */
@@ -657,62 +662,16 @@ a:focus-visible {
   }
 }
 
-/* --------------------------- Agent create card ---------------------------- */
+/* --------------------------- Agent create panel --------------------------- */
 .landing-agent {
-  margin-top: 2.5rem;
+  max-width: 36rem;
+  margin: 1rem auto 0;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 24%, var(--line));
+  border-radius: 12px;
+  background: var(--surface-raised);
+  box-shadow: 0 8px 24px rgb(38 28 16 / 7%);
   text-align: left;
-}
-
-.landing-agent-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.75rem 0;
-  border-top: 1px solid color-mix(in srgb, var(--ink) 18%, var(--line));
-  border-bottom: 1px solid color-mix(in srgb, var(--ink) 18%, var(--line));
-  color: var(--ink-soft);
-  font-size: 0.76rem;
-  font-weight: 650;
-  cursor: pointer;
-  list-style: none;
-}
-
-.landing-agent-summary::-webkit-details-marker {
-  display: none;
-}
-
-.landing-agent-summary:hover {
-  color: var(--ink);
-}
-
-.landing-agent-summary:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-
-.landing-agent-summary-action {
-  margin-left: auto;
-  color: var(--ink-faint);
-  font-size: 0.68rem;
-  font-weight: 550;
-}
-
-.landing-agent-summary-action--open,
-.landing-agent:not([open]) .landing-agent-content {
-  display: none;
-}
-
-.landing-agent[open] .landing-agent-summary-action--closed {
-  display: none;
-}
-
-.landing-agent[open] .landing-agent-summary-action--open {
-  display: inline;
-}
-
-.landing-agent-content {
-  padding-top: 0.9rem;
 }
 
 .landing-agent-hint {
@@ -837,6 +796,19 @@ a:focus-visible {
 .btn-primary:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+.btn-agent {
+  border: 1px solid color-mix(in srgb, var(--ink) 50%, var(--line));
+  background: var(--surface-raised);
+  color: var(--ink);
+  box-shadow: 0 2px 7px rgb(38 28 16 / 8%);
+}
+
+.btn-agent:hover,
+.btn-agent[aria-expanded='true'] {
+  border-color: var(--ink);
+  background: color-mix(in srgb, var(--surface-raised) 82%, var(--accent-soft));
 }
 
 .btn-ghost {

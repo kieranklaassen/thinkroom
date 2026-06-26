@@ -221,6 +221,7 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
     name: identityName,
   }))
   const [copied, setCopied] = useState(false)
+  const [agentInstructionsOpen, setAgentInstructionsOpen] = useState(false)
   const [selectedTag, setSelectedTag] = useState<string | null>(null)
   const [showAllEarlier, setShowAllEarlier] = useState(false)
   const isClient = useIsClient()
@@ -290,6 +291,16 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
               >
                 {processing ? 'Creating…' : 'New document'}
               </button>
+              <button
+                id="agent-start-trigger"
+                className="btn btn-agent"
+                type="button"
+                aria-expanded={agentInstructionsOpen}
+                aria-controls="agent-start-instructions"
+                onClick={() => setAgentInstructionsOpen((open) => !open)}
+              >
+                Have an agent start one
+              </button>
               {recent.some((document) => document.slug === 'demo') && (
                 <Link href="/d/demo" className="btn btn-ghost" prefetch>
                   Open the demo
@@ -297,6 +308,24 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
               )}
             </div>
           </header>
+
+          {agentInstructionsOpen && (
+            <section
+              id="agent-start-instructions"
+              className="landing-agent"
+              aria-labelledby="agent-start-trigger"
+            >
+              <p className="landing-agent-hint">
+                Paste this to any agent that can make HTTP requests:
+              </p>
+              <div className="landing-agent-block">
+                <code>{agentInstruction}</code>
+                <button className="share-copy" type="button" onClick={copyInstruction}>
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            </section>
+          )}
 
           <section className="document-library" aria-labelledby="your-documents-heading">
             <div className="document-library-heading">
@@ -364,28 +393,6 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
             </section>
           )}
 
-          <details className="landing-agent">
-            <summary className="landing-agent-summary">
-              <span>Have an agent start a doc</span>
-              <span className="landing-agent-summary-action landing-agent-summary-action--closed">
-                Show instructions
-              </span>
-              <span className="landing-agent-summary-action landing-agent-summary-action--open">
-                Hide instructions
-              </span>
-            </summary>
-            <div className="landing-agent-content">
-              <p className="landing-agent-hint">
-                Paste this to any agent that can make HTTP requests:
-              </p>
-              <div className="landing-agent-block">
-                <code>{agentInstruction}</code>
-                <button className="share-copy" onClick={copyInstruction}>
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-            </div>
-          </details>
         </main>
         <footer className="landing-footer">
           <a
