@@ -77,7 +77,11 @@ const liveGeometry = () => page.evaluate(() => {
     tableOverflow: tableWrapper ? getComputedStyle(tableWrapper).overflowX : null,
     code: rect(codeBlock),
     codeHandle: !!codeBlock?.querySelector(':scope > .rich-block-width-handle'),
-    codeScrolls: codeInner ? codeInner.scrollWidth > codeInner.clientWidth + 1 : false,
+    // A long line stays inside the block (wrap or inner scroll), never spilling
+    // past the <pre> edge now that the <pre> itself no longer clips.
+    codeContained: codeBlock && codeInner
+      ? codeInner.getBoundingClientRect().width <= codeBlock.getBoundingClientRect().width + 2
+      : false,
     documentWidth: getComputedStyle(document.querySelector('.doc-page')).getPropertyValue('--document-width').trim(),
     richWidth: getComputedStyle(document.querySelector('.doc-page')).getPropertyValue('--rich-content-width').trim(),
     overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -134,8 +138,8 @@ try {
     JSON.stringify(initial),
   )
   check(
-    initial.codeScrolls && initial.overflow === 0,
-    'long code lines scroll inside the block without page overflow',
+    initial.codeContained && initial.overflow === 0,
+    'a long code line stays contained in the block without page overflow',
     JSON.stringify(initial),
   )
   check(initial.overflow === 0, 'default read layout has no horizontal page overflow')
