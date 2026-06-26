@@ -20,7 +20,14 @@ interface DragState {
 }
 
 const richBlockWidthKey = new PluginKey('RICH_BLOCK_WIDTH')
-const BLOCK_SELECTOR = '.thinkroom-sketch, .milkdown-table-block'
+// Sketches, tables, and fenced code blocks share one breakout width. The
+// Mermaid source block is excluded: it pairs with a rendered diagram preview,
+// so handling it here would stack a redundant second handle on the diagram.
+const BLOCK_SELECTOR = '.thinkroom-sketch, .milkdown-table-block, pre:not([data-language="mermaid"])'
+// Only top-level blocks break out; a `:scope`-rooted query keeps handles off
+// code blocks nested inside list items or blockquotes, which never get the
+// matching breakout width in CSS.
+const BLOCK_QUERY = ':scope > .thinkroom-sketch, :scope > .milkdown-table-block, :scope > pre:not([data-language="mermaid"])'
 
 const dispatchWidth = (width: number | null, commit: boolean) => {
   window.dispatchEvent(new CustomEvent<RichBlockWidthEventDetail>(RICH_BLOCK_WIDTH_EVENT, {
@@ -76,9 +83,9 @@ const buildHandle = (block: HTMLElement) => {
   handle.className = 'rich-block-width-handle'
   handle.contentEditable = 'false'
   handle.setAttribute('role', 'separator')
-  handle.setAttribute('aria-label', 'Sketch and table width')
+  handle.setAttribute('aria-label', 'Sketch, table, and code block width')
   handle.setAttribute('aria-orientation', 'vertical')
-  handle.title = 'Drag to resize sketches and tables · Arrow keys adjust · Double-click resets'
+  handle.title = 'Drag to resize sketches, tables, and code blocks · Arrow keys adjust · Double-click resets'
   grip.setAttribute('aria-hidden', 'true')
   grip.textContent = '•••'
   handle.append(grip)
@@ -158,7 +165,7 @@ const richBlockWidthControlsProse = $prose(
 
         const sync = () => {
           frame = null
-          view.dom.querySelectorAll<HTMLElement>(BLOCK_SELECTOR).forEach((block) => {
+          view.dom.querySelectorAll<HTMLElement>(BLOCK_QUERY).forEach((block) => {
             if (!block.querySelector(':scope > .rich-block-width-handle')) buildHandle(block)
           })
           view.dom.querySelectorAll<HTMLButtonElement>('.rich-block-width-handle').forEach(syncHandleValue)

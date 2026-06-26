@@ -39,6 +39,11 @@ ${JSON.stringify(sketch)}
 | --- | --- | --- | --- |
 | ResearchAndSynthesisWithoutWrapping | Ada | Active | Compare the complete evidence set before review |
 | ProductAndEngineeringCoordination | Grace | Pending | Resolve the remaining interface constraints |
+
+\`\`\`text
+${`const ${'longUnbrokenIdentifierThatForcesHorizontalScroll'.repeat(6)} = true`}
+short line
+\`\`\`
 `
 
 const api = await request.newContext({
@@ -61,6 +66,8 @@ const liveGeometry = () => page.evaluate(() => {
   const sketchBlock = document.querySelector('.thinkroom-sketch')
   const tableBlock = document.querySelector('.milkdown-table-block')
   const tableWrapper = tableBlock?.querySelector('.table-wrapper')
+  const codeBlock = document.querySelector('.doc-live-editor .ProseMirror > pre:not([data-language="mermaid"])')
+  const codeInner = codeBlock?.querySelector('code')
   const rect = (node) => node?.getBoundingClientRect()
   return {
     prose: rect(prose),
@@ -68,6 +75,13 @@ const liveGeometry = () => page.evaluate(() => {
     table: rect(tableBlock),
     tableWrapper: rect(tableWrapper),
     tableOverflow: tableWrapper ? getComputedStyle(tableWrapper).overflowX : null,
+    code: rect(codeBlock),
+    codeHandle: !!codeBlock?.querySelector(':scope > .rich-block-width-handle'),
+    // A long line stays inside the block (wrap or inner scroll), never spilling
+    // past the <pre> edge now that the <pre> itself no longer clips.
+    codeContained: codeBlock && codeInner
+      ? codeInner.getBoundingClientRect().width <= codeBlock.getBoundingClientRect().width + 2
+      : false,
     documentWidth: getComputedStyle(document.querySelector('.doc-page')).getPropertyValue('--document-width').trim(),
     richWidth: getComputedStyle(document.querySelector('.doc-page')).getPropertyValue('--rich-content-width').trim(),
     overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -88,6 +102,7 @@ try {
   await page.locator('.doc-status--live').waitFor({ timeout: 15_000 })
   await page.locator('.thinkroom-sketch .rich-block-width-handle').waitFor({ timeout: 15_000 })
   await page.locator('.milkdown-table-block .rich-block-width-handle').waitFor({ timeout: 15_000 })
+  await page.locator('.doc-live-editor .ProseMirror > pre:not([data-language="mermaid"]) .rich-block-width-handle').waitFor({ timeout: 15_000 })
 
   const staticContext = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
@@ -117,6 +132,16 @@ try {
     'read mode gives sketches and tables a shared 960px default',
     JSON.stringify(initial),
   )
+  check(
+    initial.codeHandle && closeTo(initial.code.width, 960) && initial.code.width > initial.prose.width,
+    'code blocks join the shared breakout with their own width handle',
+    JSON.stringify(initial),
+  )
+  check(
+    initial.codeContained && initial.overflow === 0,
+    'a long code line stays contained in the block without page overflow',
+    JSON.stringify(initial),
+  )
   check(initial.overflow === 0, 'default read layout has no horizontal page overflow')
   check(
     initial.tableOverflow === 'auto' && initial.tableWrapper.width <= initial.table.width,
@@ -135,7 +160,7 @@ try {
   await page.waitForFunction(() => document.querySelector('.thinkroom-sketch')?.getBoundingClientRect().width > 1000)
   const dragged = await liveGeometry()
   check(
-    closeTo(dragged.sketch.width, 1024) && closeTo(dragged.table.width, 1024),
+    closeTo(dragged.sketch.width, 1024) && closeTo(dragged.table.width, 1024) && closeTo(dragged.code.width, 1024),
     'dragging one handle resizes every rich block together',
     JSON.stringify(dragged),
   )
@@ -238,7 +263,9 @@ try {
   const mobile = await liveGeometry()
   const handleDisplay = await reviewHandle.evaluate((node) => getComputedStyle(node).display)
   check(
-    closeTo(mobile.sketch.width, mobile.prose.width) && closeTo(mobile.table.width, mobile.prose.width),
+    closeTo(mobile.sketch.width, mobile.prose.width) &&
+      closeTo(mobile.table.width, mobile.prose.width) &&
+      closeTo(mobile.code.width, mobile.prose.width),
     'compact layouts return rich blocks to the prose width',
     JSON.stringify(mobile),
   )

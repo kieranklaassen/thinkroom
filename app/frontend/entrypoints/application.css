@@ -1166,7 +1166,10 @@ a:focus-visible {
    review layouts hold the gutter-side edge steady and grow into open space. */
 .milkdown .ProseMirror > .thinkroom-sketch,
 .milkdown .ProseMirror > .milkdown-table-block,
+.milkdown .ProseMirror > pre:not([data-language='mermaid']),
+.milkdown .ProseMirror > figure.mermaid-diagram,
 .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+.doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
 .doc-static-preview .ProseMirror > table {
   position: relative;
   width: min(max(100%, var(--rich-content-width)), calc(100vw - 3rem));
@@ -1177,7 +1180,10 @@ a:focus-visible {
 
 :where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .thinkroom-sketch,
 :where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .milkdown-table-block,
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > pre:not([data-language='mermaid']),
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > figure.mermaid-diagram,
 :where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
 :where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > table {
   /* The activity rail shares the centered body row. Half of its width
      shifts the canvas left, so include it when deriving the safe left edge. */
@@ -1191,7 +1197,10 @@ a:focus-visible {
 
 :where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .thinkroom-sketch,
 :where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .milkdown-table-block,
+:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > pre:not([data-language='mermaid']),
+:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > figure.mermaid-diagram,
 :where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
 :where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > table {
   width: min(
     max(100%, var(--rich-content-width)),
@@ -1203,7 +1212,10 @@ a:focus-visible {
    Keep the breakout centered on prose while respecting the nearer viewport edge. */
 :where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > .thinkroom-sketch,
 :where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > .milkdown-table-block,
+:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > pre:not([data-language='mermaid']),
+:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > figure.mermaid-diagram,
 :where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
 :where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .doc-static-preview .ProseMirror > table {
   width: min(
     max(100%, var(--rich-content-width)),
@@ -1485,12 +1497,16 @@ a:focus-visible {
   border: 1px solid var(--line);
   border-radius: 10px;
   padding: 1rem 1.15rem;
-  overflow-x: auto;
+  /* Scroll long lines on the inner <code>, not the <pre>: an overflow on the
+     <pre> would clip the rich-block width handle parked just past its edge. */
+  overflow: visible;
   font-size: 0.85rem;
   line-height: 1.6;
 }
 
 .milkdown .ProseMirror pre code {
+  display: block;
+  overflow-x: auto;
   background: none;
   padding: 0;
   font-size: inherit;
@@ -3409,7 +3425,10 @@ a:focus-visible {
 
   .milkdown .ProseMirror > .thinkroom-sketch,
   .milkdown .ProseMirror > .milkdown-table-block,
+  .milkdown .ProseMirror > pre:not([data-language='mermaid']),
+  .milkdown .ProseMirror > figure.mermaid-diagram,
   .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+  .doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
   .doc-static-preview .ProseMirror > table {
     width: 100%;
     max-width: 100%;
