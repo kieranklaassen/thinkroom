@@ -51,6 +51,17 @@ class DocumentsController < InertiaController
   def show
     document = Document.find_by!(slug: params[:slug])
     link_preview_request = link_preview_user_agent?
+    mode = requested_document_mode(document)
+
+    # Mode URLs express an editing capability. If the current viewer cannot
+    # use that capability, send them to the canonical Read URL before the
+    # request can affect recents or claim a pending seed. The demo is the one
+    # intentionally fixed-mode document: it remains Edit at its established
+    # base URL, so alternate demo URLs canonicalize there too.
+    if params[:mode].present? &&
+       (document.slug == "demo" || !document.writable_by?(owner_token, user: current_user))
+      return redirect_to document_page_path(document.slug), status: :see_other
+    end
 
     if request.format.json? || params[:format] == "json"
       return render json: AgentGuide.state(document, request.base_url)
@@ -73,13 +84,11 @@ class DocumentsController < InertiaController
     seed_granted = initial_render? && !prefetch_request? && !link_preview_request && document.try_claim_seed
 
     render inertia: "documents/show", props: {
-      # UI prefs ride server-readable cookies so SSR renders panel/focus/mode/
-      # width at their stored values on first paint — no post-hydration flip for
-      # users who closed the panel, enabled focus, or resized the document. The
-      # client writes these cookies on change (see show.tsx). mode for the demo
-      # doc is forced to "edit" client-side (modeLocked), so any stale cookie is
-      # ignored there.
-      ui: ui_prefs,
+      # Cookie-backed UI prefs and the path-derived mode are both available to
+      # SSR, so the first paint and hydration agree without a client-side flip.
+      # Mode deliberately comes from the URL rather than a browser preference:
+      # links, reloads, and Inertia history are now its source of truth.
+      ui: ui_prefs(mode:),
       document: document.slice(:id, :slug, :title, :content_format).merge(
         seed_content: document.seed_content,
         seed_granted: seed_granted,
@@ -136,7 +145,7 @@ class DocumentsController < InertiaController
       **ownership
     )
     remember_recent(document)
-    redirect_to document_page_path(document.slug), status: :see_other
+    redirect_to document_mode_path(document.slug, "edit"), status: :see_other
   end
 
   # Explicit, deliberate claim — a button click, never a GET side effect, so
@@ -393,11 +402,8 @@ class DocumentsController < InertiaController
   end
 
   # Cookie-backed UI prefs, read server-side so SSR's first paint matches the
-  # user's stored panel/focus/mode/width (no flip). Defaults match the historical
-  # localStorage fallbacks: panel open, focus off, Edit mode. Cookies are
-  # "1"/"0" flags, a "edit|suggest|comment|read" mode string, and a clamped
-  # pixel width; anything else falls back to the default.
-  UI_MODES = %w[edit suggest comment read].freeze
+  # user's stored panel/focus/width (no flip). Mode is path-derived and supplied
+  # by #show. Cookies are "1"/"0" flags plus a clamped pixel width.
   MIN_DOCUMENT_WIDTH = 576
   MAX_DOCUMENT_WIDTH = 1120
   LINK_PREVIEW_USER_AGENTS = /(?:
@@ -406,12 +412,18 @@ class DocumentsController < InertiaController
     iframely|opengraph
   )/ix
 
-  def ui_prefs
+  def requested_document_mode(document)
+    return "edit" if document.slug == "demo"
+
+    params[:mode].presence || "read"
+  end
+
+  def ui_prefs(mode:)
     document_width = Integer(cookies[:pruf_width], exception: false)
     {
       panel_open: cookies[:pruf_panel] != "0",
       focus_mode: cookies[:pruf_focus] == "1",
-      mode: UI_MODES.include?(cookies[:pruf_mode]) ? cookies[:pruf_mode] : "edit",
+      mode:,
       document_width: document_width&.clamp(MIN_DOCUMENT_WIDTH, MAX_DOCUMENT_WIDTH)
     }
   end

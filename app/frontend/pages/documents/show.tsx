@@ -139,6 +139,9 @@ interface CommentTarget {
   text: string
 }
 
+const documentModePath = (slug: string, mode: EditorMode) =>
+  `/d/${encodeURIComponent(slug)}${mode === 'read' ? '' : `/${mode}`}`
+
 // Server-side anchor cap is 10 KB; a truncated anchor still matches as a
 // prefix within the block (findTextRange matches the exact search string).
 // Single encode + byte slice; a byte-boundary cut mid-codepoint decodes to
@@ -230,23 +233,33 @@ export default function DocumentShow({
   const [suggestionNotice, setSuggestionNotice] = useState<string | null>(null)
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
   const viewRef = useRef<EditorView | null>(null)
-  // Hydration-safe init from server-rendered cookie prefs: SSR and the client's
-  // first render derive panel/focus/mode/width from the same `ui` props, so a user
-  // who closed the panel (etc.) sees it closed at first paint — no flip. The
-  // client writes the cookie on change (effects below); cookies, not
-  // localStorage, are now the source of truth for first paint.
+  // Hydration-safe init from server-rendered prefs: cookies supply panel/focus/
+  // width while the URL supplies mode, so SSR and the first client render agree.
   const [panelOpen, setPanelOpen] = useState(ui.panel_open)
   const [focusMode, setFocusMode] = useState(ui.focus_mode)
   const [documentWidth, setDocumentWidth] = useState<number | null>(ui.document_width)
-  // Demo doc always opens in Edit and stays locked there — a stale mode cookie
-  // can't override it (the server also defaults it; this is the client guard).
+  // Demo doc always opens in Edit and stays locked there. Ordinary documents
+  // take mode directly from the Inertia page props/history entry.
   const demoModeLocked = doc.slug === 'demo'
-  const [mode, setMode] = useState<EditorMode>(demoModeLocked ? 'edit' : ui.mode)
+  const mode = demoModeLocked ? 'edit' : ui.mode
   const effectiveMode: EditorMode = ownership.can_write ? mode : 'read'
   const modeLocked = demoModeLocked || !ownership.can_write
   const changeMode = useCallback((nextMode: EditorMode) => {
-    if (!modeLocked) setMode(nextMode)
-  }, [modeLocked])
+    if (modeLocked || nextMode === mode) return
+
+    // This is an Inertia client-side visit: it pushes URL + props into Inertia
+    // history without fetching or remounting the collaborative editor. Native
+    // Back/Forward restores the matching ui.mode from that history entry.
+    router.push<DocumentProps>({
+      url: documentModePath(doc.slug, nextMode),
+      props: (props) => ({
+        ...props,
+        ui: { ...props.ui, mode: nextMode },
+      }),
+      preserveState: true,
+      preserveScroll: true,
+    })
+  }, [doc.slug, mode, modeLocked])
   const isReading = effectiveMode === 'read'
   const connectionIdentity = viewer.account ? `account:${viewer.account.id}` : 'guest'
   const editorSessionKey = `${doc.slug}:${ownership.can_write ? 'write' : 'read'}`
@@ -313,19 +326,32 @@ export default function DocumentShow({
     if (isMobile && composerAnchor !== null) setActiveSheet('comments')
   }, [isMobile, composerAnchor])
 
-  // Persist prefs to server-readable cookies on change so the next first paint
-  // (SSR) matches. No hydration gate is needed: state initializes from the same
-  // cookie-backed props, so the first commit writes back the value it just read
-  // — idempotent, not a clobber. Demo doc never persists mode (it's locked).
+  // Persist cookie-backed prefs on change so their next SSR paint matches.
+  // Mode is intentionally absent: its shareable URL and Inertia history entry
+  // are the durable source of truth now.
   useEffect(() => {
     setCookieFlag('pruf_panel', panelOpen)
   }, [panelOpen])
   useEffect(() => {
     setCookieFlag('pruf_focus', focusMode)
   }, [focusMode])
+
+  // An owner may lock editing while another viewer is on a write-mode URL.
+  // Replace (rather than push) that now-invalid entry with canonical Read so
+  // Back cannot return the viewer to an unavailable mode.
   useEffect(() => {
-    if (!demoModeLocked) setCookie('pruf_mode', mode)
-  }, [mode, demoModeLocked])
+    if (demoModeLocked || ownership.can_write || ui.mode === 'read') return
+
+    router.replace<DocumentProps>({
+      url: documentModePath(doc.slug, 'read'),
+      props: (props) => ({
+        ...props,
+        ui: { ...props.ui, mode: 'read' },
+      }),
+      preserveState: true,
+      preserveScroll: true,
+    })
+  }, [demoModeLocked, doc.slug, ownership.can_write, ui.mode])
 
   // ⌘1–4 selects Edit/Suggest/Comment/Read. ⌘\ toggles the side panel,
   // and ⌘. toggles suggestion focus. Control mirrors Command for parity.

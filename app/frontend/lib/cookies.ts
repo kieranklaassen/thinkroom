@@ -1,7 +1,7 @@
 /**
  * Server-readable UI-pref persistence. Cookies (not localStorage) are the
- * source of truth for first paint so SSR can render panel/focus/mode/width at
- * their stored values — no post-hydration flip. Mirrors the theme cookie convention
+ * source of truth for first paint so SSR can render panel/focus/width at their
+ * stored values — no post-hydration flip. Document mode is URL-derived. Mirrors the theme cookie convention
  * in theme_picker.tsx: path=/, SameSite=Lax, one-year max-age.
  */
 const ONE_YEAR_SECONDS = 31536000

@@ -13,6 +13,7 @@ class DocumentCreateTest < ActionDispatch::IntegrationTest
     assert_equal "human", doc.seed_author_kind
     assert_equal "Quiet Falcon", doc.seed_author_name
     assert_equal doc.owner_name, doc.seed_author_name
+    assert_redirected_to document_mode_path(doc.slug, "edit")
   end
 
   test "human-created doc without a name falls back to Anonymous" do
