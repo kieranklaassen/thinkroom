@@ -48,8 +48,11 @@ class SuggestionsController < InertiaController
     # One name for both resolved_by and the activity row — two lookups with
     # different fallbacks silently diverge when no session name is set.
     by = preferred_name(params[:by], fallback: "Someone")
+    ids = if params.key?(:ids)
+      Array(params[:ids]).filter_map { |id| Integer(id, exception: false) }.uniq
+    end
     accepted = with_document_write_access(document) do
-      winners = Suggestion.accept_all!(document:, by:)
+      winners = Suggestion.accept_all!(document:, by:, ids:)
       if winners.any?
         Activity.log!(
           document:,

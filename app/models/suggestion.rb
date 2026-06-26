@@ -69,15 +69,16 @@ class Suggestion < ApplicationRecord
     reload
   end
 
-  # Batch accept for the Accept-all button: flips every pending suggestion
-  # in one transaction (one fsync instead of N round-trips) and returns the
-  # rows that actually transitioned, in id order. A suggestion resolved
-  # concurrently by a single accept loses its pending status and is simply
+  # Batch accept for the Accept-all button: flips the selected pending rows,
+  # or every pending row when ids are omitted, in one transaction. A row
+  # resolved concurrently by a single accept loses its pending status and is
   # excluded — the caller only merges winners, so no text applies twice.
-  def self.accept_all!(document:, by: nil)
+  def self.accept_all!(document:, by: nil, ids: nil)
     winners = []
     document.transaction do
-      document.suggestions.pending.order(:id).each do |suggestion|
+      pending = document.suggestions.pending
+      pending = pending.where(id: ids) unless ids.nil?
+      pending.order(:id).each do |suggestion|
         suggestion.accept!(by:)
         winners << suggestion
       rescue ActiveRecord::RecordInvalid
