@@ -13,6 +13,10 @@ interface MetaChannelOptions {
   onTitle?: (title: string) => void
   /** Fired when this live tab reconnects to a different deployed build. */
   onVersionAvailable?: (version: string) => void
+  /** Fired when the owner changes document write access. */
+  onEditingLock?: (locked: boolean) => void
+  /** Recreate the shared socket when guest/account authentication changes. */
+  connectionIdentity?: string
 }
 
 /**
@@ -35,6 +39,8 @@ export function useMetaChannel(slug: string, options?: MetaChannelOptions): void
   onTitleRef.current = options?.onTitle
   const onVersionAvailableRef = useRef(options?.onVersionAvailable)
   onVersionAvailableRef.current = options?.onVersionAvailable
+  const onEditingLockRef = useRef(options?.onEditingLock)
+  onEditingLockRef.current = options?.onEditingLock
   const loadedVersionRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -52,17 +58,19 @@ export function useMetaChannel(slug: string, options?: MetaChannelOptions): void
       onDeletedRef.current?.()
     }
 
-    const subscription = getConsumer().subscriptions.create(
+    const subscription = getConsumer(options?.connectionIdentity).subscriptions.create(
       { channel: 'DocumentMetaChannel', slug },
       {
         received: ({
           event,
           title,
           version,
+          locked,
         }: {
           event: string
           title?: string
           version?: string
+          locked?: boolean
         }) => {
           if (dead) return
           if (event === 'document_deleted') {
@@ -80,6 +88,10 @@ export function useMetaChannel(slug: string, options?: MetaChannelOptions): void
             } else if (loadedVersionRef.current !== version) {
               onVersionAvailableRef.current?.(version)
             }
+            return
+          }
+          if (event === 'editing_lock' && typeof locked === 'boolean') {
+            onEditingLockRef.current?.(locked)
             return
           }
           pending.add(event)
@@ -104,5 +116,5 @@ export function useMetaChannel(slug: string, options?: MetaChannelOptions): void
       subscription.unsubscribe()
       if (timer) clearTimeout(timer)
     }
-  }, [slug])
+  }, [slug, options?.connectionIdentity])
 }

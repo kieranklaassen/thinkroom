@@ -1,4 +1,5 @@
 class SuggestionsController < InertiaController
+  include DocumentWriteAuthorization
   rate_limit_contributions
 
   before_action :set_suggestion, only: [ :accept, :reopen, :reject ]
@@ -10,15 +11,17 @@ class SuggestionsController < InertiaController
   # and the live broadcast stay uniform with the agent path.
   def create
     document = Document.find_by!(slug: params[:slug])
-    Suggestion.propose!(
-      document:,
-      author_name: preferred_name(params[:author_name], fallback: "Anonymous"),
-      author_kind: "human",
-      body: params[:body].to_s,
-      intent: (params[:intent].presence if params[:intent].is_a?(String)),
-      anchor_text: (params[:anchor_text].presence if params[:anchor_text].is_a?(String)),
-      replaces: (params[:replaces].presence if params[:replaces].is_a?(String))
-    )
+    with_document_write_access(document) do
+      Suggestion.propose!(
+        document:,
+        author_name: preferred_name(params[:author_name], fallback: "Anonymous"),
+        author_kind: "human",
+        body: params[:body].to_s,
+        intent: (params[:intent].presence if params[:intent].is_a?(String)),
+        anchor_text: (params[:anchor_text].presence if params[:anchor_text].is_a?(String)),
+        replaces: (params[:replaces].presence if params[:replaces].is_a?(String))
+      )
+    end
 
     redirect_back fallback_location: document_page_path(document.slug), status: :see_other
   rescue ActiveRecord::RecordInvalid => e
@@ -45,18 +48,20 @@ class SuggestionsController < InertiaController
     # One name for both resolved_by and the activity row — two lookups with
     # different fallbacks silently diverge when no session name is set.
     by = preferred_name(params[:by], fallback: "Someone")
-    accepted = Suggestion.accept_all!(document:, by:)
-
-    if accepted.any?
-      Activity.log!(
-        document:,
-        actor_name: by,
-        actor_kind: "human",
-        action: "accepted_suggestion",
-        detail: "accepted #{accepted.size} suggestions in one batch"
-      )
-      DocumentMetaChannel.broadcast_event(document, :suggestions)
+    accepted = with_document_write_access(document) do
+      winners = Suggestion.accept_all!(document:, by:)
+      if winners.any?
+        Activity.log!(
+          document:,
+          actor_name: by,
+          actor_kind: "human",
+          action: "accepted_suggestion",
+          detail: "accepted #{winners.size} suggestions in one batch"
+        )
+      end
+      winners
     end
+    DocumentMetaChannel.broadcast_event(document, :suggestions) if accepted.any?
 
     render json: { accepted: accepted.map(&:as_props) }
   rescue ActiveRecord::RecordNotFound
@@ -65,8 +70,11 @@ class SuggestionsController < InertiaController
   end
 
   def accept
-    @suggestion.accept!(by: preferred_name(params[:by], fallback: "human"))
-    log_and_broadcast("accepted_suggestion", "accepted “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
+    with_document_write_access(@suggestion.document) do
+      @suggestion.accept!(by: preferred_name(params[:by], fallback: "human"))
+      log_suggestion_activity("accepted_suggestion", "accepted “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
+    end
+    DocumentMetaChannel.broadcast_event(@suggestion.document, :suggestions)
     redirect_back fallback_location: document_page_path(@suggestion.document.slug), status: :see_other
   rescue ActiveRecord::RecordInvalid
     # No `status:` on error-bag redirects — see create's rescue.
@@ -76,14 +84,16 @@ class SuggestionsController < InertiaController
 
   def reopen
     by = preferred_name(params[:by], fallback: "human")
-    @suggestion.reopen_after_failed_apply!(by:)
-    Activity.log!(
-      document: @suggestion.document,
-      actor_name: by,
-      actor_kind: "human",
-      action: "reopened_suggestion",
-      detail: "returned a suggestion to pending after its target changed"
-    )
+    with_document_write_access(@suggestion.document) do
+      @suggestion.reopen_after_failed_apply!(by:)
+      Activity.log!(
+        document: @suggestion.document,
+        actor_name: by,
+        actor_kind: "human",
+        action: "reopened_suggestion",
+        detail: "returned a suggestion to pending after its target changed"
+      )
+    end
     DocumentMetaChannel.broadcast_event(@suggestion.document, :suggestions)
     render json: { suggestion: @suggestion.as_props }
   rescue ActiveRecord::RecordInvalid
@@ -91,8 +101,11 @@ class SuggestionsController < InertiaController
   end
 
   def reject
-    @suggestion.reject!(by: preferred_name(params[:by], fallback: "human"))
-    log_and_broadcast("rejected_suggestion", "rejected “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
+    with_document_write_access(@suggestion.document) do
+      @suggestion.reject!(by: preferred_name(params[:by], fallback: "human"))
+      log_suggestion_activity("rejected_suggestion", "rejected “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
+    end
+    DocumentMetaChannel.broadcast_event(@suggestion.document, :suggestions)
     redirect_back fallback_location: document_page_path(@suggestion.document.slug), status: :see_other
   rescue ActiveRecord::RecordInvalid
     # No `status:` on error-bag redirects — see create's rescue.
@@ -116,7 +129,7 @@ class SuggestionsController < InertiaController
     end
   end
 
-  def log_and_broadcast(action, detail)
+  def log_suggestion_activity(action, detail)
     document = @suggestion.document
     Activity.log!(
       document:,
@@ -125,6 +138,5 @@ class SuggestionsController < InertiaController
       action:,
       detail:
     )
-    DocumentMetaChannel.broadcast_event(document, :suggestions)
   end
 end

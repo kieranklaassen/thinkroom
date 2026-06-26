@@ -37,6 +37,28 @@ class CommentFlowTest < ActionDispatch::IntegrationTest
     assert_response :redirect
   end
 
+  test "locked non-owner cannot create or resolve comments" do
+    @document.update!(
+      owner_token: "someone-else",
+      owner_name: "Owner",
+      editing_locked: true
+    )
+    comment = @document.comments.create!(
+      author_name: "A", author_kind: "human", body: "Existing"
+    )
+
+    assert_no_difference -> { @document.comments.count } do
+      post document_comments_path(@document.slug), params: {
+        body: "Forbidden", author_name: "Reader"
+      }
+    end
+    assert_response :redirect
+
+    patch resolve_comment_path(comment), params: { by: "Reader" }, as: :json
+    assert_response :locked
+    assert_not comment.reload.resolved_at
+  end
+
   test "resolving a comment timestamps it and keeps it out of open scope" do
     comment = @document.comments.create!(author_name: "A", author_kind: "human", body: "Fix this")
 

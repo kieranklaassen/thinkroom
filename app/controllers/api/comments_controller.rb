@@ -6,14 +6,17 @@ module Api
 
     # POST /api/docs/:slug/comments — leave a comment anchored to text.
     def create
-      comment = Comment.post!(
-        document:,
-        author_name: current_agent,
-        author_kind: "agent",
-        body: params.require(:body),
-        anchor_text: params[:anchor_text].presence
-      )
-      touch_presence(location: comment.anchor_text)
+      comment = with_document_write_access do
+        posted = Comment.post!(
+          document:,
+          author_name: current_agent,
+          author_kind: "agent",
+          body: params.require(:body),
+          anchor_text: params[:anchor_text].presence
+        )
+        touch_presence(location: posted.anchor_text)
+        posted
+      end
 
       render json: { comment: comment.as_props }, status: :created
     rescue ActionController::ParameterMissing
@@ -24,14 +27,17 @@ module Api
     # The web UI resolves over a CSRF-protected Inertia request; agents get the
     # same capability here over plain HTTP, attributed via X-Agent-Name.
     def resolve
-      comment = document.comments.find(params[:id])
-      comment.resolve!
-      Activity.log!(
-        document:, actor_name: current_agent, actor_kind: "agent",
-        action: "resolved_comment", detail: comment.body.truncate(80)
-      )
+      comment = with_document_write_access do
+        found = document.comments.find(params[:id])
+        found.resolve!
+        Activity.log!(
+          document:, actor_name: current_agent, actor_kind: "agent",
+          action: "resolved_comment", detail: found.body.truncate(80)
+        )
+        touch_presence(location: found.anchor_text)
+        found
+      end
       DocumentMetaChannel.broadcast_event(document, :comments)
-      touch_presence(location: comment.anchor_text)
 
       render json: { comment: comment.as_props }
     rescue ActiveRecord::RecordNotFound

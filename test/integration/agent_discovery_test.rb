@@ -121,9 +121,28 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     }
 
     body = response.parsed_body
-    assert_equal({ "claimed" => true, "claimable" => false, "owner_name" => "Quiet Falcon" }, body["ownership"])
+    assert_equal(
+      { "claimed" => true, "claimable" => false, "owner_name" => "Quiet Falcon",
+        "editing_locked" => false, "can_write" => true },
+      body["ownership"]
+    )
     assert body["notes"].any? { |n| n.include?("cannot claim") }
     refute_includes response.body, "tok-owner"
+  end
+
+  test "text guide explains owner-controlled read-only mode" do
+    @document.update!(
+      owner_token: "tok-owner",
+      owner_name: "Quiet Falcon",
+      editing_locked: true
+    )
+
+    get "/d/#{@document.slug}", headers: { "User-Agent" => "curl/8.6.0" }
+
+    assert_response :success
+    assert_includes response.body, "editing_locked"
+    assert_includes response.body, "read-only"
+    assert_match(/Agents cannot change\s+this setting/, response.body)
   end
 
   test "HTML text guide uses readable native HTML in its suggestion example" do

@@ -36,6 +36,11 @@ import {
 import { refreshAgentCursors } from '../../editor/agent_cursors'
 import { editorViewCtx, parserCtx, schemaCtx } from '@milkdown/kit/core'
 import { sourceParser } from '../../editor/document_format'
+import {
+  downloadDocumentHtml,
+  downloadDocumentMarkdown,
+  printDocument,
+} from '../../editor/document_export'
 import { collectInlineSuggestions } from '../../editor/suggest_changes'
 import {
   MarginInlineSuggestions,
@@ -206,10 +211,11 @@ export default function DocumentShow({
   // the editor keeps it live via onTitleChange once it mounts.
   const [documentTitle, setDocumentTitle] = useState(doc.display_title || doc.title)
   const [newVersionAvailable, setNewVersionAvailable] = useState(false)
-  const [handle, setHandle] = useState<EditorHandle | null>(null)
-  // Drops the static first-paint preview only after the live editor has painted
-  // its synced content — so the preview is replaced, never briefly deleted.
-  const [editorSwapped, setEditorSwapped] = useState(false)
+  const [readyEditor, setReadyEditor] = useState<{
+    key: string
+    handle: EditorHandle
+  } | null>(null)
+  const [swappedEditorKey, setSwappedEditorKey] = useState<string | null>(null)
   const [spans, setSpans] = useState<ProvenanceSpan[]>([])
   const [peers, setPeers] = useState<UserIdentity[]>([])
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
@@ -218,10 +224,6 @@ export default function DocumentShow({
   const [suggestionNotice, setSuggestionNotice] = useState<string | null>(null)
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
   const viewRef = useRef<EditorView | null>(null)
-  // Live handle for code that runs after awaits or inside stable callbacks —
-  // a closure-captured handle goes stale when the editor remounts mid-flight.
-  const handleRef = useRef<EditorHandle | null>(null)
-  handleRef.current = handle
   // Hydration-safe init from server-rendered cookie prefs: SSR and the client's
   // first render derive panel/focus/mode from the same `ui` props, so a user
   // who closed the panel (etc.) sees it closed at first paint — no flip. The
@@ -231,16 +233,38 @@ export default function DocumentShow({
   const [focusMode, setFocusMode] = useState(ui.focus_mode)
   // Demo doc always opens in Edit and stays locked there — a stale mode cookie
   // can't override it (the server also defaults it; this is the client guard).
-  const modeLocked = doc.slug === 'demo'
-  const [mode, setMode] = useState<EditorMode>(modeLocked ? 'edit' : ui.mode)
-  const isReading = mode === 'read'
+  const demoModeLocked = doc.slug === 'demo'
+  const [mode, setMode] = useState<EditorMode>(demoModeLocked ? 'edit' : ui.mode)
+  const effectiveMode: EditorMode = ownership.can_write ? mode : 'read'
+  const modeLocked = demoModeLocked || !ownership.can_write
+  const isReading = effectiveMode === 'read'
+  const connectionIdentity = viewer.account ? `account:${viewer.account.id}` : 'guest'
+  const editorSessionKey = `${doc.slug}:${ownership.can_write ? 'write' : 'read'}`
+  const handle = readyEditor?.key === editorSessionKey ? readyEditor.handle : null
+  // Tie the instant-paint swap to the exact permission-keyed editor. A delayed
+  // callback from the old editor can never hide the preview for a new remount.
+  const editorSwapped = swappedEditorKey === editorSessionKey
+  // Live handle for code that runs after awaits or inside stable callbacks —
+  // a closure-captured handle goes stale when the editor remounts mid-flight.
+  const handleRef = useRef<EditorHandle | null>(null)
+  handleRef.current = handle
+  const exportMarkdown = useCallback(() => {
+    const live = handleRef.current
+    if (!live) throw new Error('Document editor is not ready')
+    downloadDocumentMarkdown(live.editor, documentTitle)
+  }, [documentTitle])
+  const exportHtml = useCallback(async () => {
+    const live = handleRef.current
+    if (!live) throw new Error('Document editor is not ready')
+    await downloadDocumentHtml(live.editor, documentTitle)
+  }, [documentTitle])
   // handleSelection is a stable callback — it reads the live mode via ref.
-  const modeRef = useRef(mode)
-  modeRef.current = mode
+  const modeRef = useRef(effectiveMode)
+  modeRef.current = effectiveMode
   // Leaving Comment mode dismisses any pending click-to-comment affordance.
   useEffect(() => {
-    if (mode !== 'comment') setCommentTarget(null)
-  }, [mode])
+    if (effectiveMode !== 'comment') setCommentTarget(null)
+  }, [effectiveMode])
 
   // ≤64rem: rail and margin cards give way to anchor markers, a bottom dock,
   // and sheets — the full product, rearranged for one hand. Masked by isClient
@@ -289,8 +313,8 @@ export default function DocumentShow({
     setCookieFlag('pruf_focus', focusMode)
   }, [focusMode])
   useEffect(() => {
-    if (!modeLocked) setCookie('pruf_mode', mode)
-  }, [mode, modeLocked])
+    if (!demoModeLocked) setCookie('pruf_mode', mode)
+  }, [mode, demoModeLocked])
 
   // ⌘\ toggles the side panel, ⌘. toggles suggestion focus.
   useEffect(() => {
@@ -378,10 +402,21 @@ export default function DocumentShow({
     presencePoll.stop()
     router.visit('/')
   }, [presencePoll])
+  const reloadEditingAccess = useCallback(() => {
+    router.reload({
+      only: ownership.yours ? ['ownership'] : ['document', 'ownership'],
+      async: true,
+    })
+  }, [ownership.yours])
+  const recoverDeniedWrite = useCallback(() => {
+    router.reload({ only: ['document', 'ownership', 'viewer'], async: true })
+  }, [])
   useMetaChannel(doc.slug, {
     onDeleted: onDocumentGone,
     onTitle: setDocumentTitle,
     onVersionAvailable: () => setNewVersionAvailable(true),
+    onEditingLock: reloadEditingAccess,
+    connectionIdentity,
   })
 
   // The sync channel rejects its resubscription when the doc is gone —
@@ -390,8 +425,12 @@ export default function DocumentShow({
     if (!handle) return
     const provider = handle.provider
     provider.on('rejected', onDocumentGone)
-    return () => provider.off('rejected', onDocumentGone)
-  }, [handle, onDocumentGone])
+    provider.on('write-denied', recoverDeniedWrite)
+    return () => {
+      provider.off('rejected', onDocumentGone)
+      provider.off('write-denied', recoverDeniedWrite)
+    }
+  }, [handle, onDocumentGone, recoverDeniedWrite])
 
   const handleSelection = useCallback((view: EditorView) => {
     viewRef.current = view
@@ -941,7 +980,7 @@ export default function DocumentShow({
   // Mode switches close the composer without posting (same as Cancel).
   useEffect(() => {
     setComposerAnchor(null)
-  }, [mode])
+  }, [effectiveMode])
 
   // The anchored text stays visibly marked while the composer is open —
   // the editor selection itself collapses when focus moves to the textarea.
@@ -1036,8 +1075,24 @@ export default function DocumentShow({
                 {acceptingAll ? 'Accepting…' : `Accept all ${pendingSuggestionCount}`}
               </button>
             )}
-            <ModeControl mode={mode} onChange={setMode} locked={modeLocked} />
-            <SharePopover agentsActive={presences.length} onOpenChange={setShareOpen} />
+            <ModeControl
+              mode={effectiveMode}
+              onChange={setMode}
+              locked={modeLocked}
+              lockedReason={
+                ownership.can_write
+                  ? undefined
+                  : 'Read only — the document owner locked editing'
+              }
+            />
+            <SharePopover
+              agentsActive={presences.length}
+              exportReady={Boolean(handle)}
+              onExportMarkdown={exportMarkdown}
+              onExportHtml={exportHtml}
+              onPrint={printDocument}
+              onOpenChange={setShareOpen}
+            />
             <HeaderMenu
               panelOpen={panelOpen}
               onTogglePanel={() => setPanelOpen((open) => !open)}
@@ -1095,23 +1150,28 @@ export default function DocumentShow({
                 <div className="doc-live-editor">
                   {isClient && (
                     <DocumentEditor
+                      key={editorSessionKey}
                       slug={doc.slug}
                       identity={identity}
+                      canWrite={ownership.can_write}
+                      connectionIdentity={connectionIdentity}
                       contentFormat={doc.content_format}
                       initialStateB64={doc.yjs_state_b64}
                       seedContent={doc.seed_content}
                       seedGranted={doc.seed_granted}
                       seedAuthorKind={doc.seed_author_kind}
                       seedAuthorName={doc.seed_author_name}
-                      editable={mode === 'edit' || mode === 'suggest'}
-                      suggesting={mode === 'suggest'}
-                      taskInteractive={mode !== 'comment'}
+                      editable={ownership.can_write && (effectiveMode === 'edit' || effectiveMode === 'suggest')}
+                      suggesting={ownership.can_write && effectiveMode === 'suggest'}
+                      taskInteractive={ownership.can_write && effectiveMode !== 'comment'}
                       onReady={(h) => {
-                        setHandle(h)
+                        setReadyEditor({ key: editorSessionKey, handle: h })
                         // Wait two frames so ProseMirror has painted the synced
                         // content before the preview is removed.
                         requestAnimationFrame(() =>
-                          requestAnimationFrame(() => setEditorSwapped(true)),
+                          requestAnimationFrame(() =>
+                            setSwappedEditorKey(editorSessionKey),
+                          ),
                         )
                       }}
                       onStatus={setStatus}

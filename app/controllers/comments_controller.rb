@@ -1,15 +1,18 @@
 class CommentsController < InertiaController
+  include DocumentWriteAuthorization
   rate_limit_contributions
 
   def create
     document = Document.find_by!(slug: params[:slug])
-    Comment.post!(
-      document:,
-      author_name: preferred_name(params[:author_name], fallback: "Anonymous"),
-      author_kind: "human",
-      body: params[:body],
-      anchor_text: params[:anchor_text].presence
-    )
+    with_document_write_access(document) do
+      Comment.post!(
+        document:,
+        author_name: preferred_name(params[:author_name], fallback: "Anonymous"),
+        author_kind: "human",
+        body: params[:body],
+        anchor_text: params[:anchor_text].presence
+      )
+    end
 
     redirect_back fallback_location: document_page_path(document.slug), status: :see_other
   rescue ActiveRecord::RecordInvalid => e
@@ -24,16 +27,17 @@ class CommentsController < InertiaController
 
   def resolve
     comment = Comment.find(params[:id])
-    comment.resolve!
-
     document = comment.document
-    Activity.log!(
-      document:,
-      actor_name: preferred_name(params[:by], fallback: "Someone"),
-      actor_kind: "human",
-      action: "resolved_comment",
-      detail: comment.body.truncate(80)
-    )
+    with_document_write_access(document) do
+      comment.resolve!
+      Activity.log!(
+        document:,
+        actor_name: preferred_name(params[:by], fallback: "Someone"),
+        actor_kind: "human",
+        action: "resolved_comment",
+        detail: comment.body.truncate(80)
+      )
+    end
     DocumentMetaChannel.broadcast_event(document, :comments)
 
     redirect_back fallback_location: document_page_path(document.slug), status: :see_other

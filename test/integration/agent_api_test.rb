@@ -223,13 +223,21 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   test "state read exposes ownership without leaking the token" do
     get "/api/docs/#{@document.slug}", headers: AGENT
     body = response.parsed_body
-    assert_equal({ "claimed" => false, "claimable" => true, "owner_name" => nil }, body["ownership"])
+    assert_equal(
+      { "claimed" => false, "claimable" => true, "owner_name" => nil,
+        "editing_locked" => false, "can_write" => true },
+      body["ownership"]
+    )
 
     @document.claim!(token: "tok-owner", name: "Quiet Falcon")
 
     get "/api/docs/#{@document.slug}", headers: AGENT
     body = response.parsed_body
-    assert_equal({ "claimed" => true, "claimable" => false, "owner_name" => "Quiet Falcon" }, body["ownership"])
+    assert_equal(
+      { "claimed" => true, "claimable" => false, "owner_name" => "Quiet Falcon",
+        "editing_locked" => false, "can_write" => true },
+      body["ownership"]
+    )
     refute_includes response.body, "tok-owner"
     refute_includes response.body, "owner_token"
   end
@@ -340,6 +348,41 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal "agent", suggestion.author_kind
     assert_equal "pending_human_review", response.parsed_body["status"]
     assert_equal %w[joined suggested], @document.activities.order(:id).pluck(:action).last(2)
+  end
+
+  test "locked document stays readable but rejects agent contributions" do
+    @document.update!(
+      owner_token: "owner-token",
+      owner_name: "Owner",
+      editing_locked: true
+    )
+    comment = @document.comments.create!(
+      author_name: "A", author_kind: "human", body: "Existing"
+    )
+
+    get "/api/docs/#{@document.slug}", headers: AGENT
+    assert_response :success
+    assert_equal true, response.parsed_body.dig("ownership", "editing_locked")
+    assert_equal false, response.parsed_body.dig("ownership", "can_write")
+    assert response.parsed_body["notes"].any? { |note| note.include?("423") }
+
+    assert_no_difference -> { @document.suggestions.count } do
+      post "/api/docs/#{@document.slug}/suggestions",
+           params: { body: "Forbidden" }, headers: AGENT, as: :json
+    end
+    assert_response :locked
+    assert_equal true, response.parsed_body["editing_locked"]
+
+    assert_no_difference -> { @document.comments.count } do
+      post "/api/docs/#{@document.slug}/comments",
+           params: { body: "Forbidden" }, headers: AGENT, as: :json
+    end
+    assert_response :locked
+
+    post api_doc_resolve_comment_path(slug: @document.slug, id: comment.id),
+         headers: AGENT, as: :json
+    assert_response :locked
+    assert_not comment.reload.resolved_at
   end
 
   test "agent comment is agent-attributed and logged" do
