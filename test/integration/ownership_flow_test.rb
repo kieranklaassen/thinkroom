@@ -271,6 +271,30 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
     assert_not @document.reload.editing_locked?
   end
 
+  test "owner can set explicit link access and non-owner cannot" do
+    establish_identity
+    post claim_document_path(@document.slug), params: { name: "Owner" }
+
+    patch document_link_access_path(@document.slug), params: { access: "comment" }
+    assert_response :see_other
+    assert_equal "comment", @document.reload.link_access
+
+    reset!
+    patch document_link_access_path(@document.slug), params: { access: "view" }
+    assert_response :see_other
+    assert_equal "comment", @document.reload.link_access
+  end
+
+  test "link access rejects unknown values" do
+    establish_identity
+    post claim_document_path(@document.slug), params: { name: "Owner" }
+
+    patch document_link_access_path(@document.slug), params: { access: "suggest" }
+
+    assert_response :see_other
+    assert_equal "edit", @document.reload.link_access
+  end
+
   test "show exposes viewer-specific write access for a locked document" do
     establish_identity
     post claim_document_path(@document.slug), params: { name: "Owner" }

@@ -36,9 +36,12 @@ export const MODE_SHORTCUTS = Object.fromEntries(
   MODE_OPTIONS.map(({ shortcut, value }) => [`Digit${shortcut}`, value]),
 ) as Record<string, EditorMode>
 
+const ALL_MODES = MODE_OPTIONS.map(({ value }) => value)
+
 interface Props {
   mode: EditorMode
   onChange: (mode: EditorMode) => void
+  availableModes?: readonly EditorMode[]
   /** Demo doc: control renders but stays locked to Edit. */
   locked?: boolean
   lockedReason?: string
@@ -49,7 +52,13 @@ interface Props {
  * current mode, opening to the four modes with hints. Per-visitor UI state
  * only — switching never affects other collaborators.
  */
-export function ModeControl({ mode, onChange, locked = false, lockedReason }: Props) {
+export function ModeControl({
+  mode,
+  onChange,
+  availableModes = ALL_MODES,
+  locked = false,
+  lockedReason,
+}: Props) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
@@ -70,6 +79,8 @@ export function ModeControl({ mode, onChange, locked = false, lockedReason }: Pr
           key={value}
           role="option"
           aria-selected={mode === value}
+          disabled={!availableModes.includes(value)}
+          title={!availableModes.includes(value) ? `This link cannot use ${label} mode` : hint}
           className={`mode-control-option ${mode === value ? 'is-active' : ''}`}
           onClick={() => {
             onChange(value)

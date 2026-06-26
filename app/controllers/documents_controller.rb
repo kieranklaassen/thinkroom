@@ -59,7 +59,7 @@ class DocumentsController < InertiaController
     # intentionally fixed-mode document: it remains Edit at its established
     # base URL, so alternate demo URLs canonicalize there too.
     if params[:mode].present? &&
-       (document.slug == "demo" || !document.writable_by?(owner_token, user: current_user))
+       (document.slug == "demo" || !document_mode_available?(document, mode))
       return redirect_to document_page_path(document.slug), status: :see_other
     end
 
@@ -199,6 +199,27 @@ class DocumentsController < InertiaController
     "1" => true, "0" => false,
     1 => true, 0 => false
   }.freeze
+
+  def update_link_access
+    document = Document.find_by!(slug: params[:slug])
+    access = params[:access].to_s
+    unless Document::LINK_ACCESS_LEVELS.include?(access)
+      return redirect_back fallback_location: document_page_path(document.slug), status: :see_other,
+                           inertia: { errors: { link_access: "Choose Can edit, Can comment, or Can view" } }
+    end
+
+    document.set_link_access!(
+      access:,
+      token: owner_token,
+      user: current_user
+    )
+    redirect_back fallback_location: document_page_path(document.slug), status: :see_other
+  rescue Document::NotOwnerError
+    redirect_back fallback_location: document_page_path(params[:slug]), status: :see_other,
+                  inertia: { errors: { link_access: "Only the owner can change link access" } }
+  rescue ActiveRecord::RecordNotFound
+    redirect_to root_path, status: :see_other
+  end
 
   def update_editing_lock
     document = Document.find_by!(slug: params[:slug])
@@ -416,6 +437,14 @@ class DocumentsController < InertiaController
     return "edit" if document.slug == "demo"
 
     params[:mode].presence || "read"
+  end
+
+  def document_mode_available?(document, mode)
+    if mode == "comment"
+      document.commentable_by?(owner_token, user: current_user)
+    else
+      document.writable_by?(owner_token, user: current_user)
+    end
   end
 
   def ui_prefs(mode:)

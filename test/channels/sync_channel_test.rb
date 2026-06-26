@@ -146,7 +146,7 @@ class SyncChannelTest < ActionCable::Channel::TestCase
       title: "Locked",
       owner_token: "owner-token",
       owner_name: "Owner",
-      editing_locked: true
+      link_access: "view"
     )
     subscribe slug: doc.slug
     update = build_update_b64("forbidden")
@@ -164,7 +164,7 @@ class SyncChannelTest < ActionCable::Channel::TestCase
       title: "Locked",
       owner_token: "owner-token",
       owner_name: "Owner",
-      editing_locked: true
+      link_access: "view"
     )
     stub_connection(owner_token: "owner-token", current_user: nil)
     subscribe slug: doc.slug
@@ -184,7 +184,7 @@ class SyncChannelTest < ActionCable::Channel::TestCase
       title: "Locked",
       owner_token: "owner-token",
       owner_name: "Owner",
-      editing_locked: true
+      link_access: "view"
     )
     subscribe slug: doc.slug
 

@@ -2,13 +2,17 @@ import { useRef, useState } from 'react'
 import { router } from '@inertiajs/react'
 import { useClaim } from '../lib/use_claim'
 
+export type LinkAccess = 'edit' | 'comment' | 'view'
+
 export interface OwnershipPayload {
   claimed: boolean
   claimable: boolean
   owner_name: string | null
   yours: boolean
+  link_access: LinkAccess
   editing_locked: boolean
   can_write: boolean
+  can_comment: boolean
 }
 
 interface Props {

@@ -2307,6 +2307,69 @@ a:focus-visible {
   color: var(--ink-faint);
 }
 
+.header-menu-access {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.header-menu-access-option {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  gap: 0.45rem;
+  width: 100%;
+  border: none;
+  border-radius: 7px;
+  padding: 0.45rem 0.55rem;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.header-menu-access-option:hover,
+.header-menu-access-option[aria-checked='true'] {
+  background: var(--accent-soft);
+}
+
+.header-menu-access-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.header-menu-access-option:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.header-menu-access-check {
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2rem;
+}
+
+.header-menu-access-label,
+.header-menu-access-hint {
+  display: block;
+}
+
+.header-menu-access-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.header-menu-access-hint {
+  margin-top: 0.05rem;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+}
+
+.header-menu-access-error {
+  padding: 0.25rem 0.55rem;
+  color: #a1372c;
+  font-size: 0.68rem;
+}
+
 .header-menu-item:disabled {
   cursor: wait;
   opacity: 0.65;
@@ -2478,6 +2541,15 @@ a:focus-visible {
 
 .mode-control-option:hover {
   background: var(--accent-soft);
+}
+
+.mode-control-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.mode-control-option:disabled:hover {
+  background: transparent;
 }
 
 .mode-control-option.is-active {
@@ -3901,6 +3973,7 @@ a:focus-visible {
 @media (hover: none), (pointer: coarse) {
   .header-menu-item,
   .header-menu-status,
+  .header-menu-access-option,
   .header-menu-popover .chrome-toggle,
   .header-menu-popover .feedback-button > button,
   .header-menu-theme .theme-option,

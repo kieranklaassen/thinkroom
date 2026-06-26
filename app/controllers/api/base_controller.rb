@@ -15,9 +15,18 @@ module Api
 
     rescue_from Document::EditingLockedError do
       render json: {
-        error: "This document is read-only. Only its owner can make changes.",
+        error: "This link does not allow editing.",
+        link_access: document.link_access,
         editing_locked: true,
-        next_action: "Wait for the browser owner to turn off Read only for others, then retry."
+        next_action: "Wait for the browser owner to change link access to Can edit, then retry."
+      }, status: :locked
+    end
+
+    rescue_from Document::CommentingLockedError do
+      render json: {
+        error: "This link does not allow commenting.",
+        link_access: document.link_access,
+        next_action: "Wait for the browser owner to allow comments or editing, then retry."
       }, status: :locked
     end
 
@@ -50,6 +59,10 @@ module Api
 
     def with_document_write_access(&block)
       document.with_write_access(&block)
+    end
+
+    def with_document_comment_access(&block)
+      document.with_comment_access(&block)
     end
 
     def participation_example

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_26_110000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_26_120000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -93,6 +93,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_26_110000) do
     t.text "content_markdown"
     t.datetime "created_at", null: false
     t.boolean "editing_locked", default: false, null: false
+    t.string "link_access", default: "edit", null: false
     t.string "owner_name", limit: 255
     t.string "owner_token"
     t.json "provenance_spans", default: []
@@ -111,6 +112,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_26_110000) do
     t.index ["slug"], name: "index_documents_on_slug", unique: true
     t.index ["user_id"], name: "index_documents_on_user_id"
     t.check_constraint "content_format IN ('markdown', 'html')", name: "documents_content_format"
+    t.check_constraint "link_access IN ('edit', 'comment', 'view')", name: "documents_link_access_check"
     t.check_constraint "user_id IS NULL OR owner_token IS NULL", name: "documents_single_owner"
   end
 

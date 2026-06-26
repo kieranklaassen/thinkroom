@@ -66,6 +66,7 @@ try {
 
   await landing.getByRole('button', { name: 'New document' }).click()
   await landing.waitForURL(/\/d\//)
+  const accessSlug = new URL(landing.url()).pathname.split('/')[2]
   await landing.goto(BASE)
   await landing.getByRole('button', { name: /Add tag/ }).first().click()
   await landing
@@ -92,6 +93,87 @@ try {
   } else {
     fail('saved tags did not update the document row')
   }
+
+  // Shared-link access: the owner chooses Edit, Comment, or View. A commenter
+  // gets Comment/Read modes and HTTP comments without Yjs write authority;
+  // downgrading to View canonicalizes their open Comment URL immediately.
+  await landing.goto(`${BASE}/d/${accessSlug}/edit`)
+  await landing.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await landing.getByRole('button', { name: 'More options' }).click()
+  const accessOptions = landing.locator('.header-menu-access-option')
+  if (
+    (await accessOptions.count()) === 3 &&
+    (await accessOptions.nth(0).getAttribute('aria-checked')) === 'true'
+  ) {
+    ok('owner Access menu offers Edit, Comment, and View roles')
+  } else {
+    fail('owner Access menu did not expose the three link roles')
+  }
+  await accessOptions.nth(1).click()
+  await landing.waitForFunction(
+    () => document.querySelectorAll('.header-menu-access-option')[1]?.getAttribute('aria-checked') === 'true',
+  )
+
+  const accessGuest = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  await accessGuest.goto(`${BASE}/d/${accessSlug}/comment`)
+  await accessGuest.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await accessGuest.click('.mode-control-trigger')
+  const guestModes = await accessGuest.locator('.mode-control-option').evaluateAll((options) =>
+    options.map((option) => ({
+      label: option.querySelector('.mode-control-option-label')?.textContent,
+      disabled: option.disabled,
+    })),
+  )
+  if (
+    guestModes[0]?.disabled && guestModes[1]?.disabled &&
+    !guestModes[2]?.disabled && !guestModes[3]?.disabled &&
+    (await accessGuest.locator('.milkdown .ProseMirror').getAttribute('contenteditable')) === 'false'
+  ) {
+    ok('comment link enables Comment/Read while keeping document writes disabled')
+  } else {
+    fail(`comment link mode matrix diverged: ${JSON.stringify(guestModes)}`)
+  }
+  await accessGuest.keyboard.press('Escape')
+  await accessGuest.locator('.milkdown .ProseMirror p').first().dblclick()
+  await accessGuest.locator('.selection-toolbar button', { hasText: 'Comment' }).click()
+  const accessComment = `Comment-role check ${Date.now()}`
+  await accessGuest.getByPlaceholder('Say something about this…').fill(accessComment)
+  await accessGuest.locator('.comment-composer--anchored .btn-accept').click()
+  await landing.locator('.comment-card', { hasText: accessComment }).waitFor({ timeout: 10000 })
+  ok('comment-role contribution appears live for the owner')
+
+  await accessOptions.nth(2).click()
+  await accessGuest.waitForURL(`${BASE}/d/${accessSlug}`, { timeout: 10000 })
+  if (
+    (await accessGuest.locator('.mode-control-trigger').isDisabled()) &&
+    (await accessGuest.locator('.mode-control-trigger').textContent())?.includes('Read mode')
+  ) {
+    ok('View downgrade canonicalizes the commenter to locked Read mode')
+  } else {
+    fail('View downgrade left an unavailable mode active')
+  }
+  await accessGuest.close()
+
+  await landing.setViewportSize({ width: 390, height: 844 })
+  const accessGeometry = await landing.evaluate(() => ({
+    sheet: document.querySelector('.header-menu-popover')?.getBoundingClientRect().width,
+    rows: Array.from(document.querySelectorAll('.header-menu-access-option')).map(
+      (option) => option.getBoundingClientRect().height,
+    ),
+    overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  }))
+  if (
+    accessGeometry.sheet === 390 &&
+    accessGeometry.rows.every((height) => height >= 44) &&
+    accessGeometry.overflow === 0
+  ) {
+    ok('mobile link-access sheet is full-width with touch-sized choices')
+  } else {
+    fail(`mobile link-access geometry diverged: ${JSON.stringify(accessGeometry)}`)
+  }
+  await landing.getByRole('button', { name: 'Yours — delete…' }).click()
+  await landing.getByRole('button', { name: 'Delete?' }).click()
+  await landing.waitForURL(`${BASE}/`)
   await landing.close()
 
   const a = await makePage('a')

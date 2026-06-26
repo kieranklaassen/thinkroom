@@ -65,7 +65,7 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
     @document.update!(
       owner_token: "someone-else",
       owner_name: "Owner",
-      editing_locked: true
+      link_access: "view"
     )
 
     assert_no_difference -> { @document.suggestions.count } do

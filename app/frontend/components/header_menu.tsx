@@ -3,7 +3,11 @@ import { createPortal } from 'react-dom'
 import { Link, router } from '@inertiajs/react'
 import { useMediaQuery } from '../lib/use_media_query'
 import { useDismissable } from '../lib/use_dismissable'
-import { OwnershipChip, type OwnershipPayload } from './ownership_chip'
+import {
+  OwnershipChip,
+  type LinkAccess,
+  type OwnershipPayload,
+} from './ownership_chip'
 import { FeedbackButton } from './feedback_button'
 import { ThemePicker } from './theme_picker'
 import type { AccountPayload } from '../types/viewer'
@@ -18,6 +22,16 @@ interface Props {
   claimerName: string
   account: AccountPayload | null
 }
+
+const LINK_ACCESS_OPTIONS: ReadonlyArray<{
+  value: LinkAccess
+  label: string
+  hint: string
+}> = [
+  { value: 'edit', label: 'Can edit', hint: 'Edit, suggest, and comment' },
+  { value: 'comment', label: 'Can comment', hint: 'Comment and read' },
+  { value: 'view', label: 'Can view', hint: 'Read only' },
+]
 
 /**
  * The header's `⋯` document-options dialog — content layer over the same popover
@@ -37,8 +51,8 @@ export function HeaderMenu({
   account,
 }: Props) {
   const [open, setOpen] = useState(false)
-  const [lockUpdating, setLockUpdating] = useState(false)
-  const [lockFailed, setLockFailed] = useState(false)
+  const [accessUpdating, setAccessUpdating] = useState(false)
+  const [accessFailed, setAccessFailed] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
   const viewLabelId = useId()
@@ -52,9 +66,7 @@ export function HeaderMenu({
   useDismissable(open, () => setOpen(false), [rootRef, popoverRef])
 
   const showOwnership = ownership.yours || ownership.claimed || ownership.claimable
-  let lockLabel = 'Read only for others'
-  if (lockUpdating) lockLabel = 'Updating access…'
-  else if (lockFailed) lockLabel = 'Could not update — retry'
+  const activeAccess = LINK_ACCESS_OPTIONS.find(({ value }) => value === ownership.link_access)!
 
   return (
     <div className="share-root header-menu-root" ref={rootRef}>
@@ -110,44 +122,64 @@ export function HeaderMenu({
               {showOwnership && (
                 <div className="header-menu-group" role="group" aria-labelledby={accessLabelId}>
                   <div className="header-menu-label" id={accessLabelId}>Access</div>
-                  {ownership.yours && (
-                    <button
-                      className="header-menu-item"
-                      aria-pressed={ownership.editing_locked}
-                      disabled={lockUpdating}
-                      onClick={() => {
-                        const locked = !ownership.editing_locked
-                        setLockUpdating(true)
-                        setLockFailed(false)
-                        router.optimistic((props: { ownership?: OwnershipPayload }) => ({
-                          ownership: {
-                            ...(props.ownership ?? ownership),
-                            editing_locked: locked,
-                            can_write: true,
-                          },
-                        })).patch(
-                          `/d/${slug}/editing_lock`,
-                          { locked },
-                          {
-                            only: ['ownership', 'activities'],
-                            preserveScroll: true,
-                            async: true,
-                            onError: () => setLockFailed(true),
-                            onFinish: () => setLockUpdating(false),
-                          },
-                        )
-                      }}
+                  {ownership.yours ? (
+                    <div
+                      className="header-menu-access"
+                      role="radiogroup"
+                      aria-label="Anyone with the link"
                     >
-                      <span className="header-menu-check" aria-hidden>
-                        {ownership.editing_locked ? '✓' : ''}
-                      </span>
-                      {lockLabel}
-                    </button>
-                  )}
-                  {ownership.editing_locked && !ownership.yours && (
+                      {LINK_ACCESS_OPTIONS.map(({ value, label, hint }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          role="radio"
+                          aria-checked={ownership.link_access === value}
+                          className="header-menu-access-option"
+                          disabled={accessUpdating}
+                          onClick={() => {
+                            if (value === ownership.link_access) return
+                            setAccessUpdating(true)
+                            setAccessFailed(false)
+                            router.optimistic((props: { ownership?: OwnershipPayload }) => ({
+                              ownership: {
+                                ...(props.ownership ?? ownership),
+                                link_access: value,
+                                editing_locked: value !== 'edit',
+                                can_write: true,
+                                can_comment: true,
+                              },
+                            })).patch(
+                              `/d/${slug}/link_access`,
+                              { access: value },
+                              {
+                                only: ['ownership', 'activities'],
+                                preserveScroll: true,
+                                async: true,
+                                onError: () => setAccessFailed(true),
+                                onFinish: () => setAccessUpdating(false),
+                              },
+                            )
+                          }}
+                        >
+                          <span className="header-menu-access-check" aria-hidden>
+                            {ownership.link_access === value ? '✓' : ''}
+                          </span>
+                          <span>
+                            <span className="header-menu-access-label">{label}</span>
+                            <span className="header-menu-access-hint">{hint}</span>
+                          </span>
+                        </button>
+                      ))}
+                      {accessFailed && (
+                        <span className="header-menu-access-error" role="alert">
+                          Could not update link access — try again
+                        </span>
+                      )}
+                    </div>
+                  ) : (
                     <div className="header-menu-status" role="status">
-                      <span className="header-menu-check" aria-hidden>🔒</span>
-                      Read only — locked by owner
+                      <span className="header-menu-check" aria-hidden>↗</span>
+                      Anyone with the link {activeAccess.label.toLowerCase()}
                     </div>
                   )}
                   <OwnershipChip slug={slug} ownership={ownership} claimerName={claimerName} />

@@ -49,7 +49,7 @@ class DocumentModeRoutingTest < ActionDispatch::IntegrationTest
       owner_token: "someone-else",
       owner_name: "Owner",
       claimed_at: Time.current,
-      editing_locked: true
+      link_access: "view"
     )
 
     get document_mode_path(@document.slug, "comment"), headers: browser
@@ -57,6 +57,28 @@ class DocumentModeRoutingTest < ActionDispatch::IntegrationTest
     assert_response :see_other
     assert_redirected_to document_page_path(@document.slug)
     assert_equal "pending", @document.reload.seed_state
+  end
+
+  test "comment link permits Comment mode but redirects Edit and Suggest" do
+    @document.update!(
+      owner_token: "someone-else",
+      owner_name: "Owner",
+      claimed_at: Time.current,
+      link_access: "comment"
+    )
+
+    get document_mode_path(@document.slug, "comment"), headers: browser
+    assert_response :ok
+    assert_inertia_props do |props|
+      props.dig(:ui, :mode) == "comment" &&
+        props.dig(:ownership, :can_comment) == true &&
+        props.dig(:ownership, :can_write) == false
+    end
+
+    %w[edit suggest].each do |mode|
+      get document_mode_path(@document.slug, mode), headers: browser
+      assert_redirected_to document_page_path(@document.slug)
+    end
   end
 
   test "demo keeps its established URL locked to Edit" do

@@ -1,9 +1,11 @@
 class Document < ApplicationRecord
   class EditingLockedError < StandardError; end
+  class CommentingLockedError < StandardError; end
   class NotOwnerError < StandardError; end
   DEFAULT_SEED = "# Untitled\n\nStart writing — everything you type is attributed to you.\n"
   DEFAULT_HTML_SEED = "<h1>Untitled</h1><p>Start writing — everything you type is attributed to you.</p>"
   CONTENT_FORMATS = %w[markdown html].freeze
+  LINK_ACCESS_LEVELS = %w[edit comment view].freeze
   MAX_CONTENT_BYTES = 2.megabytes
   MAX_TAGS = 8
   MAX_TAG_LENGTH = 32
@@ -36,10 +38,12 @@ class Document < ApplicationRecord
 
   before_validation :ensure_slug, on: :create
   before_validation :normalize_tags
+  before_validation :sync_legacy_editing_lock
 
   validates :title, presence: true
   validates :slug, presence: true, uniqueness: true
   validates :content_format, inclusion: { in: CONTENT_FORMATS }
+  validates :link_access, inclusion: { in: LINK_ACCESS_LEVELS }
   validate :content_format_is_immutable, on: :update
   # owner_name is broadcast to every client and served to agents — unbounded
   # names are an amplification vector, so cap it (deliberate exception to the
@@ -120,11 +124,21 @@ class Document < ApplicationRecord
   end
 
   def writable_by?(token, user: nil)
-    !editing_locked? || owned_by?(token, user:)
+    link_access == "edit" || owned_by?(token, user:)
+  end
+
+  def commentable_by?(token, user: nil)
+    link_access != "view" || owned_by?(token, user:)
   end
 
   def assert_write_access!(token: nil, user: nil)
-    raise EditingLockedError, "This document is read-only." unless writable_by?(token, user:)
+    raise EditingLockedError, "This link does not allow editing." unless writable_by?(token, user:)
+
+    self
+  end
+
+  def assert_comment_access!(token: nil, user: nil)
+    raise CommentingLockedError, "This link does not allow commenting." unless commentable_by?(token, user:)
 
     self
   end
@@ -138,28 +152,52 @@ class Document < ApplicationRecord
     end
   end
 
+  def with_comment_access(token: nil, user: nil)
+    with_lock do
+      reload
+      assert_comment_access!(token:, user:)
+
+      yield
+    end
+  end
+
+  # Compatibility predicate for clients that still understand the previous
+  # binary field. Both Comment and View are "editing locked" in that vocabulary.
+  def editing_locked? = link_access != "edit"
+
   def set_editing_locked!(locked:, token:, user: nil)
+    set_link_access!(access: locked ? "view" : "edit", token:, user:)
+  end
+
+  def set_link_access!(access:, token:, user: nil)
+    access = access.to_s
+    unless LINK_ACCESS_LEVELS.include?(access)
+      raise ArgumentError, "link access must be edit, comment, or view"
+    end
+
     changed = false
     actor_name = user&.name || owner_name || "Anonymous"
 
     with_lock do
       reload
-      raise NotOwnerError, "Only the owner can change editing access." unless owned_by?(token, user:)
-      next if editing_locked? == locked
+      raise NotOwnerError, "Only the owner can change link access." unless owned_by?(token, user:)
+      next if link_access == access
 
-      update!(editing_locked: locked)
+      update!(link_access: access)
       activities.create!(
         actor_name:,
         actor_kind: "human",
-        action: locked ? "locked_editing" : "unlocked_editing",
-        detail: locked ? "made the document read-only for others" : "reopened the document for editing"
+        action: "changed_link_access",
+        detail: "set link access to #{access}"
       )
       changed = true
     end
 
     if changed
       DocumentMetaChannel.broadcast_event(self, :activities)
-      DocumentMetaChannel.broadcast_event(self, :editing_lock, locked:)
+      # Keep the established event name so clients mounted during a rolling
+      # deploy still reload their ownership props. New payloads include access.
+      DocumentMetaChannel.broadcast_event(self, :editing_lock, locked: editing_locked?, access: link_access)
     end
     self
   end
@@ -254,8 +292,10 @@ class Document < ApplicationRecord
       claimable: claimable?,
       owner_name: owner_name,
       yours: owned_by?(viewer_token, user: viewer_user),
+      link_access:,
       editing_locked: editing_locked?,
-      can_write: writable_by?(viewer_token, user: viewer_user)
+      can_write: writable_by?(viewer_token, user: viewer_user),
+      can_comment: commentable_by?(viewer_token, user: viewer_user)
     }
   end
 
@@ -294,6 +334,10 @@ class Document < ApplicationRecord
   end
 
   private
+
+  def sync_legacy_editing_lock
+    self.editing_locked = link_access != "edit" if link_access.present?
+  end
 
   def normalize_tags
     seen = Set.new

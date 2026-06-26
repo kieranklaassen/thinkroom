@@ -15,7 +15,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     @document.update!(
       owner_token: "someone-else",
       owner_name: "Owner",
-      editing_locked: true,
+      link_access: "view",
       content_snapshot: "original"
     )
     ydoc = Y::Doc.new
@@ -38,7 +38,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     @document.update!(
       owner_token: "someone-else",
       owner_name: "Owner",
-      editing_locked: true
+      link_access: "view"
     )
 
     post document_snapshot_path(@document.slug), params: {

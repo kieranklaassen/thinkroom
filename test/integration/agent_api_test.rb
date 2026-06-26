@@ -225,7 +225,8 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     body = response.parsed_body
     assert_equal(
       { "claimed" => false, "claimable" => true, "owner_name" => nil,
-        "editing_locked" => false, "can_write" => true },
+        "link_access" => "edit", "editing_locked" => false,
+        "can_write" => true, "can_comment" => true },
       body["ownership"]
     )
 
@@ -235,7 +236,8 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     body = response.parsed_body
     assert_equal(
       { "claimed" => true, "claimable" => false, "owner_name" => "Quiet Falcon",
-        "editing_locked" => false, "can_write" => true },
+        "link_access" => "edit", "editing_locked" => false,
+        "can_write" => true, "can_comment" => true },
       body["ownership"]
     )
     refute_includes response.body, "tok-owner"
@@ -354,7 +356,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     @document.update!(
       owner_token: "owner-token",
       owner_name: "Owner",
-      editing_locked: true
+      link_access: "view"
     )
     comment = @document.comments.create!(
       author_name: "A", author_kind: "human", body: "Existing"
@@ -383,6 +385,27 @@ class AgentApiTest < ActionDispatch::IntegrationTest
          headers: AGENT, as: :json
     assert_response :locked
     assert_not comment.reload.resolved_at
+  end
+
+  test "comment link permits agent comments but rejects suggestions" do
+    @document.update!(
+      owner_token: "owner-token",
+      owner_name: "Owner",
+      link_access: "comment"
+    )
+
+    assert_difference -> { @document.comments.count }, 1 do
+      post "/api/docs/#{@document.slug}/comments",
+           params: { body: "Allowed comment" }, headers: AGENT, as: :json
+    end
+    assert_response :created
+
+    assert_no_difference -> { @document.suggestions.count } do
+      post "/api/docs/#{@document.slug}/suggestions",
+           params: { body: "Forbidden suggestion" }, headers: AGENT, as: :json
+    end
+    assert_response :locked
+    assert_equal "comment", response.parsed_body["link_access"]
   end
 
   test "agent comment is agent-attributed and logged" do
