@@ -248,10 +248,10 @@ export default function DocumentShow({
   // a closure-captured handle goes stale when the editor remounts mid-flight.
   const handleRef = useRef<EditorHandle | null>(null)
   handleRef.current = handle
-  const exportMarkdown = useCallback(() => {
+  const exportMarkdown = useCallback(async () => {
     const live = handleRef.current
     if (!live) throw new Error('Document editor is not ready')
-    downloadDocumentMarkdown(live.editor, documentTitle)
+    await downloadDocumentMarkdown(live.editor, documentTitle)
   }, [documentTitle])
   const exportHtml = useCallback(async () => {
     const live = handleRef.current

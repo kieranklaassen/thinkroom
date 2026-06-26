@@ -1,8 +1,9 @@
-import { editorViewCtx, schemaCtx, type Editor } from '@milkdown/kit/core'
-import { getMarkdown } from '@milkdown/kit/utils'
+import { editorViewCtx, schemaCtx, serializerCtx, type Editor } from '@milkdown/kit/core'
 import { downloadBlob } from '../lib/download'
+import { stripActivityMarks } from './clipboard'
 import { serializeHtml } from './document_format'
 import { sketchToSvg } from './sketch/export'
+import { portableSketchFigure, serializePortableMarkdown } from './sketch/portable'
 import { normalizeSketchData } from './sketch/scene'
 
 const EXPORTED_DOCUMENT_STYLES = `
@@ -32,8 +33,25 @@ const safeFilename = (title: string, extension: string): string => {
   return `${base || 'thinkroom-document'}.${extension}`
 }
 
-export function downloadDocumentMarkdown(editor: Editor, title: string): void {
-  const markdown = editor.action((ctx) => getMarkdown()(ctx))
+export async function exportedDocumentMarkdown(editor: Editor): Promise<string> {
+  const exportState = editor.action((ctx) => {
+    const document = ctx.get(editorViewCtx).state.doc
+    return {
+      document: document.copy(stripActivityMarks(document.content)),
+      schema: ctx.get(schemaCtx),
+      serializer: ctx.get(serializerCtx),
+    }
+  })
+  return serializePortableMarkdown(
+    exportState.document,
+    exportState.schema,
+    exportState.serializer,
+    async (data) => sketchToSvg(data.scene),
+  )
+}
+
+export async function downloadDocumentMarkdown(editor: Editor, title: string): Promise<void> {
+  const markdown = await exportedDocumentMarkdown(editor)
   downloadBlob(
     new Blob([markdown], { type: 'text/markdown;charset=utf-8' }),
     safeFilename(title, 'md'),
@@ -95,11 +113,12 @@ export async function exportedDocumentHtml(editor: Editor, title: string): Promi
       const data = sketchDataFromFigure(figure)
       if (!data) return
       const svg = await sketchToSvg(data.scene)
-      svg.setAttribute('role', 'img')
-      svg.setAttribute('aria-label', data.description || 'Sketch')
-      const caption = exported.createElement('figcaption')
-      caption.textContent = data.description || 'Sketch'
-      figure.replaceChildren(exported.importNode(svg, true), caption)
+      const portable = portableSketchFigure(data, svg)
+      const children = Array.from(
+        portable.childNodes,
+        (child) => exported.importNode(child, true),
+      )
+      figure.replaceChildren(...children)
       for (const attribute of Array.from(figure.attributes)) {
         if (attribute.name.startsWith('data-') || attribute.name === 'aria-label') {
           figure.removeAttribute(attribute.name)
