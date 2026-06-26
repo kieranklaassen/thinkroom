@@ -24,6 +24,12 @@ module Proof
     # config.time_zone = "Central Time (US & Canada)"
     # config.eager_load_paths << Rails.root.join("extras")
 
+    config.x.riffrec_automation_emails = ENV.fetch("RIFFREC_AUTOMATION_EMAILS", "")
+                                               .split(",")
+                                               .map { |email| email.strip.downcase }
+                                               .reject(&:blank?)
+    config.x.cursor_client = nil
+
     # Don't generate system test files.
     config.generators.system_tests = nil
   end

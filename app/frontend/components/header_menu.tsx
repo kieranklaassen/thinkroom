@@ -21,6 +21,7 @@ interface Props {
   ownership: OwnershipPayload
   claimerName: string
   account: AccountPayload | null
+  feedbackAutomationEnabled: boolean
 }
 
 const LINK_ACCESS_OPTIONS: ReadonlyArray<{
@@ -49,6 +50,7 @@ export function HeaderMenu({
   ownership,
   claimerName,
   account,
+  feedbackAutomationEnabled,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [accessUpdating, setAccessUpdating] = useState(false)
@@ -197,7 +199,7 @@ export function HeaderMenu({
               )}
               <div className="header-menu-group" role="group" aria-labelledby={helpLabelId}>
                 <div className="header-menu-label" id={helpLabelId}>Help</div>
-                <FeedbackButton />
+                <FeedbackButton automationEnabled={feedbackAutomationEnabled} />
               </div>
             </div>
           )

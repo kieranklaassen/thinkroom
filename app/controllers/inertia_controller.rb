@@ -35,6 +35,7 @@ class InertiaController < ApplicationController
       name:,
       guest: current_user.nil? && name.blank?,
       account:,
+      feedback_automation_enabled: FeedbackAutomation.allowed?(current_user),
       guest_name: (guest["name"] if current_user.nil?),
       guest_color: (guest["color"] if current_user.nil?)
     }

@@ -1,0 +1,9 @@
+{
+  "ignored_warnings": [
+    {
+      "fingerprint": "dd630ee7c3b3d8a6c48f4cd9ba41fa26def240f685ce2d0e59046197ef078aef",
+      "note": "The redirect target is a server-generated Active Storage service URL with a ten-minute expiry. Request data only selects a purpose-scoped signed FeedbackRun token and cannot control the destination."
+    }
+  ],
+  "brakeman_version": "8.0.5"
+}

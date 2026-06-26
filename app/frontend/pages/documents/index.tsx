@@ -271,7 +271,9 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
       <div className="landing">
         <div className="landing-corner">
           <AccountControl viewer={viewer} />
-          {isClient && <FeedbackButton />}
+          {isClient && (
+            <FeedbackButton automationEnabled={viewer.feedback_automation_enabled} />
+          )}
         </div>
         <main className="landing-main">
           <header className="landing-hero">

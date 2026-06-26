@@ -3517,6 +3517,49 @@ a:focus-visible {
   align-items: center;
 }
 
+.feedback-flow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  position: relative;
+}
+
+.feedback-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--ink-soft);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+}
+
+.feedback-status.is-error {
+  color: #b3261e;
+}
+
+.feedback-status-actions {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.feedback-status-actions button,
+.feedback-status-actions a {
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.header-menu-popover .feedback-flow,
+.header-menu-popover .feedback-status {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
 .feedback-button > button {
   border: 1px solid var(--line) !important;
   background: var(--surface-raised) !important;
