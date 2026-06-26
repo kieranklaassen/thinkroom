@@ -84,6 +84,7 @@ import {
 } from './document_format'
 import { configureSlashMenu, slashMenu } from './slash_menu'
 import { readPointerAwarenessCtx, readPointers } from './read_pointers'
+import { mermaidDiagrams } from './mermaid'
 
 export interface EditorHandle {
   editor: Editor
@@ -460,6 +461,7 @@ function CollabEditor({
         .use(indent)
         .use(trailing)
         .use(highlight)
+        .use(mermaidDiagrams)
         .use(upload)
         .use(provenance)
         .use(frontmatter)

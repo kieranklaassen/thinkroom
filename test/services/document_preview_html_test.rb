@@ -37,6 +37,28 @@ class DocumentPreviewHtmlTest < ActiveSupport::TestCase
     assert_includes html, "def x\n  1\nend"
   end
 
+  test "replaces a Mermaid fence with a first-paint skeleton" do
+    html = DocumentPreviewHtml.call(
+      format: "markdown",
+      content: "Before\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\nAfter"
+    )
+
+    assert_includes html, 'class="doc-mermaid-skeleton"'
+    refute_includes html, "flowchart LR"
+    assert_includes html, "Before"
+    assert_includes html, "After"
+  end
+
+  test "does not replace an ordinary code fence that mentions Mermaid" do
+    html = DocumentPreviewHtml.call(
+      format: "markdown",
+      content: "```text\nmermaid flowchart LR\n```"
+    )
+
+    refute_includes html, "doc-mermaid-skeleton"
+    assert_includes html, "mermaid flowchart LR"
+  end
+
   test "strips scripts and unsafe markup in markdown" do
     html = DocumentPreviewHtml.call(format: "markdown", content: "<script>alert(1)</script>\n\nsafe")
 
