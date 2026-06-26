@@ -121,7 +121,7 @@ try {
     })
   ).json()
   const c = await browser.newPage()
-  await c.goto(`${BASE}/d/${created.slug}`)
+  await c.goto(`${BASE}/d/${created.slug}/edit`)
   await c.waitForSelector('.doc-status--live', { timeout: 15000 })
   await c.waitForTimeout(800)
   await c.click('.milkdown .ProseMirror')
@@ -148,8 +148,8 @@ try {
   ).json()
   const titleA = await browser.newPage()
   const titleB = await browser.newPage()
-  await titleA.goto(`${BASE}/d/${titleDoc.slug}`)
-  await titleB.goto(`${BASE}/d/${titleDoc.slug}`)
+  await titleA.goto(`${BASE}/d/${titleDoc.slug}/edit`)
+  await titleB.goto(`${BASE}/d/${titleDoc.slug}/edit`)
   await titleA.waitForSelector('.doc-status--live', { timeout: 15000 })
   await titleB.waitForSelector('.doc-status--live', { timeout: 15000 })
   const renamedTitle = `Renamed title ${Date.now()}`
@@ -218,8 +218,8 @@ try {
       server.send(message)
     })
   })
-  await taskA.goto(`${BASE}/d/${taskDoc.slug}`)
-  await taskB.goto(`${BASE}/d/${taskDoc.slug}`)
+  await taskA.goto(`${BASE}/d/${taskDoc.slug}/edit`)
+  await taskB.goto(`${BASE}/d/${taskDoc.slug}/edit`)
   await taskA.waitForSelector('.doc-status--live', { timeout: 15000 })
   await taskB.waitForSelector('.doc-status--live', { timeout: 15000 })
   const taskCheckboxes = taskA.locator(
@@ -287,8 +287,7 @@ try {
   // tracked as suggestions. Attr-only task transactions must bypass the
   // suggest-changes transform or the native control toggles without changing
   // ProseMirror/Yjs and silently reverts on reload.
-  await taskA.context().addCookies([{ name: 'pruf_mode', value: 'suggest', url: BASE }])
-  await taskA.reload()
+  await taskA.goto(`${BASE}/d/${taskDoc.slug}/suggest`)
   await taskA.waitForSelector('.doc-status--live', { timeout: 15000 })
   await taskA.waitForFunction(
     () => document.querySelector('.mode-control-trigger')?.textContent?.includes('Suggest'),
@@ -330,8 +329,8 @@ try {
   const sketchA = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   const sketchB = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   await Promise.all([
-    sketchA.goto(`${BASE}/d/${sketchDoc.slug}`),
-    sketchB.goto(`${BASE}/d/${sketchDoc.slug}`),
+    sketchA.goto(`${BASE}/d/${sketchDoc.slug}/edit`),
+    sketchB.goto(`${BASE}/d/${sketchDoc.slug}/edit`),
   ])
   await Promise.all([
     sketchA.waitForSelector('.doc-status--live', { timeout: 15000 }),
@@ -704,7 +703,7 @@ try {
     })
   ).json()
   const insertSketchPage = await browser.newPage({ viewport: { width: 1280, height: 900 } })
-  await insertSketchPage.goto(`${BASE}/d/${emptySketchDoc.slug}`)
+  await insertSketchPage.goto(`${BASE}/d/${emptySketchDoc.slug}/edit`)
   await insertSketchPage.waitForSelector('.doc-status--live', { timeout: 15000 })
   await insertSketchPage.locator('.sketch-add-inline').waitFor({ state: 'visible', timeout: 5000 })
   await insertSketchPage.locator('.sketch-add-inline').click()
@@ -775,7 +774,7 @@ try {
   await failedChunkPage.route('**/vite-dev/editor/sketch/excalidraw_canvas.tsx*', (route) =>
     route.abort(),
   )
-  await failedChunkPage.goto(`${BASE}/d/${malformedDoc.slug}`)
+  await failedChunkPage.goto(`${BASE}/d/${malformedDoc.slug}/edit`)
   await failedChunkPage.locator('.milkdown .ProseMirror').click()
   await failedChunkPage.keyboard.press('Meta+ArrowDown')
   await failedChunkPage.keyboard.press('Enter')
@@ -805,7 +804,7 @@ try {
     permissions: ['clipboard-read', 'clipboard-write'],
   })
   const clipboardPage = await clipboardContext.newPage()
-  await clipboardPage.goto(`${BASE}/d/${clipboardDoc.slug}`)
+  await clipboardPage.goto(`${BASE}/d/${clipboardDoc.slug}/edit`)
   await clipboardPage.waitForSelector('.doc-status--live', { timeout: 15000 })
   await clipboardPage.locator('.milkdown .ProseMirror').click()
   await clipboardPage.keyboard.press('Meta+A')
@@ -959,7 +958,7 @@ try {
     }
   }
   const fmPage = await browser.newPage()
-  await fmPage.goto(`${BASE}/d/${fmDoc.slug}`)
+  await fmPage.goto(`${BASE}/d/${fmDoc.slug}/edit`)
   await fmPage.waitForSelector('.doc-status--live', { timeout: 15000 })
   await assertFrontmatterRender(fmPage, 'initial render')
   // Typing at the very top of the doc displaces the frontmatter; the guard
@@ -1401,6 +1400,17 @@ try {
   const winA = await makePage('a')
   await winA.goto(`${BASE}/d/${trackDoc.slug}`)
   await winA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  const modeDocumentRequests = []
+  const recordModeDocumentRequest = (request) => {
+    const path = new URL(request.url()).pathname
+    if (request.method() === 'GET' && path.startsWith(`/d/${trackDoc.slug}`)) {
+      modeDocumentRequests.push(path)
+    }
+  }
+  winA.on('request', recordModeDocumentRequest)
+  await winA.locator('.milkdown .ProseMirror').evaluate((node) => {
+    node.dataset.modeSession = 'preserved'
+  })
   if ((await winA.locator('.mode-control-trigger').count()) === 1) {
     ok('header renders one mode control')
   } else {
@@ -1411,21 +1421,67 @@ try {
   } else {
     fail('mode control is not in the left header')
   }
+  if (
+    new URL(winA.url()).pathname === `/d/${trackDoc.slug}` &&
+    (await winA.locator('.mode-control-trigger').textContent())?.includes('Read mode') &&
+    (await winA.locator('.milkdown .ProseMirror').getAttribute('contenteditable')) === 'false'
+  ) {
+    ok('canonical document URL opens in Read mode')
+  } else {
+    fail(`canonical document URL did not open in Read mode: ${winA.url()}`)
+  }
   await winA.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', {
     key: '3', code: 'Digit3', metaKey: true, bubbles: true, cancelable: true,
   })))
+  await winA.waitForURL(`${BASE}/d/${trackDoc.slug}/comment`)
   if ((await winA.locator('.mode-control-trigger').textContent())?.includes('Comment mode')) {
-    ok('Command+3 switches to Comment mode')
+    ok('Command+3 switches to Comment mode and pushes its URL')
   } else {
     fail('Command+3 did not switch to Comment mode')
   }
+  await winA.click('.mode-control-trigger')
+  await winA.locator('.mode-control-option', { hasText: 'Suggest' }).click()
+  await winA.waitForURL(`${BASE}/d/${trackDoc.slug}/suggest`)
+  const editorSessionPreserved = await winA
+    .locator('.milkdown .ProseMirror')
+    .getAttribute('data-mode-session')
+  if (modeDocumentRequests.length === 0 && editorSessionPreserved === 'preserved') {
+    ok('mode choices update Inertia state without a document request or editor remount')
+  } else {
+    fail(
+      `mode choice disturbed the editor: requests=${JSON.stringify(modeDocumentRequests)} ` +
+      `session=${editorSessionPreserved}`,
+    )
+  }
+  await winA.goBack()
+  await winA.waitForURL(`${BASE}/d/${trackDoc.slug}/comment`)
+  await winA.waitForFunction(
+    () => document.querySelector('.mode-control-trigger')?.textContent?.includes('Comment mode'),
+  )
+  await winA.goForward()
+  await winA.waitForURL(`${BASE}/d/${trackDoc.slug}/suggest`)
+  await winA.waitForFunction(
+    () => document.querySelector('.mode-control-trigger')?.textContent?.includes('Suggest mode'),
+  )
+  if (modeDocumentRequests.length === 0) {
+    ok('Back and Forward restore mode from Inertia history without a document request')
+  } else {
+    fail(`mode history made document requests: ${JSON.stringify(modeDocumentRequests)}`)
+  }
+  winA.off('request', recordModeDocumentRequest)
+  await winA.reload()
+  await winA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  if ((await winA.locator('.mode-control-trigger').textContent())?.includes('Suggest mode')) {
+    ok('reloading a mode URL restores that mode from the server')
+  } else {
+    fail('Suggest mode URL did not survive reload')
+  }
+
   const winB = await makePage('b')
-  await winB.goto(`${BASE}/d/${trackDoc.slug}`)
+  await winB.goto(`${BASE}/d/${trackDoc.slug}/edit`)
   await winB.waitForSelector('.doc-status--live', { timeout: 15000 })
   await winA.waitForTimeout(1500)
 
-  await winA.click('.mode-control-trigger')
-  await winA.locator('.mode-control-option', { hasText: 'Suggest' }).click()
   const sugSentinel = `tracked-${Date.now()}`
   await winA.click('.milkdown .ProseMirror')
   await winA.keyboard.press('Meta+ArrowDown')
@@ -1548,7 +1604,7 @@ try {
   ).json()
   const widthContext = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const widthPage = await widthContext.newPage()
-  await widthPage.goto(`${BASE}/d/${widthDoc.slug}`)
+  await widthPage.goto(`${BASE}/d/${widthDoc.slug}/edit`)
   await widthPage.waitForSelector('.doc-status--live', { timeout: 15000 })
   await widthPage.waitForSelector('.document-width-handle')
 
@@ -1685,7 +1741,7 @@ try {
     userAgent: 'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
   })
   const ipadPage = await ipadContext.newPage()
-  await ipadPage.goto(`${BASE}/d/${widthDoc.slug}`)
+  await ipadPage.goto(`${BASE}/d/${widthDoc.slug}/edit`)
   await ipadPage.waitForSelector('.doc-canvas')
   const ipadGeometry = await ipadPage.evaluate(() => ({
     coarse: matchMedia('(hover: none) and (pointer: coarse)').matches,
@@ -1725,7 +1781,7 @@ try {
     })
   ).json()
   const p = await makePage('a')
-  await p.goto(`${BASE}/d/${placeDoc.slug}`)
+  await p.goto(`${BASE}/d/${placeDoc.slug}/edit`)
   await p.waitForSelector('.doc-status--live', { timeout: 15000 })
   await p.waitForTimeout(1000)
 
@@ -1857,7 +1913,7 @@ try {
   await seedSuggestion('bravo')
 
   const q = await makePage('persist')
-  await q.goto(`${BASE}/d/${persistDoc.slug}`)
+  await q.goto(`${BASE}/d/${persistDoc.slug}/edit`)
   await q.waitForSelector('.doc-status--live', { timeout: 15000 })
   await q.waitForTimeout(800) // initial Yjs bind + margin card placement settle
 
@@ -2001,7 +2057,7 @@ try {
     replaces: 'Original receipts copy.',
   })
   const bulk = await makePage('a')
-  await bulk.goto(`${BASE}/d/${bulkDoc.slug}`)
+  await bulk.goto(`${BASE}/d/${bulkDoc.slug}/edit`)
   await bulk.waitForSelector('.doc-status--live', { timeout: 15000 })
   await bulk.waitForTimeout(1000)
 
