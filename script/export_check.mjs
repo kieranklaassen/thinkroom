@@ -137,10 +137,40 @@ try {
   const markdown = await downloadText(markdownDownload)
   assert(markdownDownload.suggestedFilename() === 'export-check.md', 'Markdown uses a safe title filename')
   assert(
-    markdown.includes('Export check') && markdown.includes('```excalidraw'),
-    'Markdown contains current prose and sketch source',
+    markdown.includes('Export check') && markdown.includes('<svg') && markdown.includes('Export flow'),
+    'Markdown contains current prose and a rendered sketch SVG',
     markdown.slice(0, 500),
   )
+  assert(
+    !markdown.includes('```excalidraw') && !markdown.includes('data-scene=') &&
+      !markdown.includes('data-provenance') && !markdown.includes('export-text'),
+    'Markdown omits private sketch source, scene metadata, and activity marks',
+    markdown.slice(0, 500),
+  )
+
+  await page.locator('.milkdown .ProseMirror').focus()
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A')
+  const copied = await page.locator('.doc-live-editor .ProseMirror').evaluate((editor) => {
+    const clipboardData = new DataTransfer()
+    editor.dispatchEvent(new ClipboardEvent('copy', {
+      clipboardData,
+      bubbles: true,
+      cancelable: true,
+    }))
+    return {
+      html: clipboardData.getData('text/html'),
+      text: clipboardData.getData('text/plain'),
+    }
+  })
+  for (const [flavor, content] of Object.entries(copied)) {
+    assert(content.includes('<svg'), `copied ${flavor} contains a rendered sketch SVG`, content.slice(0, 500))
+    assert(
+      !content.includes('```excalidraw') && !content.includes('data-scene=') &&
+        !content.includes('data-provenance') && !content.includes('export-text'),
+      `copied ${flavor} omits private sketch source`,
+      content.slice(0, 500),
+    )
+  }
 
   const htmlEvent = page.waitForEvent('download')
   await exportSection.getByRole('button', { name: 'HTML' }).click()
