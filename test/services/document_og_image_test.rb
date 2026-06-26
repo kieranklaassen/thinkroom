@@ -66,4 +66,26 @@ class DocumentOgImageServiceTest < ActiveSupport::TestCase
     assert_includes svg, "A place for deeper thinking"
     refute_includes svg, "owner_token"
   end
+
+  test "keeps the excerpt out of the card's right gutter" do
+    script = <<~'RUBY'
+      document = Document.new(
+        title: "The Proof Demo Document",
+        seed_content: "# The Proof Demo Document\n\nWelcome — this document is live. Open this page in a second window and watch edits flow both ways. Everything you type is attributed to you."
+      )
+      svg = DocumentOgImage.send(:svg, document)
+      image = Vips::Image.svgload_buffer(svg, access: :sequential)
+      # Stop before the rounded card border's antialiasing at x=1152.
+      right_gutter = image.crop(1120, 230, 12, 250)
+      card_fill = [255, 253, 249, 255]
+      puts JSON.generate(max_delta: (right_gutter - card_fill).abs.max)
+    RUBY
+
+    stdout, stderr, status = Open3.capture3(
+      { "RAILS_ENV" => "test" }, Rails.root.join("bin/rails").to_s, "runner", script
+    )
+    assert status.success?, stderr
+
+    assert_equal 0, JSON.parse(stdout)["max_delta"]
+  end
 end
