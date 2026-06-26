@@ -9,6 +9,7 @@ import {
 import { $ctx, $prose, $view } from '@milkdown/kit/utils'
 import { Plugin, TextSelection } from '@milkdown/kit/prose/state'
 import { attrsFromSketchData, dataFromSketchNode, sketchSchema } from './schema'
+import { downloadSketchSvg } from './export'
 import {
   fitSketchViewport,
   renderExactSketchPreview,
@@ -81,6 +82,7 @@ const buildSketchView = (
   const titleInput = document.createElement('input')
   const editorMount = document.createElement('div')
   const deleteButton = document.createElement('button')
+  const downloadButton = document.createElement('button')
   let currentData = dataFromSketchNode(initialNode)
   let displayData = currentData
   let renderedScene = ''
@@ -90,6 +92,7 @@ const buildSketchView = (
   let destroyed = false
   let lastPreviewWidth = 0
   let renderedTapeId = ''
+  let downloadResetTimer: ReturnType<typeof setTimeout> | null = null
 
   const syncTapeVariation = (id: string) => {
     const hash = Array.from(id).reduce(
@@ -116,7 +119,12 @@ const buildSketchView = (
   deleteButton.textContent = '×'
   deleteButton.contentEditable = 'false'
   deleteButton.setAttribute('aria-label', 'Delete sketch')
-  dom.append(preview, editorMount, caption, deleteButton)
+  downloadButton.className = 'sketch-download-button'
+  downloadButton.type = 'button'
+  downloadButton.textContent = 'Download'
+  downloadButton.contentEditable = 'false'
+  downloadButton.setAttribute('aria-label', 'Download sketch as SVG')
+  dom.append(preview, editorMount, caption, downloadButton, deleteButton)
 
   const renderExactPreview = (data: SketchData, generation: number) => {
     // ProseMirror attaches the node view before the microtask queue drains.
@@ -171,8 +179,10 @@ const buildSketchView = (
       preview.replaceChildren()
       titleInput.value = 'Invalid sketch'
       titleInput.readOnly = true
+      downloadButton.hidden = true
       return
     }
+    downloadButton.hidden = false
     const scene = node.attrs.scene as string
     if (scene !== renderedScene) displayData = currentData
     const description = currentData.description
@@ -237,6 +247,35 @@ const buildSketchView = (
     if (currentData && enabled()) remove(currentData.id)
   }
   deleteButton.addEventListener('click', onDelete)
+  const resetDownloadButton = () => {
+    downloadResetTimer = null
+    downloadButton.disabled = false
+    downloadButton.textContent = 'Download'
+    downloadButton.setAttribute('aria-label', 'Download sketch as SVG')
+  }
+  const onDownload = (event: MouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!currentData || downloadButton.disabled) return
+    if (downloadResetTimer) clearTimeout(downloadResetTimer)
+    downloadButton.disabled = true
+    downloadButton.textContent = 'Preparing…'
+    void downloadSketchSvg(currentData.scene, currentData.description || 'sketch')
+      .then(() => {
+        if (destroyed) return
+        downloadButton.textContent = 'Downloaded'
+        downloadButton.setAttribute('aria-label', 'Sketch downloaded as SVG')
+        downloadResetTimer = setTimeout(resetDownloadButton, 1600)
+      })
+      .catch((error) => {
+        if (destroyed) return
+        console.warn('thinkroom: sketch export failed', error)
+        downloadButton.disabled = false
+        downloadButton.textContent = 'Retry'
+        downloadButton.setAttribute('aria-label', 'Sketch export failed. Retry download')
+      })
+  }
+  downloadButton.addEventListener('click', onDownload)
   const saveTitle = () => {
     if (!displayData || !enabled()) return
     if (titleTimer) clearTimeout(titleTimer)
@@ -279,7 +318,9 @@ const buildSketchView = (
       titleInput.removeEventListener('input', onTitleInput)
       titleInput.removeEventListener('blur', saveTitle)
       deleteButton.removeEventListener('click', onDelete)
+      downloadButton.removeEventListener('click', onDownload)
       if (titleTimer) clearTimeout(titleTimer)
+      if (downloadResetTimer) clearTimeout(downloadResetTimer)
       if (currentData) close(currentData.id)
     },
   }
