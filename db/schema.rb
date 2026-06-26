@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_24_210000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_26_110000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -92,6 +92,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_24_210000) do
     t.string "content_format", default: "markdown", null: false
     t.text "content_markdown"
     t.datetime "created_at", null: false
+    t.boolean "editing_locked", default: false, null: false
     t.string "owner_name", limit: 255
     t.string "owner_token"
     t.json "provenance_spans", default: []
@@ -101,6 +102,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_24_210000) do
     t.text "seed_markdown"
     t.string "seed_state", default: "pending", null: false
     t.string "slug", null: false
+    t.json "tags", default: [], null: false
     t.string "title", default: "Untitled", null: false
     t.datetime "updated_at", null: false
     t.integer "user_id"

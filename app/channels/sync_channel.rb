@@ -93,11 +93,18 @@ class SyncChannel < ApplicationCable::Channel
   end
 
   def persist_and_broadcast(message, update)
-    YjsPersistence.merge(@document, update)
+    YjsPersistence.merge(
+      @document,
+      update,
+      token: (connection.owner_token if connection.respond_to?(:owner_token)),
+      user: (connection.current_user if connection.respond_to?(:current_user))
+    )
     # A peer seeing an edit means the server has made it durable. This
     # ordering also prevents clients from accepting a frame that failed
     # persistence and would disappear on reload.
     self.class.broadcast_to(@document, message)
+  rescue Document::EditingLockedError
+    transmit({ type: "write-denied", locked: true })
   rescue StandardError => e
     Rails.logger.warn("SyncChannel: merge failed: #{e.class}: #{e.message}")
   end

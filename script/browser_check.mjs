@@ -40,6 +40,42 @@ try {
     fail('landing page does not use the approved Thinkroom tagline')
   }
   await landing.locator('.landing-byline', { hasText: 'creator of Compound Engineering' }).waitFor()
+  await landing.getByRole('heading', { name: 'Your documents' }).waitFor()
+  await landing.getByRole('heading', { name: 'Recently opened' }).waitFor()
+  if ((await landing.locator('.format-label').count()) === 0) {
+    ok('landing page organizes documents without format labels')
+  } else {
+    fail('landing page still exposes document format labels')
+  }
+
+  await landing.getByRole('button', { name: 'New document' }).click()
+  await landing.waitForURL(/\/d\//)
+  await landing.goto(BASE)
+  await landing.getByRole('button', { name: /Add tag/ }).first().click()
+  await landing
+    .getByLabel('Tags')
+    .fill('one, two, three, four, five, six, seven, eight, nine')
+  await landing.getByRole('button', { name: 'Save' }).click()
+  await landing.getByRole('alert').waitFor()
+  if (
+    (await landing.getByLabel('Tags').isVisible()) &&
+    (await landing.getByRole('alert').innerText()).includes('at most 8 tags')
+  ) {
+    ok('invalid tags keep the inline editor open with an error')
+  } else {
+    fail('invalid tags did not remain visible in the inline editor')
+  }
+  await landing.getByLabel('Tags').fill('Research, Planning')
+  await landing.getByRole('button', { name: 'Save' }).click()
+  await landing.locator('.document-tag-editor input').waitFor({ state: 'detached' })
+  if (
+    (await landing.locator('.document-tag', { hasText: 'Research' }).count()) === 1 &&
+    (await landing.locator('.document-tag', { hasText: 'Planning' }).count()) === 1
+  ) {
+    ok('valid tags update the row without leaving the index')
+  } else {
+    fail('saved tags did not update the document row')
+  }
   await landing.close()
 
   const a = await makePage('a')

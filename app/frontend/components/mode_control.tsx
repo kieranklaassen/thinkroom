@@ -22,6 +22,7 @@ interface Props {
   onChange: (mode: EditorMode) => void
   /** Demo doc: control renders but stays locked to Edit. */
   locked?: boolean
+  lockedReason?: string
 }
 
 /**
@@ -29,7 +30,7 @@ interface Props {
  * current mode, opening to the four modes with hints. Per-visitor UI state
  * only — switching never affects other collaborators.
  */
-export function ModeControl({ mode, onChange, locked = false }: Props) {
+export function ModeControl({ mode, onChange, locked = false, lockedReason }: Props) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   useDismissable(open, () => setOpen(false), [rootRef])
@@ -41,7 +42,7 @@ export function ModeControl({ mode, onChange, locked = false }: Props) {
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Mode: ${MODE_LABELS[mode]}`}
-        title={locked ? 'Mode switching is disabled on the demo doc' : MODE_HINTS[mode]}
+        title={locked ? lockedReason ?? 'Mode switching is disabled on the demo doc' : MODE_HINTS[mode]}
         disabled={locked}
         onClick={() => setOpen((v) => !v)}
       >

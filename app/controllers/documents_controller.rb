@@ -1,4 +1,5 @@
 class DocumentsController < InertiaController
+  include DocumentWriteAuthorization
   rate_limit_document_creation
 
   # SSR is scoped to the read-only document surfaces — #show (shell, header,
@@ -12,6 +13,8 @@ class DocumentsController < InertiaController
   inertia_config ssr_enabled: -> { %w[show index].include?(action_name) }
 
   def index
+    now = Time.current
+    week_start = now.beginning_of_week
     # Signed-in ownership follows the account across browsers. Guests retain
     # the original permanent-cookie ownership model.
     yours = if current_user
@@ -27,13 +30,15 @@ class DocumentsController < InertiaController
     slugs = Array(session[:recent_slugs])
     docs = Document.where(slug: slugs).index_by(&:slug)
     render inertia: "documents/index", props: {
-      yours: yours.map { |d| d.slice(:title, :slug, :content_format) },
+      yours: yours.map do |document|
+        index_document_props(document, week_start:, current_year: now.year)
+      end,
       # Recent rows carry ownership state so claimable docs can offer an
       # inline claim affordance. Render-time staleness is fine: the claim
       # POST is race-tolerant and the scoped reload reconciles the lists.
       recent: slugs.filter_map { |slug| docs[slug] unless your_slugs.include?(slug) }
                    .map do |d|
-                     d.slice(:title, :slug, :content_format)
+                     index_document_props(d, week_start:, current_year: now.year)
                        .merge(d.ownership_props(owner_token, viewer_user: current_user))
                    end
     }
@@ -154,6 +159,57 @@ class DocumentsController < InertiaController
     redirect_to root_path, status: :see_other
   end
 
+  def update_tags
+    document = Document.find_by!(slug: params[:slug])
+    unless document.owned_by?(owner_token, user: current_user)
+      return redirect_back fallback_location: root_path,
+                           inertia: { errors: { tags: "Only the owner can organize this document" } }
+    end
+
+    tags = params[:tags]
+    unless tags.is_a?(Array)
+      return redirect_back fallback_location: root_path,
+                           inertia: { errors: { tags: "Tags must be a list" } }
+    end
+
+    if document.update(tags:)
+      redirect_back fallback_location: root_path, status: :see_other
+    else
+      redirect_back fallback_location: root_path,
+                    inertia: { errors: { tags: document.errors[:tags].to_sentence } }
+    end
+  rescue ActiveRecord::RecordNotFound
+    redirect_to root_path, status: :see_other
+  end
+
+  LOCK_VALUES = {
+    true => true, false => false,
+    "true" => true, "false" => false,
+    "1" => true, "0" => false,
+    1 => true, 0 => false
+  }.freeze
+
+  def update_editing_lock
+    document = Document.find_by!(slug: params[:slug])
+    raw_locked = params[:locked]
+    unless LOCK_VALUES.key?(raw_locked)
+      return redirect_back fallback_location: document_page_path(document.slug), status: :see_other,
+                           inertia: { errors: { editing_lock: "Choose whether others can edit" } }
+    end
+
+    document.set_editing_locked!(
+      locked: LOCK_VALUES.fetch(raw_locked),
+      token: owner_token,
+      user: current_user
+    )
+    redirect_back fallback_location: document_page_path(document.slug), status: :see_other
+  rescue Document::NotOwnerError
+    redirect_back fallback_location: document_page_path(params[:slug]), status: :see_other,
+                  inertia: { errors: { editing_lock: "Only the owner can change editing access" } }
+  rescue ActiveRecord::RecordNotFound
+    redirect_to root_path, status: :see_other
+  end
+
   # Owners only. The broadcast goes out after a successful destroy — the
   # stream name derives from the record's retained id, so it still reaches
   # every subscriber, and clients are only evicted when the delete actually
@@ -188,6 +244,8 @@ class DocumentsController < InertiaController
 
   def snapshot
     document = Document.find_by!(slug: params[:slug])
+    @write_document = document
+    document.assert_write_access!(token: owner_token, user: current_user)
     if params.key?(:content) && params.key?(:markdown)
       return render json: { error: "Send content or legacy markdown, not both." },
                     status: :unprocessable_entity
@@ -217,7 +275,9 @@ class DocumentsController < InertiaController
       state_vector_b64: state_vector.presence,
       content:,
       spans:,
-      title:
+      title:,
+      token: owner_token,
+      user: current_user
     )
     return render json: { error: "Snapshot is stale; retry from current document state." },
                   status: :conflict unless persisted
@@ -233,11 +293,13 @@ class DocumentsController < InertiaController
   # makes the same CRDT update durable and relays it to any connected clients.
   def sync_update
     document = Document.find_by!(slug: params[:slug])
+    @write_document = document
+    document.assert_write_access!(token: owner_token, user: current_user)
     update = params[:update].to_s
     decoded = Base64.strict_decode64(update)
     return head :content_too_large if decoded.bytesize > MAX_SYNC_UPDATE_BYTES
 
-    YjsPersistence.merge(document, update)
+    YjsPersistence.merge(document, update, token: owner_token, user: current_user)
     SyncChannel.broadcast_to(document, {
       type: "update",
       update:,
@@ -263,7 +325,9 @@ class DocumentsController < InertiaController
         state_vector_b64: state_vector,
         content:,
         spans:,
-        title:
+        title:,
+        token: owner_token,
+        user: current_user
       )
       return render json: { error: "Snapshot is stale; retry from current document state." },
                     status: :conflict unless persisted
@@ -281,6 +345,23 @@ class DocumentsController < InertiaController
 
   def broadcast_title(document)
     DocumentMetaChannel.broadcast_event(document, :title, title: document.title)
+  end
+
+  def index_document_props(document, week_start:, current_year:)
+    created_at = document.created_at.in_time_zone
+    created_label = if created_at.year == current_year
+      created_at.strftime("%b %-d")
+    else
+      created_at.strftime("%b %-d, %Y")
+    end
+    {
+      title: document.title,
+      slug: document.slug,
+      tags: document.tags,
+      created_at: created_at.iso8601,
+      created_label:,
+      age_group: created_at >= week_start ? "this_week" : "earlier"
+    }
   end
 
   def sanitize_snapshot_spans(raw_spans)

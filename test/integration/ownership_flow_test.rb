@@ -256,6 +256,67 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
     refute_match(/owner_token/, response.body)
   end
 
+  test "owner can lock and unlock editing" do
+    establish_identity
+    post claim_document_path(@document.slug), params: { name: "Owner" }
+
+    assert_difference -> { @document.activities.count }, 1 do
+      patch document_editing_lock_path(@document.slug), params: { locked: true }
+    end
+    assert_response :see_other
+    assert @document.reload.editing_locked?
+
+    patch document_editing_lock_path(@document.slug), params: { locked: false }
+    assert_response :see_other
+    assert_not @document.reload.editing_locked?
+  end
+
+  test "show exposes viewer-specific write access for a locked document" do
+    establish_identity
+    post claim_document_path(@document.slug), params: { name: "Owner" }
+    patch document_editing_lock_path(@document.slug), params: { locked: true }
+
+    get document_page_path(@document.slug), headers: browser
+    assert_inertia_props do |props|
+      props.dig(:ownership, :editing_locked) == true &&
+        props.dig(:ownership, :can_write) == true &&
+        props.dig(:ownership, :yours) == true
+    end
+
+    reset!
+    get document_page_path(@document.slug), headers: browser
+    assert_inertia_props do |props|
+      props.dig(:ownership, :editing_locked) == true &&
+        props.dig(:ownership, :can_write) == false &&
+        props.dig(:ownership, :yours) == false
+    end
+  end
+
+  test "non-owner cannot change editing lock" do
+    Document.where(id: @document.id).update_all(
+      owner_token: "someone-else", owner_name: "Owner", claimed_at: Time.current
+    )
+    establish_identity
+
+    patch document_editing_lock_path(@document.slug), params: { locked: true }
+
+    assert_response :see_other
+    assert_not @document.reload.editing_locked?
+  end
+
+  test "editing lock rejects missing and invalid values" do
+    establish_identity
+    post claim_document_path(@document.slug), params: { name: "Owner" }
+
+    patch document_editing_lock_path(@document.slug), params: {}
+    assert_response :see_other
+    assert_not @document.reload.editing_locked?
+
+    patch document_editing_lock_path(@document.slug), params: { locked: "sometimes" }
+    assert_response :see_other
+    assert_not @document.reload.editing_locked?
+  end
+
   # --- home page: Your docs + deduped recents ---
 
   test "index lists docs claimed by this session under yours, newest first" do
@@ -346,6 +407,18 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
 
       assert_response :unprocessable_entity
       assert_not @document.reload.claimed?
+    end
+  end
+
+  test "forged editing lock PATCH without CSRF token is rejected" do
+    establish_identity
+    post claim_document_path(@document.slug), params: { name: "Owner" }
+
+    with_forgery_protection do
+      patch document_editing_lock_path(@document.slug), params: { locked: true }
+
+      assert_response :unprocessable_entity
+      assert_not @document.reload.editing_locked?
     end
   end
 
