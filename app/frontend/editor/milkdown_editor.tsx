@@ -85,6 +85,7 @@ import {
 import { configureSlashMenu, slashMenu } from './slash_menu'
 import { readPointerAwarenessCtx, readPointers } from './read_pointers'
 import { mermaidDiagrams } from './mermaid'
+import { richBlockWidthControls } from './rich_block_width'
 
 export interface EditorHandle {
   editor: Editor
@@ -467,6 +468,7 @@ function CollabEditor({
         .use(frontmatter)
         .use(sketchSchemaPlugins)
         .use(sketchNodeViewPlugins)
+        .use(richBlockWidthControls)
         .use(slashMenu)
         .use(suggestChangesMarks)
         // Order matters: provenanceWriter (inside provenance) runs its

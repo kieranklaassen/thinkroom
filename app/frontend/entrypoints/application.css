@@ -36,6 +36,11 @@
   --code-bg: #f3f0e9;
   --measure: 44rem;
   --document-width: var(--measure);
+  --rich-content-width: 960px;
+  --review-gutter-width: 15rem;
+  --review-gutter-half-width: 7.5rem;
+  --activity-rail-width: 21rem;
+  --activity-rail-half-width: 10.5rem;
 
   --sketch-surface: #fffef9;
   --sketch-surface-muted: #fffaf1;
@@ -1046,11 +1051,11 @@ a:focus-visible {
   align-items: stretch;
   min-width: 0;
   flex: 1;
-  max-width: calc(var(--document-width) + 15rem);
+  max-width: calc(var(--document-width) + var(--review-gutter-width));
 }
 
 .margin-gutter {
-  width: 15rem;
+  width: var(--review-gutter-width);
   flex: none;
   position: relative;
   transition: width 200ms ease;
@@ -1182,6 +1187,113 @@ a:focus-visible {
 
 .doc-static-preview {
   user-select: none;
+}
+
+/* Sketches and tables can use the screen's visual bandwidth without making
+   prose harder to read. Read/focus layouts grow around the prose center;
+   review layouts hold the gutter-side edge steady and grow into open space. */
+.milkdown .ProseMirror > .thinkroom-sketch,
+.milkdown .ProseMirror > .milkdown-table-block,
+.doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+.doc-static-preview .ProseMirror > table {
+  position: relative;
+  width: min(max(100%, var(--rich-content-width)), calc(100vw - 3rem));
+  max-width: none;
+  margin-left: 50%;
+  transform: translateX(-50%);
+}
+
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .thinkroom-sketch,
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .milkdown-table-block,
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > table {
+  /* The activity rail shares the centered body row. Half of its width
+     shifts the canvas left, so include it when deriving the safe left edge. */
+  width: min(
+    max(100%, var(--rich-content-width)),
+    calc(50vw + 50% - var(--review-gutter-half-width) - var(--activity-rail-half-width) - 1.5rem)
+  );
+  margin-left: 100%;
+  transform: translateX(-100%);
+}
+
+:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .thinkroom-sketch,
+:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .milkdown-table-block,
+:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > table {
+  width: min(
+    max(100%, var(--rich-content-width)),
+    calc(50vw + 50% - var(--review-gutter-half-width) - 1.5rem)
+  );
+}
+
+/* Focus collapses suggestion cards but intentionally leaves the activity rail.
+   Keep the breakout centered on prose while respecting the nearer viewport edge. */
+:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > .thinkroom-sketch,
+:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > .milkdown-table-block,
+:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .doc-static-preview .ProseMirror > table {
+  width: min(
+    max(100%, var(--rich-content-width)),
+    max(100%, calc(100vw - var(--review-gutter-width) - var(--activity-rail-width) - 3rem))
+  );
+}
+
+.rich-block-width-handle {
+  position: absolute;
+  z-index: 8;
+  top: 50%;
+  right: -10px;
+  display: grid;
+  width: 20px;
+  height: 48px;
+  place-items: center;
+  margin: 0;
+  border: 0;
+  border-radius: 999px;
+  outline: none;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: col-resize;
+  opacity: 0.52;
+  padding: 0;
+  touch-action: none;
+  transform: translateY(-50%);
+  transition: color 140ms ease, opacity 140ms ease;
+}
+
+.rich-block-width-handle::before {
+  position: absolute;
+  inset: 0 2px;
+  border: 1px solid color-mix(in srgb, var(--ink-faint) 42%, transparent);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--surface-raised) 90%, transparent);
+  box-shadow: 0 1px 5px rgb(0 0 0 / 5%);
+  content: '';
+}
+
+.rich-block-width-handle span {
+  position: relative;
+  font: 600 7px/1 var(--font-ui);
+  letter-spacing: -1px;
+  writing-mode: vertical-rl;
+}
+
+.rich-block-width-handle:hover,
+.rich-block-width-handle:focus-visible,
+.rich-block-width-handle.is-dragging {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.rich-block-width-handle:focus-visible::before {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .rich-block-width-handle {
+  right: auto;
+  left: -10px;
 }
 
 /* Neutral box standing in for a sketch canvas until Excalidraw mounts, so a
@@ -1504,7 +1616,7 @@ a:focus-visible {
 
 /* Normal flow, no inner scrollbar — the whole page is one scroll surface. */
 .doc-rail {
-  width: 21rem;
+  width: var(--activity-rail-width);
   flex: none;
   border-left: 1px solid var(--line);
   padding: 1.5rem 1.25rem 4rem;
@@ -3323,6 +3435,20 @@ a:focus-visible {
     display: none;
   }
 
+  .milkdown .ProseMirror > .thinkroom-sketch,
+  .milkdown .ProseMirror > .milkdown-table-block,
+  .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+  .doc-static-preview .ProseMirror > table {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+    transform: none;
+  }
+
+  .rich-block-width-handle {
+    display: none;
+  }
+
   .milkdown .ProseMirror {
     font-size: 1rem;
     line-height: 1.65;
@@ -4120,8 +4246,17 @@ a:focus-visible {
   .sketch-add-inline,
   .sketch-delete-tape,
   .sketch-download-button,
-  .thinkroom-sketch-editor-mount {
+  .thinkroom-sketch-editor-mount,
+  .rich-block-width-handle {
     display: none !important;
+  }
+
+  .milkdown .ProseMirror > .thinkroom-sketch,
+  .milkdown .ProseMirror > .milkdown-table-block {
+    width: auto;
+    max-width: 100%;
+    margin-left: 0;
+    transform: none;
   }
 
   .doc-body,
