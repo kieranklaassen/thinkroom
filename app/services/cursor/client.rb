@@ -12,6 +12,7 @@ module Cursor
     end
 
     BASE_URL = "https://api.cursor.com"
+    RETRYABLE_STATUS_CODES = [ 408, 425, 429 ].freeze
 
     def initialize(api_key: ENV["CURSOR_API_KEY"], base_url: BASE_URL, http: Net::HTTP)
       @api_key = api_key.to_s
@@ -48,7 +49,9 @@ module Cursor
       return body if response.code.to_i.between?(200, 299)
 
       message = body.dig("error", "message") || body["message"] || "Cursor returned HTTP #{response.code}."
-      raise Error.new(message.to_s.truncate(500), retryable: response.code.to_i >= 500 || response.code.to_i == 429)
+      status = response.code.to_i
+      retryable = status >= 500 || RETRYABLE_STATUS_CODES.include?(status)
+      raise Error.new(message.to_s.truncate(500), retryable:)
     rescue JSON::ParserError
       raise Error.new("Cursor returned an invalid response.", retryable: true)
     rescue Net::OpenTimeout, Net::ReadTimeout, SocketError, IOError, SystemCallError => error

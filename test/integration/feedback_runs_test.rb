@@ -92,6 +92,28 @@ class FeedbackRunsTest < ActionDispatch::IntegrationTest
     assert_equal 0, FeedbackRun.count
   end
 
+  test "upload rejects an empty archive and a wrong extension" do
+    sign_in
+    empty = Rack::Test::UploadedFile.new(StringIO.new(""), "application/zip",
+                                         original_filename: "riffrec.zip")
+    post feedback_runs_path, params: archive_params.merge(archive: empty)
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "empty"
+
+    wrong_extension = Rack::Test::UploadedFile.new(
+      StringIO.new("PK\x03\x04riffrec-data".b),
+      "application/zip",
+      original_filename: "riffrec.txt"
+    )
+    post feedback_runs_path, params: archive_params.merge(
+      archive: wrong_extension,
+      filename: "riffrec.txt"
+    )
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], ".zip"
+    assert_equal 0, FeedbackRun.count
+  end
+
   test "only the owner can read status and raw Cursor output stays server-side" do
     user = sign_in
     run = create_feedback_run(user)
@@ -106,9 +128,9 @@ class FeedbackRunsTest < ActionDispatch::IntegrationTest
     refute_includes run.result_text, "private-token"
 
     delete logout_path
-    sign_in(email: "other@example.com")
+    sign_in(email: "maintainer2@example.com")
     get feedback_run_path(run)
-    assert_response :forbidden
+    assert_response :not_found
   end
 
   test "a purpose-scoped bundle token redirects without exposing a permanent blob URL" do
@@ -125,6 +147,16 @@ class FeedbackRunsTest < ActionDispatch::IntegrationTest
 
   test "a tampered bundle token is rejected" do
     get feedback_bundle_path(token: "tampered")
+    assert_response :not_found
+  end
+
+  test "a signed bundle token with the wrong purpose is rejected" do
+    user = sign_in
+    run = create_feedback_run(user)
+    token = run.signed_id(expires_in: 1.hour, purpose: :another_purpose)
+
+    get feedback_bundle_path(token:)
+
     assert_response :not_found
   end
 

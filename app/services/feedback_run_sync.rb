@@ -1,6 +1,5 @@
 class FeedbackRunSync
   TERMINAL_STATUSES = %w[FINISHED ERROR CANCELLED EXPIRED].freeze
-  RESULT_LIMIT = 64.kilobytes
 
   def initialize(run, client: Cursor.client)
     @run = run
@@ -12,19 +11,25 @@ class FeedbackRunSync
 
     response = @client.run(@run.cursor_agent_id, @run.cursor_run_id)
     cursor_run = response["run"] || response
+    raise Cursor::Client::Error.new("Cursor returned an incomplete status response.", retryable: true) unless cursor_run.is_a?(Hash)
+
     status = cursor_run["status"].to_s.upcase
+    raise Cursor::Client::Error.new("Cursor returned an incomplete status response.", retryable: true) if status.blank?
+
     attributes = {
       cursor_status: status,
       cursor_branch_name: git_value(cursor_run, "branch"),
       cursor_pr_url: git_value(cursor_run, "prUrl"),
-      result_text: sanitize_result(cursor_run["result"])
-    }.compact
+      result_text: FeedbackOutputSanitizer.result(cursor_run["result"])
+    }.compact.merge(error_message: nil)
 
     if status == "FINISHED"
       attributes.merge!(status: "finished", completed_at: Time.current, error_message: nil)
     elsif TERMINAL_STATUSES.include?(status)
       attributes.merge!(status: "failed", completed_at: Time.current,
-                        error_message: cursor_run["error"].presence || "Cursor run ended with #{status.downcase}.")
+                        error_message: FeedbackOutputSanitizer.error(
+                          cursor_run["error"].presence || "Cursor run ended with #{status.downcase}."
+                        ))
     else
       attributes[:status] = "running"
     end
@@ -33,9 +38,11 @@ class FeedbackRunSync
     @run.save! if @run.changed?
     @run
   rescue Cursor::Client::Error => error
-    unless error.retryable
+    if error.retryable
+      @run.update!(error_message: "Cursor status is temporarily unavailable.")
+    else
       @run.update!(status: "failed", completed_at: Time.current,
-                   error_message: "Status refresh failed: #{error.message}")
+                   error_message: FeedbackOutputSanitizer.error("Status refresh failed: #{error.message}"))
     end
     @run
   end
@@ -44,16 +51,8 @@ class FeedbackRunSync
 
   def git_value(cursor_run, key)
     branches = cursor_run.dig("git", "branches")
-    branches&.first&.[](key)
-  end
+    return unless branches.is_a?(Array) && branches.first.is_a?(Hash)
 
-  def sanitize_result(value)
-    return if value.nil?
-
-    text = value.is_a?(String) ? value : JSON.generate(value)
-    text.gsub(%r{https?://[^\s]+/feedback_runs/bundle/[^\s]+}, "[private bundle URL]")
-        .truncate(RESULT_LIMIT)
-  rescue JSON::GeneratorError
-    nil
+    branches.first[key]
   end
 end

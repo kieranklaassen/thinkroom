@@ -8,6 +8,38 @@ import { csrfToken } from '../lib/csrf'
 
 const LAST_RUN_KEY = 'thinkroom.feedbackRunId'
 
+function rememberedRunId(): number | null {
+  try {
+    const stored = window.localStorage.getItem(LAST_RUN_KEY) ?? ''
+    if (!/^[1-9]\d*$/.test(stored)) {
+      forgetRememberedRun()
+      return null
+    }
+    const id = Number(stored)
+    if (Number.isSafeInteger(id)) return id
+    forgetRememberedRun()
+    return null
+  } catch {
+    return null
+  }
+}
+
+function forgetRememberedRun() {
+  try {
+    window.localStorage.removeItem(LAST_RUN_KEY)
+  } catch {
+    // Storage can be unavailable in hardened browser contexts.
+  }
+}
+
+function rememberRun(id: number) {
+  try {
+    window.localStorage.setItem(LAST_RUN_KEY, String(id))
+  } catch {
+    // Upload success does not depend on local status persistence.
+  }
+}
+
 type FeedbackRunStatus = {
   id: number
   status: 'uploaded' | 'running' | 'finished' | 'failed'
@@ -35,8 +67,7 @@ export function FeedbackButton({ automationEnabled = false }: { automationEnable
   const [pollGeneration, setPollGeneration] = useState(0)
   const [runId, setRunId] = useState<number | null>(() => {
     if (!automationEnabled || typeof window === 'undefined') return null
-    const stored = Number.parseInt(window.localStorage.getItem(LAST_RUN_KEY) ?? '', 10)
-    return Number.isFinite(stored) ? stored : null
+    return rememberedRunId()
   })
 
   useEffect(() => {
@@ -50,13 +81,23 @@ export function FeedbackButton({ automationEnabled = false }: { automationEnable
         const response = await fetch(`/feedback_runs/${runId}`, {
           headers: { Accept: 'application/json' },
         })
+        if ([401, 403, 404].includes(response.status)) {
+          if (cancelled) return
+          forgetRememberedRun()
+          setRunId(null)
+          setRun(null)
+          setUploadError('Previous automation status is no longer available.')
+          return
+        }
         if (!response.ok) throw new Error('Could not refresh automation status.')
         const nextRun = (await response.json()) as FeedbackRunStatus
         if (cancelled) return
-        setUploadError(null)
         setRun(nextRun)
         if (nextRun.status === 'uploaded' || nextRun.status === 'running') {
-          timer = setTimeout(refresh, 3_000)
+          setUploadError(nextRun.error ?? null)
+          timer = setTimeout(refresh, nextRun.error ? 10_000 : 3_000)
+        } else {
+          setUploadError(null)
         }
       } catch (error) {
         if (!cancelled) {
@@ -95,7 +136,7 @@ export function FeedbackButton({ automationEnabled = false }: { automationEnable
       setRun(payload)
       setRunId(payload.id)
       setPollGeneration((generation) => generation + 1)
-      window.localStorage.setItem(LAST_RUN_KEY, String(payload.id))
+      rememberRun(payload.id)
       setPendingArchive(payload.status === 'failed' ? result : null)
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : 'Could not upload feedback.')

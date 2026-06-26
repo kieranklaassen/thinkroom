@@ -5,7 +5,7 @@ class CursorClientTest < ActiveSupport::TestCase
 
   class FakeHttp
     class << self
-      attr_accessor :last_request
+      attr_accessor :last_request, :response
     end
 
     def self.start(_host, _port, **)
@@ -14,7 +14,7 @@ class CursorClientTest < ActiveSupport::TestCase
 
     def self.request(request)
       self.last_request = request
-      Response.new(code: "201", body: '{"agent":{"id":"bc-1"},"run":{"id":"run-1"}}')
+      response || Response.new(code: "201", body: '{"agent":{"id":"bc-1"},"run":{"id":"run-1"}}')
     end
   end
 
@@ -39,5 +39,18 @@ class CursorClientTest < ActiveSupport::TestCase
 
     assert_not error.retryable
     assert_includes error.message, "not configured"
+  end
+
+  test "treats an HTTP timeout response as retryable" do
+    FakeHttp.response = Response.new(code: "408", body: '{"message":"request timed out"}')
+
+    error = assert_raises(Cursor::Client::Error) do
+      Cursor::Client.new(api_key: "cursor-test-key", http: FakeHttp)
+                    .create_agent({}, idempotency_key: "attempt-1")
+    end
+
+    assert error.retryable
+  ensure
+    FakeHttp.response = nil
   end
 end

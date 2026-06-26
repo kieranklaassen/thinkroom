@@ -8,34 +8,62 @@ class FeedbackRunLauncher
   end
 
   def call
+    idempotency_key = prepare_launch
+    return @run unless idempotency_key
+
+    response = @client.create_agent(payload, idempotency_key:)
+    store_success(response)
+  rescue Cursor::Client::Error => error
+    store_failure(FeedbackOutputSanitizer.error(error.message), clear_key: !error.retryable)
+  rescue KeyError, TypeError
+    store_failure("Cursor returned an incomplete launch response.", clear_key: false)
+  ensure
+    @run.reload if @run.persisted?
+  end
+
+  private
+
+  def prepare_launch
     @run.with_lock do
-      return @run if @run.cursor_agent_id.present?
+      next if @run.cursor_agent_id.present?
 
       prepare_attempt!
-      response = @client.create_agent(payload, idempotency_key: @run.idempotency_key)
-      agent = response.fetch("agent")
-      cursor_run = response.fetch("run")
+      @run.idempotency_key
+    end
+  end
+
+  def store_success(response)
+    agent = response.fetch("agent")
+    cursor_run = response.fetch("run")
+    raise TypeError unless agent.is_a?(Hash) && cursor_run.is_a?(Hash)
+
+    agent_id = agent.fetch("id")
+    run_id = cursor_run.fetch("id")
+
+    @run.with_lock do
+      next if @run.cursor_agent_id.present?
+
       @run.update!(
         status: "running",
-        cursor_agent_id: agent.fetch("id"),
-        cursor_run_id: cursor_run.fetch("id"),
+        cursor_agent_id: agent_id,
+        cursor_run_id: run_id,
         cursor_agent_url: agent["url"],
         cursor_status: cursor_run["status"] || agent["status"],
         error_message: nil,
         launched_at: Time.current
       )
-    rescue Cursor::Client::Error => error
-      @run.update!(status: "failed", error_message: error.message)
-      @run.update!(idempotency_key: nil) unless error.retryable
-    rescue KeyError
-      @run.update!(status: "failed", idempotency_key: nil,
-                   error_message: "Cursor returned an incomplete launch response.")
     end
-
-    @run
   end
 
-  private
+  def store_failure(message, clear_key:)
+    @run.with_lock do
+      next if @run.cursor_agent_id.present?
+
+      attributes = { status: "failed", error_message: message }
+      attributes[:idempotency_key] = nil if clear_key
+      @run.update!(attributes)
+    end
+  end
 
   def prepare_attempt!
     return if @run.idempotency_key.present?
