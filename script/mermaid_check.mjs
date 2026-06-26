@@ -127,6 +127,30 @@ ${INVALID_SOURCE}
     JSON.stringify(desktop),
   )
 
+  // First paint (JS disabled): the server preview must already break the Mermaid
+  // placeholder out to the shared rich width so the diagram does not jump width
+  // when the live editor swaps in. Runs after the live editor above has claimed
+  // the seed, so this JS-disabled visit never strands the collaborative state.
+  const staticContext = await browser.newContext({ viewport: { width: 1280, height: 900 }, javaScriptEnabled: false })
+  const staticPage = await staticContext.newPage()
+  await staticPage.goto(`${BASE}/d/${slug}`)
+  await staticPage.locator('.doc-static-preview .doc-mermaid-skeleton').first().waitFor({ timeout: 15_000 })
+  const staticGeometry = await staticPage.evaluate(() => {
+    const skeleton = document.querySelector('.doc-static-preview .ProseMirror > .doc-mermaid-skeleton')
+    const prose = document.querySelector('.doc-static-preview .ProseMirror')
+    return {
+      skeleton: Math.round(skeleton?.getBoundingClientRect().width ?? 0),
+      prose: Math.round(prose?.getBoundingClientRect().width ?? 0),
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    }
+  })
+  check(
+    staticGeometry.skeleton > staticGeometry.prose && staticGeometry.overflow === 0,
+    'server preview breaks the Mermaid placeholder out to the rich width on first paint',
+    JSON.stringify(staticGeometry),
+  )
+  await staticContext.close()
+
   await page.setViewportSize({ width: 390, height: 844 })
   const geometry = await page.evaluate(() => ({
     overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,

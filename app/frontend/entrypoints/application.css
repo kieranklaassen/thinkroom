@@ -1169,6 +1169,7 @@ a:focus-visible {
 .milkdown .ProseMirror > pre:not([data-language='mermaid']),
 .milkdown .ProseMirror > figure.mermaid-diagram,
 .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+.doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
 .doc-static-preview .ProseMirror > table {
   position: relative;
   width: min(max(100%, var(--rich-content-width)), calc(100vw - 3rem));
@@ -1182,6 +1183,7 @@ a:focus-visible {
 :where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > pre:not([data-language='mermaid']),
 :where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > figure.mermaid-diagram,
 :where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
 :where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > table {
   /* The activity rail shares the centered body row. Half of its width
      shifts the canvas left, so include it when deriving the safe left edge. */
@@ -1198,6 +1200,7 @@ a:focus-visible {
 :where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > pre:not([data-language='mermaid']),
 :where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > figure.mermaid-diagram,
 :where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
 :where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > table {
   width: min(
     max(100%, var(--rich-content-width)),
@@ -1212,6 +1215,7 @@ a:focus-visible {
 :where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > pre:not([data-language='mermaid']),
 :where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > figure.mermaid-diagram,
 :where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
 :where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .doc-static-preview .ProseMirror > table {
   width: min(
     max(100%, var(--rich-content-width)),
@@ -3424,6 +3428,7 @@ a:focus-visible {
   .milkdown .ProseMirror > pre:not([data-language='mermaid']),
   .milkdown .ProseMirror > figure.mermaid-diagram,
   .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
+  .doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
   .doc-static-preview .ProseMirror > table {
     width: 100%;
     max-width: 100%;
