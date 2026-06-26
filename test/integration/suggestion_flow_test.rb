@@ -272,6 +272,34 @@ class SuggestionFlowTest < ActionDispatch::IntegrationTest
     assert_equal "Earlier Window", @suggestion.reload.resolved_by
   end
 
+  test "accept_all with ids transitions only the selected pending suggestions" do
+    second = @document.suggestions.create!(author_name: "Scout", author_kind: "agent", body: "b")
+    third = @document.suggestions.create!(author_name: "Scout", author_kind: "agent", body: "c")
+    other_document = Document.create!(title: "Other")
+    foreign = other_document.suggestions.create!(author_name: "Scout", author_kind: "agent", body: "d")
+
+    patch accept_all_document_suggestions_path(@document.slug),
+          params: { by: "Quiet Falcon", ids: [ second.id, third.id, foreign.id ] }, as: :json
+
+    assert_response :success
+    assert_equal [ second.id, third.id ], response.parsed_body["accepted"].map { |row| row["id"] }
+    assert_equal "pending", @suggestion.reload.status
+    assert_equal %w[accepted accepted], [ second, third ].map { |row| row.reload.status }
+    assert_equal "pending", foreign.reload.status
+    assert_includes @document.activities.last.detail, "2 suggestions"
+  end
+
+  test "accept_all with an explicit empty id list accepts nothing" do
+    assert_no_difference -> { @document.activities.count } do
+      patch accept_all_document_suggestions_path(@document.slug),
+            params: { ids: [] }, as: :json
+    end
+
+    assert_response :success
+    assert_empty response.parsed_body["accepted"]
+    assert_equal "pending", @suggestion.reload.status
+  end
+
   test "accept_all with nothing pending returns an empty list and logs no activity" do
     @suggestion.reject!
 

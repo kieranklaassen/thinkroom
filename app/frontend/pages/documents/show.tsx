@@ -170,6 +170,9 @@ const capAnchor = (text: string): string => {
   return new TextDecoder().decode(bytes.slice(0, ANCHOR_BYTE_CAP)).replace(/�+$/, '')
 }
 
+const skippedSuggestionNotice = (count: number): string =>
+  `${count} suggestion${count === 1 ? '' : 's'} skipped because the target is missing, ambiguous, or empty; ${count === 1 ? 'it remains' : 'they remain'} pending for individual review.`
+
 export default function DocumentShow({
   document: doc,
   viewer,
@@ -822,33 +825,46 @@ export default function DocumentShow({
     [acceptOne],
   )
 
-  // Accept all pending suggestions in ONE round trip: the server flips the
-  // batch atomically and returns the winners, then the bodies merge into
-  // the CRDT locally in id order — each merge re-anchors against the
+  // Accept all applicable suggestions in ONE round trip: the server flips
+  // the selected rows atomically and returns the winners, then the bodies
+  // merge into the CRDT locally in id order — each merge re-anchors against the
   // post-merge document, exactly as if the cards were clicked one by one,
   // minus the per-card network wait. Cards hide optimistically while the
   // request is in flight; the broadcast-driven props reload makes the
   // clearing durable, and a failed request lets the cards reappear.
-  const [acceptingAll, setAcceptingAll] = useState(false)
+  const [acceptingSuggestionIds, setAcceptingSuggestionIds] = useState<Set<number>>(
+    () => new Set(),
+  )
+  const acceptingAll = acceptingSuggestionIds.size > 0
   const acceptAllSuggestions = useCallback(async () => {
     if (acceptingAll || !handleRef.current) return
     const pending = suggestionsRef.current.filter((s) => s.id > 0)
     if (pending.length === 0) return
-    const blocked = pending.find(
-      (suggestion) =>
-        !suggestionApplicability(handleRef.current!.editor, suggestion, doc.content_format).ok,
-    )
-    if (blocked) {
-      setSuggestionNotice(
-        'Accept all paused because at least one suggestion has a missing, ambiguous, or empty target. Review that suggestion individually.',
+    const applicable: SuggestionPayload[] = []
+    const blocked: SuggestionPayload[] = []
+    for (const suggestion of pending) {
+      const result = suggestionApplicability(
+        handleRef.current.editor,
+        suggestion,
+        doc.content_format,
       )
+      if (result.ok) {
+        applicable.push(suggestion)
+      } else {
+        blocked.push(suggestion)
+      }
+    }
+    if (applicable.length === 0) {
+      setSuggestionNotice(skippedSuggestionNotice(blocked.length))
       return
     }
-    setAcceptingAll(true)
+    setSuggestionNotice(null)
+    setAcceptingSuggestionIds(new Set(applicable.map((suggestion) => suggestion.id)))
     let succeeded = false
     try {
       const response = await patchJSON(`/d/${doc.slug}/suggestions/accept_all`, {
         by: identity.name,
+        ids: applicable.map((suggestion) => suggestion.id),
       })
       if (response.ok) {
         const { accepted } = (await response.json()) as { accepted: SuggestionPayload[] }
@@ -883,15 +899,20 @@ export default function DocumentShow({
             }
           }
         }
+        const notices: string[] = []
+        if (blocked.length > 0) {
+          notices.push(skippedSuggestionNotice(blocked.length))
+        }
         if (reopenFailed > 0) {
-          setSuggestionNotice(
+          notices.push(
             `${reopenFailed} suggestion${reopenFailed === 1 ? '' : 's'} could not be restored to pending after the document changed. Refresh before reviewing again.`,
           )
         } else if (reopened > 0) {
-          setSuggestionNotice(
+          notices.push(
             `${reopened} suggestion${reopened === 1 ? '' : 's'} changed before merging and returned to pending.`,
           )
         }
+        setSuggestionNotice(notices.length > 0 ? notices.join(' ') : null)
         succeeded = true
       } else {
         console.warn('pruf: accept all rejected', response.status)
@@ -907,20 +928,20 @@ export default function DocumentShow({
         router.reload({
           only: ['suggestions', 'activities'],
           async: true,
-          onFinish: () => setAcceptingAll(false),
+          onFinish: () => setAcceptingSuggestionIds(new Set()),
         })
       } else {
         // Failure: release immediately so the cards reappear (rollback).
-        setAcceptingAll(false)
+        setAcceptingSuggestionIds(new Set())
       }
     }
   }, [acceptingAll, doc.slug, doc.content_format, identity.name, reopenSuggestion])
 
   // Optimistic clearing for the bulk path: server-backed cards vanish the
   // moment Accept all is clicked; optimistic placeholders (negative ids,
-  // not part of the batch) stay visible.
+  // not part of the batch) and blocked suggestions stay visible.
   const visibleSuggestions = acceptingAll
-    ? suggestions.filter((s) => s.id < 0)
+    ? suggestions.filter((s) => !acceptingSuggestionIds.has(s.id))
     : suggestions
 
   const rejectSuggestion = useCallback(

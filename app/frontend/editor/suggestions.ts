@@ -1,5 +1,11 @@
 import { editorViewCtx, parserCtx, schemaCtx, type Editor } from '@milkdown/kit/core'
-import { Slice, type MarkType, type Node } from '@milkdown/kit/prose/model'
+import {
+  Fragment,
+  Slice,
+  type MarkType,
+  type Node,
+  type NodeType,
+} from '@milkdown/kit/prose/model'
 import { TextSelection } from '@milkdown/kit/prose/state'
 import { SKIP_PROVENANCE } from './provenance'
 import {
@@ -112,49 +118,73 @@ function findTextRanges(doc: Node, search: string | null): { from: number; to: n
 
 const normalizeBlockText = (text: string): string => text.replace(/\s+/g, ' ').trim()
 
-/** Normalized plain text of each top-level block in a parsed fragment. */
-const blockTexts = (parsed: Node): string[] => {
-  const texts: string[] = []
-  parsed.forEach((child) => texts.push(normalizeBlockText(child.textContent)))
-  return texts
+const renderedBlockText = (node: Node): string =>
+  normalizeBlockText(node.textBetween(0, node.content.size, ' ', ' '))
+
+const isListNode = (node: Node): boolean =>
+  node.type.name === 'ordered_list' || node.type.name === 'bullet_list'
+
+interface StructuralRange {
+  from: number
+  to: number
+  kind: 'block' | 'list'
 }
 
 /**
- * First contiguous window of top-level doc blocks whose rendered text
- * matches `searchTexts` block-for-block (whitespace-normalized, full-block
- * equality). Returns the doc range spanning the window.
+ * Contiguous structural windows whose block-separated rendered text matches
+ * the agent-facing quote. Top-level windows cover section rewrites; partial
+ * list-child windows cover adjacent list items. A nested window containing
+ * every list item is excluded because the equivalent outer top-level list
+ * range is the replaceable unit that permits changing the list type.
  */
-function findBlockRanges(doc: Node, searchTexts: string[]): { from: number; to: number }[] {
-  if (searchTexts.length === 0 || searchTexts.every((t) => t === '')) return []
-  const blocks: { text: string; from: number; to: number }[] = []
-  doc.forEach((child, offset) => {
-    blocks.push({
-      text: normalizeBlockText(child.textContent),
-      from: offset,
-      to: offset + child.nodeSize,
+function findStructuralRanges(doc: Node, searchText: string): StructuralRange[] {
+  if (!searchText) return []
+  const results: StructuralRange[] = []
+
+  const visit = (parent: Node, contentStart: number) => {
+    const blocks: { text: string; from: number; to: number }[] = []
+    parent.forEach((child, offset) => {
+      const from = contentStart + offset
+      if (child.isBlock) {
+        blocks.push({
+          text: renderedBlockText(child),
+          from,
+          to: from + child.nodeSize,
+        })
+      }
+      if (child.childCount > 0) visit(child, from + 1)
     })
-  })
-  const results: { from: number; to: number }[] = []
-  for (let i = 0; i + searchTexts.length <= blocks.length; i += 1) {
-    let matched = true
-    for (let j = 0; j < searchTexts.length; j += 1) {
-      if (blocks[i + j].text !== searchTexts[j]) {
-        matched = false
-        break
+
+    const list = isListNode(parent)
+    if ((parent !== doc && !list) || blocks.length !== parent.childCount) return
+
+    for (let start = 0; start < blocks.length; start += 1) {
+      if (!blocks[start].text) continue
+      let text = ''
+      for (let end = start; end < blocks.length; end += 1) {
+        if (list && start === 0 && end === blocks.length - 1) continue
+        text = normalizeBlockText(`${text} ${blocks[end].text}`)
+        if (text.length > searchText.length) break
+        if (text === searchText && blocks[end].text) {
+          results.push({
+            from: blocks[start].from,
+            to: blocks[end].to,
+            kind: list ? 'list' : 'block',
+          })
+        }
       }
     }
-    if (matched) {
-      results.push({ from: blocks[i].from, to: blocks[i + searchTexts.length - 1].to })
-    }
   }
+
+  visit(doc, 0)
   return results
 }
 
 interface MatchedRange {
   from: number
   to: number
-  /** 'inline' = within one textblock; 'block' = a window of whole blocks. */
-  kind: 'inline' | 'block'
+  /** Inline text, top-level blocks, or a partial window of sibling list items. */
+  kind: 'inline' | 'block' | 'list'
 }
 
 // Parsing a quote is deterministic for a given source string, and the margin
@@ -197,6 +227,21 @@ const uniqueMatch = (
   return { status: 'matched', range: { ...ranges[0], kind } }
 }
 
+const uniqueStructuralMatch = (ranges: StructuralRange[]): MatchResult => {
+  if (ranges.length === 0) return { status: 'missing' }
+  if (ranges.length > 1) return { status: 'ambiguous' }
+  return { status: 'matched', range: ranges[0] }
+}
+
+const listReplacementContent = (parsed: Node, listItemType: NodeType | undefined) => {
+  if (parsed.childCount === 1 && parsed.firstChild && isListNode(parsed.firstChild)) {
+    return parsed.firstChild.content
+  }
+  if (!listItemType) return null
+  const item = listItemType.createAndFill(null, parsed.content)
+  return item ? Fragment.from(item) : null
+}
+
 /**
  * Locate suggestion-quoted text in the document. Agents quote the markdown
  * SOURCE they read from the API (`### Heading`, `**bold**`, `\~` escapes),
@@ -221,7 +266,9 @@ function matchQuotedText(
   const parsed = parseQuote(parser, cacheScope, search)
   if (!parsed || parsed.content.size === 0) return { status: 'missing' }
 
-  const block = uniqueMatch(findBlockRanges(doc, blockTexts(parsed)), 'block')
+  const block = uniqueStructuralMatch(
+    findStructuralRanges(doc, renderedBlockText(parsed)),
+  )
   if (block.status !== 'missing') return block
 
   // Source-styled inline quote (e.g. `**Date:** 2026` or `<strong>Date:</strong>`)
@@ -278,6 +325,12 @@ export function suggestionApplicability(
       const match = matchQuotedText(view.state.doc, parser, format, suggestion.replaces)
       if (match.status === 'ambiguous') return { ok: false, reason: 'ambiguous' }
       if (match.status === 'missing') return { ok: false, reason: 'missing' }
+      if (
+        match.range.kind === 'list' &&
+        !listReplacementContent(parsed, view.state.schema.nodes.list_item)
+      ) {
+        return { ok: false, reason: 'empty' }
+      }
     }
     return { ok: true }
   })
@@ -334,6 +387,12 @@ export function applySuggestion(
       tr = tr.replaceWith(target.from, target.to, inline)
       insertFrom = target.from
       insertTo = target.from + inline.size
+    } else if (target && target.kind === 'list') {
+      const replacement = listReplacementContent(parsed, state.schema.nodes.list_item)
+      if (!replacement) return
+      tr = tr.replaceWith(target.from, target.to, replacement)
+      insertFrom = target.from
+      insertTo = target.from + replacement.size
     } else if (target && target.kind === 'block') {
       tr = tr.replaceWith(target.from, target.to, parsed.content)
       insertFrom = target.from
