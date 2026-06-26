@@ -1,0 +1,67 @@
+.cli-auth-card {
+  width: min(100%, 25rem);
+}
+
+.cli-auth-eyebrow {
+  margin: 0 0 0.35rem;
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.cli-auth-code {
+  display: grid;
+  gap: 0.3rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  padding: 0.9rem 1rem;
+}
+
+.cli-auth-code span,
+.cli-auth-account span {
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+}
+
+.cli-auth-code strong {
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.25rem;
+  letter-spacing: 0.12em;
+}
+
+.cli-auth-account {
+  display: grid;
+  margin-bottom: 1rem;
+}
+
+.cli-auth-account strong {
+  margin-top: 0.2rem;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.cli-auth-account small {
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+}
+
+.cli-auth-submit {
+  display: flex;
+  width: 100%;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}
+
+.cli-auth-safety {
+  margin-top: 0.9rem;
+  color: var(--ink-faint);
+  font-size: 0.72rem;
+  line-height: 1.5;
+}

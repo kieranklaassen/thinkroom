@@ -1,0 +1,4 @@
+interface:
+  display_name: "Thinkroom"
+  short_description: "Collaborate with humans in Thinkroom"
+  default_prompt: "Use $thinkroom to start, share, or revise a Thinkroom document."

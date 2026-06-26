@@ -25,7 +25,9 @@ module Api
         content_format: format,
         seed_content: source,
         seed_author_kind: kind,
-        seed_author_name: name
+        seed_author_name: name,
+        user: current_api_user,
+        owner_name: current_api_user&.name
       )
       DocumentAsset.claim_from_html!(document: doc, source:) if doc.html?
 
@@ -178,12 +180,20 @@ module Api
         plain_text: doc.plain_text,
         normalized: normalized,
         warning: warning,
-        note: "This document is unclaimed. The first person to open the share URL in a browser can claim it — claiming grants them ownership (including delete).",
+        note: ownership_note(doc),
         content_contract: AgentGuide.content_contract(doc.content_format, request.base_url),
         api: AgentGuide.endpoints(doc, request.base_url)
       }
       response[:markdown] = doc.current_content if doc.content_format == "markdown"
       response
+    end
+
+    def ownership_note(doc)
+      if doc.user_id?
+        "This document belongs to your Thinkroom account and appears in your document list."
+      else
+        "This document is unclaimed. The first person to open the share URL in a browser can claim it — claiming grants them ownership (including delete)."
+      end
     end
   end
 end

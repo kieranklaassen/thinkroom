@@ -38,7 +38,8 @@
     "yjs": "^13.6.31"
   },
   "scripts": {
-    "check": "tsc -p tsconfig.app.json && tsc -p tsconfig.node.json",
+    "check": "tsc -p tsconfig.app.json && tsc -p tsconfig.node.json && npm run check:cli",
+    "check:cli": "node --test cli/test/*.test.js",
     "check:exports": "node script/export_check.mjs",
     "check:html": "node script/html_document_check.mjs",
     "check:links": "node script/link_check.mjs"

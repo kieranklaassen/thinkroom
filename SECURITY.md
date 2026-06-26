@@ -22,6 +22,11 @@ coordinate a fix, and credit the reporter unless anonymity is requested.
   selected mode.
 - `X-Agent-Name` records attribution; it is not authentication and must not be
   treated as proof of identity.
+- Thinkroom CLI bearer tokens authenticate an account for CLI-owned document
+  creation and account identity. They do not override a document share link's
+  edit/comment/view access. Tokens are stored as SHA-256 digests server-side;
+  protect the raw token in `~/.config/thinkroom/config.json` like a password and
+  revoke it with `thinkroom logout`.
 - Browser ownership tokens authorize destructive owner actions. They are
   stored in signed, HTTP-only cookies and are not user accounts.
 - Operators are responsible for keeping `config/master.key`, `.kamal/secrets`,

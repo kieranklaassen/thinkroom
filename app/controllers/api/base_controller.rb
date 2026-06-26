@@ -5,6 +5,8 @@ module Api
   class BaseController < ActionController::API
     include WriteRateLimited
 
+    before_action :authenticate_cli_bearer
+
     rescue_from ActiveRecord::RecordNotFound do
       render json: { error: "No document with that slug." }, status: :not_found
     end
@@ -31,6 +33,36 @@ module Api
     end
 
     private
+
+    attr_reader :current_cli_token, :current_api_user
+
+    def authenticate_cli_bearer
+      authorization = request.authorization
+      return if authorization.blank?
+
+      scheme, raw_token = authorization.split(" ", 2)
+      token = CliAccessToken.authenticate(raw_token) if scheme&.casecmp?("Bearer")
+      return assign_cli_token(token) if token
+
+      render json: {
+        error: "Invalid or revoked Thinkroom access token.",
+        next_action: "Run `thinkroom login` to connect this CLI again."
+      }, status: :unauthorized
+    end
+
+    def assign_cli_token(token)
+      @current_cli_token = token
+      @current_api_user = token.user
+    end
+
+    def require_cli_user!
+      return if current_api_user
+
+      render json: {
+        error: "A Thinkroom access token is required.",
+        next_action: "Run `thinkroom login` first."
+      }, status: :unauthorized
+    end
 
     def render_write_rate_limit
       render json: { error: "Write rate limit exceeded; retry later." }, status: :too_many_requests
