@@ -2139,6 +2139,24 @@ a:focus-visible {
   user-select: none;
 }
 
+.presence-avatar--human {
+  padding: 0;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.presence-avatar--human:hover {
+  transform: translateY(-1px);
+}
+
+.presence-avatar--human:focus-visible,
+.presence-avatar--human.is-following {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--surface-raised), 0 0 0 4px var(--accent);
+  z-index: 2;
+}
+
 .presence-stack .presence-avatar + .presence-avatar {
   margin-left: -8px;
 }
@@ -2175,6 +2193,19 @@ a:focus-visible {
   font-size: 0.68rem;
   color: var(--ink-faint);
   white-space: nowrap;
+}
+
+.presence-following {
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--ink-soft);
+  padding: 0.12rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 600;
 }
 
 /* Compact (mobile header) variant: 24px avatars. */
@@ -3272,7 +3303,8 @@ a:focus-visible {
   /* Glanceable chrome only: counts live on the dock, labels in titles. */
   .prov-summary,
   .presence-count,
-  .presence-agent-name {
+  .presence-agent-name,
+  .presence-following {
     display: none;
   }
 
