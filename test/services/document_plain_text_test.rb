@@ -24,6 +24,18 @@ class DocumentPlainTextTest < ActiveSupport::TestCase
                  DocumentPlainText.call(format: "html", content: source)
   end
 
+  test "normalizes blank and binary content to UTF-8" do
+    assert_equal "", DocumentPlainText.call(format: "markdown", content: nil)
+    assert_equal "ASCII", DocumentPlainText.call(
+      format: "markdown",
+      content: "ASCII".dup.force_encoding(Encoding::BINARY)
+    )
+    assert_equal "bad � byte", DocumentPlainText.call(
+      format: "markdown",
+      content: "bad \xFF byte".b
+    )
+  end
+
   test "markdown Thinkroom markup contributes content but not tags" do
     source = 'Before <span data-provenance data-kind="ai">robot</span> ' \
       'and <ins data-suggestion-id="x">new</ins>'

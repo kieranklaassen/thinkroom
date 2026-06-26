@@ -32,6 +32,20 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "/api/docs/#{@document.slug}"
   end
 
+  test "link preview crawlers get metadata HTML without claiming or adding a recent" do
+    @document.update!(title: "Crawler preview", seed_markdown: "# Crawler preview\n\nCard body")
+
+    get "/d/#{@document.slug}", headers: { "User-Agent" => "Twitterbot/1.0" }
+
+    assert_response :success
+    assert_equal "text/html", response.media_type
+    assert_includes response.body, 'property="og:image"'
+    assert_nil @document.reload.seed_claimed_at
+
+    get root_path, headers: { "User-Agent" => "Mozilla/5.0" }
+    refute_includes response.body, "Crawler preview"
+  end
+
   test "JSON accept on the share URL returns machine-readable state + endpoints" do
     get "/d/#{@document.slug}", headers: {
       "Accept" => "application/json",
