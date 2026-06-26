@@ -29,7 +29,7 @@
     "remark-frontmatter": "^5.0.0",
     "riffrec": "git+https://github.com/kieranklaassen/riffrec.git#9d3e2b5c62694049bcefec9370eaa9b30f41a60e",
     "shiki": "^4.2.0",
-    "tailwindcss": "^4.3.0",
+    "tailwindcss": "^4.3.1",
     "typescript": "^6.0.3",
     "y-prosemirror": "^1.3.7",
     "y-protocols": "^1.0.7",
