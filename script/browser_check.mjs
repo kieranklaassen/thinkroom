@@ -152,6 +152,35 @@ try {
   } else {
     fail('View downgrade left an unavailable mode active')
   }
+
+  const ownerContentBeforePointer = await landing.locator('.milkdown .ProseMirror').evaluate((editor) => {
+    const clone = editor.cloneNode(true)
+    clone.querySelectorAll('.read-pointer-cursor').forEach((cursor) => cursor.remove())
+    return clone.textContent
+  })
+  const readParagraph = await accessGuest.locator('.milkdown .ProseMirror p').first().boundingBox()
+  if (!readParagraph) throw new Error('Read-mode paragraph did not render')
+  await accessGuest.mouse.move(
+    readParagraph.x + Math.min(80, readParagraph.width / 2),
+    readParagraph.y + readParagraph.height / 2,
+  )
+  await landing.locator('.read-pointer-cursor').waitFor({ timeout: 5000 })
+  const ownerContentWithPointer = await landing.locator('.milkdown .ProseMirror').evaluate((editor) => {
+    const clone = editor.cloneNode(true)
+    clone.querySelectorAll('.read-pointer-cursor').forEach((cursor) => cursor.remove())
+    return clone.textContent
+  })
+  if (
+    ownerContentWithPointer === ownerContentBeforePointer &&
+    (await accessGuest.locator('.milkdown .ProseMirror').getAttribute('contenteditable')) === 'false'
+  ) {
+    ok('locked Read mode broadcasts a live pointer without editing content')
+  } else {
+    fail('Read-mode pointer changed document content or enabled editing')
+  }
+  await accessGuest.mouse.move(0, 0)
+  await landing.locator('.read-pointer-cursor').waitFor({ state: 'detached', timeout: 5000 })
+  ok('Read-mode pointer clears when the reader leaves the document')
   await accessGuest.close()
 
   await landing.setViewportSize({ width: 390, height: 844 })

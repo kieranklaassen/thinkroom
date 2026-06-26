@@ -83,6 +83,7 @@ import {
   type DocumentFormat,
 } from './document_format'
 import { configureSlashMenu, slashMenu } from './slash_menu'
+import { readPointerAwarenessCtx, readPointers } from './read_pointers'
 
 export interface EditorHandle {
   editor: Editor
@@ -473,6 +474,7 @@ function CollabEditor({
         .use(suggestGuard)
         .use(selectionWatcher)
         .use(agentCursors)
+        .use(readPointers)
         .use(collab),
     [],
   )
@@ -531,6 +533,7 @@ function CollabEditor({
       started = true
       editor.action((ctx) => {
         const service = ctx.get(collabServiceCtx)
+        ctx.set(readPointerAwarenessCtx.key, provider.awareness)
         service.bindDoc(ydoc).setAwareness(provider.awareness)
         ctx.set(taskPersistenceCtx.key, {
           persist: () =>
