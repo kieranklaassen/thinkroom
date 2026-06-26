@@ -58,7 +58,11 @@ import { IdentityChip } from '../../components/identity_chip'
 import { type OwnershipPayload } from '../../components/ownership_chip'
 import { ClaimBanner } from '../../components/claim_banner'
 import { HeaderMenu } from '../../components/header_menu'
-import { ModeControl, type EditorMode } from '../../components/mode_control'
+import {
+  MODE_SHORTCUTS,
+  ModeControl,
+  type EditorMode,
+} from '../../components/mode_control'
 import { SharePopover } from '../../components/share_popover'
 import {
   MobileDock,
@@ -237,6 +241,9 @@ export default function DocumentShow({
   const [mode, setMode] = useState<EditorMode>(demoModeLocked ? 'edit' : ui.mode)
   const effectiveMode: EditorMode = ownership.can_write ? mode : 'read'
   const modeLocked = demoModeLocked || !ownership.can_write
+  const changeMode = useCallback((nextMode: EditorMode) => {
+    if (!modeLocked) setMode(nextMode)
+  }, [modeLocked])
   const isReading = effectiveMode === 'read'
   const connectionIdentity = viewer.account ? `account:${viewer.account.id}` : 'guest'
   const editorSessionKey = `${doc.slug}:${ownership.can_write ? 'write' : 'read'}`
@@ -316,10 +323,18 @@ export default function DocumentShow({
     if (!demoModeLocked) setCookie('pruf_mode', mode)
   }, [mode, demoModeLocked])
 
-  // ⌘\ toggles the side panel, ⌘. toggles suggestion focus.
+  // ⌘1–4 selects Edit/Suggest/Comment/Read. ⌘\ toggles the side panel,
+  // and ⌘. toggles suggestion focus. Control mirrors Command for parity.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) return
+      const shortcutMode = MODE_SHORTCUTS[event.code] ?? MODE_SHORTCUTS[`Digit${event.key}`]
+      if (shortcutMode) {
+        if (modeLocked) return
+        event.preventDefault()
+        changeMode(shortcutMode)
+        return
+      }
       const target = event.target as HTMLElement | null
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
       if (event.key === '\\') {
@@ -332,7 +347,7 @@ export default function DocumentShow({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [changeMode, modeLocked])
 
   // Human presence from Yjs awareness. Self is filtered out — the
   // IdentityChip represents you; a duplicate avatar next to it is noise.
@@ -1037,9 +1052,16 @@ export default function DocumentShow({
               T.
             </Link>
             <span className="doc-title">{documentTitle}</span>
-            <span className="doc-format" aria-label={`Document format: ${doc.content_format}`}>
-              {doc.content_format === 'html' ? 'HTML' : 'Markdown'}
-            </span>
+            <ModeControl
+              mode={effectiveMode}
+              onChange={changeMode}
+              locked={modeLocked}
+              lockedReason={
+                ownership.can_write
+                  ? undefined
+                  : 'Read only — the document owner locked editing'
+              }
+            />
             <span
               className={`doc-status doc-status--${status}`}
               title={status === 'live' ? 'Connected — edits sync live' : 'Connecting…'}
@@ -1055,7 +1077,7 @@ export default function DocumentShow({
             )}
           </div>
           <div className="doc-header-right">
-            {/* ≤4 groups: identity/presence · (mode control) · Share · ⋯ menu */}
+            {/* ≤3 groups: identity/presence · Share · ⋯ menu */}
             <div className="doc-header-people">
               <IdentityChip
                 identity={identity}
@@ -1075,16 +1097,6 @@ export default function DocumentShow({
                 {acceptingAll ? 'Accepting…' : `Accept all ${pendingSuggestionCount}`}
               </button>
             )}
-            <ModeControl
-              mode={effectiveMode}
-              onChange={setMode}
-              locked={modeLocked}
-              lockedReason={
-                ownership.can_write
-                  ? undefined
-                  : 'Read only — the document owner locked editing'
-              }
-            />
             <SharePopover
               agentsActive={presences.length}
               exportReady={Boolean(handle)}

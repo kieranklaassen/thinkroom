@@ -1346,6 +1346,24 @@ try {
   const winA = await makePage('a')
   await winA.goto(`${BASE}/d/${trackDoc.slug}`)
   await winA.waitForSelector('.doc-status--live', { timeout: 15000 })
+  if ((await winA.locator('.mode-control-trigger').count()) === 1) {
+    ok('header renders one mode control')
+  } else {
+    fail('header did not render exactly one mode control')
+  }
+  if (await winA.locator('.doc-header-left .mode-control-trigger').isVisible()) {
+    ok('mode control replaced the format badge beside the title')
+  } else {
+    fail('mode control is not in the left header')
+  }
+  await winA.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', {
+    key: '3', code: 'Digit3', metaKey: true, bubbles: true, cancelable: true,
+  })))
+  if ((await winA.locator('.mode-control-trigger').textContent())?.includes('Comment mode')) {
+    ok('Command+3 switches to Comment mode')
+  } else {
+    fail('Command+3 did not switch to Comment mode')
+  }
   const winB = await makePage('b')
   await winB.goto(`${BASE}/d/${trackDoc.slug}`)
   await winB.waitForSelector('.doc-status--live', { timeout: 15000 })
@@ -1446,6 +1464,14 @@ try {
   const demoMode = (await demoPage.locator('.mode-control-trigger').textContent())?.trim()
   if (demoMode?.startsWith('Edit')) ok('demo doc ignored a tampered stored mode (locked to Edit)')
   else fail(`demo doc mode after tamper: "${demoMode}"`)
+  await demoPage.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', {
+    key: '2', code: 'Digit2', metaKey: true, bubbles: true, cancelable: true,
+  })))
+  if ((await demoPage.locator('.mode-control-trigger').textContent())?.includes('Edit mode')) {
+    ok('demo doc ignored the locked Command+2 mode shortcut')
+  } else {
+    fail('demo doc changed mode through a locked shortcut')
+  }
   await demoPage.close()
 
   // --- Floating chrome placement: measured, centered, never covering ---

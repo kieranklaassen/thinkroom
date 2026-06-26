@@ -321,17 +321,6 @@ a:focus-visible {
   margin-bottom: 0.5rem;
 }
 
-.doc-format {
-  flex: none;
-  color: var(--ink-faint);
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-  font-weight: 600;
-  letter-spacing: 0.045em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
 /* ---------------------------- Document library -------------------------- */
 .document-library {
   --document-library-muted: color-mix(in srgb, var(--ink-soft) 88%, var(--ink));
@@ -945,12 +934,6 @@ a:focus-visible {
   /* Flex items default to min-width:auto — without this the nowrap title
    * refuses to shrink and forces horizontal overflow on narrow screens. */
   min-width: 0;
-}
-
-.doc-format {
-  padding: 0.16rem 0.34rem;
-  border: 1px solid var(--line);
-  border-radius: 4px;
 }
 
 .doc-notice {
@@ -2288,11 +2271,24 @@ a:focus-visible {
   color: var(--ink) !important;
 }
 
-/* Mode switcher (Edit / Suggest / Comment). */
+/* Mode switcher (Edit / Suggest / Comment / Read). */
+.doc-header-left .mode-control {
+  flex: none;
+}
+
+.doc-header-left .mode-control-popover {
+  left: 0;
+  right: auto;
+}
+
 .mode-control-trigger {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  color: var(--ink);
+  white-space: nowrap;
 }
 
 .mode-control-trigger:disabled {
@@ -2302,6 +2298,27 @@ a:focus-visible {
 
 .mode-control-caret {
   font-size: 0.6rem;
+  color: var(--ink-faint);
+}
+
+.mode-control-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.mode-control-dot--suggest {
+  background: var(--sug-ins-line);
+}
+
+.mode-control-dot--comment {
+  background: var(--prov-pending-line);
+}
+
+.mode-control-dot--read {
+  background: var(--ink-faint);
 }
 
 .mode-control-popover {
@@ -2313,10 +2330,10 @@ a:focus-visible {
 }
 
 .mode-control-option {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.1rem;
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
   width: 100%;
   border: none;
   background: transparent;
@@ -2331,7 +2348,24 @@ a:focus-visible {
 }
 
 .mode-control-option.is-active {
-  background: var(--accent-soft);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised));
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.mode-control-option-check {
+  align-self: start;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+}
+
+.mode-control-option-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
 }
 
 .mode-control-option-label {
@@ -2343,6 +2377,19 @@ a:focus-visible {
 .mode-control-option-hint {
   font-size: 0.7rem;
   color: var(--ink-faint);
+}
+
+.mode-control-shortcut {
+  align-self: center;
+  min-width: 2rem;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  line-height: 1.35rem;
+  text-align: center;
 }
 
 .selection-toolbar button:disabled {
@@ -2948,6 +2995,12 @@ a:focus-visible {
   /* No rail, no margin cards — their toggles go too. */
   .chrome-toggle {
     display: none;
+  }
+
+  /* Mode is primary document state, not secondary chrome. It stays visible
+   * after moving into the title cluster; only panel/focus toggles collapse. */
+  .mode-control-trigger {
+    display: inline-flex;
   }
 
   /* The overflow menu is the mobile route to ownership and account actions. */
