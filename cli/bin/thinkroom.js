@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url'
 
 const VERSION = '0.1.0'
 const DEFAULT_URL = 'https://thinkroom.kieranklaassen.com'
+const DEFAULT_AGENT_NAME = 'Thinkroom CLI'
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 
 class CliError extends Error {
@@ -159,8 +160,20 @@ function printJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
 }
 
-function agentName(options) {
-  return options.agent || process.env.THINKROOM_AGENT || 'Thinkroom CLI'
+function resolveAgent(options) {
+  const explicit = options.agent || process.env.THINKROOM_AGENT
+  return { name: explicit || DEFAULT_AGENT_NAME, explicit: Boolean(explicit) }
+}
+
+function writeAgent(options) {
+  const { name, explicit } = resolveAgent(options)
+  if (!explicit) {
+    process.stderr.write(
+      `Warning: No agent identity set; attributing this write to "${name}". ` +
+        'Pass --agent NAME or set THINKROOM_AGENT so your edits are attributed to you.\n',
+    )
+  }
+  return name
 }
 
 function slugFrom(value) {
@@ -283,7 +296,7 @@ async function createDocument(positionals, options) {
     method: 'POST',
     body,
     requireToken: true,
-    agent: agentName(options),
+    agent: writeAgent(options),
   })
   if (options.json) printJson(result.payload)
   else process.stdout.write(`${result.payload.share_url}\n`)
@@ -291,7 +304,7 @@ async function createDocument(positionals, options) {
 
 async function showDocument(positionals, options) {
   const slug = slugFrom(positionals[0])
-  const result = await request(`/api/docs/${encodeURIComponent(slug)}`, options, { agent: agentName(options) })
+  const result = await request(`/api/docs/${encodeURIComponent(slug)}`, options, { agent: resolveAgent(options).name })
   if (options.json) printJson(result.payload)
   else process.stdout.write(`${result.payload.content ?? result.payload.markdown ?? ''}\n`)
 }
@@ -307,7 +320,7 @@ async function updateDocument(positionals, options) {
   const result = await request(`/api/docs/${encodeURIComponent(slug)}`, options, {
     method: 'PATCH',
     body,
-    agent: agentName(options),
+    agent: writeAgent(options),
   })
   if (options.json) printJson(result.payload)
   else process.stdout.write(`${result.payload.share_url}\n`)
@@ -319,7 +332,7 @@ async function suggest(positionals, options) {
   if (!bodyText) throw new CliError('Suggestion body is required via --body, a file, or stdin.')
   const result = await request(`/api/docs/${encodeURIComponent(slug)}/suggestions`, options, {
     method: 'POST',
-    agent: agentName(options),
+    agent: writeAgent(options),
     body: {
       body: bodyText,
       intent: options.intent,
@@ -337,7 +350,7 @@ async function comment(positionals, options) {
   if (!bodyText) throw new CliError('Comment body is required via --body, a file, or stdin.')
   const result = await request(`/api/docs/${encodeURIComponent(slug)}/comments`, options, {
     method: 'POST',
-    agent: agentName(options),
+    agent: writeAgent(options),
     body: { body: bodyText, anchor_text: options.anchor },
   })
   if (options.json) printJson(result.payload)
