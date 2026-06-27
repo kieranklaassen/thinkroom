@@ -12,6 +12,51 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     @document = Document.create!(title: "Shared Doc", seed_markdown: "# Hello\n\nA paragraph about provenance.")
   end
 
+  test "docs index is an anonymous API entry point without leaking documents" do
+    get "/api/docs", headers: AGENT, as: :json
+
+    assert_response :success
+    body = response.parsed_body
+    assert_equal [], body["documents"]
+    assert_equal "POST", body.dig("api", "create_document", "method")
+    assert_equal "/api/docs", URI(body.dig("api", "create_document", "url")).path
+    assert body["notes"].any? { |note| note.include?("Bearer token") }
+  end
+
+  test "docs index lists only bearer token account documents" do
+    user = User.create!(
+      name: "Kieran",
+      email: "kieran@example.com",
+      password: "password1234",
+      password_confirmation: "password1234"
+    )
+    other_user = User.create!(
+      name: "Other",
+      email: "other@example.com",
+      password: "password1234",
+      password_confirmation: "password1234"
+    )
+    older = Document.create!(title: "Older", user:, content_format: "markdown", seed_content: "# Older")
+    newer = Document.create!(title: "Newer", user:, content_format: "html", seed_content: "<h1>Newer</h1>")
+    Document.create!(title: "Other Account", user: other_user)
+    _token, raw_token = CliAccessToken.issue!(user:, name: "Test terminal")
+
+    get "/api/docs",
+        headers: AGENT.merge("Authorization" => "Bearer #{raw_token}"),
+        as: :json
+
+    assert_response :success
+    documents = response.parsed_body["documents"]
+    slugs = documents.pluck("slug")
+    assert_equal [ newer.slug, older.slug ], slugs
+    assert_equal "Newer", documents.first["title"]
+    assert_equal "html", documents.first["content_format"]
+    assert_equal "/d/#{newer.slug}", URI(documents.first["share_url"]).path
+    assert_equal "/api/docs/#{newer.slug}", URI(documents.first["api_url"]).path
+    refute_includes slugs, @document.slug
+    assert response.parsed_body["notes"].any? { |note| note.include?("scoped to that account") }
+  end
+
   test "agent creates a document from markdown and gets a shareable slug" do
     post "/api/docs",
          params: { title: "Agent Doc", content: "# From an agent" },

@@ -53,6 +53,7 @@ Rails.application.routes.draw do
     end
 
     post "uploads", to: "uploads#create"
+    get "docs", to: "docs#index"
     post "docs", to: "docs#create"
     get "docs/:slug", to: "docs#show", as: :doc
     patch "docs/:slug", to: "docs#update"
