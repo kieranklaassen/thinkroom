@@ -747,6 +747,164 @@ class AgentApiTest < ActionDispatch::IntegrationTest
                  "a claimed document's seed must not be overwritable through the agent API"
   end
 
+  # --- owner-authenticated updates of their own claimed document ---
+
+  test "authenticated owner updates their own claimed seed-stage document in place" do
+    user = cli_user(email: "owner-update@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:, name: "Owner terminal")
+    doc = Document.create!(title: "Draft", user:, owner_name: user.name, seed_content: "# First cut")
+    refute doc.claimable?, "creating it while authenticated claims it to the account"
+
+    patch "/api/docs/#{doc.slug}",
+          params: { title: "Revised", content: "# Second cut\n\nBetter now." },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal doc.slug, body["slug"], "slug stays stable across an owner update"
+    assert_equal "Revised", body["title"]
+    assert_includes body["content"], "Second cut"
+
+    doc.reload
+    assert_equal "Revised", doc.title
+    assert_includes doc.current_content, "Second cut"
+    assert_equal "updated_document", doc.activities.last.action
+    assert_equal "Scout", doc.activities.last.actor_name
+    assert_equal "Scout", doc.seed_author_name, "an owner update re-attributes the seed to the sender"
+  end
+
+  test "authenticated owner can rename their own claimed seed-stage document" do
+    user = cli_user(email: "owner-rename@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(title: "Draft", user:, owner_name: user.name, seed_content: "# Body stays")
+
+    patch "/api/docs/#{doc.slug}",
+          params: { title: "Renamed" },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :ok
+    doc.reload
+    assert_equal "Renamed", doc.title
+    assert_includes doc.current_content, "Body stays"
+  end
+
+  test "a bearer token from a non-owner account cannot update a claimed document" do
+    owner = cli_user(email: "owner-real@example.com")
+    other = cli_user(email: "owner-impostor@example.com", name: "Other")
+    _record, raw_token = CliAccessToken.issue!(user: other)
+    doc = Document.create!(title: "Theirs", user: owner, owner_name: owner.name, seed_content: "# Owner content")
+
+    patch "/api/docs/#{doc.slug}",
+          params: { content: "# not yours" },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :conflict
+    assert_includes response.parsed_body["error"], "no longer an unclaimed draft"
+    assert_equal "# Owner content", doc.reload.seed_content,
+                 "another account's bearer token must not overwrite a claimed document"
+  end
+
+  test "owner update past the seed stage returns an ownership-aware conflict" do
+    user = cli_user(email: "owner-live@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(
+      title: "Live", user:, owner_name: user.name,
+      seed_content: "# Seed", yjs_state: "binary-crdt-state"
+    )
+
+    patch "/api/docs/#{doc.slug}",
+          params: { content: "# replace" },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :conflict
+    body = response.parsed_body
+    assert_includes body["error"], "You own this document"
+    assert_equal "/d/#{doc.slug}", URI(body["edit_in_browser"]).path
+    assert_includes body["propose_suggestion"], "/api/docs/#{doc.slug}/suggestions"
+    assert_nil body["revision_workflow"], "the owner conflict is ownership-aware, not the agent workflow"
+    assert_equal "# Seed", doc.reload.seed_content, "a live document's seed must stay untouched"
+  end
+
+  test "owner update past a content snapshot returns an ownership-aware conflict" do
+    user = cli_user(email: "owner-snapshot@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(
+      title: "Snap", user:, owner_name: user.name,
+      seed_content: "# Seed", content_snapshot: "# editor snapshot"
+    )
+
+    patch "/api/docs/#{doc.slug}",
+          params: { content: "# replace" },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :conflict
+    assert_includes response.parsed_body["error"], "You own this document"
+    assert_equal "# Seed", doc.reload.seed_content
+  end
+
+  test "an unclaimable document is not updatable even with a bearer token" do
+    user = cli_user(email: "owner-demo@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    demo = Document.create!(slug: "demo", title: "Demo", seed_content: "# Demo seed")
+
+    patch "/api/docs/demo",
+          params: { content: "# hijack the demo" },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :conflict
+    assert_equal "# Demo seed", demo.reload.seed_content,
+                 "the unclaimable demo must never be writable through the owner path"
+  end
+
+  test "an account-owned unclaimable document still cannot be updated via the owner path" do
+    user = cli_user(email: "owner-demo-owned@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    # Defense-in-depth: even if a future bug ever assigned the demo an owner,
+    # the unclaimable guard must keep the owner update path closed.
+    demo = Document.create!(slug: "demo", title: "Demo", user:, owner_name: user.name, seed_content: "# Demo seed")
+
+    patch "/api/docs/demo",
+          params: { content: "# hijack the demo" },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :conflict
+    assert_equal "# Demo seed", demo.reload.seed_content
+  end
+
+  test "a bearer token cannot update a document claimed only by a guest cookie" do
+    user = cli_user(email: "owner-vs-guest@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(
+      title: "Guest claimed", owner_token: SecureRandom.hex(8), owner_name: "Guest",
+      seed_content: "# Guest content"
+    )
+
+    patch "/api/docs/#{doc.slug}",
+          params: { content: "# not yours" },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :conflict
+    assert_equal "# Guest content", doc.reload.seed_content,
+                 "an account token does not own a guest-cookie-claimed document"
+  end
+
+  test "authenticated owner update without an agent name succeeds without spurious attribution" do
+    user = cli_user(email: "owner-no-agent@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(title: "Draft", user:, owner_name: user.name, seed_content: "# First")
+
+    # The real CLI always sends X-Agent-Name, but a bare request must still work
+    # for the owner and leave seed authorship unattributed (parity with create).
+    patch "/api/docs/#{doc.slug}",
+          params: { content: "# Second" },
+          headers: { "Authorization" => "Bearer #{raw_token}" }, as: :json
+
+    assert_response :ok
+    doc.reload
+    assert_includes doc.current_content, "Second"
+    assert_nil doc.seed_author_kind, "no X-Agent-Name means no agent seed attribution"
+  end
+
   test "title-only update leaves content and seed authorship untouched" do
     post "/api/docs", params: { title: "Draft", content: "# Body stays" }, headers: AGENT, as: :json
     slug = response.parsed_body["slug"]
@@ -941,6 +1099,17 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   end
 
   private
+
+  def cli_user(email:, name: "Owner")
+    User.create!(
+      name:, email:,
+      password: "password1234", password_confirmation: "password1234"
+    )
+  end
+
+  def bearer(raw_token)
+    AGENT.merge("Authorization" => "Bearer #{raw_token}")
+  end
 
   def valid_sketch_fence
     sketch_fence({
