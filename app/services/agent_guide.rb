@@ -141,21 +141,7 @@ class AgentGuide
                       success_status: 204,
                       body: { last_event_id: "(required) the ack_with value from poll_events" },
                       purpose: "Advance your event cursor." },
-        create_document: { method: "POST", url: "#{base_url}/api/docs",
-                           headers: { "X-Agent-Name": "recommended", "Content-Type": "application/json" },
-                           success_status: 201,
-                           rate_limits: document_creation_rate_limits,
-                           body: { title: "(optional)", format: "markdown | html", content: "(required with explicit format; canonical source)" },
-                           limits: { content_max_bytes: Document::MAX_CONTENT_BYTES },
-                           content_contracts: {
-                             markdown: content_contract("markdown", base_url),
-                             html: content_contract("html", base_url)
-                           },
-                           returns: { slug: "Document identifier", share_url: "Browser/editor URL",
-                                      content_format: "Immutable markdown or html", content: "Canonical source",
-                                      plain_text: "Rendered text", normalized: "Whether source changed during normalization",
-                                      content_contract: "Machine-readable source, HTML, CSS, and image rules" },
-                           purpose: "Create a new shared document. X-Agent-Name is recommended for seed attribution but creation also permits an unattributed request." },
+        create_document: create_document_endpoint(base_url),
         update_document: { method: "PATCH", url: api_base,
                            headers: { "X-Agent-Name": "recommended", "Content-Type": "application/json" },
                            success_status: 200,
@@ -170,6 +156,24 @@ class AgentGuide
                                       normalized: "Whether source changed during normalization", warning: "Normalization detail" },
                            purpose: "Revise the document you created in place — same slug, same share URL — while it is still seed-stage (no human has opened it to edit). Once a human starts editing, the live collaborative document is authoritative: this returns 409, and you propose a suggestion instead." }
       }
+    end
+
+    def create_document_endpoint(base_url)
+      { method: "POST", url: "#{base_url}/api/docs",
+        headers: { "X-Agent-Name": "recommended", "Content-Type": "application/json" },
+        success_status: 201,
+        rate_limits: document_creation_rate_limits,
+        body: { title: "(optional)", format: "markdown | html", content: "(required with explicit format; canonical source)" },
+        limits: { content_max_bytes: Document::MAX_CONTENT_BYTES },
+        content_contracts: {
+          markdown: content_contract("markdown", base_url),
+          html: content_contract("html", base_url)
+        },
+        returns: { slug: "Document identifier", share_url: "Browser/editor URL",
+                   content_format: "Immutable markdown or html", content: "Canonical source",
+                   plain_text: "Rendered text", normalized: "Whether source changed during normalization",
+                   content_contract: "Machine-readable source, HTML, CSS, and image rules" },
+        purpose: "Create a new shared document. X-Agent-Name is recommended for seed attribution but creation also permits an unattributed request." }
     end
 
     def content_contract(format, base_url)

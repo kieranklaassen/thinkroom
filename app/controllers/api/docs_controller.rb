@@ -3,6 +3,17 @@ module Api
     rate_limit_document_creation
     rate_limit_document_update
 
+    # GET /api/docs — API entry point plus the authenticated account's docs.
+    def index
+      render json: {
+        documents: index_documents.map { |doc| index_document_response(doc) },
+        api: {
+          create_document: AgentGuide.create_document_endpoint(request.base_url)
+        },
+        notes: index_notes
+      }
+    end
+
     # POST /api/docs — create a typed source document, get back its slug.
     def create
       content = params[:content].presence
@@ -104,6 +115,30 @@ module Api
     end
 
     private
+
+    def index_documents
+      return Document.none unless current_api_user
+
+      current_api_user.documents.order(created_at: :desc).limit(50)
+    end
+
+    def index_document_response(doc)
+      {
+        slug: doc.slug,
+        title: doc.title,
+        share_url: document_page_url(doc.slug),
+        api_url: api_doc_url(doc.slug),
+        content_format: doc.content_format,
+        created_at: doc.created_at.iso8601,
+        updated_at: doc.updated_at.iso8601
+      }
+    end
+
+    def index_notes
+      return [ "Authenticated with a Thinkroom CLI token; documents are scoped to that account." ] if current_api_user
+
+      [ "Send a Bearer token from `thinkroom login` to list account documents. Anonymous requests can still create documents with POST /api/docs." ]
+    end
 
     # A well-formed request that conflicts with the document's current state: a
     # human has claimed or started editing it, so the live document — not the
