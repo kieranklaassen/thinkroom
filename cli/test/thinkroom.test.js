@@ -229,8 +229,8 @@ test('document commands normalize share URLs and surface API failures', async (t
   assert.equal(seen[4].agent, 'Scout')
 })
 
-test('writes warn on the generic identity fallback and honor THINKROOM_AGENT', async (t) => {
-  const root = await temporaryDirectory('agent-fallback')
+test('writes require an agent identity and honor THINKROOM_AGENT', async (t) => {
+  const root = await temporaryDirectory('agent-identity')
   const configHome = path.join(root, 'config')
   await mkdir(path.join(configHome, 'thinkroom'), { recursive: true })
 
@@ -249,20 +249,20 @@ test('writes warn on the generic identity fallback and honor THINKROOM_AGENT', a
     JSON.stringify({ token: 'trm_test', url: server.url }),
   )
 
-  // No --agent and no THINKROOM_AGENT: send the generic identity but warn loudly.
-  const fallback = await runCli(['new', '-', '--title', 'Anon draft'], {
+  // No --agent and no THINKROOM_AGENT: refuse the write so nothing is misattributed.
+  const missing = await runCli(['new', '-', '--title', 'Anon draft'], {
     cwd: root,
     configHome,
     input: '# Draft\n',
     env: { THINKROOM_URL: server.url, THINKROOM_AGENT: '' },
   })
-  assert.equal(fallback.code, 0, fallback.stderr)
-  assert.equal(fallback.stdout.trim(), `${server.url}/d/doc1`)
-  assert.match(fallback.stderr, /No agent identity set/)
-  assert.match(fallback.stderr, /--agent/)
-  assert.equal(seen[0].agent, 'Thinkroom CLI')
+  assert.equal(missing.code, 1)
+  assert.match(missing.stderr, /agent identity/)
+  assert.match(missing.stderr, /--agent/)
+  assert.equal(missing.stdout, '', 'a refused write must not print a share URL')
+  assert.equal(seen.length, 0, 'a refused write must never reach the server')
 
-  // THINKROOM_AGENT supplies identity: forward it and stay silent.
+  // THINKROOM_AGENT supplies identity: forward it verbatim and succeed silently.
   const fromEnv = await runCli(['new', '-', '--title', 'Env draft'], {
     cwd: root,
     configHome,
@@ -270,6 +270,7 @@ test('writes warn on the generic identity fallback and honor THINKROOM_AGENT', a
     env: { THINKROOM_URL: server.url, THINKROOM_AGENT: 'Claude' },
   })
   assert.equal(fromEnv.code, 0, fromEnv.stderr)
-  assert.equal(seen[1].agent, 'Claude')
-  assert.equal(fromEnv.stderr, '', 'an explicit THINKROOM_AGENT must suppress the fallback warning')
+  assert.equal(fromEnv.stdout.trim(), `${server.url}/d/doc1`)
+  assert.equal(seen[0].agent, 'Claude')
+  assert.equal(fromEnv.stderr, '', 'an explicit THINKROOM_AGENT must not warn')
 })
