@@ -133,6 +133,17 @@ class DocumentTest < ActiveSupport::TestCase
     assert_equal "Codex", doc.seed_author_name
   end
 
+  test "replace content advances the CRDT generation so stale frames can be dropped" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed")
+    assert_equal 0, doc.crdt_epoch, "a never-replaced document stays at generation 0"
+
+    doc.replace_content!(source: "# First replacement")
+    assert_equal 1, doc.reload.crdt_epoch
+
+    doc.replace_content!(source: "# Second replacement")
+    assert_equal 2, doc.reload.crdt_epoch, "each replacement supersedes the prior generation"
+  end
+
   test "database rejects unknown content formats" do
     doc = Document.create!(title: "Constrained")
 

@@ -13,6 +13,9 @@ type SyncMessage = {
   type: 'sync' | 'sync-reply' | 'update' | 'awareness' | 'awareness-query' | 'write-denied'
   update?: string
   sv?: string
+  /** Server content generation. Bumped by an owner replace_content!; echoed on
+   *  outgoing frames so the server can drop ones from a superseded generation. */
+  epoch?: number
   seed?: boolean
   content_format?: 'markdown' | 'html'
   seed_content?: string
@@ -51,6 +54,13 @@ export class CableProvider {
   readonly awareness: Awareness
   readonly clientId = crypto.randomUUID()
   synced = false
+  // The server content generation this client last synced at. Stamped on every
+  // outgoing frame so the server drops frames produced before an owner
+  // replace_content! reset (which would otherwise resurrect the old CRDT state).
+  private serverEpoch = 0
+  // True once any sync has landed; unlike `synced` it survives disconnects, so a
+  // reconnect can tell "first handshake" from "re-handshake at a new generation".
+  private hasSynced = false
   seedContent: string | null = null
   seedFormat: 'markdown' | 'html' = 'markdown'
   // Seed authorship rides alongside seedContent with the same one-shot
@@ -106,12 +116,12 @@ export class CableProvider {
     window.addEventListener('beforeunload', this.handleUnload)
   }
 
-  on(event: 'synced' | 'seed' | 'rejected' | 'write-denied', handler: () => void): void {
+  on(event: 'synced' | 'seed' | 'rejected' | 'write-denied' | 'superseded', handler: () => void): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set())
     this.listeners.get(event)!.add(handler as never)
   }
 
-  off(event: 'synced' | 'seed' | 'rejected' | 'write-denied', handler: () => void): void {
+  off(event: 'synced' | 'seed' | 'rejected' | 'write-denied' | 'superseded', handler: () => void): void {
     this.listeners.get(event)?.delete(handler as never)
   }
 
@@ -144,7 +154,7 @@ export class CableProvider {
 
   private sendUpdate(type: 'sync-reply' | 'update', update: Uint8Array): void {
     this.updateSequence += 1
-    this.send({ type, update: toBase64(update), seq: this.updateSequence })
+    this.send({ type, update: toBase64(update), seq: this.updateSequence, epoch: this.serverEpoch })
   }
 
   /**
@@ -159,7 +169,7 @@ export class CableProvider {
       : Y.encodeStateAsUpdate(this.doc)
     const persistedVector = Y.encodeStateVector(this.doc)
 
-    const updatePayload = { update: toBase64(update), cid: this.clientId }
+    const updatePayload = { update: toBase64(update), cid: this.clientId, epoch: this.serverEpoch }
     const completePayload = { ...updatePayload, ...snapshot }
     const completeBody = JSON.stringify(completePayload)
     // Browsers cap keepalive request bodies at roughly 64 KiB. Large docs
@@ -191,6 +201,19 @@ export class CableProvider {
 
     switch (data.type) {
       case 'sync': {
+        const incomingEpoch = data.epoch ?? 0
+        // A reconnect that lands on a newer generation means the source was
+        // replaced (replace_content!) while we held the old one — possibly
+        // while we were offline and missed the content_reset signal. Replying
+        // with our stale state would resurrect the replaced content, so skip the
+        // handshake and recover by reloading into the new generation.
+        if (this.hasSynced && incomingEpoch > this.serverEpoch) {
+          this.serverEpoch = incomingEpoch
+          this.emit('superseded')
+          break
+        }
+        this.serverEpoch = incomingEpoch
+        this.hasSynced = true
         // Server's full state, then reply with what it's missing (sync step 2).
         Y.applyUpdate(this.doc, fromBase64(data.update!), this)
         const serverVector = fromBase64(data.sv!)

@@ -1369,6 +1369,7 @@ export default function DocumentShow({
                       onSpans={setSpans}
                       onSelection={isReading ? undefined : handleSelection}
                       onTitleChange={setDocumentTitle}
+                      onSuperseded={reloadAfterContentReset}
                     />
                   )}
                 </div>

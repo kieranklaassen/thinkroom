@@ -67,6 +67,48 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_not doc.yjs_state.present?, "no-op merge must not persist state"
   end
 
+  test "merge drops a frame produced before a content reset" do
+    doc = Document.create!(title: "Reset", seed_markdown: "# Old")
+    assert YjsPersistence.merge(doc, b64_update_for("old browser content"))
+    assert doc.reload.yjs_state.present?
+
+    # Owner replacement advances the generation and clears the CRDT state.
+    doc.replace_content!(source: "# New source")
+    doc.reload
+    assert_nil doc.yjs_state
+    assert_equal "pending", doc.seed_state
+
+    # A still-connected (or reconnecting) client replays its pre-reset state,
+    # stamped with the old generation. It must not resurrect the old content.
+    relayed = YjsPersistence.merge(doc, b64_update_for("old browser content"), epoch: 0)
+
+    assert_not relayed, "a stale-generation frame must not be relayed"
+    doc.reload
+    assert_nil doc.yjs_state, "a stale frame must not resurrect the old CRDT state"
+    assert_equal "pending", doc.seed_state, "a stale frame must not re-seed the doc"
+  end
+
+  test "merge accepts a frame stamped with the current generation after a reset" do
+    doc = Document.create!(title: "Reset", seed_markdown: "# Old")
+    doc.replace_content!(source: "# New source")
+    assert_equal 1, doc.reload.crdt_epoch
+
+    # The reloaded editor synced at the new generation and applies the new seed.
+    relayed = YjsPersistence.merge(doc, b64_update_for("new seed content"), epoch: doc.crdt_epoch)
+
+    assert relayed
+    doc.reload
+    assert doc.yjs_state.present?
+    assert_equal "seeded", doc.seed_state
+    assert_equal "new seed content", text_of(doc)
+  end
+
+  test "merge relays a current-generation frame on a never-reset document" do
+    doc = Document.create!(title: "Live")
+    assert YjsPersistence.merge(doc, b64_update_for("content"), epoch: 0),
+           "an epoch-0 frame on an epoch-0 document is current and relays"
+  end
+
   test "corrupt base64 raises and leaves the document untouched" do
     doc = Document.create!(title: "Corrupt")
     YjsPersistence.merge(doc, b64_update_for("good content"))

@@ -337,7 +337,12 @@ class DocumentsController < InertiaController
     decoded = Base64.strict_decode64(update)
     return head :content_too_large if decoded.bytesize > MAX_SYNC_UPDATE_BYTES
 
-    YjsPersistence.merge(document, update, token: owner_token, user: current_user)
+    relayable = YjsPersistence.merge(document, update, token: owner_token, user: current_user, epoch: params[:epoch])
+    # A stale-generation keepalive frame (the source was replaced out from under
+    # this client via replace_content!) must neither relay nor re-persist the
+    # superseded content/snapshot. The client recovers through content_reset.
+    return head :no_content unless relayable
+
     SyncChannel.broadcast_to(document, {
       type: "update",
       update:,

@@ -141,6 +141,10 @@ interface EditorProps {
   onSpans?: (spans: ProvenanceSpan[]) => void
   onSelection?: (view: EditorView) => void
   onTitleChange?: (title: string) => void
+  /** The synced document generation was superseded by an owner replacement
+   *  (replace_content!) while this client held an older one — recover by
+   *  reloading so the new source is applied instead of the stale local doc. */
+  onSuperseded?: () => void
 }
 
 interface ActiveSketch {
@@ -369,13 +373,14 @@ function CollabEditor({
   onSpans,
   onSelection,
   onTitleChange,
+  onSuperseded,
 }: EditorProps) {
   const [sketchDraft, setSketchDraft] = useState<ActiveSketch | undefined>(undefined)
   const insertSketchRef = useRef<() => void>(() => undefined)
   const saveSketchRef = useRef<(data: SketchData) => void>(() => undefined)
   const deleteSketchRef = useRef<(id: string) => void>(() => undefined)
-  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange })
-  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange }
+  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onSuperseded })
+  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onSuperseded }
   // Ref so the editable() closure always reads the live value; the effect
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
@@ -501,6 +506,11 @@ function CollabEditor({
       initialStateB64,
     )
     callbacksRef.current.onStatus?.('connecting')
+
+    // Reconnecting onto a newer content generation (an owner replaced the
+    // source) means our local doc is stale; let the page reload into it.
+    const handleSuperseded = () => callbacksRef.current.onSuperseded?.()
+    provider.on('superseded', handleSuperseded)
 
     let snapshotTimer: ReturnType<typeof setTimeout> | null = null
     let snapshotRetryTimer: ReturnType<typeof setTimeout> | null = null
@@ -631,6 +641,7 @@ function CollabEditor({
     return () => {
       cancelled = true
       provider.off('synced', start)
+      provider.off('superseded', handleSuperseded)
       if (snapshotTimer) clearTimeout(snapshotTimer)
       if (snapshotRetryTimer) clearTimeout(snapshotRetryTimer)
       try {

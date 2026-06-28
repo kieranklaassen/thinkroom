@@ -23,7 +23,11 @@ class SyncChannel < ApplicationCable::Channel
     stream_for @document
 
     full_state, state_vector = YjsPersistence.state_b64(@document)
-    message = { type: "sync", update: full_state, sv: state_vector }
+    # The content generation this client is syncing from. It stamps every frame
+    # the client sends back; frames from a superseded generation (after an owner
+    # replace_content!) are dropped server-side instead of resurrecting the old
+    # CRDT state. Absent for pre-rollout clients — treated as generation 0.
+    message = { type: "sync", update: full_state, sv: state_vector, epoch: @document.crdt_epoch }
     if claim_seed?
       message[:seed] = true
       message[:content_format] = @document.content_format
@@ -55,14 +59,15 @@ class SyncChannel < ApplicationCable::Channel
         return
       end
 
+      epoch = data["epoch"]
       if data.key?("seq")
         sequence = Integer(data["seq"], exception: false)
         return unless sequence&.positive?
 
-        enqueue_update(sequence, message, update)
+        enqueue_update(sequence, message, update, epoch)
       else
         # Rollout compatibility for clients deployed before ordered frames.
-        persist_and_broadcast(message, update)
+        persist_and_broadcast(message, update, epoch)
       end
     when "awareness", "awareness-query"
       self.class.broadcast_to(@document, message)
@@ -76,7 +81,7 @@ class SyncChannel < ApplicationCable::Channel
   # one of those updates in isolation leaves pending structs that y-rb's
   # full_diff does not serialize. Sequence and drain each subscription's
   # frames in client order before persisting them.
-  def enqueue_update(sequence, message, update)
+  def enqueue_update(sequence, message, update, epoch)
     @sequence_lock.synchronize do
       return if sequence < @next_sequence
       if sequence > @next_sequence + MAX_SEQUENCE_GAP
@@ -84,7 +89,7 @@ class SyncChannel < ApplicationCable::Channel
         return
       end
 
-      @pending_updates[sequence] ||= [ message, update ]
+      @pending_updates[sequence] ||= [ message, update, epoch ]
       while (frame = @pending_updates.delete(@next_sequence))
         persist_and_broadcast(*frame)
         @next_sequence += 1
@@ -92,13 +97,19 @@ class SyncChannel < ApplicationCable::Channel
     end
   end
 
-  def persist_and_broadcast(message, update)
-    YjsPersistence.merge(
+  def persist_and_broadcast(message, update, epoch)
+    relayable = YjsPersistence.merge(
       @document,
       update,
       token: (connection.owner_token if connection.respond_to?(:owner_token)),
-      user: (connection.current_user if connection.respond_to?(:current_user))
+      user: (connection.current_user if connection.respond_to?(:current_user)),
+      epoch: epoch
     )
+    # A stale-generation frame (produced before an owner replace_content!) is
+    # neither persisted nor relayed — broadcasting it would let peers merge the
+    # superseded content back into their freshly reset docs.
+    return unless relayable
+
     # A peer seeing an edit means the server has made it durable. This
     # ordering also prevents clients from accepting a frame that failed
     # persistence and would disappear on reload.
