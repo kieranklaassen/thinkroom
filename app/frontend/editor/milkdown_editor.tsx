@@ -518,7 +518,10 @@ function CollabEditor({
     const pushSnapshot = (attempt = 0) => {
       if (!canWriteRef.current) return
       editor.action((ctx) => {
-        void postJSON(`/d/${slug}/snapshot`, buildSnapshotPayload(ctx, ydoc, contentFormat))
+        void postJSON(`/d/${slug}/snapshot`, {
+          ...buildSnapshotPayload(ctx, ydoc, contentFormat),
+          epoch: provider.contentEpoch,
+        })
           .then((response) => {
             if (response.status === 409 && attempt < 3 && !cancelled) {
               if (snapshotRetryTimer) clearTimeout(snapshotRetryTimer)

@@ -125,6 +125,12 @@ export class CableProvider {
     this.listeners.get(event)?.delete(handler as never)
   }
 
+  // The generation derived snapshots must be stamped with, so the server drops
+  // a snapshot produced before an owner replace_content! reset.
+  get contentEpoch(): number {
+    return this.serverEpoch
+  }
+
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true

@@ -223,6 +223,45 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert_equal 1, @document.reload.provenance_spans.length
   end
 
+  test "a snapshot from a superseded generation is dropped without mutating content" do
+    @document.replace_content!(source: "# New source") # crdt_epoch -> 1, content_snapshot nil
+    assert_equal 1, @document.reload.crdt_epoch
+
+    post document_snapshot_path(@document.slug),
+         params: { markdown: "stale browser content", spans: [], epoch: 0 },
+         as: :json
+
+    assert_response :no_content
+    assert_nil @document.reload.content_snapshot,
+               "a snapshot from before the reset must not write the read model"
+  end
+
+  test "a snapshot stamped with the current generation persists after a reset" do
+    @document.replace_content!(source: "# New source") # crdt_epoch -> 1
+    post document_snapshot_path(@document.slug),
+         params: { markdown: "# New source typed", spans: [], epoch: 1 },
+         as: :json
+
+    assert_response :ok
+    assert_equal "# New source typed", @document.reload.content_snapshot
+  end
+
+  test "a durable sync update from a superseded generation is dropped" do
+    @document.replace_content!(source: "# New source") # crdt_epoch -> 1
+    ydoc = Y::Doc.new
+    ydoc.get_text("t") << "stale content"
+    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
+
+    assert_no_broadcasts(SyncChannel.broadcasting_for(@document)) do
+      post document_sync_update_path(@document.slug),
+           params: { update:, cid: "stale", epoch: 0 },
+           as: :json
+    end
+
+    assert_response :no_content
+    assert_nil @document.reload.yjs_state, "a stale sync update must not resurrect old state"
+  end
+
   test "durable sync update persists and broadcasts the Yjs diff" do
     ydoc = Y::Doc.new
     ydoc.get_text("task") << "checked"

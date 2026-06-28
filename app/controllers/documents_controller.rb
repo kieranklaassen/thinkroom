@@ -284,6 +284,11 @@ class DocumentsController < InertiaController
     document = Document.find_by!(slug: params[:slug])
     @write_document = document
     document.assert_write_access!(token: owner_token, user: current_user)
+    # A snapshot derived before an owner replace_content! reset would write the
+    # superseded source into the read model. Drop it silently — the client
+    # reloads into the new generation via content_reset — instead of letting
+    # current_content diverge from the live editor state.
+    return head :no_content if document.crdt_epoch > params[:epoch].to_i
     if params.key?(:content) && params.key?(:markdown)
       return render json: { error: "Send content or legacy markdown, not both." },
                     status: :unprocessable_entity
