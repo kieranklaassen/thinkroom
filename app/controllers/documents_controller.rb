@@ -320,7 +320,8 @@ class DocumentsController < InertiaController
       spans:,
       title:,
       token: owner_token,
-      user: current_user
+      user: current_user,
+      epoch: params[:epoch]
     )
     return render json: { error: "Snapshot is stale; retry from current document state." },
                   status: :conflict unless persisted
@@ -375,7 +376,8 @@ class DocumentsController < InertiaController
         spans:,
         title:,
         token: owner_token,
-        user: current_user
+        user: current_user,
+        epoch: params[:epoch]
       )
       return render json: { error: "Snapshot is stale; retry from current document state." },
                     status: :conflict unless persisted

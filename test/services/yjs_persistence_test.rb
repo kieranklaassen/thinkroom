@@ -130,6 +130,32 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal "server content", client.get_text("t").to_s
   end
 
+  test "persist_snapshot drops a snapshot from a superseded generation" do
+    doc = Document.create!(title: "Snap", content_snapshot: "current")
+    doc.replace_content!(source: "# New source") # crdt_epoch -> 1, content_snapshot nil
+    assert_equal 1, doc.reload.crdt_epoch
+
+    persisted = YjsPersistence.persist_snapshot(
+      doc, state_vector_b64: nil, content: "stale snapshot", spans: [], epoch: 0
+    )
+
+    assert_not persisted
+    assert_nil doc.reload.content_snapshot,
+               "a stale-generation snapshot must not write the read model"
+  end
+
+  test "persist_snapshot accepts a snapshot stamped with the current generation" do
+    doc = Document.create!(title: "Snap")
+    doc.replace_content!(source: "# New source") # crdt_epoch -> 1
+
+    persisted = YjsPersistence.persist_snapshot(
+      doc, state_vector_b64: nil, content: "new typed", spans: [], epoch: doc.crdt_epoch
+    )
+
+    assert persisted
+    assert_equal "new typed", doc.reload.content_snapshot
+  end
+
   test "snapshot persistence rejects a client behind the current Yjs state" do
     doc = Document.create!(title: "Snapshot", content_snapshot: "current")
     YjsPersistence.merge(doc, b64_update_for("server content"))

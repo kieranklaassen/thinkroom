@@ -69,13 +69,19 @@ class YjsPersistence
     # A client may be ahead (its own cable frame is still in flight), but it
     # may not overwrite the API read model from behind.
     def persist_snapshot(document, state_vector_b64:, content:, spans:, title: document.title,
-                         token: nil, user: nil)
+                         token: nil, user: nil, epoch: nil)
       client_state = decode_state_vector(decode(state_vector_b64)) if state_vector_b64.present?
 
       lock_for(document.id).synchronize do
         document.with_lock do
           document.reload
           raise Document::EditingLockedError, "This document is read-only." unless document.writable_by?(token, user:)
+          # Re-check the generation under the write lock, not just in the
+          # controller: a replace_content! can commit between the unlocked read
+          # and this write, and the currency check below is skipped once the
+          # reset nils yjs_state — without this a stale snapshot would overwrite
+          # the read model after the reset. nil epoch counts as generation 0.
+          return false if document.crdt_epoch > epoch.to_i
 
           if client_state && document.yjs_state.present?
             server_state = decode_state_vector(load_ydoc(document).state)

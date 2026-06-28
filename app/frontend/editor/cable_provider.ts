@@ -212,9 +212,11 @@ export class CableProvider {
         // replaced (replace_content!) while we held the old one — possibly
         // while we were offline and missed the content_reset signal. Replying
         // with our stale state would resurrect the replaced content, so skip the
-        // handshake and recover by reloading into the new generation.
+        // handshake and recover by reloading into the new generation. Keep
+        // serverEpoch at the superseded value on purpose: a keepalive/snapshot
+        // that fires before the reload tears us down is then stamped stale and
+        // dropped server-side, rather than re-stamped current and accepted.
         if (this.hasSynced && incomingEpoch > this.serverEpoch) {
-          this.serverEpoch = incomingEpoch
           this.emit('superseded')
           break
         }
