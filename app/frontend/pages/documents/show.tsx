@@ -107,6 +107,7 @@ export interface DocumentProps {
     title: string
     content_format: DocumentFormat
     seed_content: string | null
+    seed_version: string
     seed_granted: boolean
     seed_author_kind: string | null
     seed_author_name: string | null
@@ -1347,6 +1348,7 @@ export default function DocumentShow({
                       contentFormat={doc.content_format}
                       initialStateB64={doc.yjs_state_b64}
                       seedContent={doc.seed_content}
+                      seedVersion={doc.seed_version}
                       seedGranted={doc.seed_granted}
                       seedAuthorKind={doc.seed_author_kind}
                       seedAuthorName={doc.seed_author_name}

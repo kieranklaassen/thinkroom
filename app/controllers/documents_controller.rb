@@ -96,6 +96,7 @@ class DocumentsController < InertiaController
       ui: ui_prefs(mode:),
       document: document.slice(:id, :slug, :title, :content_format).merge(
         seed_content: document.seed_content,
+        seed_version: document.updated_at.iso8601(6),
         seed_granted: seed_granted,
         seed_author_kind: document.seed_author_kind,
         seed_author_name: document.seed_author_name,
