@@ -194,6 +194,7 @@ test('document commands normalize share URLs and surface API failures', async (t
   const shown = await runCli(['show', `${server.url}/d/slug123`], { cwd: root, configHome, env })
   assert.equal(shown.code, 0, shown.stderr)
   assert.equal(shown.stdout.trim(), '# Current')
+  assert.equal(shown.stderr, '', 'read-only show must not warn about agent identity')
 
   const updated = await runCli(['update', 'slug123', '-', '--agent', 'Codex'], {
     cwd: root, configHome, env, input: '# Revision',
@@ -217,4 +218,49 @@ test('document commands normalize share URLs and surface API failures', async (t
   assert.equal(seen[2].agent, 'Codex')
   assert.deepEqual(seen[3].body, { body: 'Check this', anchor_text: 'Current' })
   assert.equal(seen[3].agent, 'Scout')
+})
+
+test('writes warn on the generic identity fallback and honor THINKROOM_AGENT', async (t) => {
+  const root = await temporaryDirectory('agent-fallback')
+  const configHome = path.join(root, 'config')
+  await mkdir(path.join(configHome, 'thinkroom'), { recursive: true })
+
+  const seen = []
+  const server = await startServer(async (request, response) => {
+    if (request.url === '/api/docs' && request.method === 'POST') {
+      seen.push({ agent: request.headers['x-agent-name'], body: await jsonRequest(request) })
+      return sendJson(response, 201, { slug: 'doc1', share_url: `${server.url}/d/doc1` })
+    }
+    return sendJson(response, 404, { error: `Unexpected ${request.method} ${request.url}` })
+  })
+  t.after(() => server.close())
+
+  await writeFile(
+    path.join(configHome, 'thinkroom', 'config.json'),
+    JSON.stringify({ token: 'trm_test', url: server.url }),
+  )
+
+  // No --agent and no THINKROOM_AGENT: send the generic identity but warn loudly.
+  const fallback = await runCli(['new', '-', '--title', 'Anon draft'], {
+    cwd: root,
+    configHome,
+    input: '# Draft\n',
+    env: { THINKROOM_URL: server.url, THINKROOM_AGENT: '' },
+  })
+  assert.equal(fallback.code, 0, fallback.stderr)
+  assert.equal(fallback.stdout.trim(), `${server.url}/d/doc1`)
+  assert.match(fallback.stderr, /No agent identity set/)
+  assert.match(fallback.stderr, /--agent/)
+  assert.equal(seen[0].agent, 'Thinkroom CLI')
+
+  // THINKROOM_AGENT supplies identity: forward it and stay silent.
+  const fromEnv = await runCli(['new', '-', '--title', 'Env draft'], {
+    cwd: root,
+    configHome,
+    input: '# Draft\n',
+    env: { THINKROOM_URL: server.url, THINKROOM_AGENT: 'Claude' },
+  })
+  assert.equal(fromEnv.code, 0, fromEnv.stderr)
+  assert.equal(seen[1].agent, 'Claude')
+  assert.equal(fromEnv.stderr, '', 'an explicit THINKROOM_AGENT must suppress the fallback warning')
 })

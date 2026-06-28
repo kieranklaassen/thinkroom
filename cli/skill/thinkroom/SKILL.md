@@ -25,6 +25,8 @@ Write the complete draft to a file or pipe it on standard input. Identify the ac
 thinkroom new draft.md --title "Decision memo" --agent "Codex"
 ```
 
+Always pass `--agent` (or set `THINKROOM_AGENT`) on writes. Omitting it attributes the write to a generic `Thinkroom CLI` identity and prints a warning, which breaks per-agent provenance.
+
 Use `--format html` only when semantic HTML is genuinely needed. Return the printed share URL to the user.
 
 If the CLI asks for authentication, run `thinkroom login` and let the person approve the browser prompt. Never ask them to paste a token into chat.
