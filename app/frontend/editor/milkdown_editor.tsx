@@ -107,6 +107,10 @@ interface EditorProps {
   seedContent?: string | null
   /** Changes whenever the server-side source generation changes. */
   seedVersion?: string | null
+  /** Monotonic content generation this page loaded with. Announced to the
+   *  server on every durable write so writes from a session that predates an
+   *  owner CLI replacement are rejected instead of resurrecting old state. */
+  contentGeneration?: number | null
   /** True when documents#show atomically claimed the seed for this page
    *  load — the props-first path that skips the WebSocket round-trip. */
   seedGranted?: boolean
@@ -141,6 +145,9 @@ interface EditorProps {
   onSpans?: (spans: ProvenanceSpan[]) => void
   onSelection?: (view: EditorView) => void
   onTitleChange?: (title: string) => void
+  /** The document was replaced server-side (owner CLI update) and this session
+   *  is stale — reload onto the new content. */
+  onReset?: () => void
 }
 
 interface ActiveSketch {
@@ -238,6 +245,7 @@ function acquireSession(
   canWrite: boolean,
   connectionIdentity: string,
   initialStateB64?: string | null,
+  generation?: number | null,
 ): CollabSession {
   let session = sessions.get(slug)
   if (session && (session.canWrite !== canWrite || session.connectionIdentity !== connectionIdentity)) {
@@ -266,7 +274,7 @@ function acquireSession(
         // corrupt/stale prop — fall back to the wait-for-synced path
       }
     }
-    const provider = new CableProvider(ydoc, slug, { canWrite, connectionIdentity })
+    const provider = new CableProvider(ydoc, slug, { canWrite, connectionIdentity, generation })
     provider.awareness.setLocalStateField('user', identity)
     session = { ydoc, provider, refs: 0, destroyTimer: null, canWrite, connectionIdentity }
     sessions.set(slug, session)
@@ -356,6 +364,7 @@ function CollabEditor({
   initialStateB64,
   seedContent,
   seedVersion,
+  contentGeneration,
   seedGranted,
   seedAuthorKind,
   seedAuthorName,
@@ -369,13 +378,14 @@ function CollabEditor({
   onSpans,
   onSelection,
   onTitleChange,
+  onReset,
 }: EditorProps) {
   const [sketchDraft, setSketchDraft] = useState<ActiveSketch | undefined>(undefined)
   const insertSketchRef = useRef<() => void>(() => undefined)
   const saveSketchRef = useRef<(data: SketchData) => void>(() => undefined)
   const deleteSketchRef = useRef<(id: string) => void>(() => undefined)
-  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange })
-  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange }
+  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onReset })
+  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onReset }
   // Ref so the editable() closure always reads the live value; the effect
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
@@ -499,8 +509,11 @@ function CollabEditor({
       canWriteRef.current,
       connectionIdentity,
       initialStateB64,
+      contentGeneration,
     )
     callbacksRef.current.onStatus?.('connecting')
+    const handleReset = () => callbacksRef.current.onReset?.()
+    provider.on('reset', handleReset)
 
     let snapshotTimer: ReturnType<typeof setTimeout> | null = null
     let snapshotRetryTimer: ReturnType<typeof setTimeout> | null = null
@@ -508,7 +521,10 @@ function CollabEditor({
     const pushSnapshot = (attempt = 0) => {
       if (!canWriteRef.current) return
       editor.action((ctx) => {
-        void postJSON(`/d/${slug}/snapshot`, buildSnapshotPayload(ctx, ydoc, contentFormat))
+        void postJSON(`/d/${slug}/snapshot`, {
+          ...buildSnapshotPayload(ctx, ydoc, contentFormat),
+          gen: contentGeneration,
+        })
           .then((response) => {
             if (response.status === 409 && attempt < 3 && !cancelled) {
               if (snapshotRetryTimer) clearTimeout(snapshotRetryTimer)
@@ -631,6 +647,7 @@ function CollabEditor({
     return () => {
       cancelled = true
       provider.off('synced', start)
+      provider.off('reset', handleReset)
       if (snapshotTimer) clearTimeout(snapshotTimer)
       if (snapshotRetryTimer) clearTimeout(snapshotRetryTimer)
       try {
