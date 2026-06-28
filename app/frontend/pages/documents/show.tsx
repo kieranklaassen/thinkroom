@@ -564,11 +564,16 @@ export default function DocumentShow({
   const recoverDeniedWrite = useCallback(() => {
     router.reload({ only: ['document', 'ownership', 'viewer'], async: true })
   }, [])
+  const reloadAfterContentReset = useCallback(() => {
+    presencePoll.stop()
+    window.location.reload()
+  }, [presencePoll])
   useMetaChannel(doc.slug, {
     onDeleted: onDocumentGone,
     onTitle: setDocumentTitle,
     onVersionAvailable: () => setNewVersionAvailable(true),
     onEditingLock: reloadEditingAccess,
+    onContentReset: reloadAfterContentReset,
     connectionIdentity,
   })
 

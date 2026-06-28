@@ -102,6 +102,37 @@ class DocumentTest < ActiveSupport::TestCase
     assert_equal "", html.current_content
   end
 
+  test "replace content resets stale live state back to a seedable source" do
+    doc = Document.create!(
+      title: "Live",
+      seed_content: "# Seed",
+      content_snapshot: "# Snapshot",
+      yjs_state: "old-crdt-state",
+      provenance_spans: [ { "kind" => "human", "chars" => 8 } ],
+      seed_state: "seeded",
+      seed_claimed_at: Time.current
+    )
+
+    doc.replace_content!(
+      source: "# Replacement",
+      title: "Replaced",
+      seed_author_kind: "agent",
+      seed_author_name: "Codex"
+    )
+
+    doc.reload
+    assert_equal "Replaced", doc.title
+    assert_equal "# Replacement", doc.current_content
+    assert_equal "# Replacement", doc.seed_content
+    assert_nil doc.content_snapshot
+    assert_nil doc.yjs_state
+    assert_equal [], doc.provenance_spans
+    assert_equal "pending", doc.seed_state
+    assert_nil doc.seed_claimed_at
+    assert_equal "agent", doc.seed_author_kind
+    assert_equal "Codex", doc.seed_author_name
+  end
+
   test "database rejects unknown content formats" do
     doc = Document.create!(title: "Constrained")
 
