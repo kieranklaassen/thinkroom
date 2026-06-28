@@ -105,6 +105,26 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     assert_equal "pending", @document.reload.seed_state
   end
 
+  test "seed version changes after source replacement at the same slug" do
+    get document_page_path(@document.slug), headers: browser
+    first_version = nil
+    assert_inertia_props do |props|
+      first_version = props[:document][:seed_version]
+      first_version.present?
+    end
+
+    travel 1.second do
+      @document.replace_content!(source: "# Replacement")
+    end
+
+    get document_page_path(@document.slug), headers: browser
+    assert_inertia_props do |props|
+      props[:document][:seed_version].present? &&
+        props[:document][:seed_version] != first_version &&
+        props[:document][:seed_content] == "# Replacement"
+    end
+  end
+
   test "documents without seed markdown never grant the seed" do
     doc = Document.create!(title: "Blank", seed_markdown: nil)
 

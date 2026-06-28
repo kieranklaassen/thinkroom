@@ -105,6 +105,8 @@ interface EditorProps {
   /** Seed template for a never-edited document. Applied at bind time when
    *  the page response granted this client the seed claim. */
   seedContent?: string | null
+  /** Changes whenever the server-side source generation changes. */
+  seedVersion?: string | null
   /** True when documents#show atomically claimed the seed for this page
    *  load — the props-first path that skips the WebSocket round-trip. */
   seedGranted?: boolean
@@ -281,21 +283,23 @@ function acquireSession(
 // with the original seed_granted: true long after the template was applied
 // and synced. Re-applying onto a fresh local doc would duplicate the
 // template when the server state merges in, so grant consumption is made
-// durable per tab. sessionStorage is per-tab, which matches the grant's
-// scope — other tabs get fresh props (seed_granted: false once claimed).
-const seedAppliedKey = (slug: string) => `pruf:seed-applied:${slug}`
+// durable per tab. The server generation is part of the key because owner
+// CLI replacement keeps the slug while resetting the CRDT state to a new
+// seed source; that new generation must be allowed to seed again.
+const seedAppliedKey = (slug: string, seedVersion?: string | null) =>
+  `pruf:seed-applied:${slug}:${seedVersion ?? 'unknown'}`
 
-function seedAlreadyApplied(slug: string): boolean {
+function seedAlreadyApplied(slug: string, seedVersion?: string | null): boolean {
   try {
-    return sessionStorage.getItem(seedAppliedKey(slug)) === '1'
+    return sessionStorage.getItem(seedAppliedKey(slug, seedVersion)) === '1'
   } catch {
     return false
   }
 }
 
-function markSeedApplied(slug: string): void {
+function markSeedApplied(slug: string, seedVersion?: string | null): void {
   try {
-    sessionStorage.setItem(seedAppliedKey(slug), '1')
+    sessionStorage.setItem(seedAppliedKey(slug, seedVersion), '1')
   } catch {
     // best effort — worst case is the pre-fix behavior on history restore
   }
@@ -351,6 +355,7 @@ function CollabEditor({
   contentFormat,
   initialStateB64,
   seedContent,
+  seedVersion,
   seedGranted,
   seedAuthorKind,
   seedAuthorName,
@@ -612,8 +617,8 @@ function CollabEditor({
     // someone else holds the claim — waits for the sync handshake.
     if (provider.synced || ydoc.store.clients.size > 0) {
       start()
-    } else if (seedGranted && seedContent && !seedAlreadyApplied(slug)) {
-      markSeedApplied(slug)
+    } else if (seedGranted && seedContent && !seedAlreadyApplied(slug, seedVersion)) {
+      markSeedApplied(slug, seedVersion)
       provider.seedContent = seedContent
       provider.seedFormat = contentFormat
       provider.seedAuthorKind = seedAuthorKind ?? null
