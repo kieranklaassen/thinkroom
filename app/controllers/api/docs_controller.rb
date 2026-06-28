@@ -59,11 +59,14 @@ module Api
     end
 
     # PATCH/PUT /api/docs/:slug — revise a document in place. Unclaimed drafts
-    # still use the seed-stage path; authenticated account owners may also
-    # replace their own live document by resetting stale CRDT/snapshot state to
-    # the new source. Non-owners on claimed/live documents keep the suggestion
-    # workflow so a full replacement never bypasses ownership.
+    # still use the seed-stage path. An authenticated account owner may also
+    # replace their own live document, but because that discards human edits,
+    # the live CRDT/snapshot state, and pending suggestions, it requires an
+    # explicit force opt-in — a bare update is refused rather than silently
+    # destroying that work (issue #121). Non-owners on claimed/live documents
+    # keep the suggestion workflow so a full replacement never bypasses ownership.
     def update
+      force = ActiveModel::Type::Boolean.new.cast(params[:force])
       live_owner_replacement = !document.seed_stage? && owner_via_cli_token?
       return render_update_conflict unless live_owner_replacement || (document.seed_stage? && updatable_in_place?)
 
@@ -82,6 +85,13 @@ module Api
                       status: :unprocessable_entity
       end
       return if reject_oversized_content(content)
+
+      # Replacing the content of a claimed, live document destroys human browser
+      # edits, the live CRDT state, and any pending suggestions. Never do that
+      # silently: require an explicit force opt-in so a routine update can't look
+      # like success while corrupting the document (issue #121). A title-only
+      # owner update is non-destructive and stays allowed without force.
+      return render_claimed_replacement_warning if live_owner_replacement && content.present? && !force
 
       normalized = false
       warning = nil
@@ -122,7 +132,11 @@ module Api
           action: "updated_document", detail: document.title
         )
       end
-      DocumentMetaChannel.broadcast_event(document, :content_reset) if content_reset
+      if content_reset
+        DocumentMetaChannel.broadcast_event(document, :content_reset)
+        # The replacement cleared pending suggestions; tell open panels to refresh.
+        DocumentMetaChannel.broadcast_event(document, :suggestions)
+      end
 
       render json: agent_document_response(document, normalized:, warning:), status: :ok
     end
@@ -171,11 +185,28 @@ module Api
         document.owned_by?(nil, user: current_api_user)
     end
 
+    # The owner CAN replace their own document, but past the seed stage that
+    # discards human browser edits, the live CRDT state, and pending suggestions.
+    # Refuse a bare update so it can never silently destroy that work (issue
+    # #121): teach the safe suggestion path and the explicit force opt-in the
+    # owner uses when an overwrite is genuinely intended.
+    def render_claimed_replacement_warning
+      suggestions_url = "#{api_doc_url(document.slug)}/suggestions"
+      render json: {
+        error: "This document has been claimed and edited in the browser, so its live editor " \
+               "state is authoritative. Updating it would overwrite those human edits and discard " \
+               "pending suggestions.",
+        next_action: "Propose a suggestion instead (POST #{suggestions_url}), or re-run with " \
+                     "--force (force: true) to replace the live document and reset its editor state.",
+        propose_suggestion: suggestions_url,
+        force_hint: "Add --force (CLI) or force: true (API) to overwrite the claimed document."
+      }, status: :conflict
+    end
+
     # A well-formed request that conflicts with the document's current state.
-    # The owner reaches it only past the seed stage (an editor session made the
-    # live CRDT authoritative); everyone else also lands here on a claimed or
-    # collaboratively edited document. Teach the correct next action rather than
-    # failing opaquely or silently no-opping a seed write.
+    # Non-owners land here on a claimed or collaboratively edited document
+    # (owners get render_claimed_replacement_warning instead). Teach the correct
+    # next action rather than failing opaquely or silently no-opping a seed write.
     def render_update_conflict
       revision_workflow = AgentGuide.revision_workflow(document, request.base_url)
       steps = revision_workflow.fetch(:steps).index_by { |step| step.fetch(:action) }

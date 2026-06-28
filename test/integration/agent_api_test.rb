@@ -819,7 +819,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
 
     assert_broadcast_on(DocumentMetaChannel.broadcasting_for(doc), event: "content_reset") do
       patch "/api/docs/#{doc.slug}",
-            params: { title: "Replaced", content: "# replace" },
+            params: { title: "Replaced", content: "# replace", force: true },
             headers: bearer(raw_token), as: :json
     end
 
@@ -850,7 +850,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     )
 
     patch "/api/docs/#{doc.slug}",
-          params: { content: "# replace" },
+          params: { content: "# replace", force: true },
           headers: bearer(raw_token), as: :json
 
     assert_response :ok
@@ -876,6 +876,87 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal "Renamed", doc.title
     assert_equal "# editor snapshot", doc.current_content
     assert_equal "binary-crdt-state", doc.yjs_state
+  end
+
+  test "owner content replacement on a claimed live document is refused without force" do
+    user = cli_user(email: "owner-live-noforce@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(
+      title: "Live", user:, owner_name: user.name,
+      seed_content: "# Seed", content_snapshot: "# editor snapshot",
+      yjs_state: "binary-crdt-state"
+    )
+    suggestion = doc.suggestions.create!(
+      author_name: "Scout", author_kind: "agent", status: "pending",
+      body: "improved", replaces: "editor snapshot"
+    )
+
+    assert_no_broadcasts(DocumentMetaChannel.broadcasting_for(doc)) do
+      patch "/api/docs/#{doc.slug}",
+            params: { content: "# replace" },
+            headers: bearer(raw_token), as: :json
+    end
+
+    assert_response :conflict
+    body = response.parsed_body
+    assert_includes body["error"], "claimed"
+    assert_includes body["next_action"], "--force"
+    assert_includes body["propose_suggestion"], "/api/docs/#{doc.slug}/suggestions"
+
+    doc.reload
+    assert_equal "# editor snapshot", doc.current_content,
+                 "a bare update must not overwrite the live document"
+    assert_equal "binary-crdt-state", doc.yjs_state
+    assert Suggestion.exists?(suggestion.id), "pending suggestions survive a refused update"
+  end
+
+  test "forced owner replacement clears orphaned pending suggestions" do
+    user = cli_user(email: "owner-live-force@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(
+      title: "Live", user:, owner_name: user.name,
+      seed_content: "# Seed", content_snapshot: "# editor snapshot",
+      yjs_state: "binary-crdt-state"
+    )
+    orphan = doc.suggestions.create!(
+      author_name: "Scout", author_kind: "agent", status: "pending",
+      body: "improved", replaces: "editor snapshot"
+    )
+    resolved = doc.suggestions.create!(
+      author_name: "Scout", author_kind: "agent", status: "accepted",
+      body: "kept", replaces: "Seed"
+    )
+
+    assert_broadcast_on(DocumentMetaChannel.broadcasting_for(doc), event: "suggestions") do
+      patch "/api/docs/#{doc.slug}",
+            params: { content: "# replace", force: true },
+            headers: bearer(raw_token), as: :json
+    end
+
+    assert_response :ok
+    assert_equal "# replace", doc.reload.current_content
+    refute Suggestion.exists?(orphan.id), "a forced replacement clears pending suggestions"
+    assert Suggestion.exists?(resolved.id), "resolved suggestions are history and stay"
+  end
+
+  test "force does not let a non-owner overwrite a claimed live document" do
+    owner = cli_user(email: "force-owner@example.com")
+    other = cli_user(email: "force-impostor@example.com", name: "Other")
+    _record, raw_token = CliAccessToken.issue!(user: other)
+    doc = Document.create!(
+      title: "Theirs", user: owner, owner_name: owner.name,
+      seed_content: "# Seed", content_snapshot: "# Owner content",
+      yjs_state: "binary-crdt-state"
+    )
+
+    patch "/api/docs/#{doc.slug}",
+          params: { content: "# not yours", force: true },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :conflict
+    assert_includes response.parsed_body["error"], "no longer an unclaimed draft"
+    assert_equal "# Owner content", doc.reload.current_content,
+                 "force from a non-owner must not overwrite the document"
   end
 
   test "an unclaimable document is not updatable even with a bearer token" do
@@ -1092,6 +1173,8 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal 409, update["conflict_status"]
     assert_includes update["url"], "/api/docs/#{response.parsed_body['slug']}"
     assert_includes update["purpose"], "replace their own document"
+    assert_includes update["purpose"], "force: true"
+    assert update.dig("body", "force").present?, "the update endpoint advertises the force opt-in"
   end
 
   test "state payload advertises the update endpoint and explains it in notes" do

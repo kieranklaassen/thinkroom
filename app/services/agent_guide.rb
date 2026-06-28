@@ -149,12 +149,13 @@ class AgentGuide
                            rate_limits: contribution_rate_limits,
                            body: { title: "(optional) replacement title",
                                    format: "(optional) must equal this document's immutable content_format",
-                                   content: "(optional) replacement canonical #{source_name} source; send title and/or content" },
+                                   content: "(optional) replacement canonical #{source_name} source; send title and/or content",
+                                   force: "(optional) set true to replace a claimed, live document you own — discards its live editor state and pending suggestions" },
                            limits: { content_max_bytes: Document::MAX_CONTENT_BYTES },
                            returns: { slug: "Unchanged identifier", share_url: "Unchanged share URL",
                                       content: "Updated canonical source", plain_text: "Updated rendered text",
                                       normalized: "Whether source changed during normalization", warning: "Normalization detail" },
-                           purpose: "Revise the document you created in place — same slug, same share URL. An authenticated owner (CLI Bearer token) can replace their own document even after live editing has started; non-owners receive 409 and should propose a suggestion instead." }
+                           purpose: "Revise the document you created in place — same slug, same share URL. While it is still an unclaimed/seed draft it updates directly; once it is claimed and edited, only its authenticated account owner can replace their own document, and only with force: true (a bare update is refused so it cannot silently overwrite human edits). Non-owners receive 409 and should propose a suggestion instead." }
       }
     end
 
@@ -263,7 +264,7 @@ class AgentGuide
         "All your writes go through the same provenance/suggestion machinery as the human UI. There is no side channel: you propose, humans review.",
         "Text you contribute is marked kind=ai provenance (with your agent name as author) and tinted in the editor until a human advances its review state (pending -> reviewed -> endorsed).",
         "Documents you create with source content are pre-attributed as 100% unreviewed AI prose. Before any editor session opens the doc, the provenance summary is derived from the seed source and replaced by the first editor snapshot.",
-        "Updating: PATCH /api/docs/:slug rewrites your document in place — same slug, same share URL — so revisions stay at the link you already shared. An authenticated owner (a Bearer token from `thinkroom login`) can replace their own live document; non-owners get a 409 and should propose suggestions instead.",
+        "Updating: PATCH /api/docs/:slug rewrites your document in place — same slug, same share URL — so revisions stay at the link you already shared. Once it is claimed and edited in the browser a bare update is refused; its authenticated account owner (a Bearer token from `thinkroom login`) can still replace it by sending force: true, which discards the live editor state and pending suggestions. Non-owners get a 409 and should propose suggestions instead.",
         "Connected editors see your suggestions, comments, and presence live over WebSocket — no refresh needed on their side.",
         "Reading state: use plain_text as working context and content when source fidelity matters. This document expects #{source_name} suggestion bodies. State may lag if no human has the document open — the Yjs CRDT state is always authoritative.",
         "Sketches: inline Excalidraw scenes appear in content and are summarized in plain_text from their human description and text labels. Treat the scene as editable source and SVG as a derived browser export; embedded bitmap files are not supported. To author one in Markdown, embed a fenced excalidraw block following content_contract.sketches.markdown_source (formatVersion, id, description, height, and a full excalidraw scene with type/version/appState/files) — copy its example to start. A recognized sketch shows in plain_text as \"Sketch: <description> — <labels>\"; raw scene JSON in plain_text means the block was not recognized, and the create response then returns normalized: true with a warning.",
@@ -412,10 +413,13 @@ class AgentGuide
              -H "X-Agent-Name: YOUR_NAME" -H "Content-Type: application/json" \\
              -d '{"title": "Revised", "content": "..."}'
         format is immutable; omit it or send the document's existing format.
-        If you authenticate with a Bearer token (thinkroom login) and own the
-        document, you can keep updating it in place even after it is claimed or
-        after live editing has started. If you do not own the document, PATCH
-        returns 409 once it is claimed or live; propose a suggestion instead.
+        While the document is still an unclaimed seed draft this just works. Once
+        it has been claimed and edited in the browser, a bare update is refused —
+        replacing it would discard the human's edits and pending suggestions. If
+        you authenticate with a Bearer token (thinkroom login), own the document,
+        and intend a full overwrite, add "force": true (CLI: --force). If you do
+        not own the document, PATCH returns 409 once it is claimed or live;
+        propose a suggestion instead.
 
         HTML is sanitized and normalized to Thinkroom's editable schema. Create and
         suggestion responses include normalized=true plus a warning when
