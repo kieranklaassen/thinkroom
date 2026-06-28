@@ -59,14 +59,17 @@ module Api
     end
 
     # PATCH/PUT /api/docs/:slug — revise a document's seed in place while it is
-    # still an unclaimed draft. Same slug, same share URL, so the link the agent
-    # already shared keeps working. The moment a human gets involved — claiming
-    # the document, or opening it so an editor snapshot / live CRDT exists — the
-    # live document is authoritative and the seed is no longer what readers see.
-    # A seed write there would 200 while changing nothing, so this returns 409
-    # and points the agent at suggestions instead of lying about success.
+    # still a seed-stage draft. Same slug, same share URL, so the link already
+    # shared keeps working. Two audiences can write the seed: an unclaimed draft
+    # (the agent/anonymous flow) and the authenticated CLI account that owns the
+    # document — an owner must never be locked out of revising their own draft
+    # just because creating it claimed it. The seed_stage gate still applies to
+    # both: once an editor snapshot / live CRDT exists, the live document is
+    # authoritative and the seed is no longer what readers see, so a seed write
+    # would 200 while changing nothing. That case returns 409 and routes the
+    # caller to the right next action instead of lying about success.
     def update
-      return render_update_conflict unless document.seed_stage? && document.claimable?
+      return render_update_conflict unless document.seed_stage? && updatable_in_place?
 
       requested_format = request.request_parameters["format"].presence
       if requested_format && requested_format != document.content_format
@@ -140,11 +143,32 @@ module Api
       [ "Send a Bearer token from `thinkroom login` to list account documents. Anonymous requests can still create documents with POST /api/docs." ]
     end
 
-    # A well-formed request that conflicts with the document's current state: a
-    # human has claimed or started editing it, so the live document — not the
-    # seed — is authoritative. Teach the agent the correct next action rather
-    # than failing opaquely or silently no-opping a seed write.
+    # A seed-stage document is revisable in place by the agent/anonymous flow
+    # while it is still unclaimed, or by the authenticated CLI account that owns
+    # it. seed_stage? is checked separately and always required.
+    def updatable_in_place?
+      document.claimable? || owner_via_cli_token?
+    end
+
+    # True only when a valid CLI Bearer token's account owns a document that can
+    # be individually owned. Account ownership only (owned_by? with user:) — the
+    # CLI authenticates as an account, so a guest owner_token cookie is
+    # irrelevant. The unclaimable? guard keeps a permanently shared document
+    # (the demo) out of this path even if a future code path ever assigned it an
+    # owner, rather than relying on that invariant holding elsewhere.
+    def owner_via_cli_token?
+      current_api_user.present? && !document.unclaimable? &&
+        document.owned_by?(nil, user: current_api_user)
+    end
+
+    # A well-formed request that conflicts with the document's current state.
+    # The owner reaches it only past the seed stage (an editor session made the
+    # live CRDT authoritative); everyone else also lands here on a claimed or
+    # collaboratively edited document. Teach the correct next action rather than
+    # failing opaquely or silently no-opping a seed write.
     def render_update_conflict
+      return render_owner_update_conflict if owner_via_cli_token?
+
       revision_workflow = AgentGuide.revision_workflow(document, request.base_url)
       steps = revision_workflow.fetch(:steps).index_by { |step| step.fetch(:action) }
       render json: {
@@ -154,6 +178,20 @@ module Api
         propose_suggestion: steps.fetch("propose_targeted_suggestion").fetch(:url),
         resolve_comment: steps.fetch("resolve_addressed_comment").fetch(:url),
         revision_workflow:
+      }, status: :conflict
+    end
+
+    # The owner's own document has progressed past the seed stage: an editor
+    # session made the live Yjs/CRDT state authoritative, so a full replacement
+    # through this endpoint would change nothing readers see. Replacing live
+    # collaborative content server-side is intentionally not offered (it would
+    # clobber live edits), so route the owner to the browser editor — where they
+    # have full edit access — with suggestions as a secondary option.
+    def render_owner_update_conflict
+      render json: {
+        error: "You own this document, but it is now a live collaborative document — its editor (Yjs/CRDT) state is authoritative, so a full replacement here would change nothing readers see. Edit it directly in the browser, or propose a suggestion.",
+        edit_in_browser: document_page_url(document.slug),
+        propose_suggestion: AgentGuide.endpoints(document, request.base_url).fetch(:propose_suggestion).fetch(:url)
       }, status: :conflict
     end
 

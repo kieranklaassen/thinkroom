@@ -113,7 +113,12 @@ class Document < ApplicationRecord
 
   def claimed? = user_id.present? || owner_token.present?
 
-  def claimable? = !claimed? && UNCLAIMABLE_SLUGS.exclude?(slug)
+  # Permanently shared documents (the demo) that must never be owned, claimed,
+  # or replaced by a single party — claiming's only power is delete, and
+  # deleting the demo would take it away from everyone.
+  def unclaimable? = UNCLAIMABLE_SLUGS.include?(slug)
+
+  def claimable? = !claimed? && !unclaimable?
 
   # Never true for blank tokens — the delete-authorization predicate must not
   # match an unclaimed doc against a missing cookie.
