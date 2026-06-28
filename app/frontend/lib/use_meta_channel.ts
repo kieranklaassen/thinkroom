@@ -15,6 +15,8 @@ interface MetaChannelOptions {
   onVersionAvailable?: (version: string) => void
   /** Fired when the owner changes document write access. */
   onEditingLock?: (locked: boolean) => void
+  /** Fired when an owner replaces the document source outside the live editor. */
+  onContentReset?: () => void
   /** Recreate the shared socket when guest/account authentication changes. */
   connectionIdentity?: string
 }
@@ -41,6 +43,8 @@ export function useMetaChannel(slug: string, options?: MetaChannelOptions): void
   onVersionAvailableRef.current = options?.onVersionAvailable
   const onEditingLockRef = useRef(options?.onEditingLock)
   onEditingLockRef.current = options?.onEditingLock
+  const onContentResetRef = useRef(options?.onContentReset)
+  onContentResetRef.current = options?.onContentReset
   const loadedVersionRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -92,6 +96,10 @@ export function useMetaChannel(slug: string, options?: MetaChannelOptions): void
           }
           if (event === 'editing_lock' && typeof locked === 'boolean') {
             onEditingLockRef.current?.(locked)
+            return
+          }
+          if (event === 'content_reset') {
+            onContentResetRef.current?.()
             return
           }
           pending.add(event)

@@ -804,28 +804,44 @@ class AgentApiTest < ActionDispatch::IntegrationTest
                  "another account's bearer token must not overwrite a claimed document"
   end
 
-  test "owner update past the seed stage returns an ownership-aware conflict" do
+  test "owner update past the seed stage replaces live content and broadcasts reset" do
     user = cli_user(email: "owner-live@example.com")
     _record, raw_token = CliAccessToken.issue!(user:)
     doc = Document.create!(
       title: "Live", user:, owner_name: user.name,
-      seed_content: "# Seed", yjs_state: "binary-crdt-state"
+      seed_content: "# Seed",
+      content_snapshot: "# editor snapshot",
+      yjs_state: "binary-crdt-state",
+      provenance_spans: [ { "kind" => "human", "chars" => 15 } ],
+      seed_state: "seeded",
+      seed_claimed_at: Time.current
     )
 
-    patch "/api/docs/#{doc.slug}",
-          params: { content: "# replace" },
-          headers: bearer(raw_token), as: :json
+    assert_broadcast_on(DocumentMetaChannel.broadcasting_for(doc), event: "content_reset") do
+      patch "/api/docs/#{doc.slug}",
+            params: { title: "Replaced", content: "# replace" },
+            headers: bearer(raw_token), as: :json
+    end
 
-    assert_response :conflict
+    assert_response :ok
     body = response.parsed_body
-    assert_includes body["error"], "You own this document"
-    assert_equal "/d/#{doc.slug}", URI(body["edit_in_browser"]).path
-    assert_includes body["propose_suggestion"], "/api/docs/#{doc.slug}/suggestions"
-    assert_nil body["revision_workflow"], "the owner conflict is ownership-aware, not the agent workflow"
-    assert_equal "# Seed", doc.reload.seed_content, "a live document's seed must stay untouched"
+    assert_equal doc.slug, body["slug"]
+    assert_equal "Replaced", body["title"]
+    assert_includes body["content"], "# replace"
+
+    doc.reload
+    assert_equal "Replaced", doc.title
+    assert_equal "# replace", doc.current_content
+    assert_equal "# replace", doc.seed_content
+    assert_nil doc.content_snapshot
+    assert_nil doc.yjs_state
+    assert_equal [], doc.provenance_spans
+    assert_equal "pending", doc.seed_state
+    assert_nil doc.seed_claimed_at
+    assert_equal "updated_document", doc.activities.last.action
   end
 
-  test "owner update past a content snapshot returns an ownership-aware conflict" do
+  test "owner update past a content snapshot replaces snapshot content" do
     user = cli_user(email: "owner-snapshot@example.com")
     _record, raw_token = CliAccessToken.issue!(user:)
     doc = Document.create!(
@@ -837,9 +853,29 @@ class AgentApiTest < ActionDispatch::IntegrationTest
           params: { content: "# replace" },
           headers: bearer(raw_token), as: :json
 
-    assert_response :conflict
-    assert_includes response.parsed_body["error"], "You own this document"
-    assert_equal "# Seed", doc.reload.seed_content
+    assert_response :ok
+    assert_equal "# replace", doc.reload.current_content
+    assert_nil doc.content_snapshot
+  end
+
+  test "owner title-only update past live state renames without resetting content" do
+    user = cli_user(email: "owner-live-title@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(
+      title: "Live", user:, owner_name: user.name,
+      seed_content: "# Seed", content_snapshot: "# editor snapshot",
+      yjs_state: "binary-crdt-state"
+    )
+
+    patch "/api/docs/#{doc.slug}",
+          params: { title: "Renamed" },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :ok
+    doc.reload
+    assert_equal "Renamed", doc.title
+    assert_equal "# editor snapshot", doc.current_content
+    assert_equal "binary-crdt-state", doc.yjs_state
   end
 
   test "an unclaimable document is not updatable even with a bearer token" do
@@ -1055,7 +1091,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal "PATCH", update["method"]
     assert_equal 409, update["conflict_status"]
     assert_includes update["url"], "/api/docs/#{response.parsed_body['slug']}"
-    assert_includes update["purpose"], "seed-stage"
+    assert_includes update["purpose"], "replace their own document"
   end
 
   test "state payload advertises the update endpoint and explains it in notes" do

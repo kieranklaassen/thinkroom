@@ -180,6 +180,9 @@ test('document commands normalize share URLs and surface API failures', async (t
     if (request.method === 'PATCH' && request.url === '/api/docs/slug123') {
       return sendJson(response, 409, { error: 'Live state is authoritative.', how_to_revise: 'Propose a suggestion.' })
     }
+    if (request.method === 'PATCH' && request.url === '/api/docs/owned123') {
+      return sendJson(response, 200, { share_url: `${server.url}/d/owned123` })
+    }
     if (request.method === 'POST' && request.url === '/api/docs/slug123/suggestions') {
       return sendJson(response, 201, { suggestion: { id: 12 } })
     }
@@ -202,6 +205,12 @@ test('document commands normalize share URLs and surface API failures', async (t
   assert.equal(updated.code, 1)
   assert.match(updated.stderr, /Propose a suggestion/)
 
+  const ownerUpdated = await runCli(['update', 'owned123', '-', '--agent', 'Codex'], {
+    cwd: root, configHome, env, input: '# Owner revision',
+  })
+  assert.equal(ownerUpdated.code, 0, ownerUpdated.stderr)
+  assert.equal(ownerUpdated.stdout.trim(), `${server.url}/d/owned123`)
+
   const suggested = await runCli([
     'suggest', `${server.url}/d/slug123`, '--body', 'New', '--replaces', 'Old', '--intent', 'Tighten', '--agent', 'Codex',
   ], { cwd: root, configHome, env })
@@ -214,10 +223,10 @@ test('document commands normalize share URLs and surface API failures', async (t
   assert.equal(commented.code, 0, commented.stderr)
   assert.match(commented.stdout, /Comment 13/)
 
-  assert.deepEqual(seen[2].body, { body: 'New', intent: 'Tighten', replaces: 'Old' })
-  assert.equal(seen[2].agent, 'Codex')
-  assert.deepEqual(seen[3].body, { body: 'Check this', anchor_text: 'Current' })
-  assert.equal(seen[3].agent, 'Scout')
+  assert.deepEqual(seen[3].body, { body: 'New', intent: 'Tighten', replaces: 'Old' })
+  assert.equal(seen[3].agent, 'Codex')
+  assert.deepEqual(seen[4].body, { body: 'Check this', anchor_text: 'Current' })
+  assert.equal(seen[4].agent, 'Scout')
 })
 
 test('writes warn on the generic identity fallback and honor THINKROOM_AGENT', async (t) => {

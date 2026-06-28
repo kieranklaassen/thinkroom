@@ -45,9 +45,9 @@ For a document that is still an untouched seed, revise it in place:
 thinkroom update SHARE_URL revision.md --title "Updated title" --agent "Codex"
 ```
 
-If you are logged in (`thinkroom login`) and own the document, you can update it in place this way even after it is claimed — being the owner is not a lock-out. The seed stage is the only constraint: updating works until a human opens the document in the browser and starts a live editing session.
+If you are logged in (`thinkroom login`) and own the document, you can update it in place this way even after it is claimed or after a live editing session exists. Owner updates are full replacements of the document source at the same share URL.
 
-Once the document has a live editing session — a collaborator has opened it in the browser, so its live state is authoritative — do not try to overwrite it from the CLI. Owners edit a live document directly in the browser; otherwise propose the smallest exact replacement and include intent:
+If you do not own the document, do not try to overwrite a claimed or live document from the CLI. Propose the smallest exact replacement and include intent:
 
 ```bash
 thinkroom suggest SHARE_URL \

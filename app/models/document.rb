@@ -157,6 +157,27 @@ class Document < ApplicationRecord
     end
   end
 
+  def replace_content!(source:, title: nil, seed_author_kind: nil, seed_author_name: nil)
+    with_lock do
+      reload
+      attributes = {
+        seed_content: source,
+        content_snapshot: nil,
+        provenance_spans: [],
+        yjs_state: nil,
+        seed_state: "pending",
+        seed_claimed_at: nil
+      }
+      attributes[:title] = title if title.present?
+      if seed_author_kind.present?
+        attributes[:seed_author_kind] = seed_author_kind
+        attributes[:seed_author_name] = seed_author_name
+      end
+      update!(attributes)
+    end
+    self
+  end
+
   def with_comment_access(token: nil, user: nil)
     with_lock do
       reload

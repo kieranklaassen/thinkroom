@@ -58,18 +58,14 @@ module Api
       render json: AgentGuide.state(document, request.base_url)
     end
 
-    # PATCH/PUT /api/docs/:slug — revise a document's seed in place while it is
-    # still a seed-stage draft. Same slug, same share URL, so the link already
-    # shared keeps working. Two audiences can write the seed: an unclaimed draft
-    # (the agent/anonymous flow) and the authenticated CLI account that owns the
-    # document — an owner must never be locked out of revising their own draft
-    # just because creating it claimed it. The seed_stage gate still applies to
-    # both: once an editor snapshot / live CRDT exists, the live document is
-    # authoritative and the seed is no longer what readers see, so a seed write
-    # would 200 while changing nothing. That case returns 409 and routes the
-    # caller to the right next action instead of lying about success.
+    # PATCH/PUT /api/docs/:slug — revise a document in place. Unclaimed drafts
+    # still use the seed-stage path; authenticated account owners may also
+    # replace their own live document by resetting stale CRDT/snapshot state to
+    # the new source. Non-owners on claimed/live documents keep the suggestion
+    # workflow so a full replacement never bypasses ownership.
     def update
-      return render_update_conflict unless document.seed_stage? && updatable_in_place?
+      live_owner_replacement = !document.seed_stage? && owner_via_cli_token?
+      return render_update_conflict unless live_owner_replacement || (document.seed_stage? && updatable_in_place?)
 
       requested_format = request.request_parameters["format"].presence
       if requested_format && requested_format != document.content_format
@@ -90,19 +86,32 @@ module Api
       normalized = false
       warning = nil
       source = nil
+      content_reset = false
       if content.present?
         source, normalized, warning = normalized_source_and_signal(document.content_format, content)
-        document.seed_content = source
         # Only (re)attribute when an agent identifies itself; an anonymous
         # update preserves the original seed authorship rather than erasing it.
         kind, name = agent_seed_attribution(content)
-        if kind
-          document.seed_author_kind = kind
-          document.seed_author_name = name
+        if live_owner_replacement
+          document.replace_content!(
+            source:,
+            title: new_title,
+            seed_author_kind: kind,
+            seed_author_name: name
+          )
+          content_reset = true
+        else
+          document.seed_content = source
+          if kind
+            document.seed_author_kind = kind
+            document.seed_author_name = name
+          end
         end
       end
-      document.title = new_title if new_title.present?
-      document.save!
+      unless live_owner_replacement && content.present?
+        document.title = new_title if new_title.present?
+        document.save!
+      end
       # Claim assets only after the content that references them is persisted,
       # so a failed save never binds assets to content that was never stored.
       DocumentAsset.claim_from_html!(document:, source:) if source && document.html?
@@ -113,6 +122,7 @@ module Api
           action: "updated_document", detail: document.title
         )
       end
+      DocumentMetaChannel.broadcast_event(document, :content_reset) if content_reset
 
       render json: agent_document_response(document, normalized:, warning:), status: :ok
     end
@@ -167,8 +177,6 @@ module Api
     # collaboratively edited document. Teach the correct next action rather than
     # failing opaquely or silently no-opping a seed write.
     def render_update_conflict
-      return render_owner_update_conflict if owner_via_cli_token?
-
       revision_workflow = AgentGuide.revision_workflow(document, request.base_url)
       steps = revision_workflow.fetch(:steps).index_by { |step| step.fetch(:action) }
       render json: {
@@ -178,20 +186,6 @@ module Api
         propose_suggestion: steps.fetch("propose_targeted_suggestion").fetch(:url),
         resolve_comment: steps.fetch("resolve_addressed_comment").fetch(:url),
         revision_workflow:
-      }, status: :conflict
-    end
-
-    # The owner's own document has progressed past the seed stage: an editor
-    # session made the live Yjs/CRDT state authoritative, so a full replacement
-    # through this endpoint would change nothing readers see. Replacing live
-    # collaborative content server-side is intentionally not offered (it would
-    # clobber live edits), so route the owner to the browser editor — where they
-    # have full edit access — with suggestions as a secondary option.
-    def render_owner_update_conflict
-      render json: {
-        error: "You own this document, but it is now a live collaborative document — its editor (Yjs/CRDT) state is authoritative, so a full replacement here would change nothing readers see. Edit it directly in the browser, or propose a suggestion.",
-        edit_in_browser: document_page_url(document.slug),
-        propose_suggestion: AgentGuide.endpoints(document, request.base_url).fetch(:propose_suggestion).fetch(:url)
       }, status: :conflict
     end
 
