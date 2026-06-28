@@ -45,7 +45,7 @@ class ApiError extends CliError {
 function parseArgs(argv) {
   const options = {}
   const positionals = []
-  const booleans = new Set(['json', 'help', 'version', 'no-open'])
+  const booleans = new Set(['json', 'help', 'version', 'no-open', 'force'])
 
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index]
@@ -316,6 +316,9 @@ async function updateDocument(positionals, options) {
   if (options.title) body.title = options.title
   if (content !== undefined) body.content = content
   if (options.format) body.format = options.format
+  // Replacing a claimed/live document is destructive; the server refuses it
+  // without an explicit opt-in. --force makes that intent explicit.
+  if (options.force) body.force = true
   if (Object.keys(body).length === 0) throw new CliError('Provide a file/stdin and/or --title to update the document.')
   const result = await request(`/api/docs/${encodeURIComponent(slug)}`, options, {
     method: 'PATCH',
@@ -487,7 +490,7 @@ function help() {
   process.stdout.write(`Thinkroom CLI ${VERSION}\n\n`)
   process.stdout.write('Usage: thinkroom <command> [arguments] [options]\n\n')
   process.stdout.write('Account\n  login [--url URL] [--no-open]\n  whoami [--json]\n  logout\n\n')
-  process.stdout.write('Documents\n  new [FILE|-] [--title TITLE] [--format markdown|html] [--agent NAME] [--json]\n  show SLUG|URL [--json]\n  update SLUG|URL [FILE|-] [--title TITLE] [--agent NAME] [--json]\n  suggest SLUG|URL [FILE|-] --body TEXT --replaces TEXT --intent TEXT [--agent NAME]\n  comment SLUG|URL [FILE|-] --body TEXT [--anchor TEXT] [--agent NAME]\n  open SLUG|URL\n\n')
+  process.stdout.write('Documents\n  new [FILE|-] [--title TITLE] [--format markdown|html] [--agent NAME] [--json]\n  show SLUG|URL [--json]\n  update SLUG|URL [FILE|-] [--title TITLE] [--force] [--agent NAME] [--json]\n  suggest SLUG|URL [FILE|-] --body TEXT --replaces TEXT --intent TEXT [--agent NAME]\n  comment SLUG|URL [FILE|-] --body TEXT [--anchor TEXT] [--agent NAME]\n  open SLUG|URL\n\n')
   process.stdout.write('Agent setup\n  init [--agent agents|claude|codex|all]\n  skill install [--agent agents|claude|codex|all]\n  prime [--json]\n\n')
   process.stdout.write('Environment: THINKROOM_URL, THINKROOM_TOKEN, THINKROOM_AGENT, XDG_CONFIG_HOME\n')
 }
