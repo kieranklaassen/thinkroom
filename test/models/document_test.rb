@@ -133,6 +133,27 @@ class DocumentTest < ActiveSupport::TestCase
     assert_equal "Codex", doc.seed_author_name
   end
 
+  test "replace content bumps the content generation each time" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed")
+    assert_equal 0, doc.content_generation
+
+    doc.replace_content!(source: "# First")
+    assert_equal 1, doc.reload.content_generation
+
+    doc.replace_content!(source: "# Second")
+    assert_equal 2, doc.reload.content_generation
+  end
+
+  test "content_stale? flags only writes behind the current generation" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed")
+    doc.replace_content!(source: "# New") # content_generation -> 1
+
+    assert doc.content_stale?(0), "a write from before the reset is stale"
+    assert_not doc.content_stale?(1), "a write at the current generation is current"
+    assert_not doc.content_stale?(2), "a write ahead of the server is not stale"
+    assert_not doc.content_stale?(nil), "a write without a generation is not guarded"
+  end
+
   test "database rejects unknown content formats" do
     doc = Document.create!(title: "Constrained")
 

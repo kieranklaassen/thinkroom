@@ -27,6 +27,12 @@ class Document < ApplicationRecord
   # as "already claimed".
   class ClaimRaceError < StandardError; end
 
+  # Raised when a CRDT/snapshot write originates from a client whose document
+  # state predates a replace_content! reset (an older content_generation). The
+  # write is dropped so it can't resurrect the replaced state; the caller signals
+  # the stale client to reload.
+  class StaleContentError < StandardError; end
+
   attr_readonly :slug, :content_format
 
   has_many :suggestions, dependent: :destroy
@@ -166,7 +172,10 @@ class Document < ApplicationRecord
         provenance_spans: [],
         yjs_state: nil,
         seed_state: "pending",
-        seed_claimed_at: nil
+        seed_claimed_at: nil,
+        # Bump the generation so any client still holding the pre-reset CRDT
+        # is rejected when it tries to re-sync stale state (see content_stale?).
+        content_generation: content_generation + 1
       }
       attributes[:title] = title if title.present?
       if seed_author_kind.present?
@@ -176,6 +185,16 @@ class Document < ApplicationRecord
       update!(attributes)
     end
     self
+  end
+
+  # True when a write announces a generation older than this document's
+  # current one — i.e. it originates from a client whose document state
+  # predates a replace_content! reset. Such a write must never persist: it
+  # would resurrect the old CRDT/snapshot and permanently shadow the new seed
+  # (seed_stage? flips false the moment yjs_state/content_snapshot is set).
+  # A nil generation (clients deployed before the guard shipped) is not stale.
+  def content_stale?(generation)
+    generation.present? && generation < content_generation
   end
 
   def with_comment_access(token: nil, user: nil)

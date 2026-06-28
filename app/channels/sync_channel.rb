@@ -20,7 +20,17 @@ class SyncChannel < ApplicationCable::Channel
     @sequence_lock = Mutex.new
     @next_sequence = 1
     @pending_updates = {}
+    # The content generation this client loaded its page with. Fixed for the
+    # life of the page (never adopted from a reconnect handshake), so a tab
+    # holding pre-reset state keeps announcing its stale generation and its
+    # writes stay rejected. nil for clients deployed before the guard shipped.
+    @client_generation = Integer(params[:gen], exception: false)
     stream_for @document
+
+    # A client that loaded before an owner CLI replacement reconnecting here
+    # must not re-seed its stale doc. Tell it to reload (the page it loads next
+    # carries the current generation) instead of running the sync handshake.
+    return transmit({ type: "reset" }) if @document.content_stale?(@client_generation)
 
     full_state, state_vector = YjsPersistence.state_b64(@document)
     message = { type: "sync", update: full_state, sv: state_vector }
@@ -97,7 +107,8 @@ class SyncChannel < ApplicationCable::Channel
       @document,
       update,
       token: (connection.owner_token if connection.respond_to?(:owner_token)),
-      user: (connection.current_user if connection.respond_to?(:current_user))
+      user: (connection.current_user if connection.respond_to?(:current_user)),
+      generation: @client_generation
     )
     # A peer seeing an edit means the server has made it durable. This
     # ordering also prevents clients from accepting a frame that failed
@@ -105,6 +116,10 @@ class SyncChannel < ApplicationCable::Channel
     self.class.broadcast_to(@document, message)
   rescue Document::EditingLockedError
     transmit({ type: "write-denied", locked: true })
+  rescue Document::StaleContentError
+    # The doc was replaced out from under this client. Don't persist or relay
+    # its stale frame; have it reload onto the current generation.
+    transmit({ type: "reset" })
   rescue StandardError => e
     Rails.logger.warn("SyncChannel: merge failed: #{e.class}: #{e.message}")
   end

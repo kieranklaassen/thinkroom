@@ -13,12 +13,16 @@ class YjsPersistence
 
   class << self
     # Merge a base64-encoded Yjs update into the document's persisted state.
-    def merge(document, base64_update, token: nil, user: nil)
+    # `generation` is the content generation the writing client loaded; a write
+    # behind the current generation predates a replace_content! reset and is
+    # rejected so it can't resurrect the replaced CRDT state.
+    def merge(document, base64_update, token: nil, user: nil, generation: nil)
       update = decode(base64_update)
       lock_for(document.id).synchronize do
         document.with_lock do
           document.reload
           raise Document::EditingLockedError, "This document is read-only." unless document.writable_by?(token, user:)
+          raise Document::StaleContentError, "This document was replaced." if document.content_stale?(generation)
 
           ydoc = load_ydoc(document)
           before = ydoc.state
@@ -51,13 +55,17 @@ class YjsPersistence
     # A client may be ahead (its own cable frame is still in flight), but it
     # may not overwrite the API read model from behind.
     def persist_snapshot(document, state_vector_b64:, content:, spans:, title: document.title,
-                         token: nil, user: nil)
+                         token: nil, user: nil, generation: nil)
       client_state = decode_state_vector(decode(state_vector_b64)) if state_vector_b64.present?
 
       lock_for(document.id).synchronize do
         document.with_lock do
           document.reload
           raise Document::EditingLockedError, "This document is read-only." unless document.writable_by?(token, user:)
+          # A snapshot from a pre-reset client would resurrect the replaced
+          # source (content_snapshot shadows the new seed). Drop it like a
+          # stale state vector.
+          return false if document.content_stale?(generation)
 
           if client_state && document.yjs_state.present?
             server_state = decode_state_vector(load_ydoc(document).state)
