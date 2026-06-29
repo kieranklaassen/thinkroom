@@ -174,6 +174,10 @@ class Document < ApplicationRecord
         attributes[:seed_author_name] = seed_author_name
       end
       update!(attributes)
+      # A full replacement removes the text that pending suggestions target, so
+      # none of them can apply cleanly. Clear them rather than leaving an
+      # orphaned, unappliable review queue behind (issue #121).
+      suggestions.pending.destroy_all
     end
     self
   end

@@ -133,6 +133,26 @@ class DocumentTest < ActiveSupport::TestCase
     assert_equal "Codex", doc.seed_author_name
   end
 
+  test "replace content clears pending suggestions but keeps resolved ones" do
+    doc = Document.create!(
+      title: "Live", seed_content: "# Seed", content_snapshot: "# Snapshot",
+      yjs_state: "old-crdt-state"
+    )
+    pending = doc.suggestions.create!(
+      author_name: "Codex", author_kind: "agent", status: "pending",
+      body: "new", replaces: "Snapshot"
+    )
+    accepted = doc.suggestions.create!(
+      author_name: "Codex", author_kind: "agent", status: "accepted",
+      body: "kept", replaces: "Seed"
+    )
+
+    doc.replace_content!(source: "# Replacement")
+
+    refute Suggestion.exists?(pending.id), "pending suggestions target text that is now gone"
+    assert Suggestion.exists?(accepted.id), "resolved suggestions are history and are kept"
+  end
+
   test "database rejects unknown content formats" do
     doc = Document.create!(title: "Constrained")
 

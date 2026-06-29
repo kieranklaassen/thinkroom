@@ -34,6 +34,11 @@ class FeedbackRunsTest < ActionDispatch::IntegrationTest
   end
 
   setup do
+    # sign_in posts to the authentication-rate-limited sessions endpoint, and
+    # the limiter's store is process-global. Clear it so sign-ins accumulated by
+    # parallel test workers can't flake this suite to 429 (mirrors the other
+    # auth-exercising suites, e.g. authentication_flow_test).
+    WriteRateLimited::STORE.clear
     @cursor_client = FakeCursorClient.new
     Rails.application.config.x.cursor_client = @cursor_client
   end

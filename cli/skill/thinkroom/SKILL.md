@@ -45,7 +45,13 @@ For a document that is still an untouched seed, revise it in place:
 thinkroom update SHARE_URL revision.md --title "Updated title" --agent "Codex"
 ```
 
-If you are logged in (`thinkroom login`) and own the document, you can update it in place this way even after it is claimed or after a live editing session exists. Owner updates are full replacements of the document source at the same share URL.
+Once a document has been claimed and edited in the browser, a bare `thinkroom update` is refused — overwriting it would discard the human's edits, the live editor state, and any pending suggestions. Prefer `thinkroom suggest` for changes to a claimed document. If you are logged in (`thinkroom login`), own the document, and genuinely intend a full replacement, re-run with `--force`:
+
+```bash
+thinkroom update SHARE_URL revision.md --force --agent "Codex"
+```
+
+A forced update replaces the document source at the same share URL and clears pending suggestions, so use it only when overwriting the human's edits is intended.
 
 If you do not own the document, do not try to overwrite a claimed or live document from the CLI. Propose the smallest exact replacement and include intent:
 

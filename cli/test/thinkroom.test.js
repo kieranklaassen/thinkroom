@@ -273,3 +273,40 @@ test('writes warn on the generic identity fallback and honor THINKROOM_AGENT', a
   assert.equal(seen[1].agent, 'Claude')
   assert.equal(fromEnv.stderr, '', 'an explicit THINKROOM_AGENT must suppress the fallback warning')
 })
+
+test('update is refused on a claimed doc and --force opts in to replacement', async (t) => {
+  const root = await temporaryDirectory('force-update')
+  const configHome = path.join(root, 'config')
+  const seen = []
+  const server = await startServer(async (request, response) => {
+    if (request.method === 'PATCH' && request.url === '/api/docs/claimed123') {
+      const body = await jsonRequest(request)
+      seen.push(body)
+      if (!body.force) {
+        return sendJson(response, 409, {
+          error: 'This document has been claimed and edited in the browser.',
+          next_action: 'Propose a suggestion instead, or re-run with --force to replace the live document.',
+        })
+      }
+      return sendJson(response, 200, { share_url: `${server.url}/d/claimed123` })
+    }
+    return sendJson(response, 404, { error: 'Unexpected request' })
+  })
+  t.after(() => server.close())
+  const env = { THINKROOM_URL: server.url }
+
+  const refused = await runCli(['update', 'claimed123', '-', '--agent', 'Codex'], {
+    cwd: root, configHome, env, input: '# Revision',
+  })
+  assert.equal(refused.code, 1)
+  assert.match(refused.stderr, /claimed/)
+  assert.match(refused.stderr, /--force/)
+  assert.equal(seen[0].force, undefined, 'a bare update must not send force')
+
+  const forced = await runCli(['update', 'claimed123', '-', '--force', '--agent', 'Codex'], {
+    cwd: root, configHome, env, input: '# Revision',
+  })
+  assert.equal(forced.code, 0, forced.stderr)
+  assert.equal(forced.stdout.trim(), `${server.url}/d/claimed123`)
+  assert.equal(seen[1].force, true, '--force sends force: true')
+})
