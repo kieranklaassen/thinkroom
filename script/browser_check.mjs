@@ -74,6 +74,11 @@ try {
   // button confirms with "Copied" without requiring a separate copy click.
   await landing.locator('.landing-agent-block .share-copy', { hasText: 'Copied' }).waitFor()
   ok('activating the agent action copies the instruction automatically')
+  // And a clear, prominent confirmation message appears (not just the small button).
+  await landing
+    .locator('.landing-agent-hint.is-copied', { hasText: 'Copied to clipboard' })
+    .waitFor()
+  ok('a clear "Copied to clipboard" confirmation is shown on copy')
   if ((await landing.locator('.format-label').count()) === 0) {
     ok('landing page organizes documents without format labels')
   } else {

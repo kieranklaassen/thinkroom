@@ -240,7 +240,7 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
   const copyInstruction = useCallback(() => {
     void navigator.clipboard.writeText(agentInstruction).then(() => {
       setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
+      setTimeout(() => setCopied(false), 2400)
     })
   }, [agentInstruction])
 
@@ -327,8 +327,13 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
               className="landing-agent"
               aria-labelledby="agent-start-trigger"
             >
-              <p className="landing-agent-hint">
-                Paste this to any agent that can make HTTP requests:
+              <p
+                className={`landing-agent-hint${copied ? ' is-copied' : ''}`}
+                aria-live="polite"
+              >
+                {copied
+                  ? 'Copied to clipboard — paste it into any agent that can make HTTP requests:'
+                  : 'Paste this to any agent that can make HTTP requests:'}
               </p>
               <div className="landing-agent-block">
                 <code>{agentInstruction}</code>
