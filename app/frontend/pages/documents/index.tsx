@@ -244,6 +244,16 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
     })
   }, [agentInstruction])
 
+  // Revealing the prompt also copies it: the agent-start action is "give me the
+  // prompt", so a single click both shows it and puts it on the clipboard.
+  const revealAgentInstructions = useCallback(() => {
+    const willOpen = !agentInstructionsOpen
+    setAgentInstructionsOpen(willOpen)
+    if (willOpen) {
+      copyInstruction()
+    }
+  }, [agentInstructionsOpen, copyInstruction])
+
   const availableTags = yours.reduce<string[]>((tags, document) => {
     document.tags.forEach((tag) => {
       if (!tags.some((existingTag) => existingTag.toLowerCase() === tag.toLowerCase())) {
@@ -299,7 +309,7 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
                 type="button"
                 aria-expanded={agentInstructionsOpen}
                 aria-controls="agent-start-instructions"
-                onClick={() => setAgentInstructionsOpen((open) => !open)}
+                onClick={revealAgentInstructions}
               >
                 Have an agent start one
               </button>

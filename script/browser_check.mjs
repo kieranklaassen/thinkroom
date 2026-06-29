@@ -27,6 +27,11 @@ const makePage = async (label) => {
 
 try {
   const landing = await browser.newPage()
+  // Headless shell denies clipboard writes by default; real browsers allow them
+  // under a user gesture. Grant them so the agent-start copy path is testable.
+  await landing
+    .context()
+    .grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE })
   await landing.goto(BASE)
   await landing.waitForSelector('.landing-wordmark')
   if ((await landing.locator('.landing-wordmark').innerText()) === 'Thinkroom') {
@@ -65,9 +70,10 @@ try {
   } else {
     fail('agent creation action does not report its expanded state')
   }
-  await landing.locator('.landing-agent-block .share-copy').click()
+  // Activating the trigger should copy the prompt automatically — the in-panel Copy
+  // button confirms with "Copied" without requiring a separate copy click.
   await landing.locator('.landing-agent-block .share-copy', { hasText: 'Copied' }).waitFor()
-  ok('agent creation instructions provide explicit copy confirmation')
+  ok('activating the agent action copies the instruction automatically')
   if ((await landing.locator('.format-label').count()) === 0) {
     ok('landing page organizes documents without format labels')
   } else {
