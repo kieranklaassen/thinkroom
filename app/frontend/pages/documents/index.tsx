@@ -31,6 +31,13 @@ const EARLIER_PREVIEW_LIMIT = 8
 const GITHUB_REPOSITORY_URL = 'https://github.com/kieranklaassen/thinkroom'
 const GITHUB_PROFILE_URL = 'https://github.com/kieranklaassen'
 
+const buildAgentInstruction = (origin: string) =>
+  `Create a Thinkroom document for me: POST ${origin}/api/docs with JSON ` +
+  `{"title": "…", "format": "markdown", "content": "# …"} ` +
+  `or use "format": "html" with HTML content, plus an X-Agent-Name header. ` +
+  `The response includes the share URL — open it and we'll collaborate live. ` +
+  `Fetch the share URL (Accept: text/plain) for the full API guide.`
+
 const errorText = (error: unknown): string | null => {
   if (Array.isArray(error)) return error.find((value) => typeof value === 'string') ?? null
   return typeof error === 'string' ? error : null
@@ -230,19 +237,18 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
   useEffect(() => {
     setOrigin(window.location.origin)
   }, [])
-  const agentInstruction =
-    `Create a Thinkroom document for me: POST ${origin}/api/docs with JSON ` +
-    `{"title": "…", "format": "markdown", "content": "# …"} ` +
-    `or use "format": "html" with HTML content, plus an X-Agent-Name header. ` +
-    `The response includes the share URL — open it and we'll collaborate live. ` +
-    `Fetch the share URL (Accept: text/plain) for the full API guide.`
+  const agentInstruction = buildAgentInstruction(origin)
 
+  // Resolve the host from window at copy time, not from the render-closed
+  // `origin` state: this runs only from client click handlers (post-hydration),
+  // and the reveal auto-copy can fire before the post-hydration effect fills
+  // `origin`, so reading state here would put a host-less prompt on the clipboard.
   const copyInstruction = useCallback(() => {
-    void navigator.clipboard.writeText(agentInstruction).then(() => {
+    void navigator.clipboard.writeText(buildAgentInstruction(window.location.origin)).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2400)
     })
-  }, [agentInstruction])
+  }, [])
 
   // Revealing the prompt also copies it: the agent-start action is "give me the
   // prompt", so a single click both shows it and puts it on the clipboard.
