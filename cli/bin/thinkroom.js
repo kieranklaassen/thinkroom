@@ -322,8 +322,24 @@ async function updateDocument(positionals, options) {
     body,
     agent: writeAgent(options),
   })
-  if (options.json) printJson(result.payload)
-  else process.stdout.write(`${result.payload.share_url}\n`)
+  if (options.json) {
+    printJson(result.payload)
+  } else {
+    process.stdout.write(`${result.payload.share_url}\n`)
+    // auto_rejected_suggestions is only present on a live-document
+    // replacement (see Api::DocsController#update). Surfacing it here too
+    // -- not just in --json mode -- is the point of this field: a CLI
+    // caller in default mode must not learn about cleared suggestions only
+    // by later hitting a confusing "target missing" error from `suggest`.
+    if (result.payload.auto_rejected_suggestions > 0) {
+      const n = result.payload.auto_rejected_suggestions
+      process.stderr.write(
+        `Note: this replaced a live document and auto-rejected ${n} pending ` +
+          `suggestion${n === 1 ? '' : 's'} that targeted removed text. Run ` +
+          '`thinkroom show --json` to review the current suggestion queue.\n',
+      )
+    }
+  }
 }
 
 async function suggest(positionals, options) {
