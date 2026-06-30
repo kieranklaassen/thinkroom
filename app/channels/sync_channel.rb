@@ -3,13 +3,25 @@
 # ({ update: <base64> } JSON) so the yrb-actioncable client could be swapped in.
 #
 # Protocol:
-#   server -> joining client : { type: "sync", update, sv, seed?, content_format?, seed_content?, seed_author_kind?, seed_author_name? }
-#   client -> server         : { type: "sync-reply", update, cid, seq }   # everything server was missing
-#                              { type: "update", update, cid, seq }       # incremental edit
+#   server -> joining client : { type: "sync", update, sv, generation, seed?, content_format?, seed_content?, seed_author_kind?, seed_author_name? }
+#   client -> server         : { type: "sync-reply", update, cid, seq, generation }   # everything server was missing
+#                              { type: "update", update, cid, seq, generation }       # incremental edit
 #                              { type: "awareness", update, cid }    # presence/cursors, relay-only
 #                              { type: "awareness-query", cid }      # ask peers to re-announce
 # All client messages are broadcast to every subscriber (sender filters its own
 # via cid); update/sync-reply are additionally merged into persistent storage.
+#
+# `generation` (Document#content_generation) is the client's last-known
+# content generation, learned from the initial "sync" message and echoed back
+# on every outgoing update/sync-reply frame. A client connected before an
+# owner CLI replacement (Document#replace_content!) still has a live
+# subscription — ActionCable has no way to know the content changed — but its
+# next outgoing frame carries the stale generation. YjsPersistence.merge
+# rejects (does not persist) a frame whose generation is behind the
+# document's current one, so a stale tab can never resurrect content a
+# replacement just wiped. A frame with no generation key (clients deployed
+# before this) is trusted, matching the existing seq-less rollout-compatibility
+# branch below.
 class SyncChannel < ApplicationCable::Channel
   MAX_SEQUENCE_GAP = 256
 
@@ -23,7 +35,7 @@ class SyncChannel < ApplicationCable::Channel
     stream_for @document
 
     full_state, state_vector = YjsPersistence.state_b64(@document)
-    message = { type: "sync", update: full_state, sv: state_vector }
+    message = { type: "sync", update: full_state, sv: state_vector, generation: @document.content_generation }
     if claim_seed?
       message[:seed] = true
       message[:content_format] = @document.content_format
@@ -55,14 +67,21 @@ class SyncChannel < ApplicationCable::Channel
         return
       end
 
+      # nil (key absent) means "trust it" — rollout compatibility for clients
+      # deployed before this field existed, mirroring the seq-less branch
+      # below. Present-but-blank/non-integer is treated the same as absent
+      # rather than as generation 0, so a malformed value can't accidentally
+      # reject a legitimate current-generation frame.
+      generation = Integer(data["generation"], exception: false) if data.key?("generation")
+
       if data.key?("seq")
         sequence = Integer(data["seq"], exception: false)
         return unless sequence&.positive?
 
-        enqueue_update(sequence, message, update)
+        enqueue_update(sequence, message, update, generation)
       else
         # Rollout compatibility for clients deployed before ordered frames.
-        persist_and_broadcast(message, update)
+        persist_and_broadcast(message, update, generation)
       end
     when "awareness", "awareness-query"
       self.class.broadcast_to(@document, message)
@@ -76,7 +95,7 @@ class SyncChannel < ApplicationCable::Channel
   # one of those updates in isolation leaves pending structs that y-rb's
   # full_diff does not serialize. Sequence and drain each subscription's
   # frames in client order before persisting them.
-  def enqueue_update(sequence, message, update)
+  def enqueue_update(sequence, message, update, generation)
     @sequence_lock.synchronize do
       return if sequence < @next_sequence
       if sequence > @next_sequence + MAX_SEQUENCE_GAP
@@ -84,7 +103,7 @@ class SyncChannel < ApplicationCable::Channel
         return
       end
 
-      @pending_updates[sequence] ||= [ message, update ]
+      @pending_updates[sequence] ||= [ message, update, generation ]
       while (frame = @pending_updates.delete(@next_sequence))
         persist_and_broadcast(*frame)
         @next_sequence += 1
@@ -92,10 +111,11 @@ class SyncChannel < ApplicationCable::Channel
     end
   end
 
-  def persist_and_broadcast(message, update)
+  def persist_and_broadcast(message, update, generation = nil)
     YjsPersistence.merge(
       @document,
       update,
+      generation:,
       token: (connection.owner_token if connection.respond_to?(:owner_token)),
       user: (connection.current_user if connection.respond_to?(:current_user))
     )
@@ -105,6 +125,12 @@ class SyncChannel < ApplicationCable::Channel
     self.class.broadcast_to(@document, message)
   rescue Document::EditingLockedError
     transmit({ type: "write-denied", locked: true })
+  rescue Document::StaleGenerationError
+    # The document was replaced (Document#replace_content!) since this client
+    # last synced. Drop the frame — merging it would resurrect content the
+    # replacement just wiped — and tell the client to discard its session
+    # rather than silently dropping it with no recovery signal.
+    transmit({ type: "write-denied", locked: false, stale: true })
   rescue StandardError => e
     Rails.logger.warn("SyncChannel: merge failed: #{e.class}: #{e.message}")
   end

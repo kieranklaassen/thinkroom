@@ -329,6 +329,11 @@ class DocumentsController < InertiaController
   # incremental Yjs diff over a keepalive HTTP request. A page reload can close
   # Action Cable before its frame reaches the server; this idempotent fallback
   # makes the same CRDT update durable and relays it to any connected clients.
+  #
+  # Merges through the same YjsPersistence.merge path SyncChannel uses, so it
+  # carries the same content_generation guard: a client whose tab is closing
+  # right as an owner CLI replacement resets the document must not have this
+  # keepalive request resurrect the pre-replacement state it's holding.
   def sync_update
     document = Document.find_by!(slug: params[:slug])
     @write_document = document
@@ -337,7 +342,8 @@ class DocumentsController < InertiaController
     decoded = Base64.strict_decode64(update)
     return head :content_too_large if decoded.bytesize > MAX_SYNC_UPDATE_BYTES
 
-    YjsPersistence.merge(document, update, token: owner_token, user: current_user)
+    generation = Integer(params[:generation], exception: false) if params.key?(:generation)
+    YjsPersistence.merge(document, update, generation:, token: owner_token, user: current_user)
     SyncChannel.broadcast_to(document, {
       type: "update",
       update:,

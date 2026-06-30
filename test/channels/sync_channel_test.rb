@@ -141,6 +141,68 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert doc.reload.yjs_state.present?
   end
 
+  test "subscribing transmits the document's current content generation" do
+    doc = Document.create!(title: "Generation")
+    subscribe slug: doc.slug
+
+    assert_equal 0, transmissions.last["generation"]
+  end
+
+  test "a frame carrying a stale generation is rejected, not merged" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed")
+    YjsPersistence.merge(doc, build_update_b64("live editor content"))
+    subscribe slug: doc.slug
+    stale_generation = transmissions.last["generation"]
+
+    doc.replace_content!(source: "# Replacement")
+    assert_equal stale_generation + 1, doc.reload.content_generation
+
+    update = build_update_b64("resurrected stale content")
+    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+      perform :receive, {
+        "type" => "update", "update" => update, "cid" => "stale-tab", "generation" => stale_generation
+      }
+    end
+
+    assert_nil doc.reload.yjs_state, "a stale-generation frame must never resurrect yjs_state"
+    last = transmissions.last
+    assert_equal "write-denied", last["type"]
+    assert_equal true, last["stale"]
+
+    # The literal #120 repro: a fresh, independent read (what an incognito
+    # hard refresh's documents#show ultimately reads from) must see the
+    # replacement, not content the stale tab tried to resurrect.
+    assert_equal "# Replacement", Document.find(doc.id).current_content
+  end
+
+  test "a frame carrying the current generation persists normally" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed")
+    subscribe slug: doc.slug
+    current_generation = transmissions.last["generation"]
+    update = build_update_b64("current content")
+
+    assert_broadcast_on(SyncChannel.broadcasting_for(doc), type: "update", update:, cid: "fresh-tab") do
+      perform :receive, {
+        "type" => "update", "update" => update, "cid" => "fresh-tab", "generation" => current_generation
+      }
+    end
+
+    assert doc.reload.yjs_state.present?
+  end
+
+  test "a frame with no generation key still merges (rollout compatibility)" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed")
+    subscribe slug: doc.slug
+    doc.replace_content!(source: "# Replacement")
+    update = build_update_b64("no generation sent")
+
+    assert_broadcast_on(SyncChannel.broadcasting_for(doc), type: "update", update:, cid: "legacy-client") do
+      perform :receive, { "type" => "update", "update" => update, "cid" => "legacy-client" }
+    end
+
+    assert doc.reload.yjs_state.present?
+  end
+
   test "locked non-owner updates are rejected without persistence or relay" do
     doc = Document.create!(
       title: "Locked",

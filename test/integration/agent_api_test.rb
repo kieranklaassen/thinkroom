@@ -522,6 +522,27 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_includes response.parsed_body["error"], "last_event_id"
   end
 
+  test "event ack with non-numeric last_event_id is rejected and does not reset the high-water mark" do
+    post "/api/docs/#{@document.slug}/presence", params: { status: "active" }, headers: AGENT, as: :json
+    Activity.log!(document: @document, actor_name: "Quiet Falcon", actor_kind: "human",
+                  action: "accepted_suggestion", detail: "accepted")
+
+    get "/api/docs/#{@document.slug}/events/pending", headers: AGENT
+    ack_with = response.parsed_body["ack_with"]
+    post "/api/docs/#{@document.slug}/events/ack",
+         params: { last_event_id: ack_with }, headers: AGENT, as: :json
+    assert_response :no_content
+
+    post "/api/docs/#{@document.slug}/events/ack",
+         params: { last_event_id: "not-a-number" }, headers: AGENT, as: :json
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "last_event_id"
+
+    # The bad ack must not roll the high-water mark back to 0 and re-deliver events.
+    get "/api/docs/#{@document.slug}/events/pending", headers: AGENT
+    assert_empty response.parsed_body["events"]
+  end
+
   test "presence announce returns an explicit 200" do
     post "/api/docs/#{@document.slug}/presence",
          params: { status: "active" }, headers: AGENT, as: :json
@@ -839,6 +860,47 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal "pending", doc.seed_state
     assert_nil doc.seed_claimed_at
     assert_equal "updated_document", doc.activities.last.action
+    assert_equal 0, body["auto_rejected_suggestions"],
+                 "a replacement with no stale suggestions still reports the count, not omits it"
+  end
+
+  test "owner replacement response reports how many pending suggestions were auto-rejected" do
+    user = cli_user(email: "owner-suggestions@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(
+      title: "Live", user:, owner_name: user.name,
+      seed_content: "# Seed\n\nThis paragraph will be removed.",
+      content_snapshot: "# Seed\n\nThis paragraph will be removed.",
+      yjs_state: "binary-crdt-state",
+      seed_state: "seeded",
+      seed_claimed_at: Time.current
+    )
+    stale = Suggestion.propose!(
+      document: doc, author_name: "Scout", author_kind: "agent",
+      body: "tightened wording", replaces: "This paragraph will be removed."
+    )
+
+    patch "/api/docs/#{doc.slug}",
+          params: { content: "# Entirely different content" },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :ok
+    assert_equal 1, response.parsed_body["auto_rejected_suggestions"]
+    assert_equal "rejected", stale.reload.status
+  end
+
+  test "seed-stage updates never report auto_rejected_suggestions" do
+    user = cli_user(email: "owner-seedstage@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(title: "Draft", user:, owner_name: user.name, seed_content: "# Seed")
+
+    patch "/api/docs/#{doc.slug}",
+          params: { content: "# Revised draft" },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :ok
+    assert_not response.parsed_body.key?("auto_rejected_suggestions"),
+                "a seed-stage (non-replacement) update is not a content reset and must not report this field"
   end
 
   test "owner update past a content snapshot replaces snapshot content" do

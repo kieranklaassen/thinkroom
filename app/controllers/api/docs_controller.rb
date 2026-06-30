@@ -63,6 +63,13 @@ module Api
     # replace their own live document by resetting stale CRDT/snapshot state to
     # the new source. Non-owners on claimed/live documents keep the suggestion
     # workflow so a full replacement never bypasses ownership.
+    #
+    # A live replacement also advances Document#content_generation, which
+    # SyncChannel/YjsPersistence use to reject (not merge) any frame a still-
+    # connected stale browser tab sends afterward — without that guard, the
+    # stale tab could silently resurrect the pre-replacement content moments
+    # after this request returns 200. See
+    # docs/plans/2026-06-30-001-fix-cli-replacement-stale-crdt-race-plan.md.
     def update
       live_owner_replacement = !document.seed_stage? && owner_via_cli_token?
       return render_update_conflict unless live_owner_replacement || (document.seed_stage? && updatable_in_place?)
@@ -124,7 +131,10 @@ module Api
       end
       DocumentMetaChannel.broadcast_event(document, :content_reset) if content_reset
 
-      render json: agent_document_response(document, normalized:, warning:), status: :ok
+      render json: agent_document_response(
+        document, normalized:, warning:,
+        auto_rejected_suggestions: (document.auto_rejected_suggestions if content_reset)
+      ), status: :ok
     end
 
     private
@@ -237,7 +247,7 @@ module Api
     # The create/update success payload: one shape so an agent revising a
     # document sees the same fields — and the same normalization signal — it
     # saw on create.
-    def agent_document_response(doc, normalized:, warning:)
+    def agent_document_response(doc, normalized:, warning:, auto_rejected_suggestions: nil)
       response = {
         slug: doc.slug,
         title: doc.title,
@@ -252,6 +262,11 @@ module Api
         api: AgentGuide.endpoints(doc, request.base_url)
       }
       response[:markdown] = doc.current_content if doc.content_format == "markdown"
+      # Only present on an owner replacement (create and seed-stage updates
+      # never auto-reject anything) — surfaces the side effect immediately,
+      # including the 0 case, instead of letting the caller discover it via
+      # a later confusing `suggest` "target missing" failure.
+      response[:auto_rejected_suggestions] = auto_rejected_suggestions unless auto_rejected_suggestions.nil?
       response
     end
 

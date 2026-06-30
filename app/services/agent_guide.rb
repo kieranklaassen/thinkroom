@@ -153,8 +153,9 @@ class AgentGuide
                            limits: { content_max_bytes: Document::MAX_CONTENT_BYTES },
                            returns: { slug: "Unchanged identifier", share_url: "Unchanged share URL",
                                       content: "Updated canonical source", plain_text: "Updated rendered text",
-                                      normalized: "Whether source changed during normalization", warning: "Normalization detail" },
-                           purpose: "Revise the document you created in place — same slug, same share URL. An authenticated owner (CLI Bearer token) can replace their own document even after live editing has started; non-owners receive 409 and should propose a suggestion instead." }
+                                      normalized: "Whether source changed during normalization", warning: "Normalization detail",
+                                      auto_rejected_suggestions: "Present only on a live-document replacement: how many pending suggestions were auto-rejected because the text they targeted no longer exists in the new content" },
+                           purpose: "Revise the document you created in place — same slug, same share URL. An authenticated owner (CLI Bearer token) can replace their own document even after live editing has started; non-owners receive 409 and should propose a suggestion instead. Replacing a live document auto-rejects pending suggestions whose targeted text no longer exists in the new content." }
       }
     end
 

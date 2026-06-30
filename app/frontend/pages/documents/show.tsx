@@ -585,11 +585,18 @@ export default function DocumentShow({
     const provider = handle.provider
     provider.on('rejected', onDocumentGone)
     provider.on('write-denied', recoverDeniedWrite)
+    // A frame this tab sent was rejected for staleness: an owner CLI
+    // replacement reset the document since this tab last synced (its
+    // content_generation is behind). This can fire even when the
+    // content_reset broadcast was missed or raced with the outgoing frame —
+    // same recovery action as content_reset, reached via a second path.
+    provider.on('stale', reloadAfterContentReset)
     return () => {
       provider.off('rejected', onDocumentGone)
       provider.off('write-denied', recoverDeniedWrite)
+      provider.off('stale', reloadAfterContentReset)
     }
-  }, [handle, onDocumentGone, recoverDeniedWrite])
+  }, [handle, onDocumentGone, recoverDeniedWrite, reloadAfterContentReset])
 
   const handleSelection = useCallback((view: EditorView) => {
     viewRef.current = view

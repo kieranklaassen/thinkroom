@@ -21,6 +21,12 @@ type SyncMessage = {
   seed_author_name?: string | null
   cid?: string
   seq?: number
+  /** Document#content_generation at the time of this message. */
+  generation?: number
+  /** True when a write-denied frame was rejected for staleness (the
+   *  document was replaced since this client last synced) rather than a
+   *  locked-link permission denial. */
+  stale?: boolean
 }
 
 export interface DurableSnapshotPayload {
@@ -65,6 +71,11 @@ export class CableProvider {
   private destroyed = false
   private updateSequence = 0
   private serverStateVector: Uint8Array | null = null
+  // Learned from each "sync" message and echoed back on outgoing
+  // update/sync-reply frames so the server can detect a client whose local
+  // Yjs doc predates an owner CLI replacement (Document#replace_content!)
+  // and reject its frame instead of merging stale content back in.
+  private generation: number | null = null
   private readonly slug: string
   private readonly canWrite: boolean
 
@@ -106,12 +117,12 @@ export class CableProvider {
     window.addEventListener('beforeunload', this.handleUnload)
   }
 
-  on(event: 'synced' | 'seed' | 'rejected' | 'write-denied', handler: () => void): void {
+  on(event: 'synced' | 'seed' | 'rejected' | 'write-denied' | 'stale', handler: () => void): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set())
     this.listeners.get(event)!.add(handler as never)
   }
 
-  off(event: 'synced' | 'seed' | 'rejected' | 'write-denied', handler: () => void): void {
+  off(event: 'synced' | 'seed' | 'rejected' | 'write-denied' | 'stale', handler: () => void): void {
     this.listeners.get(event)?.delete(handler as never)
   }
 
@@ -144,7 +155,14 @@ export class CableProvider {
 
   private sendUpdate(type: 'sync-reply' | 'update', update: Uint8Array): void {
     this.updateSequence += 1
-    this.send({ type, update: toBase64(update), seq: this.updateSequence })
+    this.send({
+      type,
+      update: toBase64(update),
+      seq: this.updateSequence,
+      // Omitted (not null) when not yet known, matching the server's
+      // "absent key means trust it" rollout-compatibility handling.
+      ...(this.generation === null ? {} : { generation: this.generation }),
+    })
   }
 
   /**
@@ -159,7 +177,16 @@ export class CableProvider {
       : Y.encodeStateAsUpdate(this.doc)
     const persistedVector = Y.encodeStateVector(this.doc)
 
-    const updatePayload = { update: toBase64(update), cid: this.clientId }
+    const updatePayload = {
+      update: toBase64(update),
+      cid: this.clientId,
+      // Same staleness guard as sendUpdate: this beforeunload/keepalive
+      // fallback merges through the identical YjsPersistence.merge path as
+      // SyncChannel, so it must carry generation too -- otherwise a closing
+      // stale tab could resurrect content a replacement just reset via this
+      // second transport.
+      ...(this.generation === null ? {} : { generation: this.generation }),
+    }
     const completePayload = { ...updatePayload, ...snapshot }
     const completeBody = JSON.stringify(completePayload)
     // Browsers cap keepalive request bodies at roughly 64 KiB. Large docs
@@ -196,6 +223,7 @@ export class CableProvider {
         const serverVector = fromBase64(data.sv!)
         this.serverStateVector = serverVector
         this.updateSequence = 0
+        if (typeof data.generation === 'number') this.generation = data.generation
         if (this.canWrite) {
           this.sendUpdate('sync-reply', Y.encodeStateAsUpdate(this.doc, serverVector))
         }
@@ -236,7 +264,10 @@ export class CableProvider {
         this.broadcastAwareness()
         break
       case 'write-denied':
-        this.emit('write-denied')
+        // Distinguish "this link is locked" from "your local doc predates an
+        // owner CLI replacement" (Document#content_generation mismatch) —
+        // each needs a different client recovery action (see show.tsx).
+        this.emit(data.stale ? 'stale' : 'write-denied')
         break
     }
   }

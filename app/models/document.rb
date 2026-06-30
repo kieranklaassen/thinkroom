@@ -27,6 +27,14 @@ class Document < ApplicationRecord
   # as "already claimed".
   class ClaimRaceError < StandardError; end
 
+  # Raised when a SyncChannel frame's known content_generation is behind the
+  # document's current one — an owner CLI replacement (replace_content!) has
+  # reset the live state since this client last synced. The frame must be
+  # dropped, not merged, or it would resurrect the pre-replacement CRDT state
+  # the replacement just wiped. Mirrors EditingLockedError's
+  # raise-at-the-merge-boundary shape (see YjsPersistence.merge).
+  class StaleGenerationError < StandardError; end
+
   attr_readonly :slug, :content_format
 
   has_many :suggestions, dependent: :destroy
@@ -157,6 +165,13 @@ class Document < ApplicationRecord
     end
   end
 
+  # Set by the most recent replace_content! call — the number of pending
+  # suggestions auto-rejected as a side effect (see
+  # Suggestion.auto_reject_stale!). Callers that need to surface this
+  # (Api::DocsController#update, for R6) read the attribute rather than
+  # replace_content! changing its return shape away from `self`.
+  attr_reader :auto_rejected_suggestions
+
   def replace_content!(source:, title: nil, seed_author_kind: nil, seed_author_name: nil)
     with_lock do
       reload
@@ -166,7 +181,12 @@ class Document < ApplicationRecord
         provenance_spans: [],
         yjs_state: nil,
         seed_state: "pending",
-        seed_claimed_at: nil
+        seed_claimed_at: nil,
+        # Advances the generation so any SyncChannel client still holding a
+        # pre-replacement Yjs doc has its next frame rejected by
+        # YjsPersistence.merge instead of silently resurrecting this content
+        # we just wiped. See StaleGenerationError.
+        content_generation: content_generation + 1
       }
       attributes[:title] = title if title.present?
       if seed_author_kind.present?
@@ -174,6 +194,10 @@ class Document < ApplicationRecord
         attributes[:seed_author_name] = seed_author_name
       end
       update!(attributes)
+      # Suggestions targeting text this replacement just removed would
+      # otherwise sit pending forever, failing "missing"/"ambiguous" on
+      # every future apply attempt with no explanation in the UI.
+      @auto_rejected_suggestions = Suggestion.auto_reject_stale!(self, new_content: source)
     end
     self
   end

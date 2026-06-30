@@ -229,6 +229,48 @@ test('document commands normalize share URLs and surface API failures', async (t
   assert.equal(seen[4].agent, 'Scout')
 })
 
+test('update warns in default mode when a live replacement auto-rejected suggestions', async (t) => {
+  const root = await temporaryDirectory('auto-rejected')
+  const configHome = path.join(root, 'config')
+  const server = await startServer(async (request, response) => {
+    if (request.method === 'PATCH' && request.url === '/api/docs/replaced123') {
+      return sendJson(response, 200, {
+        share_url: `${server.url}/d/replaced123`,
+        auto_rejected_suggestions: 2,
+      })
+    }
+    if (request.method === 'PATCH' && request.url === '/api/docs/clean123') {
+      return sendJson(response, 200, {
+        share_url: `${server.url}/d/clean123`,
+        auto_rejected_suggestions: 0,
+      })
+    }
+    return sendJson(response, 404, { error: 'Unexpected request' })
+  })
+  t.after(() => server.close())
+  const env = { THINKROOM_URL: server.url }
+
+  const replaced = await runCli(['update', 'replaced123', '-', '--agent', 'Codex'], {
+    cwd: root, configHome, env, input: '# Revision',
+  })
+  assert.equal(replaced.code, 0, replaced.stderr)
+  assert.equal(replaced.stdout.trim(), `${server.url}/d/replaced123`)
+  assert.match(replaced.stderr, /auto-rejected 2 pending suggestions/)
+
+  const clean = await runCli(['update', 'clean123', '-', '--agent', 'Codex'], {
+    cwd: root, configHome, env, input: '# Revision',
+  })
+  assert.equal(clean.code, 0, clean.stderr)
+  assert.equal(clean.stderr, '', 'a replacement with zero auto-rejections must not warn')
+
+  const json = await runCli(['update', 'replaced123', '-', '--agent', 'Codex', '--json'], {
+    cwd: root, configHome, env, input: '# Revision',
+  })
+  assert.equal(json.code, 0, json.stderr)
+  assert.equal(json.stderr, '', '--json mode already surfaces the field in stdout, no extra warning needed')
+  assert.equal(JSON.parse(json.stdout).auto_rejected_suggestions, 2)
+})
+
 test('writes require an agent identity and honor THINKROOM_AGENT', async (t) => {
   const root = await temporaryDirectory('agent-identity')
   const configHome = path.join(root, 'config')

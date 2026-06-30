@@ -67,6 +67,37 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_not doc.yjs_state.present?, "no-op merge must not persist state"
   end
 
+  test "merge rejects a frame whose generation is behind the document's current one" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed")
+    YjsPersistence.merge(doc, b64_update_for("live editor content"))
+    stale_generation = doc.content_generation
+    doc.replace_content!(source: "# Replacement")
+    assert_equal stale_generation + 1, doc.reload.content_generation
+
+    assert_raises(Document::StaleGenerationError) do
+      YjsPersistence.merge(doc, b64_update_for("resurrected stale content"), generation: stale_generation)
+    end
+
+    assert_nil doc.reload.yjs_state, "a rejected stale frame must not resurrect yjs_state"
+  end
+
+  test "merge accepts a frame whose generation matches the document's current one" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed")
+    YjsPersistence.merge(doc, b64_update_for("current content"), generation: doc.content_generation)
+
+    assert doc.reload.yjs_state.present?
+    assert_equal "current content", text_of(doc)
+  end
+
+  test "merge trusts a frame with no generation (rollout compatibility)" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed")
+    doc.replace_content!(source: "# Replacement")
+
+    YjsPersistence.merge(doc, b64_update_for("no generation sent"), generation: nil)
+
+    assert doc.reload.yjs_state.present?, "a frame with no generation key must still merge, matching pre-existing behavior"
+  end
+
   test "corrupt base64 raises and leaves the document untouched" do
     doc = Document.create!(title: "Corrupt")
     YjsPersistence.merge(doc, b64_update_for("good content"))

@@ -125,6 +125,23 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "a fresh page load after replacement reflects the replacement even when a stale client tried to resync" do
+    @document.update!(yjs_state: "ignored-for-this-http-only-test", content_snapshot: "# Live snapshot")
+    @document.replace_content!(source: "# Replacement content")
+
+    # A stale SyncChannel client attempting to resync after the replacement
+    # is covered end-to-end in test/channels/sync_channel_test.rb (the
+    # generation guard rejects it there). This asserts the HTTP read side of
+    # the same invariant: documents#show always reflects the replacement,
+    # which only holds because that stale frame was never merged.
+    get document_page_path(@document.slug), headers: browser
+
+    assert_inertia_props do |props|
+      props[:document][:seed_content] == "# Replacement content" &&
+        props[:document][:has_state] == false
+    end
+  end
+
   test "documents without seed markdown never grant the seed" do
     doc = Document.create!(title: "Blank", seed_markdown: nil)
 

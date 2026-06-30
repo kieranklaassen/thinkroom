@@ -13,12 +13,25 @@ class YjsPersistence
 
   class << self
     # Merge a base64-encoded Yjs update into the document's persisted state.
-    def merge(document, base64_update, token: nil, user: nil)
+    #
+    # `generation` is the sending client's last-known Document#content_generation
+    # (nil for clients deployed before this field existed — trusted, matching
+    # the channel's existing seq-less rollout-compatibility behavior). A
+    # present generation behind the document's current one means an owner CLI
+    # replacement (Document#replace_content!) reset this document's live
+    # state since the client last synced: merging would resurrect the exact
+    # CRDT content the replacement just wiped, so the update is rejected
+    # rather than persisted.
+    def merge(document, base64_update, generation: nil, token: nil, user: nil)
       update = decode(base64_update)
       lock_for(document.id).synchronize do
         document.with_lock do
           document.reload
           raise Document::EditingLockedError, "This document is read-only." unless document.writable_by?(token, user:)
+          if generation && generation != document.content_generation
+            raise Document::StaleGenerationError,
+                  "Client generation #{generation} is behind document generation #{document.content_generation}."
+          end
 
           ydoc = load_ydoc(document)
           before = ydoc.state

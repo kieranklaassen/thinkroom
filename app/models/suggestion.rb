@@ -92,6 +92,71 @@ class Suggestion < ApplicationRecord
     transition!("rejected", by:)
   end
 
+  # Auto-rejects every pending suggestion belonging to `document` whose
+  # `replaces` text is no longer a verbatim substring of `new_content`'s
+  # rendered plain text. Called by Document#replace_content! so a CLI owner
+  # replacement doesn't leave suggestions silently targeting text that no
+  # longer exists — each rejection logs an Activity explaining why (so the
+  # feed isn't a silent disappearance), and the agent API contract surfaces
+  # the count so a caller learns about the side effect immediately rather
+  # than discovering it through a later failed `suggest` call (see
+  # Api::DocsController#update).
+  #
+  # Deliberately a plain substring containment check, not the client's fuzzy
+  # matchQuotedText matching (app/frontend/editor/suggestions.ts) — a false
+  # "still matches" here is harmless: the existing client-side applicability
+  # check will independently report it missing/ambiguous, same as today.
+  # Suggestions with a blank `replaces` (general/anchor-only) have no target
+  # to lose and are left untouched.
+  #
+  # Compares against DocumentPlainText, not the raw new_content, because
+  # `replaces` is canonically "a unique quote from plain_text" (AgentGuide).
+  # For HTML documents a raw-markup comparison would false-reject every
+  # quote that crosses a tag boundary (e.g. **bold** or an inline link) even
+  # though the rendered text is untouched.
+  #
+  # Mirrors accept_all!'s rescue: a suggestion resolved concurrently (a human
+  # accepting/rejecting it in the browser between the scope read and this
+  # row's transition) loses its pending status and is skipped rather than
+  # raising — replace_content! must not abort the whole replacement over a
+  # suggestion that was already resolved by someone else.
+  #
+  # Only RecordInvalid is rescued. An unexpected Activity.log! failure
+  # intentionally propagates and rolls back the whole replace_content!
+  # transaction (yjs_state/content_generation reset included) — the same
+  # choice Document#claim! makes for its own activity write ("Ownership and
+  # its activity commit together: a failed activity insert must not leave
+  # the doc silently claimed with no feed entry and no broadcast"). A
+  # suggestion rejected with no audit trail is the failure mode this guards
+  # against, not an edge case to swallow.
+  def self.auto_reject_stale!(document, new_content:)
+    rejected = 0
+    new_plain_text = DocumentPlainText.call(format: document.content_format, content: new_content)
+    document.suggestions.pending.where.not(replaces: [ nil, "" ]).find_each do |suggestion|
+      next if new_plain_text.include?(suggestion.replaces)
+
+      suggestion.reject!
+      rejected += 1
+      # actor_kind "system" is a deliberate third value alongside the
+      # existing "human"/"agent" — this rejection was taken by neither; it's
+      # an automatic consequence of the replacement, not anyone's edit.
+      # Activity has no actor_kind enum to extend (validated only for
+      # presence), and the one frontend consumer (activity_panel.tsx) uses
+      # actor_kind solely as a CSS class modifier with no switch to update.
+      Activity.log!(
+        document:,
+        actor_name: "Thinkroom",
+        actor_kind: "system",
+        action: "auto_rejected_suggestion",
+        detail: "A document replacement removed the text this suggestion targeted: " \
+                "#{suggestion.replaces.to_s.truncate(80)}"
+      )
+    rescue ActiveRecord::RecordInvalid
+      # lost to a concurrent resolve between the scope read and this row
+    end
+    rejected
+  end
+
   def as_props
     slice(:id, :author_name, :author_kind, :intent, :body, :anchor_text, :replaces, :status)
       .merge(created_at: created_at.iso8601)
