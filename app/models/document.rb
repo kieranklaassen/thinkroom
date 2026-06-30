@@ -166,7 +166,13 @@ class Document < ApplicationRecord
         provenance_spans: [],
         yjs_state: nil,
         seed_state: "pending",
-        seed_claimed_at: nil
+        seed_claimed_at: nil,
+        # Supersede the prior CRDT generation. A still-connected or reconnecting
+        # editor holding the pre-reset Yjs state would otherwise merge it back
+        # (a reconnect sync-reply dumps the client's whole old document), which
+        # resurrects the old content and re-shadows the new seed. The relay
+        # layer drops frames stamped with an older epoch — see YjsPersistence.merge.
+        crdt_epoch: crdt_epoch + 1
       }
       attributes[:title] = title if title.present?
       if seed_author_kind.present?

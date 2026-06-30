@@ -125,6 +125,30 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "a stale CRDT frame after a content reset cannot block the new seed grant" do
+    # The browser made the document live with its (soon to be old) content.
+    YjsPersistence.merge(@document, live_update("old browser content"))
+    old_frame = Base64.strict_encode64(@document.reload.yjs_state)
+    assert @document.yjs_state.present?
+
+    # Owner replaces the source out of band (the `thinkroom update` path).
+    @document.replace_content!(source: "# Replacement source")
+
+    # A still-connected or reconnecting editor replays its pre-reset state at the
+    # superseded generation. It must be dropped, not merged back in.
+    relayed = YjsPersistence.merge(@document, old_frame, epoch: 0)
+    assert_not relayed, "a stale-generation frame must not be relayed"
+
+    # A fresh browser load therefore re-seeds the replacement rather than binding
+    # the resurrected stale CRDT state — the exact symptom of the reported bug.
+    get document_page_path(@document.slug), headers: browser
+    assert_inertia_props do |props|
+      props[:document][:seed_granted] == true &&
+        props[:document][:has_state] == false &&
+        props[:document][:seed_content] == "# Replacement source"
+    end
+  end
+
   test "documents without seed markdown never grant the seed" do
     doc = Document.create!(title: "Blank", seed_markdown: nil)
 
@@ -171,5 +195,11 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
 
   def browser
     { "User-Agent" => "Mozilla/5.0" }
+  end
+
+  def live_update(text)
+    ydoc = Y::Doc.new
+    ydoc.get_text("t") << text
+    Base64.strict_encode64(ydoc.diff.pack("C*"))
   end
 end

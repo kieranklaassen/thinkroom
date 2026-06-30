@@ -141,6 +141,48 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert doc.reload.yjs_state.present?
   end
 
+  test "the sync handshake carries the document content generation" do
+    doc = Document.create!(title: "Generation")
+
+    subscribe slug: doc.slug
+    assert_equal 0, transmissions.last["epoch"], "a never-reset doc is generation 0"
+
+    doc.replace_content!(source: "# Replacement")
+    unsubscribe
+    subscribe slug: doc.slug
+    assert_equal 1, transmissions.last["epoch"], "a reset advances the generation"
+  end
+
+  test "an update from a superseded generation is dropped without relay or persistence" do
+    doc = Document.create!(title: "Reset", seed_markdown: "# Old")
+    doc.replace_content!(source: "# New source") # crdt_epoch -> 1
+    subscribe slug: doc.slug
+    stale = build_update_b64("stale browser content")
+
+    # A still-connected client replays its pre-reset state at the old generation.
+    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+      perform :receive, { "type" => "update", "update" => stale, "cid" => "stale", "epoch" => 0 }
+    end
+
+    doc.reload
+    assert_nil doc.yjs_state, "a stale frame must not resurrect the old CRDT state"
+    assert_not_equal "seeded", doc.seed_state,
+                     "a stale frame must not flip the doc to seeded and block re-seeding"
+  end
+
+  test "an update stamped with the current generation relays after a reset" do
+    doc = Document.create!(title: "Reset", seed_markdown: "# Old")
+    doc.replace_content!(source: "# New source") # crdt_epoch -> 1
+    subscribe slug: doc.slug
+    fresh = build_update_b64("# New source applied")
+
+    assert_broadcast_on(SyncChannel.broadcasting_for(doc), type: "update", update: fresh, cid: "fresh") do
+      perform :receive, { "type" => "update", "update" => fresh, "cid" => "fresh", "epoch" => 1 }
+    end
+
+    assert doc.reload.yjs_state.present?
+  end
+
   test "locked non-owner updates are rejected without persistence or relay" do
     doc = Document.create!(
       title: "Locked",

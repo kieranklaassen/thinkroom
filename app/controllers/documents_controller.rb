@@ -284,6 +284,11 @@ class DocumentsController < InertiaController
     document = Document.find_by!(slug: params[:slug])
     @write_document = document
     document.assert_write_access!(token: owner_token, user: current_user)
+    # A snapshot derived before an owner replace_content! reset would write the
+    # superseded source into the read model. Drop it silently — the client
+    # reloads into the new generation via content_reset — instead of letting
+    # current_content diverge from the live editor state.
+    return head :no_content if document.crdt_epoch > params[:epoch].to_i
     if params.key?(:content) && params.key?(:markdown)
       return render json: { error: "Send content or legacy markdown, not both." },
                     status: :unprocessable_entity
@@ -315,7 +320,8 @@ class DocumentsController < InertiaController
       spans:,
       title:,
       token: owner_token,
-      user: current_user
+      user: current_user,
+      epoch: params[:epoch]
     )
     return render json: { error: "Snapshot is stale; retry from current document state." },
                   status: :conflict unless persisted
@@ -337,7 +343,12 @@ class DocumentsController < InertiaController
     decoded = Base64.strict_decode64(update)
     return head :content_too_large if decoded.bytesize > MAX_SYNC_UPDATE_BYTES
 
-    YjsPersistence.merge(document, update, token: owner_token, user: current_user)
+    relayable = YjsPersistence.merge(document, update, token: owner_token, user: current_user, epoch: params[:epoch])
+    # A stale-generation keepalive frame (the source was replaced out from under
+    # this client via replace_content!) must neither relay nor re-persist the
+    # superseded content/snapshot. The client recovers through content_reset.
+    return head :no_content unless relayable
+
     SyncChannel.broadcast_to(document, {
       type: "update",
       update:,
@@ -365,7 +376,8 @@ class DocumentsController < InertiaController
         spans:,
         title:,
         token: owner_token,
-        user: current_user
+        user: current_user,
+        epoch: params[:epoch]
       )
       return render json: { error: "Snapshot is stale; retry from current document state." },
                     status: :conflict unless persisted

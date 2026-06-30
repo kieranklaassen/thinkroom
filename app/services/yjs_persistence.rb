@@ -13,13 +13,30 @@ class YjsPersistence
 
   class << self
     # Merge a base64-encoded Yjs update into the document's persisted state.
-    def merge(document, base64_update, token: nil, user: nil)
+    # Returns true when the frame belongs to the current content generation
+    # (and was therefore relayable), false when it was dropped as stale.
+    #
+    # `epoch` is the document generation the sending client last synced at.
+    # When the source was replaced (replace_content! bumps crdt_epoch), frames
+    # produced from the superseded generation must not resurrect the old CRDT
+    # state — a reconnecting client's sync-reply would otherwise dump its entire
+    # pre-reset document back into the freshly reset doc. A nil epoch is treated
+    # as generation 0 (legacy/rollout clients): harmless on never-reset docs,
+    # correctly dropped on docs that have since been replaced.
+    def merge(document, base64_update, token: nil, user: nil, epoch: nil)
       update = decode(base64_update)
+      relayable = false
       lock_for(document.id).synchronize do
         document.with_lock do
           document.reload
           raise Document::EditingLockedError, "This document is read-only." unless document.writable_by?(token, user:)
+          # A frame stamped with a generation older than the document's current
+          # one was produced before a replace_content! reset; dropping it keeps
+          # the old CRDT state from coming back. nil/absent stamps count as
+          # generation 0, so never-reset docs (crdt_epoch 0) accept everything.
+          next if document.crdt_epoch > epoch.to_i
 
+          relayable = true
           ydoc = load_ydoc(document)
           before = ydoc.state
           ydoc.sync(update)
@@ -35,6 +52,7 @@ class YjsPersistence
           )
         end
       end
+      relayable
     end
 
     # => [full_state_b64, state_vector_b64] for the sync handshake.
@@ -51,13 +69,19 @@ class YjsPersistence
     # A client may be ahead (its own cable frame is still in flight), but it
     # may not overwrite the API read model from behind.
     def persist_snapshot(document, state_vector_b64:, content:, spans:, title: document.title,
-                         token: nil, user: nil)
+                         token: nil, user: nil, epoch: nil)
       client_state = decode_state_vector(decode(state_vector_b64)) if state_vector_b64.present?
 
       lock_for(document.id).synchronize do
         document.with_lock do
           document.reload
           raise Document::EditingLockedError, "This document is read-only." unless document.writable_by?(token, user:)
+          # Re-check the generation under the write lock, not just in the
+          # controller: a replace_content! can commit between the unlocked read
+          # and this write, and the currency check below is skipped once the
+          # reset nils yjs_state — without this a stale snapshot would overwrite
+          # the read model after the reset. nil epoch counts as generation 0.
+          return false if document.crdt_epoch > epoch.to_i
 
           if client_state && document.yjs_state.present?
             server_state = decode_state_vector(load_ydoc(document).state)
