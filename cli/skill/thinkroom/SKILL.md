@@ -25,7 +25,7 @@ Write the complete draft to a file or pipe it on standard input. Identify the ac
 thinkroom new draft.md --title "Decision memo" --agent "Codex"
 ```
 
-Always pass `--agent` (or set `THINKROOM_AGENT`) on writes. Omitting it attributes the write to a generic `Thinkroom CLI` identity and prints a warning, which breaks per-agent provenance.
+Always pass `--agent` (or set `THINKROOM_AGENT`) on writes — it is required. Without it the CLI stops with an error instead of misattributing the write to a generic identity, because per-agent provenance is the point.
 
 Use `--format html` only when semantic HTML is genuinely needed. Return the printed share URL to the user.
 
