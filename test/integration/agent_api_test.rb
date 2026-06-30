@@ -839,6 +839,47 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal "pending", doc.seed_state
     assert_nil doc.seed_claimed_at
     assert_equal "updated_document", doc.activities.last.action
+    assert_equal 0, body["auto_rejected_suggestions"],
+                 "a replacement with no stale suggestions still reports the count, not omits it"
+  end
+
+  test "owner replacement response reports how many pending suggestions were auto-rejected" do
+    user = cli_user(email: "owner-suggestions@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(
+      title: "Live", user:, owner_name: user.name,
+      seed_content: "# Seed\n\nThis paragraph will be removed.",
+      content_snapshot: "# Seed\n\nThis paragraph will be removed.",
+      yjs_state: "binary-crdt-state",
+      seed_state: "seeded",
+      seed_claimed_at: Time.current
+    )
+    stale = Suggestion.propose!(
+      document: doc, author_name: "Scout", author_kind: "agent",
+      body: "tightened wording", replaces: "This paragraph will be removed."
+    )
+
+    patch "/api/docs/#{doc.slug}",
+          params: { content: "# Entirely different content" },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :ok
+    assert_equal 1, response.parsed_body["auto_rejected_suggestions"]
+    assert_equal "rejected", stale.reload.status
+  end
+
+  test "seed-stage updates never report auto_rejected_suggestions" do
+    user = cli_user(email: "owner-seedstage@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(title: "Draft", user:, owner_name: user.name, seed_content: "# Seed")
+
+    patch "/api/docs/#{doc.slug}",
+          params: { content: "# Revised draft" },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :ok
+    assert_not response.parsed_body.key?("auto_rejected_suggestions"),
+                "a seed-stage (non-replacement) update is not a content reset and must not report this field"
   end
 
   test "owner update past a content snapshot replaces snapshot content" do

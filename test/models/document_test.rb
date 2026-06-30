@@ -166,6 +166,48 @@ class DocumentTest < ActiveSupport::TestCase
     assert_equal 0, doc.reload.content_generation
   end
 
+  test "replace_content! leaves a suggestion pending when its target text survives" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed\n\nKeep this paragraph.")
+    surviving = Suggestion.propose!(
+      document: doc, author_name: "Scout", author_kind: "agent",
+      body: "Replacement text", replaces: "Keep this paragraph."
+    )
+
+    doc.replace_content!(source: "# New\n\nKeep this paragraph. And more.")
+
+    assert_equal "pending", surviving.reload.status
+    assert_equal 0, doc.auto_rejected_suggestions
+  end
+
+  test "replace_content! auto-rejects a suggestion whose target text is gone" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed\n\nThis will be removed.")
+    stale = Suggestion.propose!(
+      document: doc, author_name: "Scout", author_kind: "agent",
+      body: "Replacement text", replaces: "This will be removed."
+    )
+
+    doc.replace_content!(source: "# Entirely different content")
+
+    assert_equal "rejected", stale.reload.status
+    assert_equal 1, doc.auto_rejected_suggestions
+    activity = doc.activities.order(:created_at).last
+    assert_equal "auto_rejected_suggestion", activity.action
+    assert_includes activity.detail, "This will be removed."
+  end
+
+  test "replace_content! leaves suggestions without a replaces target untouched" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed")
+    general = Suggestion.propose!(
+      document: doc, author_name: "Scout", author_kind: "agent",
+      body: "Add a new section", intent: "general addition"
+    )
+
+    doc.replace_content!(source: "# Entirely different content")
+
+    assert_equal "pending", general.reload.status
+    assert_equal 0, doc.auto_rejected_suggestions
+  end
+
   test "database rejects unknown content formats" do
     doc = Document.create!(title: "Constrained")
 

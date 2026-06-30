@@ -92,6 +92,40 @@ class Suggestion < ApplicationRecord
     transition!("rejected", by:)
   end
 
+  # Auto-rejects every pending suggestion belonging to `document` whose
+  # `replaces` text is no longer a verbatim substring of `new_content`.
+  # Called by Document#replace_content! so a CLI owner replacement doesn't
+  # leave suggestions silently targeting text that no longer exists — each
+  # rejection logs an Activity explaining why (so the feed isn't a silent
+  # disappearance), and the agent API contract surfaces the count so a
+  # caller learns about the side effect immediately rather than discovering
+  # it through a later failed `suggest` call (see Api::DocsController#update).
+  #
+  # Deliberately a plain substring containment check, not the client's fuzzy
+  # matchQuotedText matching (app/frontend/editor/suggestions.ts) — a false
+  # "still matches" here is harmless: the existing client-side applicability
+  # check will independently report it missing/ambiguous, same as today.
+  # Suggestions with a blank `replaces` (general/anchor-only) have no target
+  # to lose and are left untouched.
+  def self.auto_reject_stale!(document, new_content:)
+    rejected = 0
+    document.suggestions.pending.where.not(replaces: [ nil, "" ]).find_each do |suggestion|
+      next if new_content.include?(suggestion.replaces)
+
+      suggestion.reject!
+      rejected += 1
+      Activity.log!(
+        document:,
+        actor_name: "Thinkroom",
+        actor_kind: "system",
+        action: "auto_rejected_suggestion",
+        detail: "A document replacement removed the text this suggestion targeted: " \
+                "#{suggestion.replaces.to_s.truncate(80)}"
+      )
+    end
+    rejected
+  end
+
   def as_props
     slice(:id, :author_name, :author_kind, :intent, :body, :anchor_text, :replaces, :status)
       .merge(created_at: created_at.iso8601)

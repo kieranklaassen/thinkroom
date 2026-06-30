@@ -165,6 +165,13 @@ class Document < ApplicationRecord
     end
   end
 
+  # Set by the most recent replace_content! call — the number of pending
+  # suggestions auto-rejected as a side effect (see
+  # Suggestion.auto_reject_stale!). Callers that need to surface this
+  # (Api::DocsController#update, for R6) read the attribute rather than
+  # replace_content! changing its return shape away from `self`.
+  attr_reader :auto_rejected_suggestions
+
   def replace_content!(source:, title: nil, seed_author_kind: nil, seed_author_name: nil)
     with_lock do
       reload
@@ -187,6 +194,10 @@ class Document < ApplicationRecord
         attributes[:seed_author_name] = seed_author_name
       end
       update!(attributes)
+      # Suggestions targeting text this replacement just removed would
+      # otherwise sit pending forever, failing "missing"/"ambiguous" on
+      # every future apply attempt with no explanation in the UI.
+      @auto_rejected_suggestions = Suggestion.auto_reject_stale!(self, new_content: source)
     end
     self
   end

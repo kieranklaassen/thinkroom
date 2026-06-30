@@ -124,7 +124,10 @@ module Api
       end
       DocumentMetaChannel.broadcast_event(document, :content_reset) if content_reset
 
-      render json: agent_document_response(document, normalized:, warning:), status: :ok
+      render json: agent_document_response(
+        document, normalized:, warning:,
+        auto_rejected_suggestions: (document.auto_rejected_suggestions if content_reset)
+      ), status: :ok
     end
 
     private
@@ -237,7 +240,7 @@ module Api
     # The create/update success payload: one shape so an agent revising a
     # document sees the same fields — and the same normalization signal — it
     # saw on create.
-    def agent_document_response(doc, normalized:, warning:)
+    def agent_document_response(doc, normalized:, warning:, auto_rejected_suggestions: nil)
       response = {
         slug: doc.slug,
         title: doc.title,
@@ -252,6 +255,11 @@ module Api
         api: AgentGuide.endpoints(doc, request.base_url)
       }
       response[:markdown] = doc.current_content if doc.content_format == "markdown"
+      # Only present on an owner replacement (create and seed-stage updates
+      # never auto-reject anything) — surfaces the side effect immediately,
+      # including the 0 case, instead of letting the caller discover it via
+      # a later confusing `suggest` "target missing" failure.
+      response[:auto_rejected_suggestions] = auto_rejected_suggestions unless auto_rejected_suggestions.nil?
       response
     end
 
