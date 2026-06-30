@@ -22,7 +22,6 @@ import { fileURLToPath } from 'node:url'
 
 const VERSION = '0.1.0'
 const DEFAULT_URL = 'https://thinkroom.kieranklaassen.com'
-const DEFAULT_AGENT_NAME = 'Thinkroom CLI'
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 
 class CliError extends Error {
@@ -160,17 +159,21 @@ function printJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
 }
 
-function resolveAgent(options) {
-  const explicit = options.agent || process.env.THINKROOM_AGENT
-  return { name: explicit || DEFAULT_AGENT_NAME, explicit: Boolean(explicit) }
+// Identity is self-asserted via --agent or THINKROOM_AGENT. We never invent one:
+// a fabricated default would attribute every forgotten write to a meaningless
+// generic name, which is exactly the provenance pollution this avoids.
+function agentIdentity(options) {
+  return (options.agent || process.env.THINKROOM_AGENT || '').trim() || undefined
 }
 
-function writeAgent(options) {
-  const { name, explicit } = resolveAgent(options)
-  if (!explicit) {
-    process.stderr.write(
-      `Warning: No agent identity set; attributing this write to "${name}". ` +
-        'Pass --agent NAME or set THINKROOM_AGENT so your edits are attributed to you.\n',
+// Writes must be attributable, so refuse to send one without an identity rather
+// than silently misattributing it (the raw API likewise requires X-Agent-Name).
+function requireAgent(options) {
+  const name = agentIdentity(options)
+  if (!name) {
+    throw new CliError(
+      'Set your agent identity before writing so this edit is attributed to you.\n' +
+        'Pass --agent NAME (for example --agent "Claude") or set THINKROOM_AGENT.',
     )
   }
   return name
@@ -287,6 +290,7 @@ async function logout(options) {
 }
 
 async function createDocument(positionals, options) {
+  const agent = requireAgent(options)
   const content = await readContent(positionals[0])
   const body = {}
   if (options.title) body.title = options.title
@@ -296,7 +300,7 @@ async function createDocument(positionals, options) {
     method: 'POST',
     body,
     requireToken: true,
-    agent: writeAgent(options),
+    agent,
   })
   if (options.json) printJson(result.payload)
   else process.stdout.write(`${result.payload.share_url}\n`)
@@ -304,12 +308,15 @@ async function createDocument(positionals, options) {
 
 async function showDocument(positionals, options) {
   const slug = slugFrom(positionals[0])
-  const result = await request(`/api/docs/${encodeURIComponent(slug)}`, options, { agent: resolveAgent(options).name })
+  // Read-only: forward an identity if one was given (presence), but never
+  // fabricate one — an unidentified read must not create a presence chip.
+  const result = await request(`/api/docs/${encodeURIComponent(slug)}`, options, { agent: agentIdentity(options) })
   if (options.json) printJson(result.payload)
   else process.stdout.write(`${result.payload.content ?? result.payload.markdown ?? ''}\n`)
 }
 
 async function updateDocument(positionals, options) {
+  const agent = requireAgent(options)
   const slug = slugFrom(positionals[0])
   const content = await readContent(positionals[1])
   const body = {}
@@ -320,7 +327,7 @@ async function updateDocument(positionals, options) {
   const result = await request(`/api/docs/${encodeURIComponent(slug)}`, options, {
     method: 'PATCH',
     body,
-    agent: writeAgent(options),
+    agent,
   })
   if (options.json) {
     printJson(result.payload)
@@ -343,12 +350,13 @@ async function updateDocument(positionals, options) {
 }
 
 async function suggest(positionals, options) {
+  const agent = requireAgent(options)
   const slug = slugFrom(positionals[0])
   const bodyText = options.body ?? (await readContent(positionals[1]))
   if (!bodyText) throw new CliError('Suggestion body is required via --body, a file, or stdin.')
   const result = await request(`/api/docs/${encodeURIComponent(slug)}/suggestions`, options, {
     method: 'POST',
-    agent: writeAgent(options),
+    agent,
     body: {
       body: bodyText,
       intent: options.intent,
@@ -361,12 +369,13 @@ async function suggest(positionals, options) {
 }
 
 async function comment(positionals, options) {
+  const agent = requireAgent(options)
   const slug = slugFrom(positionals[0])
   const bodyText = options.body ?? (await readContent(positionals[1]))
   if (!bodyText) throw new CliError('Comment body is required via --body, a file, or stdin.')
   const result = await request(`/api/docs/${encodeURIComponent(slug)}/comments`, options, {
     method: 'POST',
-    agent: writeAgent(options),
+    agent,
     body: { body: bodyText, anchor_text: options.anchor },
   })
   if (options.json) printJson(result.payload)
@@ -503,7 +512,8 @@ function help() {
   process.stdout.write(`Thinkroom CLI ${VERSION}\n\n`)
   process.stdout.write('Usage: thinkroom <command> [arguments] [options]\n\n')
   process.stdout.write('Account\n  login [--url URL] [--no-open]\n  whoami [--json]\n  logout\n\n')
-  process.stdout.write('Documents\n  new [FILE|-] [--title TITLE] [--format markdown|html] [--agent NAME] [--json]\n  show SLUG|URL [--json]\n  update SLUG|URL [FILE|-] [--title TITLE] [--agent NAME] [--json]\n  suggest SLUG|URL [FILE|-] --body TEXT --replaces TEXT --intent TEXT [--agent NAME]\n  comment SLUG|URL [FILE|-] --body TEXT [--anchor TEXT] [--agent NAME]\n  open SLUG|URL\n\n')
+  process.stdout.write('Documents\n  new [FILE|-] [--title TITLE] [--format markdown|html] --agent NAME [--json]\n  show SLUG|URL [--json]\n  update SLUG|URL [FILE|-] [--title TITLE] --agent NAME [--json]\n  suggest SLUG|URL [FILE|-] --body TEXT --replaces TEXT --intent TEXT --agent NAME\n  comment SLUG|URL [FILE|-] --body TEXT [--anchor TEXT] --agent NAME\n  open SLUG|URL\n\n')
+  process.stdout.write('Writes require an agent identity: pass --agent NAME or set THINKROOM_AGENT.\n\n')
   process.stdout.write('Agent setup\n  init [--agent agents|claude|codex|all]\n  skill install [--agent agents|claude|codex|all]\n  prime [--json]\n\n')
   process.stdout.write('Environment: THINKROOM_URL, THINKROOM_TOKEN, THINKROOM_AGENT, XDG_CONFIG_HOME\n')
 }

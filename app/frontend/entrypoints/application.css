@@ -680,6 +680,15 @@ a:focus-visible {
   margin-bottom: 0.5rem;
 }
 
+.landing-agent-hint.is-copied {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.landing-agent-hint.is-copied::before {
+  content: '✓ ';
+}
+
 .landing-agent-block {
   position: relative;
   background: var(--surface-raised);

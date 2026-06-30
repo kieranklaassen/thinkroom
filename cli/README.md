@@ -10,6 +10,7 @@ thinkroom new draft.md --title "Decision memo" --agent "Codex"
 ```
 
 Use `thinkroom help` for commands. Set `THINKROOM_URL` for a self-hosted server
-and `THINKROOM_TOKEN` for non-interactive automation. Pass `--agent NAME` (or set
-`THINKROOM_AGENT`) on writes so edits are attributed to you; without it the CLI
-falls back to a generic `Thinkroom CLI` identity and warns.
+and `THINKROOM_TOKEN` for non-interactive automation. Writes require an agent
+identity: pass `--agent NAME` (or set `THINKROOM_AGENT`) so edits are attributed
+to you. Without one the CLI stops with an error rather than misattributing the
+write to a generic identity.
