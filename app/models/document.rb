@@ -27,6 +27,14 @@ class Document < ApplicationRecord
   # as "already claimed".
   class ClaimRaceError < StandardError; end
 
+  # Raised when a SyncChannel frame's known content_generation is behind the
+  # document's current one — an owner CLI replacement (replace_content!) has
+  # reset the live state since this client last synced. The frame must be
+  # dropped, not merged, or it would resurrect the pre-replacement CRDT state
+  # the replacement just wiped. Mirrors EditingLockedError's
+  # raise-at-the-merge-boundary shape (see YjsPersistence.merge).
+  class StaleGenerationError < StandardError; end
+
   attr_readonly :slug, :content_format
 
   has_many :suggestions, dependent: :destroy
@@ -166,7 +174,12 @@ class Document < ApplicationRecord
         provenance_spans: [],
         yjs_state: nil,
         seed_state: "pending",
-        seed_claimed_at: nil
+        seed_claimed_at: nil,
+        # Advances the generation so any SyncChannel client still holding a
+        # pre-replacement Yjs doc has its next frame rejected by
+        # YjsPersistence.merge instead of silently resurrecting this content
+        # we just wiped. See StaleGenerationError.
+        content_generation: content_generation + 1
       }
       attributes[:title] = title if title.present?
       if seed_author_kind.present?

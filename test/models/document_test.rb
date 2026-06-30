@@ -131,6 +131,39 @@ class DocumentTest < ActiveSupport::TestCase
     assert_nil doc.seed_claimed_at
     assert_equal "agent", doc.seed_author_kind
     assert_equal "Codex", doc.seed_author_name
+    assert_equal 1, doc.content_generation
+  end
+
+  test "a new document defaults content_generation to zero" do
+    doc = Document.create!(title: "Fresh")
+
+    assert_equal 0, doc.content_generation
+  end
+
+  test "replace_content! increments content_generation by exactly one per call" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed")
+    assert_equal 0, doc.content_generation
+
+    doc.replace_content!(source: "# First replacement")
+    assert_equal 1, doc.reload.content_generation
+
+    doc.replace_content!(source: "# Second replacement")
+    assert_equal 2, doc.reload.content_generation
+  end
+
+  test "non-replacement updates never change content_generation" do
+    doc = Document.create!(title: "Draft", seed_content: "# Seed")
+
+    doc.update!(title: "Renamed")
+    assert_equal 0, doc.reload.content_generation
+
+    YjsPersistence.persist_snapshot(
+      doc,
+      state_vector_b64: nil,
+      content: "# Editor snapshot",
+      spans: []
+    )
+    assert_equal 0, doc.reload.content_generation
   end
 
   test "database rejects unknown content formats" do
