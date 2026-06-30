@@ -218,6 +218,24 @@ export class CableProvider {
 
     switch (data.type) {
       case 'sync': {
+        // A generation that advanced since our last sync means an owner CLI
+        // replacement (Document#replace_content!) reset this document while we
+        // held a stale in-memory Y.Doc — e.g. a reconnect that missed the
+        // content_reset broadcast. Applying the server's post-reset state does
+        // not drop our pre-replacement history, so the sync-reply diff below
+        // would re-merge (resurrect) it under the new, now-current generation,
+        // slipping past YjsPersistence.merge's guard exactly like the original
+        // stale-merge race. Bail to the same recovery as a server-rejected
+        // stale frame instead; leaving generation/serverStateVector at their
+        // stale values keeps any frame that races the reload rejectable too.
+        if (
+          this.generation !== null &&
+          typeof data.generation === 'number' &&
+          data.generation !== this.generation
+        ) {
+          this.emit('stale')
+          break
+        }
         // Server's full state, then reply with what it's missing (sync step 2).
         Y.applyUpdate(this.doc, fromBase64(data.update!), this)
         const serverVector = fromBase64(data.sv!)
