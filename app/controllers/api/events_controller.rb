@@ -20,8 +20,13 @@ module Api
     end
 
     def ack
+      last_event_id = Integer(params.require(:last_event_id), exception: false)
+      if last_event_id.nil?
+        return render json: { error: "last_event_id must be an integer." }, status: :unprocessable_entity
+      end
+
       presence, = AgentPresence.touch!(document:, agent_name: current_agent)
-      presence.update!(last_event_id: params.require(:last_event_id).to_i)
+      presence.update!(last_event_id:)
       head :no_content
     rescue ActionController::ParameterMissing
       render json: { error: "last_event_id is required." }, status: :unprocessable_entity

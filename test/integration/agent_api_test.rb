@@ -522,6 +522,27 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_includes response.parsed_body["error"], "last_event_id"
   end
 
+  test "event ack with non-numeric last_event_id is rejected and does not reset the high-water mark" do
+    post "/api/docs/#{@document.slug}/presence", params: { status: "active" }, headers: AGENT, as: :json
+    Activity.log!(document: @document, actor_name: "Quiet Falcon", actor_kind: "human",
+                  action: "accepted_suggestion", detail: "accepted")
+
+    get "/api/docs/#{@document.slug}/events/pending", headers: AGENT
+    ack_with = response.parsed_body["ack_with"]
+    post "/api/docs/#{@document.slug}/events/ack",
+         params: { last_event_id: ack_with }, headers: AGENT, as: :json
+    assert_response :no_content
+
+    post "/api/docs/#{@document.slug}/events/ack",
+         params: { last_event_id: "not-a-number" }, headers: AGENT, as: :json
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "last_event_id"
+
+    # The bad ack must not roll the high-water mark back to 0 and re-deliver events.
+    get "/api/docs/#{@document.slug}/events/pending", headers: AGENT
+    assert_empty response.parsed_body["events"]
+  end
+
   test "presence announce returns an explicit 200" do
     post "/api/docs/#{@document.slug}/presence",
          params: { status: "active" }, headers: AGENT, as: :json
