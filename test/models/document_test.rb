@@ -195,6 +195,59 @@ class DocumentTest < ActiveSupport::TestCase
     assert_includes activity.detail, "This will be removed."
   end
 
+  test "replace_content! does not raise or re-reject a suggestion whose target text is gone but that is no longer pending" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed\n\nThis will be removed.")
+    already_accepted = Suggestion.propose!(
+      document: doc, author_name: "Scout", author_kind: "agent",
+      body: "Replacement text", replaces: "This will be removed."
+    )
+    still_pending = Suggestion.propose!(
+      document: doc, author_name: "Scout", author_kind: "agent",
+      body: "Another", replaces: "This will be removed."
+    )
+    # Mirrors the realistic shape of accept_all!'s "excludes suggestions
+    # already resolved before the call" coverage: a human resolves a
+    # suggestion in the browser before the replacement's auto-reject pass
+    # runs. transition!'s compare-and-set (mirrored by accept_all!'s rescued
+    # ActiveRecord::RecordInvalid) is what protects a true mid-iteration race
+    # in production; this proves auto_reject_stale! only ever touches rows
+    # still pending when it acts.
+    already_accepted.accept!
+
+    assert_nothing_raised do
+      doc.replace_content!(source: "# Entirely different content")
+    end
+
+    assert_equal "accepted", already_accepted.reload.status,
+                 "a suggestion resolved before the replacement must keep its real status, not be force-rejected"
+    assert_equal "rejected", still_pending.reload.status
+    assert_equal 1, doc.auto_rejected_suggestions
+  end
+
+  test "auto_reject_stale! continues the loop when one row's transition genuinely races and loses" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed\n\nThis will be removed.")
+    raced = Suggestion.propose!(
+      document: doc, author_name: "Scout", author_kind: "agent",
+      body: "Raced", replaces: "This will be removed."
+    )
+    other = Suggestion.propose!(
+      document: doc, author_name: "Scout", author_kind: "agent",
+      body: "Other", replaces: "This will be removed."
+    )
+    # Forces transition! to lose its compare-and-set for exactly one row
+    # (as if a human resolved it in the browser between the .pending scope
+    # read and this row's own UPDATE), proving the rescue ActiveRecord::RecordInvalid
+    # clause itself -- not just the .pending scope's pre-filtering -- is what
+    # keeps the loop going past a row that races and loses.
+    raced.define_singleton_method(:reject!) { |by: nil| raise ActiveRecord::RecordInvalid.new(self) }
+
+    assert_nothing_raised do
+      Suggestion.auto_reject_stale!(doc, new_content: "# Entirely different content")
+    end
+
+    assert_equal "rejected", other.reload.status
+  end
+
   test "replace_content! leaves suggestions without a replaces target untouched" do
     doc = Document.create!(title: "Live", seed_content: "# Seed")
     general = Suggestion.propose!(
@@ -205,6 +258,53 @@ class DocumentTest < ActiveSupport::TestCase
     doc.replace_content!(source: "# Entirely different content")
 
     assert_equal "pending", general.reload.status
+    assert_equal 0, doc.auto_rejected_suggestions
+  end
+
+  test "replace_content! rolls back the whole reset when auto-rejecting a suggestion fails to log its activity" do
+    doc = Document.create!(title: "Live", seed_content: "# Seed\n\nThis will be removed.", yjs_state: "old-crdt-state")
+    Suggestion.propose!(
+      document: doc, author_name: "Scout", author_kind: "agent",
+      body: "Replacement text", replaces: "This will be removed."
+    )
+    # Mirrors "claim rolls back ownership when the activity insert fails" --
+    # the same deliberate choice: a failed activity insert must not leave
+    # the doc silently reset with no feed entry explaining the suggestion's
+    # disappearance.
+    Activity.define_singleton_method(:new) { |*, **| raise "activity insert failed" }
+    begin
+      assert_raises(RuntimeError) do
+        doc.replace_content!(source: "# Entirely different content")
+      end
+    ensure
+      Activity.singleton_class.remove_method(:new)
+    end
+
+    doc.reload
+    assert_equal "# Seed\n\nThis will be removed.", doc.seed_content,
+                 "a failed activity insert must roll back the content reset, not leave it half-applied"
+    assert_equal "old-crdt-state", doc.yjs_state
+  end
+
+  test "replace_content! on an HTML document compares replaces against rendered text, not raw markup" do
+    doc = Document.create!(
+      title: "Live", content_format: "html",
+      seed_content: "<h1>Seed</h1><p>Please <strong>keep this</strong> paragraph intact.</p>"
+    )
+    # "replaces" is documented as a plain-text quote (AgentGuide: "a unique
+    # quote from plain_text"), so it spans the <strong> tag boundary the way
+    # a human or agent would actually quote it -- not the raw HTML markup.
+    surviving = Suggestion.propose!(
+      document: doc, author_name: "Scout", author_kind: "agent",
+      body: "Replacement", replaces: "Please keep this paragraph intact."
+    )
+
+    doc.replace_content!(
+      source: "<h1>New</h1><p>Please <strong>keep this</strong> paragraph intact. Plus more.</p>"
+    )
+
+    assert_equal "pending", surviving.reload.status,
+                 "comparing against raw HTML would falsely reject this -- the tag boundary splits the raw markup but not the rendered text"
     assert_equal 0, doc.auto_rejected_suggestions
   end
 
