@@ -168,6 +168,11 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     last = transmissions.last
     assert_equal "write-denied", last["type"]
     assert_equal true, last["stale"]
+
+    # The literal #120 repro: a fresh, independent read (what an incognito
+    # hard refresh's documents#show ultimately reads from) must see the
+    # replacement, not content the stale tab tried to resurrect.
+    assert_equal "# Replacement", Document.find(doc.id).current_content
   end
 
   test "a frame carrying the current generation persists normally" do
