@@ -177,7 +177,16 @@ export class CableProvider {
       : Y.encodeStateAsUpdate(this.doc)
     const persistedVector = Y.encodeStateVector(this.doc)
 
-    const updatePayload = { update: toBase64(update), cid: this.clientId }
+    const updatePayload = {
+      update: toBase64(update),
+      cid: this.clientId,
+      // Same staleness guard as sendUpdate: this beforeunload/keepalive
+      // fallback merges through the identical YjsPersistence.merge path as
+      // SyncChannel, so it must carry generation too -- otherwise a closing
+      // stale tab could resurrect content a replacement just reset via this
+      // second transport.
+      ...(this.generation === null ? {} : { generation: this.generation }),
+    }
     const completePayload = { ...updatePayload, ...snapshot }
     const completeBody = JSON.stringify(completePayload)
     // Browsers cap keepalive request bodies at roughly 64 KiB. Large docs

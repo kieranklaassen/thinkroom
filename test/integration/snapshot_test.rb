@@ -248,6 +248,54 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert_equal "* [x] checked", @document.content_snapshot
   end
 
+  test "durable sync update rejects a stale generation instead of resurrecting replaced content" do
+    @document.update!(seed_content: "# Seed", content_snapshot: nil)
+    stale_generation = @document.content_generation
+
+    # A still-open tab's local Yjs doc predates an owner CLI replacement.
+    @document.replace_content!(source: "# Replacement")
+    assert_equal stale_generation + 1, @document.reload.content_generation
+
+    ydoc = Y::Doc.new
+    ydoc.get_text("t") << "resurrected stale content"
+    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
+
+    assert_no_broadcasts(SyncChannel.broadcasting_for(@document)) do
+      post document_sync_update_path(@document.slug),
+           params: { update:, generation: stale_generation },
+           as: :json
+    end
+
+    assert_response :conflict
+    assert_nil @document.reload.yjs_state,
+               "a stale-generation keepalive request must never resurrect content a replacement reset"
+  end
+
+  test "durable sync update with the current generation persists normally" do
+    @document.update!(seed_content: "# Seed", content_snapshot: nil)
+    ydoc = Y::Doc.new
+    ydoc.get_text("t") << "current content"
+    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
+
+    post document_sync_update_path(@document.slug),
+         params: { update:, generation: @document.content_generation },
+         as: :json
+
+    assert_response :no_content
+    assert @document.reload.yjs_state.present?
+  end
+
+  test "durable sync update with no generation key still merges (rollout compatibility)" do
+    ydoc = Y::Doc.new
+    ydoc.get_text("t") << "legacy client, no generation field"
+    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
+
+    post document_sync_update_path(@document.slug), params: { update: }, as: :json
+
+    assert_response :no_content
+    assert @document.reload.yjs_state.present?
+  end
+
   test "durable sync update rejects malformed and oversized payloads" do
     post document_sync_update_path(@document.slug),
          params: { update: "not-base64" },
