@@ -63,6 +63,13 @@ module Api
     # replace their own live document by resetting stale CRDT/snapshot state to
     # the new source. Non-owners on claimed/live documents keep the suggestion
     # workflow so a full replacement never bypasses ownership.
+    #
+    # A live replacement also advances Document#content_generation, which
+    # SyncChannel/YjsPersistence use to reject (not merge) any frame a still-
+    # connected stale browser tab sends afterward — without that guard, the
+    # stale tab could silently resurrect the pre-replacement content moments
+    # after this request returns 200. See
+    # docs/plans/2026-06-30-001-fix-cli-replacement-stale-crdt-race-plan.md.
     def update
       live_owner_replacement = !document.seed_stage? && owner_via_cli_token?
       return render_update_conflict unless live_owner_replacement || (document.seed_stage? && updatable_in_place?)
