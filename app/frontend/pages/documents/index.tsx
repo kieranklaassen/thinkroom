@@ -240,9 +240,19 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
   const copyInstruction = useCallback(() => {
     void navigator.clipboard.writeText(agentInstruction).then(() => {
       setCopied(true)
-      setTimeout(() => setCopied(false), 1600)
+      setTimeout(() => setCopied(false), 2400)
     })
   }, [agentInstruction])
+
+  // Revealing the prompt also copies it: the agent-start action is "give me the
+  // prompt", so a single click both shows it and puts it on the clipboard.
+  const revealAgentInstructions = useCallback(() => {
+    const willOpen = !agentInstructionsOpen
+    setAgentInstructionsOpen(willOpen)
+    if (willOpen) {
+      copyInstruction()
+    }
+  }, [agentInstructionsOpen, copyInstruction])
 
   const availableTags = yours.reduce<string[]>((tags, document) => {
     document.tags.forEach((tag) => {
@@ -299,7 +309,7 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
                 type="button"
                 aria-expanded={agentInstructionsOpen}
                 aria-controls="agent-start-instructions"
-                onClick={() => setAgentInstructionsOpen((open) => !open)}
+                onClick={revealAgentInstructions}
               >
                 Have an agent start one
               </button>
@@ -317,8 +327,13 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
               className="landing-agent"
               aria-labelledby="agent-start-trigger"
             >
-              <p className="landing-agent-hint">
-                Paste this to any agent that can make HTTP requests:
+              <p
+                className={`landing-agent-hint${copied ? ' is-copied' : ''}`}
+                aria-live="polite"
+              >
+                {copied
+                  ? 'Copied to clipboard — paste it into any agent that can make HTTP requests:'
+                  : 'Paste this to any agent that can make HTTP requests:'}
               </p>
               <div className="landing-agent-block">
                 <code>{agentInstruction}</code>
