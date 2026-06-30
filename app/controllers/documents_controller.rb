@@ -97,6 +97,9 @@ class DocumentsController < InertiaController
       document: document.slice(:id, :slug, :title, :content_format).merge(
         seed_content: document.seed_content,
         seed_version: document.updated_at.iso8601(6),
+        # Announced back on every CRDT/snapshot write so the server can reject
+        # stale writes from a client that loaded before an owner replacement.
+        content_generation: document.content_generation,
         seed_granted: seed_granted,
         seed_author_kind: document.seed_author_kind,
         seed_author_name: document.seed_author_name,
@@ -315,7 +318,8 @@ class DocumentsController < InertiaController
       spans:,
       title:,
       token: owner_token,
-      user: current_user
+      user: current_user,
+      generation: client_generation
     )
     return render json: { error: "Snapshot is stale; retry from current document state." },
                   status: :conflict unless persisted
@@ -337,7 +341,8 @@ class DocumentsController < InertiaController
     decoded = Base64.strict_decode64(update)
     return head :content_too_large if decoded.bytesize > MAX_SYNC_UPDATE_BYTES
 
-    YjsPersistence.merge(document, update, token: owner_token, user: current_user)
+    YjsPersistence.merge(document, update, token: owner_token, user: current_user,
+                                           generation: client_generation)
     SyncChannel.broadcast_to(document, {
       type: "update",
       update:,
@@ -365,7 +370,8 @@ class DocumentsController < InertiaController
         spans:,
         title:,
         token: owner_token,
-        user: current_user
+        user: current_user,
+        generation: client_generation
       )
       return render json: { error: "Snapshot is stale; retry from current document state." },
                     status: :conflict unless persisted
@@ -377,12 +383,23 @@ class DocumentsController < InertiaController
     head :no_content
   rescue ArgumentError
     render json: { error: "Invalid Yjs update." }, status: :unprocessable_entity
+  rescue Document::StaleContentError
+    # The doc was replaced after this client loaded; drop the stale write
+    # rather than resurrecting the old state or relaying it to peers.
+    head :conflict
   end
 
   private
 
   def broadcast_title(document)
     DocumentMetaChannel.broadcast_event(document, :title, title: document.title)
+  end
+
+  # The content generation an editor client loaded with, echoed on its durable
+  # writes. Behind the document's current generation => the client predates a
+  # replace_content! reset, so the persistence layer drops the write.
+  def client_generation
+    Integer(params[:gen], exception: false)
   end
 
   def index_document_props(document, week_start:, current_year:)

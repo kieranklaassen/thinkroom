@@ -108,6 +108,7 @@ export interface DocumentProps {
     content_format: DocumentFormat
     seed_content: string | null
     seed_version: string
+    content_generation: number
     seed_granted: boolean
     seed_author_kind: string | null
     seed_author_name: string | null
@@ -1349,6 +1350,7 @@ export default function DocumentShow({
                       initialStateB64={doc.yjs_state_b64}
                       seedContent={doc.seed_content}
                       seedVersion={doc.seed_version}
+                      contentGeneration={doc.content_generation}
                       seedGranted={doc.seed_granted}
                       seedAuthorKind={doc.seed_author_kind}
                       seedAuthorName={doc.seed_author_name}
@@ -1369,6 +1371,7 @@ export default function DocumentShow({
                       onSpans={setSpans}
                       onSelection={isReading ? undefined : handleSelection}
                       onTitleChange={setDocumentTitle}
+                      onReset={reloadAfterContentReset}
                     />
                   )}
                 </div>

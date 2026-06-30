@@ -266,6 +266,49 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     end
   end
 
+  test "a client reconnecting behind the content generation is told to reset" do
+    doc = Document.create!(title: "Replaced", seed_markdown: "# Seed")
+    YjsPersistence.merge(doc, build_update_b64("old"), generation: 0)
+    doc.replace_content!(source: "# new source") # content_generation -> 1
+
+    subscribe slug: doc.slug, gen: 0
+
+    assert subscription.confirmed?
+    message = transmissions.last
+    assert_equal "reset", message["type"],
+                 "a stale reconnecting client must be told to reload, not handed the sync handshake"
+  end
+
+  test "a stale update frame is dropped, not persisted or relayed, and triggers reset" do
+    doc = Document.create!(title: "Replaced", seed_markdown: "# Seed")
+    YjsPersistence.merge(doc, build_update_b64("old"), generation: 0)
+    doc.replace_content!(source: "# new source")
+    subscribe slug: doc.slug, gen: 0
+    stale = build_update_b64("resurrected old content")
+
+    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+      perform :receive, { "type" => "sync-reply", "update" => stale, "cid" => "stale", "seq" => 1 }
+    end
+
+    assert_not doc.reload.yjs_state.present?, "a stale sync-reply must not resurrect yjs_state"
+    assert doc.seed_stage?, "doc must remain seed-stage after dropping the stale frame"
+    assert_equal "reset", transmissions.last["type"]
+  end
+
+  test "a current-generation update still persists after a reset" do
+    doc = Document.create!(title: "Replaced", seed_markdown: "# Seed")
+    YjsPersistence.merge(doc, build_update_b64("old"), generation: 0)
+    doc.replace_content!(source: "# new source")
+    subscribe slug: doc.slug, gen: doc.content_generation
+    update = build_update_b64("fresh content")
+
+    assert_broadcast_on(SyncChannel.broadcasting_for(doc), type: "update", update: update, cid: "fresh") do
+      perform :receive, { "type" => "update", "update" => update, "cid" => "fresh", "seq" => 1 }
+    end
+
+    assert doc.reload.yjs_state.present?
+  end
+
   test "awareness messages relay without persisting" do
     doc = Document.create!(title: "Presence")
     subscribe slug: doc.slug

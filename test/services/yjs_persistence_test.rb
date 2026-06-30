@@ -67,6 +67,62 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_not doc.yjs_state.present?, "no-op merge must not persist state"
   end
 
+  test "merge rejects a write from a client behind the current content generation" do
+    doc = Document.create!(title: "Replaced")
+    old = b64_update_for("old live content")
+    YjsPersistence.merge(doc, old, generation: 0)
+    doc.replace_content!(source: "# new source") # bumps content_generation to 1
+
+    assert_raises(Document::StaleContentError) do
+      # A stale tab (still at generation 0) re-syncing its old doc must not
+      # resurrect the replaced state.
+      YjsPersistence.merge(doc, old, generation: 0)
+    end
+
+    doc.reload
+    assert_not doc.yjs_state.present?, "stale re-sync must not repopulate yjs_state"
+    assert doc.seed_stage?, "doc must stay seed-stage so fresh loads reseed the new source"
+    assert_equal "# new source", doc.current_content
+  end
+
+  test "merge accepts a write at the current content generation after a reset" do
+    doc = Document.create!(title: "Replaced")
+    YjsPersistence.merge(doc, b64_update_for("old"), generation: 0)
+    doc.replace_content!(source: "# new source")
+
+    YjsPersistence.merge(doc, b64_update_for("fresh edit"), generation: doc.content_generation)
+
+    assert doc.reload.yjs_state.present?
+    assert_includes text_of(doc), "fresh edit"
+  end
+
+  test "merge without a generation is not guarded (rollout compatibility)" do
+    doc = Document.create!(title: "Legacy")
+    doc.replace_content!(source: "# new source")
+
+    YjsPersistence.merge(doc, b64_update_for("from a pre-guard client"))
+
+    assert doc.reload.yjs_state.present?
+  end
+
+  test "persist_snapshot rejects a client behind the current content generation" do
+    doc = Document.create!(title: "Snapshot", content_snapshot: "current")
+    YjsPersistence.merge(doc, b64_update_for("server content"), generation: 0)
+    doc.replace_content!(source: "# new source")
+    client_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+
+    persisted = YjsPersistence.persist_snapshot(
+      doc,
+      state_vector_b64: client_vector,
+      content: "stale snapshot",
+      spans: [],
+      generation: 0
+    )
+
+    assert_not persisted, "a snapshot from a pre-reset client must be rejected"
+    assert_nil doc.reload.content_snapshot, "stale snapshot must not shadow the new seed"
+  end
+
   test "corrupt base64 raises and leaves the document untouched" do
     doc = Document.create!(title: "Corrupt")
     YjsPersistence.merge(doc, b64_update_for("good content"))

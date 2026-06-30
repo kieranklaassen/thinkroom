@@ -125,6 +125,40 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "page render exposes the content generation for the editor to announce" do
+    get document_page_path(@document.slug), headers: browser
+
+    assert_inertia_props do |props|
+      props[:document][:content_generation] == @document.reload.content_generation
+    end
+  end
+
+  # The reported bug: after `thinkroom update` replaces a live document, a stale
+  # browser session re-syncs its old CRDT, which used to resurrect yjs_state and
+  # stop every later load (incognito included) from reseeding the new source.
+  test "a stale re-sync after replacement cannot stop a fresh load from reseeding the new source" do
+    old = Y::Doc.new
+    old.get_text("t") << "OLD LIVE CONTENT"
+    old_full = Base64.strict_encode64(old.full_diff.pack("C*"))
+    YjsPersistence.merge(@document, old_full, generation: 0)
+    assert_not @document.reload.seed_stage?, "doc is now live"
+
+    @document.replace_content!(source: "# Brand New")
+
+    # A stale tab (still at generation 0) re-syncing its old doc is rejected.
+    assert_raises(Document::StaleContentError) do
+      YjsPersistence.merge(@document, old_full, generation: 0)
+    end
+
+    # A brand-new (e.g. incognito) page load still reseeds the new source.
+    get document_page_path(@document.slug), headers: browser
+    assert_inertia_props do |props|
+      props[:document][:seed_granted] == true &&
+        props[:document][:seed_content] == "# Brand New" &&
+        props[:document][:has_state] == false
+    end
+  end
+
   test "documents without seed markdown never grant the seed" do
     doc = Document.create!(title: "Blank", seed_markdown: nil)
 

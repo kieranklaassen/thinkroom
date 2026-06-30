@@ -10,7 +10,7 @@ import {
 } from 'y-protocols/awareness'
 
 type SyncMessage = {
-  type: 'sync' | 'sync-reply' | 'update' | 'awareness' | 'awareness-query' | 'write-denied'
+  type: 'sync' | 'sync-reply' | 'update' | 'awareness' | 'awareness-query' | 'write-denied' | 'reset'
   update?: string
   sv?: string
   seed?: boolean
@@ -67,20 +67,31 @@ export class CableProvider {
   private serverStateVector: Uint8Array | null = null
   private readonly slug: string
   private readonly canWrite: boolean
+  // The content generation this page loaded with. Sent on subscribe and with
+  // every durable write so the server can drop writes from a session that
+  // predates an owner CLI replacement (a stale tab re-syncing old state).
+  // Fixed for the page's lifetime: never updated from a reconnect handshake.
+  private readonly generation: number | null
 
   constructor(
     doc: Y.Doc,
     slug: string,
-    options?: { consumer?: Consumer; canWrite?: boolean; connectionIdentity?: string },
+    options?: {
+      consumer?: Consumer
+      canWrite?: boolean
+      connectionIdentity?: string
+      generation?: number | null
+    },
   ) {
     this.doc = doc
     this.slug = slug
     this.canWrite = options?.canWrite ?? true
+    this.generation = options?.generation ?? null
     this.awareness = new Awareness(doc)
     this.consumer = options?.consumer ?? getConsumer(options?.connectionIdentity)
 
     this.subscription = this.consumer.subscriptions.create(
-      { channel: 'SyncChannel', slug },
+      { channel: 'SyncChannel', slug, gen: this.generation },
       {
         received: (data: SyncMessage) => this.handleReceived(data),
         disconnected: () => {
@@ -106,12 +117,12 @@ export class CableProvider {
     window.addEventListener('beforeunload', this.handleUnload)
   }
 
-  on(event: 'synced' | 'seed' | 'rejected' | 'write-denied', handler: () => void): void {
+  on(event: 'synced' | 'seed' | 'rejected' | 'write-denied' | 'reset', handler: () => void): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set())
     this.listeners.get(event)!.add(handler as never)
   }
 
-  off(event: 'synced' | 'seed' | 'rejected' | 'write-denied', handler: () => void): void {
+  off(event: 'synced' | 'seed' | 'rejected' | 'write-denied' | 'reset', handler: () => void): void {
     this.listeners.get(event)?.delete(handler as never)
   }
 
@@ -159,7 +170,7 @@ export class CableProvider {
       : Y.encodeStateAsUpdate(this.doc)
     const persistedVector = Y.encodeStateVector(this.doc)
 
-    const updatePayload = { update: toBase64(update), cid: this.clientId }
+    const updatePayload = { update: toBase64(update), cid: this.clientId, gen: this.generation }
     const completePayload = { ...updatePayload, ...snapshot }
     const completeBody = JSON.stringify(completePayload)
     // Browsers cap keepalive request bodies at roughly 64 KiB. Large docs
@@ -237,6 +248,13 @@ export class CableProvider {
         break
       case 'write-denied':
         this.emit('write-denied')
+        break
+      case 'reset':
+        // The document was replaced (owner CLI update) after this page loaded.
+        // This stale session must not re-sync its old doc; reload onto the
+        // current generation. Reached when we reconnect after missing the
+        // DocumentMetaChannel content_reset broadcast.
+        this.emit('reset')
         break
     }
   }
