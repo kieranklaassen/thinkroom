@@ -27,18 +27,17 @@ const auditPage = async (page, path, { expectFields }) => {
   await page.waitForFunction(() => (document.getElementById('app')?.childElementCount ?? 0) > 0)
   if (expectFields) await page.waitForSelector('input:not([type=hidden])')
 
-  const inputs = await page.evaluate((min) => {
+  const inputs = await page.evaluate(() => {
     const fields = [...document.querySelectorAll('input, textarea, select')]
     return fields
       .filter((field) => field.type !== 'hidden' && field.getClientRects().length > 0)
       .map((field) => ({
         label: `${field.tagName.toLowerCase()}[name=${field.name || field.className || '?'}]`,
         fontPx: parseFloat(getComputedStyle(field).fontSize),
-        zooms: parseFloat(getComputedStyle(field).fontSize) < min,
       }))
-  }, MIN_FONT_PX)
+  })
 
-  const zoomers = inputs.filter((input) => input.zooms)
+  const zoomers = inputs.filter((input) => input.fontPx < MIN_FONT_PX)
   if (zoomers.length > 0) {
     for (const input of zoomers) {
       fail(`${path}: ${input.label} is ${input.fontPx}px — below the ${MIN_FONT_PX}px iOS zoom threshold`)
