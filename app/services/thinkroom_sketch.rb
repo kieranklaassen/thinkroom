@@ -18,10 +18,9 @@ class ThinkroomSketch
   # sketch (normalizeSketchData in app/frontend/editor/sketch/scene.ts).
   VALID_ID = /\A[a-zA-Z0-9_-]{1,100}\z/
 
-  # `id` is nil when the source carried no editor-recognizable id (see
-  # parse_markdown_fence); renderers that must match the editor's accept set
-  # (the static preview) skip those, while text/audit consumers — which only
-  # care whether the scene itself is a sketch — ignore the field.
+  # `id` is present for every markdown fence (parse_markdown_fence rejects
+  # fences without an editor-valid one); it is nil only when a direct `parse`
+  # caller has no id to carry (e.g. the HTML sanitizer validating a scene).
   Parsed = Data.define(:scene, :description, :labels, :shape_types, :id, :height) do
     def semantic_text
       parts = [ description.presence, labels.presence&.join(", ") ].compact
@@ -74,11 +73,18 @@ class ThinkroomSketch
       payload = JSON.parse(code_text.to_s)
       return unless payload.is_a?(Hash)
 
+      # The editor only recognizes fences whose id matches VALID_ID
+      # (normalizeSketchData keeps everything else a code block), so reject
+      # them here too: create-time recognition, plain_text, the audit
+      # warning, and the static preview all share the editor's accept set.
+      id = payload["id"].to_s[VALID_ID]
+      return unless id
+
       parse(
         JSON.generate(payload.fetch("scene")),
         description: payload["description"],
         format_version: payload["formatVersion"],
-        id: payload["id"].to_s[VALID_ID],
+        id:,
         height: payload["height"]
       )
     rescue JSON::ParserError, JSON::NestingError, JSON::GeneratorError, KeyError

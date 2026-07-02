@@ -278,11 +278,9 @@ class DocumentPreviewHtml
       else
         # The excalidraw fence sanitizes down to <pre><code>{scene json}</code></pre>
         # (the lang hint is dropped), so the JSON payload itself is the signal.
-        # A nil id means the fence is not editor-recognizable (normalizeSketchData
-        # would keep it a code block there), so it stays a code block here too.
         fragment.css("pre > code").filter_map do |code|
           parsed = ThinkroomSketch.parse_markdown_fence(code.text)
-          [ code.parent, parsed ] if parsed&.id
+          [ code.parent, parsed ] if parsed
         end
       end
     end
