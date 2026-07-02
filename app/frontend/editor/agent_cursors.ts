@@ -22,45 +22,48 @@ let cursorResizeObserver: ResizeObserver | null = null
 let cursorIntersectionObserver: IntersectionObserver | null = null
 let cursorMutationObserver: MutationObserver | null = null
 
-let cursorClampVerified = false
+const CURSOR_LABEL_GUTTER = 8
 
-const clampCursorLabels = () => {
+const clampCursorLabels = (verify = true) => {
   cursorClampFrame = null
   cursorLabels.forEach((label) => {
-    const gutter = 8
     label.style.removeProperty('--agent-cursor-shift')
     const rect = label.getBoundingClientRect()
     let shift = 0
-    if (rect.right > window.innerWidth - gutter) shift = window.innerWidth - gutter - rect.right
-    if (rect.left + shift < gutter) shift += gutter - (rect.left + shift)
+    if (rect.right > window.innerWidth - CURSOR_LABEL_GUTTER) {
+      shift = window.innerWidth - CURSOR_LABEL_GUTTER - rect.right
+    }
+    if (rect.left + shift < CURSOR_LABEL_GUTTER) {
+      shift += CURSOR_LABEL_GUTTER - (rect.left + shift)
+    }
     label.style.setProperty('--agent-cursor-shift', `${Math.round(shift)}px`)
   })
   // A clamp scheduled during a viewport resize measures mid-reflow geometry
   // (window.innerWidth itself lags), lands a stale shift, and nothing later
   // corrects it. Verify once on the NEXT frame — where layout and
-  // innerWidth have settled — and re-clamp if any label sits out of bounds.
-  if (cursorClampVerified) {
-    cursorClampVerified = false
-    return
-  }
-  cursorClampVerified = true
+  // innerWidth have settled — and re-clamp (unverified, so this cannot
+  // loop) if any label sits out of bounds.
+  if (!verify) return
   cursorClampFrame = requestAnimationFrame(() => {
     cursorClampFrame = null
-    const gutter = 8
     let outOfBounds = false
     cursorLabels.forEach((label) => {
       const rect = label.getBoundingClientRect()
       if (rect.width === 0) return
-      if (rect.right > window.innerWidth - gutter + 1 || rect.left < gutter - 1) outOfBounds = true
+      if (
+        rect.right > window.innerWidth - CURSOR_LABEL_GUTTER + 1 ||
+        rect.left < CURSOR_LABEL_GUTTER - 1
+      ) {
+        outOfBounds = true
+      }
     })
-    if (outOfBounds) clampCursorLabels()
-    else cursorClampVerified = false
+    if (outOfBounds) clampCursorLabels(false)
   })
 }
 
 const scheduleCursorClamp = () => {
   if (cursorClampFrame !== null) return
-  cursorClampFrame = requestAnimationFrame(clampCursorLabels)
+  cursorClampFrame = requestAnimationFrame(() => clampCursorLabels())
 }
 
 const startCursorClampManager = () => {

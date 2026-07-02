@@ -1291,43 +1291,10 @@ a:focus-visible {
   height: auto;
 }
 
-/* Provenance tints: the editor derives .prov--* classes from marks; the
-   preview carries the sanitized data attributes. Same tints, zero color
-   flash at the swap. */
-.doc-static-preview span[data-provenance][data-kind='ai'] {
-  border-radius: 2px;
-}
-
-.doc-static-preview span[data-provenance][data-kind='ai'][data-state='pending'] {
-  background: var(--prov-pending-bg);
-  box-shadow: inset 0 -2px 0 var(--prov-pending-line);
-}
-
-.doc-static-preview span[data-provenance][data-kind='ai'][data-state='reviewed'] {
-  background: var(--prov-reviewed-bg);
-  box-shadow: inset 0 -2px 0 var(--prov-reviewed-line);
-}
-
-.doc-static-preview span[data-provenance][data-kind='ai'][data-state='endorsed'] {
-  box-shadow: inset 0 -2px 0 var(--prov-endorsed-line);
-}
-
-/* Tracked-edit marks in the preview mirror .sug-ins/.sug-del. */
-.doc-static-preview ins[data-suggestion-id] {
-  text-decoration: none;
-  background: var(--sug-ins-bg);
-  box-shadow: inset 0 -2px 0 var(--sug-ins-line);
-  border-radius: 2px;
-}
-
-.doc-static-preview del[data-suggestion-id] {
-  text-decoration: line-through;
-  text-decoration-color: var(--sug-del-line);
-  text-decoration-thickness: 2px;
-  background: var(--sug-del-bg);
-  border-radius: 2px;
-  color: color-mix(in srgb, var(--ink) 72%, transparent);
-}
+/* Provenance and suggestion tints for the static preview live grouped with
+   the editor's own tint rules (see "Provenance tints" below) so the two
+   layers can never drift apart — a tint drift is exactly the color flash at
+   the preview → editor swap this file works to prevent. */
 
 .milkdown .ProseMirror {
   outline: none;
@@ -2147,23 +2114,30 @@ a:focus-visible {
 }
 
 /* ----------------------------- Provenance tints -------------------------- */
-/* Human text renders plain — the absence of decoration IS the design.       */
-.milkdown .prov--ai {
+/* Human text renders plain — the absence of decoration IS the design.
+ * Each rule also targets the static preview, which carries the sanitized
+ * data attributes instead of the editor's mark-derived classes; grouping
+ * them keeps the tints identical so the swap never flashes color. */
+.milkdown .prov--ai,
+.doc-static-preview span[data-provenance][data-kind='ai'] {
   border-radius: 2px;
   transition: background 240ms ease, border-color 240ms ease;
 }
 
-.milkdown .prov--ai.prov--pending {
+.milkdown .prov--ai.prov--pending,
+.doc-static-preview span[data-provenance][data-kind='ai'][data-state='pending'] {
   background: var(--prov-pending-bg);
   box-shadow: inset 0 -2px 0 var(--prov-pending-line);
 }
 
-.milkdown .prov--ai.prov--reviewed {
+.milkdown .prov--ai.prov--reviewed,
+.doc-static-preview span[data-provenance][data-kind='ai'][data-state='reviewed'] {
   background: var(--prov-reviewed-bg);
   box-shadow: inset 0 -2px 0 var(--prov-reviewed-line);
 }
 
-.milkdown .prov--ai.prov--endorsed {
+.milkdown .prov--ai.prov--endorsed,
+.doc-static-preview span[data-provenance][data-kind='ai'][data-state='endorsed'] {
   background: transparent;
   box-shadow: inset 0 -2px 0 var(--prov-endorsed-line);
 }
@@ -2172,14 +2146,16 @@ a:focus-visible {
 /* Pending track-changes marks (Suggest mode). Green = proposed insertion,
  * red strikethrough = proposed deletion (text stays until accepted). The
  * suggestion tint deliberately dominates provenance tints while pending. */
-.milkdown ins.sug-ins {
+.milkdown ins.sug-ins,
+.doc-static-preview ins[data-suggestion-id] {
   text-decoration: none;
   background: var(--sug-ins-bg);
   box-shadow: inset 0 -2px 0 var(--sug-ins-line);
   border-radius: 2px;
 }
 
-.milkdown del.sug-del {
+.milkdown del.sug-del,
+.doc-static-preview del[data-suggestion-id] {
   text-decoration: line-through;
   text-decoration-color: var(--sug-del-line);
   text-decoration-thickness: 2px;
