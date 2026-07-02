@@ -1,7 +1,7 @@
 ---
 title: "fix: Suggestion replace duplication + fast bulk accept"
 type: fix
-status: active
+status: completed
 date: 2026-06-08
 ---
 

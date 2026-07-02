@@ -1,7 +1,7 @@
 ---
 title: "feat: Add PATCH /api/docs/:slug for updating existing documents"
 type: feat
-status: active
+status: completed
 date: 2026-06-25
 origin: https://github.com/kieranklaassen/thinkroom/issues/57
 ---

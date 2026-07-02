@@ -1,7 +1,7 @@
 ---
 title: Agent Rich HTML API
 type: feat
-status: active
+status: completed
 date: 2026-06-08
 ---
 

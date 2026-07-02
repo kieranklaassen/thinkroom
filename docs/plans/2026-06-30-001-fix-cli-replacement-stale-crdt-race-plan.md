@@ -1,7 +1,7 @@
 ---
 title: "fix: Close the stale-CRDT race after owner CLI replacement and clean up orphaned suggestions"
 type: fix
-status: active
+status: completed
 date: 2026-06-30
 origin:
   - https://github.com/kieranklaassen/thinkroom/issues/119
