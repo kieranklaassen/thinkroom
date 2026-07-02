@@ -33,7 +33,7 @@ class DocumentOpenGraphTest < ActionDispatch::IntegrationTest
     assert_equal URI(image_url).path, document_og_image_path(@document.slug)
     assert URI(image_url).query.include?("v=")
     assert_includes property(page, "og:image:alt"), "Thinkroom shared document"
-    assert_includes property(page, "og:image:alt"), "Open document"
+    assert_includes property(page, "og:image:alt"), "Product & market"
     assert_equal "Product & market — Open this shared document on Thinkroom", page.at_css("title").text
     assert_includes 50..60, page.at_css("title").text.scan(/\X/).length
     assert_operator named(page, "description").scan(/\X/).length, :<=, 125

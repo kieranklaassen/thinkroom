@@ -57,14 +57,45 @@ class DocumentOgImageServiceTest < ActiveSupport::TestCase
     end
   end
 
-  test "renders source context and an honest call to action" do
+  test "renders the wordmark, source label, and tagline for an unattributed document" do
     document = Document.new(title: "Plan", seed_content: "# Plan\n\nA useful summary")
     svg = DocumentOgImage.send(:svg, document)
 
-    assert_includes svg, "THINKROOM · SHARED DOCUMENT"
-    assert_includes svg, "Open document →"
+    assert_includes svg, ">Thinkroom<"
+    assert_includes svg, "SHARED DOCUMENT"
     assert_includes svg, "A place for deeper thinking"
     refute_includes svg, "owner_token"
+  end
+
+  test "renders the author and labels when the document carries them" do
+    document = Document.new(
+      slug: "abc123",
+      title: "Roadmap",
+      owner_name: "Ada Lovelace",
+      tags: [ "Planning", "Q3" ],
+      seed_content: "# Roadmap\n\nWhere we are headed."
+    )
+    svg = DocumentOgImage.send(:svg, document)
+
+    assert_includes svg, ">Ada Lovelace<"
+    assert_includes svg, ">A<" # avatar initial
+    assert_includes svg, ">Planning<"
+    assert_includes svg, ">Q3<"
+    refute_includes svg, "A place for deeper thinking"
+  end
+
+  test "escapes user-authored copy in the SVG" do
+    document = Document.new(
+      title: "Tom & Jerry <plan>",
+      owner_name: "A & B",
+      tags: [ "<tag>" ],
+      seed_content: "Body & <markup>"
+    )
+    svg = DocumentOgImage.send(:svg, document)
+
+    assert_includes svg, "Tom &amp; Jerry &lt;plan&gt;"
+    refute_includes svg, "<plan>"
+    refute_includes svg, "<tag>"
   end
 
   test "keeps the excerpt out of the card's right gutter" do
@@ -75,10 +106,11 @@ class DocumentOgImageServiceTest < ActiveSupport::TestCase
       )
       svg = DocumentOgImage.send(:svg, document)
       image = Vips::Image.svgload_buffer(svg, access: :sequential)
-      # Stop before the rounded card border's antialiasing at x=1152.
+      # The title/excerpt must stay left of the right whitespace; this band sits
+      # between the header eyebrow and the footer, so it is pure background.
       right_gutter = image.crop(1120, 230, 12, 250)
-      card_fill = [255, 253, 249, 255]
-      puts JSON.generate(max_delta: (right_gutter - card_fill).abs.max)
+      background = [251, 250, 247, 255]
+      puts JSON.generate(max_delta: (right_gutter - background).abs.max)
     RUBY
 
     stdout, stderr, status = Open3.capture3(

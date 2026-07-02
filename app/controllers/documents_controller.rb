@@ -482,7 +482,7 @@ class DocumentsController < InertiaController
         document.slug,
         v: DocumentOgImage.url_version(document)
       ),
-      image_alt: "Thinkroom shared document preview for “#{preview.title}” with an Open document button."
+      image_alt: "Thinkroom shared document preview for “#{preview.title}”."
     }
   end
 

@@ -1,11 +1,58 @@
 class DocumentOgImage
   WIDTH = 1200
   HEIGHT = 630
-  VERSION = "3"
-  TITLE_LINE_WIDTH = 16.5
+  # Bump when the visual template changes so cached PNGs and versioned
+  # og:image URLs invalidate.
+  VERSION = "4"
+
+  # Page geometry. The design is a full-bleed cream "document cover": a left
+  # margin rule, a wordmark/eyebrow header, a centered serif title + excerpt,
+  # and a hairline footer carrying the author and optional label pills.
+  MARGIN_X = 72
+  CONTENT_RIGHT = WIDTH - MARGIN_X
+  RULE_X = 44
+
+  HEADER_BASELINE = 96
+
+  # Title/excerpt live in the band between the header and the footer hairline
+  # and are vertically centered within it.
+  REGION_TOP = 128
+  REGION_BOTTOM = 484
+  REGION_CENTER = (REGION_TOP + REGION_BOTTOM) / 2
+
+  # Widths are in "visual width" units (~1 em per unit), so max line px / size.
+  TITLE_SIZE = 72
+  TITLE_LINE_HEIGHT = 78
+  TITLE_LINE_WIDTH = 13.5
   TITLE_MAX_LINES = 3
+
+  DESCRIPTION_SIZE = 26
+  DESCRIPTION_LINE_HEIGHT = 38
   DESCRIPTION_LINE_WIDTH = 33.0
   DESCRIPTION_MAX_LINES = 2
+  DESCRIPTION_GAP = 22
+
+  HAIRLINE_Y = 508
+  FOOTER_CENTER = 554
+  AVATAR_RADIUS = 20
+
+  # Curated jewel/earth tones that all read well on the cream field. The default
+  # (first) is the maroon from the mockup; each document gets a stable accent
+  # derived from its slug so previews feel distinct without a manual choice.
+  ACCENTS = %w[#7A2E2E #2A5A46 #2F3A56 #8A5A1F].freeze
+
+  BACKGROUND = "#FBFAF7"
+  INK = "#1C1B18"
+  DESCRIPTION_INK = "#5C5850"
+  EYEBROW_INK = "#8A867C"
+  HAIRLINE_INK = "#E3DFD6"
+  AUTHOR_INK = "#3A372F"
+  PILL_INK = "#5C5850"
+  PILL_BORDER = "#DBD6CB"
+  AVATAR_INK = "#FBFAF7"
+
+  SERIF = "Newsreader, 'Liberation Serif', Georgia, 'Times New Roman', serif".freeze
+  SANS = "Instrument Sans, -apple-system, 'Segoe UI', 'Liberation Sans', Helvetica, Arial, sans-serif".freeze
 
   class << self
     def call(document)
@@ -28,60 +75,104 @@ class DocumentOgImage
 
     def svg(document)
       preview = DocumentSocialPreview.new(document)
+      accent = accent_for(document)
+
       title_lines = wrap(preview.title, width: TITLE_LINE_WIDTH, maximum: TITLE_MAX_LINES)
       description_maximum = title_lines.length >= TITLE_MAX_LINES ? 1 : DESCRIPTION_MAX_LINES
-      description_lines = wrap(
-        preview.description,
-        width: DESCRIPTION_LINE_WIDTH,
-        maximum: description_maximum
-      )
-      description_y = 222 + (title_lines.length * 68)
+      # A title-only document projects its title as the description too; don't
+      # echo it back as a redundant subtitle on the card.
+      description_text = preview.description.to_s
+      description_text = "" if description_text.strip == preview.title.to_s.strip
+      description_lines = description_text.present? ? wrap(description_text, width: DESCRIPTION_LINE_WIDTH, maximum: description_maximum) : []
+
+      block_height = title_lines.length * TITLE_LINE_HEIGHT
+      block_height += DESCRIPTION_GAP + description_lines.length * DESCRIPTION_LINE_HEIGHT if description_lines.any?
+      block_top = REGION_CENTER - (block_height / 2.0)
+
+      title_baseline = block_top + 58
+      title_bottom = block_top + title_lines.length * TITLE_LINE_HEIGHT
+      description_baseline = title_bottom + DESCRIPTION_GAP + 27
+
+      wordmark_x = MARGIN_X + (visual_width("T.") * 34) + 14
 
       <<~SVG
         <svg xmlns="http://www.w3.org/2000/svg" width="#{WIDTH}" height="#{HEIGHT}" viewBox="0 0 #{WIDTH} #{HEIGHT}">
-          <defs>
-            <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stop-color="#f4effa"/>
-              <stop offset="1" stop-color="#ece5f6"/>
-            </linearGradient>
-            <linearGradient id="accent" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stop-color="#a755db"/>
-              <stop offset="1" stop-color="#7240c7"/>
-            </linearGradient>
-          </defs>
-          <rect width="#{WIDTH}" height="#{HEIGHT}" fill="url(#background)"/>
-          <circle cx="1090" cy="8" r="260" fill="#9d4edd" opacity="0.08"/>
-          <circle cx="1138" cy="72" r="126" fill="none" stroke="#9d4edd" stroke-width="2" opacity="0.16"/>
-          <rect x="48" y="48" width="1104" height="534" rx="28" fill="#fffdf9" stroke="#dcd2e8" stroke-width="2"/>
-          <path d="M76 48H62C54.268 48 48 54.268 48 62V568C48 575.732 54.268 582 62 582H76Z" fill="url(#accent)"/>
+          <rect width="#{WIDTH}" height="#{HEIGHT}" fill="#{BACKGROUND}"/>
+          <line x1="#{RULE_X}" y1="0" x2="#{RULE_X}" y2="#{HEIGHT}" stroke="#{accent}" stroke-width="1" opacity="0.28"/>
 
-          <circle cx="105" cy="112" r="6" fill="#9d4edd"/>
-          <text x="123" y="120" fill="#674e78" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="700" letter-spacing="2.6">THINKROOM · SHARED DOCUMENT</text>
-          <g opacity="0.72">
-            <circle cx="1040" cy="111" r="17" fill="#eadcf5" stroke="#fffdf9" stroke-width="4"/>
-            <circle cx="1072" cy="111" r="17" fill="#d6c2ec" stroke="#fffdf9" stroke-width="4"/>
-            <circle cx="1104" cy="111" r="17" fill="#9d4edd" stroke="#fffdf9" stroke-width="4"/>
-          </g>
+          <text x="#{MARGIN_X}" y="#{HEADER_BASELINE}" fill="#{accent}" font-family="#{SERIF}" font-size="34" font-weight="600">T.</text>
+          <text x="#{wordmark_x.round(1)}" y="#{HEADER_BASELINE}" fill="#{INK}" font-family="#{SANS}" font-size="21" font-weight="600" letter-spacing="-0.2">Thinkroom</text>
+          <text x="#{CONTENT_RIGHT}" y="#{HEADER_BASELINE}" text-anchor="end" fill="#{EYEBROW_INK}" font-family="#{SANS}" font-size="16" font-weight="500" letter-spacing="2.2">SHARED DOCUMENT</text>
 
-          <text x="100" y="198" fill="#252128" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="62" font-weight="650" letter-spacing="-1.5">
-            #{tspans(title_lines, x: 100, line_height: 68)}
+          <text x="#{MARGIN_X}" y="#{title_baseline.round(1)}" fill="#{INK}" font-family="#{SERIF}" font-size="#{TITLE_SIZE}" font-weight="500" letter-spacing="-1">
+            #{tspans(title_lines, x: MARGIN_X, line_height: TITLE_LINE_HEIGHT)}
           </text>
-          <text x="100" y="#{description_y}" fill="#685f6c" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="28" font-weight="400">
-            #{tspans(description_lines, x: 100, line_height: 40)}
-          </text>
+          #{description_svg(description_lines, description_baseline)}
 
-          <rect x="100" y="504" width="232" height="50" rx="25" fill="#8f46cf"/>
-          <text x="126" y="536" fill="#ffffff" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="19" font-weight="700">Open document →</text>
-          <text x="1100" y="535" text-anchor="end" fill="#827787" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18">A place for deeper thinking</text>
+          <line x1="#{MARGIN_X}" y1="#{HAIRLINE_Y}" x2="#{CONTENT_RIGHT}" y2="#{HAIRLINE_Y}" stroke="#{HAIRLINE_INK}" stroke-width="1"/>
+          #{footer_left_svg(preview, accent)}
+          #{pills_svg(preview.labels)}
         </svg>
       SVG
+    end
+
+    def description_svg(lines, baseline)
+      return "" if lines.empty?
+
+      %(<text x="#{MARGIN_X}" y="#{baseline.round(1)}" fill="#{DESCRIPTION_INK}" font-family="#{SANS}" font-size="#{DESCRIPTION_SIZE}" font-weight="400">
+            #{tspans(lines, x: MARGIN_X, line_height: DESCRIPTION_LINE_HEIGHT)}
+          </text>)
+    end
+
+    def footer_left_svg(preview, accent)
+      if preview.author.present?
+        cx = MARGIN_X + AVATAR_RADIUS
+        <<~AUTHOR.strip
+          <circle cx="#{cx}" cy="#{FOOTER_CENTER}" r="#{AVATAR_RADIUS}" fill="#{accent}"/>
+          <text x="#{cx}" y="#{FOOTER_CENTER + 7}" text-anchor="middle" fill="#{AVATAR_INK}" font-family="#{SERIF}" font-size="21" font-weight="500">#{escape(preview.author_initial)}</text>
+          <text x="#{cx + AVATAR_RADIUS + 14}" y="#{FOOTER_CENTER + 7}" fill="#{AUTHOR_INK}" font-family="#{SANS}" font-size="20" font-weight="500">#{escape(preview.author)}</text>
+        AUTHOR
+      else
+        %(<text x="#{MARGIN_X}" y="#{FOOTER_CENTER + 6}" fill="#{EYEBROW_INK}" font-family="#{SANS}" font-size="19" font-weight="400">A place for deeper thinking</text>)
+      end
+    end
+
+    def pills_svg(labels)
+      return "" if labels.empty?
+
+      gap = 10
+      widths = labels.map { |label| ((visual_width(label) * 16) + 32).round }
+      total = widths.sum + gap * (labels.length - 1)
+      cursor = CONTENT_RIGHT - total
+      top = FOOTER_CENTER - 17
+
+      labels.each_with_index.map do |label, index|
+        width = widths[index]
+        pill = <<~PILL.strip
+          <rect x="#{cursor}" y="#{top}" width="#{width}" height="34" rx="17" fill="none" stroke="#{PILL_BORDER}" stroke-width="1.5"/>
+          <text x="#{cursor + width / 2}" y="#{FOOTER_CENTER + 6}" text-anchor="middle" fill="#{PILL_INK}" font-family="#{SANS}" font-size="16" font-weight="500">#{escape(label)}</text>
+        PILL
+        cursor += width + gap
+        pill
+      end.join("\n          ")
+    end
+
+    def accent_for(document)
+      slug = document.slug.to_s
+      return ACCENTS.first if slug.empty?
+
+      ACCENTS[slug.each_byte.sum % ACCENTS.length]
     end
 
     def tspans(lines, x:, line_height:)
       lines.map.with_index do |line, index|
         dy = index.zero? ? 0 : line_height
-        %(<tspan x="#{x}" dy="#{dy}">#{ERB::Util.html_escape(line)}</tspan>)
+        %(<tspan x="#{x}" dy="#{dy}">#{escape(line)}</tspan>)
       end.join("\n")
+    end
+
+    def escape(text)
+      ERB::Util.html_escape(text)
     end
 
     def wrap(text, width:, maximum:)
