@@ -451,6 +451,59 @@ a:focus-visible {
   transition: background 120ms ease;
 }
 
+/* Swipe-to-delete (native app only — the SwipeRow wrapper never renders on
+   the web). The row's padding moves into the sliding content so the revealed
+   action fills the full row height. */
+.document-row--swipe {
+  padding: 0;
+}
+
+.swipe-row {
+  position: relative;
+  overflow: hidden;
+}
+
+.swipe-row-action {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 88px;
+  display: flex;
+}
+
+.swipe-row-action button {
+  flex: 1;
+  border: 0;
+  background: var(--sketch-danger);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.swipe-row-action button:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.swipe-row-content {
+  position: relative;
+  background: var(--surface-raised);
+  transition: transform 180ms ease;
+  /* Vertical panning stays native so the list scrolls; horizontal drags
+     reach the pointer handlers. */
+  touch-action: pan-y;
+}
+
+.swipe-row-content.is-dragging {
+  transition: none;
+}
+
+.swipe-row-padding {
+  padding: 0.78rem 0.9rem;
+}
+
 .document-row:last-child {
   border-bottom: 0;
 }

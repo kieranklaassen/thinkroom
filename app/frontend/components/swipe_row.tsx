@@ -1,0 +1,143 @@
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react'
+import { nativeHaptic } from '@ruby-native/react'
+
+// Only one row may sit open at a time (the iOS list convention). Opening a
+// row registers its closer here; the next row to open — or a tap anywhere
+// else — invokes it.
+let closeOpenRow: (() => void) | null = null
+
+const ACTION_WIDTH = 88
+// Horizontal movement before we treat the gesture as a swipe (and start
+// suppressing the row's own click/navigation).
+const SLOP = 12
+
+interface Props {
+  slug: string
+  deleting: boolean
+  onDelete: () => void
+  children: ReactNode
+}
+
+/**
+ * iOS-style swipe-to-delete container for the native app's document rows.
+ * Drag left past the threshold to reveal a Delete action; vertical movement
+ * cancels so the list still scrolls; a tap on an open row closes it instead
+ * of navigating. Dependency-free pointer-event implementation (the plan's
+ * "Silk" library is not installed).
+ */
+export function SwipeRow({ slug, deleting, onDelete, children }: Props) {
+  const [offset, setOffset] = useState(0)
+  const [open, setOpen] = useState(false)
+  // Disables the settle transition while the finger is down so the row
+  // tracks the drag 1:1.
+  const [dragging, setDragging] = useState(false)
+  const start = useRef<{ x: number; y: number } | null>(null)
+  const axis = useRef<'horizontal' | 'vertical' | null>(null)
+  // Sticky "this gesture was a swipe" flag: the click that follows a drag
+  // must be suppressed even though pointerup already reset the drag state.
+  const swiped = useRef(false)
+
+  const close = useCallback(() => {
+    setOpen(false)
+    setOffset(0)
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    closeOpenRow?.()
+    closeOpenRow = close
+    return () => {
+      if (closeOpenRow === close) closeOpenRow = null
+    }
+  }, [open, close])
+
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    start.current = { x: event.clientX, y: event.clientY }
+    axis.current = null
+    swiped.current = false
+  }
+
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (!start.current) return
+    const dx = event.clientX - start.current.x
+    const dy = event.clientY - start.current.y
+    if (!axis.current) {
+      if (Math.abs(dx) < SLOP && Math.abs(dy) < SLOP) return
+      axis.current = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical'
+      if (axis.current === 'horizontal') {
+        swiped.current = true
+        setDragging(true)
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId)
+        } catch {
+          // Synthetic events may carry an unknown pointerId; capture is an
+          // enhancement, not a requirement.
+        }
+      }
+    }
+    if (axis.current !== 'horizontal') return
+    const base = open ? -ACTION_WIDTH : 0
+    setOffset(Math.min(0, Math.max(-ACTION_WIDTH, base + dx)))
+  }
+
+  const endGesture = () => {
+    if (axis.current === 'horizontal') {
+      const shouldOpen = offset < -ACTION_WIDTH / 2
+      setOpen(shouldOpen)
+      setOffset(shouldOpen ? -ACTION_WIDTH : 0)
+    }
+    start.current = null
+    axis.current = null
+    setDragging(false)
+  }
+
+  // A click that follows a swipe (or lands on an open row) closes the row
+  // and never reaches the Inertia link underneath.
+  const onClickCapture = (event: MouseEvent<HTMLDivElement>) => {
+    if (swiped.current) {
+      event.preventDefault()
+      event.stopPropagation()
+      swiped.current = false
+      return
+    }
+    if (open) {
+      event.preventDefault()
+      event.stopPropagation()
+      close()
+    }
+  }
+
+  return (
+    <div className={`swipe-row${open ? ' is-open' : ''}`} data-swipe-row={slug}>
+      <div className="swipe-row-action">
+        <button
+          type="button"
+          disabled={deleting}
+          onClick={onDelete}
+          {...nativeHaptic('warning')}
+        >
+          {deleting ? 'Deleting…' : 'Delete'}
+        </button>
+      </div>
+      <div
+        className={`swipe-row-content${dragging ? ' is-dragging' : ''}`}
+        style={{ transform: offset === 0 ? undefined : `translateX(${offset}px)` }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endGesture}
+        onPointerCancel={endGesture}
+        onClickCapture={onClickCapture}
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
