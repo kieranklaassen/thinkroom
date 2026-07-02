@@ -23,7 +23,7 @@ Every merge builds a fresh `Y::Doc` from the stored blob before applying one upd
 - R4: Entries evict on last disconnect (SyncChannel refcount) and via an LRU cap (`MAX_RESIDENT_DOCS = 256`); the per-document `LOCKS` mutex evicts on last disconnect when unlocked (a racing thread that still holds a reference is safe — `with_lock` remains the second guard, per the existing comment).
 - R5: `merge.yjs` events record `cache: hit|miss` so the hit rate is measurable.
 - R6: Behavior is otherwise unchanged: same outcomes, same rejections, same handshake serving (columns-first from the stacked state-vector PR).
-- R7: A pending (causally dependent) update retained in the resident doc persists once its dependency arrives within the process lifetime — an improvement over the fresh-doc-per-merge path, which dropped pending structs at every encode.
+- R7: A pending (causally dependent) update is inert in the resident doc — y-rb 0.7.0 never re-integrates parked pending structs when the dependency later syncs (verified empirically), and `full_diff` never serializes them. Convergence comes from client redelivery, exactly as on the fresh-doc-per-merge path; the cache must not make this worse.
 
 ## Key Technical Decisions
 

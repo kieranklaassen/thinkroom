@@ -375,14 +375,46 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal "ab", text_of(doc.reload)
   end
 
-  test "the resident cache is bounded by an LRU cap" do
-    docs = (YjsPersistence::MAX_RESIDENT_DOCS + 1).times.map do |i|
-      Document.create!(title: "LRU #{i}")
+  test "the resident cache is bounded by an LRU cap and hits refresh recency" do
+    docs = YjsPersistence::MAX_RESIDENT_DOCS.times.map { |i| Document.create!(title: "LRU #{i}") }
+    clients = docs.map do |d|
+      client = Y::Doc.new
+      YjsPersistence.merge(d, b64_update_for("x", from_doc: client))
+      client
     end
-    docs.each { |d| YjsPersistence.merge(d, b64_update_for("x")) }
 
-    assert_not YjsPersistence.resident?(docs.first.id), "the least-recently-used entry must evict"
-    assert YjsPersistence.resident?(docs.last.id)
+    # A hit on the oldest entry refreshes its recency...
+    YjsPersistence.merge(docs.first, b64_update_for("y", from_doc: clients.first))
+
+    # ...so the overflow evicts the now-oldest second entry instead.
+    overflow = Document.create!(title: "LRU overflow")
+    YjsPersistence.merge(overflow, b64_update_for("x"))
+
+    assert YjsPersistence.resident?(docs.first.id), "a recently-hit entry must survive"
+    assert_not YjsPersistence.resident?(docs[1].id), "the least-recently-used entry must evict"
+    assert YjsPersistence.resident?(overflow.id)
+  end
+
+  test "a failed persist evicts the resident doc so redelivery lands" do
+    doc = Document.create!(title: "Failed persist")
+    client = Y::Doc.new
+    YjsPersistence.merge(doc, b64_update_for("kept. ", from_doc: client))
+    update = b64_update_for("nearly lost", from_doc: client)
+
+    doc.define_singleton_method(:update_columns) { |*| raise ActiveRecord::StatementInvalid, "disk I/O error" }
+    begin
+      assert_raises(ActiveRecord::StatementInvalid) { YjsPersistence.merge(doc, update) }
+    ensure
+      doc.singleton_class.send(:remove_method, :update_columns)
+    end
+    assert_not YjsPersistence.resident?(doc.id), "a doc ahead of the DB must not stay cached"
+
+    # The client redelivers the same frame (seq buffer / sync-reply): it must
+    # miss the cache, reload from the stored blob, and actually persist.
+    assert_notification("merge.yjs", cache: "miss", outcome: "merged") do
+      YjsPersistence.merge(doc.reload, update)
+    end
+    assert_includes text_of(doc.reload), "nearly lost"
   end
 
   test "release evicts the resident doc and an unlocked mutex" do

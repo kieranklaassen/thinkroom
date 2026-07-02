@@ -54,33 +54,43 @@ class YjsPersistence
             end
 
             ydoc = resident_ydoc(document, payload)
-            before = ydoc.state
-            ydoc.sync(update)
-            # A no-op update (e.g. the empty sync-reply a client joining an
-            # empty doc sends) must not persist — flipping seed_state to
-            # "seeded" without content would permanently block the seed
-            # claim. (A causally dependent update whose dependency has not
-            # arrived also lands here: y-rb 0.7.0 does not retry pending
-            # structs across syncs, so the frame is dropped exactly as the
-            # fresh-doc-per-merge path dropped it, and the client's next
-            # sync-reply re-delivers it — no behavior change.)
-            if ydoc.state == before
-              payload[:outcome] = "noop"
-              next
-            end
+            begin
+              before = ydoc.state
+              ydoc.sync(update)
+              # A no-op update (e.g. the empty sync-reply a client joining an
+              # empty doc sends) must not persist — flipping seed_state to
+              # "seeded" without content would permanently block the seed
+              # claim. (A causally dependent update whose dependency has not
+              # arrived also lands here: y-rb 0.7.0 does not retry pending
+              # structs across syncs, so the frame is dropped exactly as the
+              # fresh-doc-per-merge path dropped it, and the client's next
+              # sync-reply re-delivers it — no behavior change.)
+              if ydoc.state == before
+                payload[:outcome] = "noop"
+                next
+              end
 
-            payload[:blob_bytes_before] = document.yjs_state&.bytesize || 0
-            blob = ydoc.full_diff.pack("C*")
-            payload[:blob_bytes_after] = blob.bytesize
-            document.update_columns(
-              yjs_state: blob,
-              yjs_state_vector: ydoc.state.pack("C*"),
-              seed_state: "seeded",
-              updated_at: Time.current
-            )
-            remember_resident(document, ydoc, blob)
-            payload[:outcome] = "merged"
-            true
+              payload[:blob_bytes_before] = document.yjs_state&.bytesize || 0
+              blob = ydoc.full_diff.pack("C*")
+              payload[:blob_bytes_after] = blob.bytesize
+              document.update_columns(
+                yjs_state: blob,
+                yjs_state_vector: ydoc.state.pack("C*"),
+                seed_state: "seeded",
+                updated_at: Time.current
+              )
+              remember_resident(document, ydoc, blob)
+              payload[:outcome] = "merged"
+              true
+            rescue StandardError
+              # A failure after the cached doc was mutated (e.g. the persist
+              # raising) would leave the resident doc ahead of the DB with a
+              # digest that still matches the old blob — the client's
+              # redelivery would then hit the cache, classify as a no-op,
+              # and never persist. Evict so the redelivery reloads.
+              DOC_CACHE.delete(document.id)
+              raise
+            end
           end
         end
       end
