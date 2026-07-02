@@ -12,12 +12,14 @@ class ApplicationController < ActionController::Base
   # complements CSRF protection on the claim/delete POSTs.
   before_action :ensure_owner_token
 
-  # Runs after the action so login (flag just set) upgrades to a persistent
+  # Runs around the action so login (flag just set) upgrades to a persistent
   # cookie and logout (reset_session just cleared it) reverts to a
   # browser-session cookie. Re-applied every request: any session write
   # re-issues the cookie, and without expire_after that reissue would
   # silently downgrade a remembered session. Also slides the 30-day window.
-  after_action :extend_remembered_session
+  # around_action + ensure (not after_action) so rescue_from-handled requests
+  # — which still commit the session — keep the expiry too.
+  around_action :extend_remembered_session
 
   helper_method :current_user
 
@@ -26,9 +28,9 @@ class ApplicationController < ActionController::Base
   private
 
   def extend_remembered_session
-    return unless session[:remember_me]
-
-    request.session_options[:expire_after] = REMEMBER_ME_DURATION
+    yield
+  ensure
+    request.session_options[:expire_after] = REMEMBER_ME_DURATION if session[:remember_me]
   end
 
   def render_write_rate_limit

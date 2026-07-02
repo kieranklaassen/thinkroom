@@ -127,6 +127,7 @@
    rules that style the text fields. */
 .auth-fields .auth-remember {
   display: flex;
+  min-height: 2.75rem;
   align-items: center;
   gap: 0.55rem;
   cursor: pointer;
