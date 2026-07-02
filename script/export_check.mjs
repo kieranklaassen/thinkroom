@@ -93,8 +93,16 @@ const restoreObjectUrlCreation = () =>
     delete window.__originalCreateObjectURL
   })
 const errors = []
+// Dev-server-only console noise, verified not to reproduce on clean loads or
+// in production builds (docs/dogfood-reports/2026-07-01-main-two-week-release-dogfood.md):
+// - React's recoverable hydration de-opt fires when automation interacts
+//   before hydration completes; clean Playwright loads show zero of these.
+// - The double-createRoot warning is a StrictMode dev double-mount inside an
+//   editor library (container is not #app; app code has one createRoot call).
 const expectedBrowserNoise = (message) =>
-  message.includes('ResizeObserver loop completed with undelivered notifications')
+  message.includes('ResizeObserver loop completed with undelivered notifications') ||
+  message.includes("Hydration failed because the server rendered HTML didn't match the client") ||
+  message.includes('already been passed to createRoot()')
 page.on('pageerror', (error) => {
   const message = error.stack ?? String(error)
   if (!expectedBrowserNoise(message)) errors.push(message)

@@ -34,6 +34,7 @@ import {
   type SuggestionPayload,
 } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
+import { bindReadModeCopy } from '../../editor/clipboard'
 import { bindReadPointerBroadcast } from '../../editor/read_pointers'
 import { bindViewportBroadcast, bindViewportFollow } from '../../editor/viewport_follow'
 import { editorViewCtx, parserCtx, schemaCtx } from '@milkdown/kit/core'
@@ -363,6 +364,15 @@ export default function DocumentShow({
 
     return bindReadPointerBroadcast(handle.editor, handle.provider.awareness)
   }, [handle, isReading])
+
+  // Non-editable modes (Read, Comment) never route copies through
+  // ProseMirror, so bind the clean-clipboard fallback for them. The handler
+  // no-ops while the view is editable.
+  useEffect(() => {
+    if (!handle) return
+
+    return bindReadModeCopy(handle.editor)
+  }, [handle])
 
   useEffect(() => {
     if (!handle) return
