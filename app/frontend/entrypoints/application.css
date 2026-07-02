@@ -1176,10 +1176,7 @@ a:focus-visible {
 .milkdown .ProseMirror > .thinkroom-sketch,
 .milkdown .ProseMirror > .milkdown-table-block,
 .milkdown .ProseMirror > pre:not([data-language='mermaid']),
-.milkdown .ProseMirror > figure.mermaid-diagram,
-.doc-static-preview .ProseMirror > .doc-sketch-skeleton,
-.doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
-.doc-static-preview .ProseMirror > table {
+.milkdown .ProseMirror > figure.mermaid-diagram {
   position: relative;
   width: min(max(100%, var(--rich-content-width)), calc(100vw - 3rem));
   max-width: none;
@@ -1190,10 +1187,7 @@ a:focus-visible {
 :where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .thinkroom-sketch,
 :where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .milkdown-table-block,
 :where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > pre:not([data-language='mermaid']),
-:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > figure.mermaid-diagram,
-:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
-:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
-:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > table {
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > figure.mermaid-diagram {
   /* The activity rail shares the centered body row. Half of its width
      shifts the canvas left, so include it when deriving the safe left edge. */
   width: min(
@@ -1207,10 +1201,7 @@ a:focus-visible {
 :where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .thinkroom-sketch,
 :where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .milkdown-table-block,
 :where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > pre:not([data-language='mermaid']),
-:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > figure.mermaid-diagram,
-:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
-:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
-:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .doc-static-preview .ProseMirror > table {
+:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > figure.mermaid-diagram {
   width: min(
     max(100%, var(--rich-content-width)),
     calc(50vw + 50% - var(--review-gutter-half-width) - 1.5rem)
@@ -1222,10 +1213,7 @@ a:focus-visible {
 :where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > .thinkroom-sketch,
 :where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > .milkdown-table-block,
 :where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > pre:not([data-language='mermaid']),
-:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > figure.mermaid-diagram,
-:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
-:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
-:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .doc-static-preview .ProseMirror > table {
+:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > figure.mermaid-diagram {
   width: min(
     max(100%, var(--rich-content-width)),
     max(100%, calc(100vw - var(--review-gutter-width) - var(--activity-rail-width) - 3rem))
@@ -1289,17 +1277,56 @@ a:focus-visible {
   left: -10px;
 }
 
-/* Neutral box standing in for a sketch canvas until Excalidraw mounts, so a
-   sketch doc reserves the right height instead of reflowing on swap. */
-.doc-sketch-skeleton,
-.doc-mermaid-skeleton {
-  margin: 1.5rem 0;
-  border-radius: 12px;
-  background: color-mix(in srgb, currentColor 6%, transparent);
+/* ------------------- Static preview parity (first paint) ------------------
+   The server preview reuses the live editor's own markup and classes
+   (.thinkroom-sketch, .mermaid-diagram, .milkdown-table-block), so almost all
+   styling parity is free. The rules below cover the few editor behaviors that
+   are driven by JS/marks rather than markup. */
+
+/* Uploaded images ship width/height attributes (Active Storage metadata) so
+   their box is reserved before the file loads; height must stay aspect-driven
+   once max-width constrains them, exactly like the editor's attribute-less
+   images. */
+.doc-static-preview .ProseMirror img[width][height] {
+  height: auto;
 }
 
-.doc-mermaid-skeleton {
-  min-height: 240px;
+/* Provenance tints: the editor derives .prov--* classes from marks; the
+   preview carries the sanitized data attributes. Same tints, zero color
+   flash at the swap. */
+.doc-static-preview span[data-provenance][data-kind='ai'] {
+  border-radius: 2px;
+}
+
+.doc-static-preview span[data-provenance][data-kind='ai'][data-state='pending'] {
+  background: var(--prov-pending-bg);
+  box-shadow: inset 0 -2px 0 var(--prov-pending-line);
+}
+
+.doc-static-preview span[data-provenance][data-kind='ai'][data-state='reviewed'] {
+  background: var(--prov-reviewed-bg);
+  box-shadow: inset 0 -2px 0 var(--prov-reviewed-line);
+}
+
+.doc-static-preview span[data-provenance][data-kind='ai'][data-state='endorsed'] {
+  box-shadow: inset 0 -2px 0 var(--prov-endorsed-line);
+}
+
+/* Tracked-edit marks in the preview mirror .sug-ins/.sug-del. */
+.doc-static-preview ins[data-suggestion-id] {
+  text-decoration: none;
+  background: var(--sug-ins-bg);
+  box-shadow: inset 0 -2px 0 var(--sug-ins-line);
+  border-radius: 2px;
+}
+
+.doc-static-preview del[data-suggestion-id] {
+  text-decoration: line-through;
+  text-decoration-color: var(--sug-del-line);
+  text-decoration-thickness: 2px;
+  background: var(--sug-del-bg);
+  border-radius: 2px;
+  color: color-mix(in srgb, var(--ink) 72%, transparent);
 }
 
 .milkdown .ProseMirror {
@@ -3435,10 +3462,7 @@ a:focus-visible {
   .milkdown .ProseMirror > .thinkroom-sketch,
   .milkdown .ProseMirror > .milkdown-table-block,
   .milkdown .ProseMirror > pre:not([data-language='mermaid']),
-  .milkdown .ProseMirror > figure.mermaid-diagram,
-  .doc-static-preview .ProseMirror > .doc-sketch-skeleton,
-  .doc-static-preview .ProseMirror > .doc-mermaid-skeleton,
-  .doc-static-preview .ProseMirror > table {
+  .milkdown .ProseMirror > figure.mermaid-diagram {
     width: 100%;
     max-width: 100%;
     margin-left: 0;

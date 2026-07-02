@@ -2,9 +2,21 @@ import DOMPurify from 'dompurify'
 import type { Node } from '@milkdown/kit/prose/model'
 import { Plugin, PluginKey } from '@milkdown/kit/prose/state'
 import { Decoration, DecorationSet } from '@milkdown/kit/prose/view'
-import { $prose } from '@milkdown/kit/utils'
+import { $ctx, $prose } from '@milkdown/kit/utils'
 
 type MermaidApi = (typeof import('mermaid'))['default']
+
+/** Persisted per-document diagram heights, keyed by sourceHash. Server-fed
+ * (documents#show props) so the loading figure reserves its final height and
+ * the async render lands with zero layout shift on repeat loads. The same
+ * hints size the static preview's skeleton (DocumentPreviewHtml), keeping the
+ * preview → editor swap pixel-identical. */
+export type MermaidRenderHints = Record<string, number>
+
+export const mermaidRenderHintsCtx = $ctx<MermaidRenderHints, 'mermaidRenderHints'>(
+  {},
+  'mermaidRenderHints',
+)
 
 const RENDER_DELAY_MS = 120
 const mermaidDecorationsKey = new PluginKey<DecorationSet>('thinkroomMermaid')
@@ -54,6 +66,10 @@ const sanitizedSvg = (source: string): SVGSVGElement | null => {
   return template.content.querySelector('svg')
 }
 
+/** Fired (bubbling) on a diagram figure once its SVG is in the DOM, so the
+ * editor can re-measure heights and persist fresh render hints. */
+export const MERMAID_RENDERED_EVENT = 'thinkroom:mermaid-rendered'
+
 const renderDiagram = async (figure: HTMLElement, source: string): Promise<void> => {
   if (!source.trim()) throw new Error('Empty Mermaid source')
 
@@ -62,7 +78,21 @@ const renderDiagram = async (figure: HTMLElement, source: string): Promise<void>
   if (!parsed) throw new Error('Invalid Mermaid source')
 
   const id = `thinkroom-mermaid-${++renderSequence}`
-  const { svg } = await mermaid.render(id, source)
+  // Mermaid measures the diagram in a scratch element. Left to its default it
+  // appends a plain div to <body>, which momentarily extends the page by the
+  // diagram's height — a visible scrollbar jump on every load. A fixed,
+  // hidden host keeps the measurement pass out of the document's layout
+  // (visibility:hidden still allows getBBox, display:none would not).
+  const measureHost = document.createElement('div')
+  measureHost.style.cssText =
+    'position:fixed;top:0;left:0;visibility:hidden;pointer-events:none;contain:layout size;'
+  document.body.appendChild(measureHost)
+  let svg: string
+  try {
+    ;({ svg } = await mermaid.render(id, source, measureHost))
+  } finally {
+    measureHost.remove()
+  }
   const rendered = sanitizedSvg(svg)
   if (!rendered) throw new Error('Mermaid returned no SVG')
   if (!rendered.hasAttribute('aria-label') && !rendered.hasAttribute('aria-labelledby')) {
@@ -74,11 +104,17 @@ const renderDiagram = async (figure: HTMLElement, source: string): Promise<void>
   if (!figure.isConnected) return
   figure.dataset.state = 'ready'
   figure.replaceChildren(rendered)
+  figure.dispatchEvent(new CustomEvent(MERMAID_RENDERED_EVENT, { bubbles: true }))
 }
 
-const diagramWidget = (position: number, source: string): Decoration => {
+const diagramWidget = (
+  position: number,
+  source: string,
+  hints: MermaidRenderHints,
+): Decoration => {
   let timer: ReturnType<typeof setTimeout> | null = null
   let destroyed = false
+  const hash = sourceHash(source)
 
   return Decoration.widget(
     position,
@@ -87,7 +123,13 @@ const diagramWidget = (position: number, source: string): Decoration => {
       figure.className = 'mermaid-diagram'
       figure.contentEditable = 'false'
       figure.dataset.state = 'loading'
+      figure.dataset.sourceHash = hash
       figure.setAttribute('aria-label', 'Mermaid diagram')
+      // Reserve the diagram's persisted height before mermaid runs. Kept as
+      // min-height after render: a slightly-smaller rerender pads instead of
+      // shifting, and the next snapshot re-measures.
+      const hint = hints[hash]
+      if (typeof hint === 'number' && hint > 0) figure.style.minHeight = `${hint}px`
       figure.replaceChildren(statusElement('Rendering diagram…'))
 
       timer = setTimeout(() => {
@@ -96,6 +138,9 @@ const diagramWidget = (position: number, source: string): Decoration => {
         void renderDiagram(figure, source).catch(() => {
           if (destroyed || !figure.isConnected) return
           figure.dataset.state = 'error'
+          // The dashed error box is intentionally compact; a stale reserved
+          // height would hold a big blank frame around a one-line notice.
+          figure.style.minHeight = ''
           figure.replaceChildren(statusElement('Couldn’t render this Mermaid diagram.'))
         })
       }, RENDER_DELAY_MS)
@@ -104,7 +149,7 @@ const diagramWidget = (position: number, source: string): Decoration => {
     },
     {
       side: -1,
-      key: `mermaid-${position}-${sourceHash(source)}`,
+      key: `mermaid-${position}-${hash}`,
       ignoreSelection: true,
       destroy: () => {
         destroyed = true
@@ -114,17 +159,31 @@ const diagramWidget = (position: number, source: string): Decoration => {
   )
 }
 
-const decorationsFor = (doc: Node): DecorationSet => {
+const decorationsFor = (doc: Node, hints: MermaidRenderHints): DecorationSet => {
   const decorations: Decoration[] = []
   doc.descendants((node, position) => {
     const language = typeof node.attrs.language === 'string'
       ? node.attrs.language.trim().toLowerCase()
       : ''
     if (node.type.name === 'code_block' && language === 'mermaid') {
-      decorations.push(diagramWidget(position, node.textContent))
+      decorations.push(diagramWidget(position, node.textContent, hints))
     }
   })
   return DecorationSet.create(doc, decorations)
+}
+
+/** Measure rendered diagrams for the durable snapshot: sourceHash → px height.
+ * The server persists these (Document#render_hints) and feeds them back to
+ * both the static preview and the next editor mount. */
+export const collectMermaidRenderHints = (root: HTMLElement): MermaidRenderHints => {
+  const hints: MermaidRenderHints = {}
+  root
+    .querySelectorAll<HTMLElement>('figure.mermaid-diagram[data-state="ready"][data-source-hash]')
+    .forEach((figure) => {
+      const height = Math.round(figure.getBoundingClientRect().height)
+      if (height > 0) hints[figure.dataset.sourceHash!] = height
+    })
+  return hints
 }
 
 /**
@@ -132,14 +191,14 @@ const decorationsFor = (doc: Node): DecorationSet => {
  * The native code block remains the collaborative, serializable source; this
  * plugin only adds a derived browser preview immediately before it.
  */
-export const mermaidDiagrams = $prose(
-  () => new Plugin<DecorationSet>({
+const mermaidDecorations = $prose(
+  (ctx) => new Plugin<DecorationSet>({
     key: mermaidDecorationsKey,
     state: {
-      init: (_, state) => decorationsFor(state.doc),
+      init: (_, state) => decorationsFor(state.doc, ctx.get(mermaidRenderHintsCtx.key)),
       apply: (transaction, decorations) => (
         transaction.docChanged
-          ? decorationsFor(transaction.doc)
+          ? decorationsFor(transaction.doc, ctx.get(mermaidRenderHintsCtx.key))
           : decorations.map(transaction.mapping, transaction.doc)
       ),
     },
@@ -148,3 +207,5 @@ export const mermaidDiagrams = $prose(
     },
   }),
 )
+
+export const mermaidDiagrams = [mermaidRenderHintsCtx, mermaidDecorations].flat()

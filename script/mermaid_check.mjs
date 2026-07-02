@@ -134,9 +134,9 @@ ${INVALID_SOURCE}
   const staticContext = await browser.newContext({ viewport: { width: 1280, height: 900 }, javaScriptEnabled: false })
   const staticPage = await staticContext.newPage()
   await staticPage.goto(`${BASE}/d/${slug}`)
-  await staticPage.locator('.doc-static-preview .doc-mermaid-skeleton').first().waitFor({ timeout: 15_000 })
+  await staticPage.locator('.doc-static-preview figure.mermaid-diagram').first().waitFor({ timeout: 15_000 })
   const staticGeometry = await staticPage.evaluate(() => {
-    const skeleton = document.querySelector('.doc-static-preview .ProseMirror > .doc-mermaid-skeleton')
+    const skeleton = document.querySelector('.doc-static-preview .ProseMirror > figure.mermaid-diagram')
     const prose = document.querySelector('.doc-static-preview .ProseMirror')
     return {
       skeleton: Math.round(skeleton?.getBoundingClientRect().width ?? 0),

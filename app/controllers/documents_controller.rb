@@ -100,6 +100,13 @@ class DocumentsController < InertiaController
     # and a burned grant blocks the channel fallback for SEED_CLAIM_TIMEOUT.
     seed_granted = initial_render? && !prefetch_request? && !link_preview_request && document.try_claim_seed
 
+    # Editor capabilities for THIS view, mirrored into the static preview so
+    # mode-dependent chrome (Mermaid source visibility, sketch caption
+    # affordance) is identical on both sides of the preview → editor swap.
+    writable = document.writable_by?(owner_token, user: current_user)
+    preview_editable = writable && %w[edit suggest].include?(mode)
+    preview_sketch_interactive = writable && mode == "edit"
+
     render inertia: "documents/show", props: {
       # Cookie-backed UI prefs and the path-derived mode are both available to
       # SSR, so the first paint and hydration agree without a client-side flip.
@@ -116,7 +123,15 @@ class DocumentsController < InertiaController
         yjs_state_b64: (Base64.strict_encode64(document.yjs_state) if document.yjs_state.present?),
         # Server-rendered prose for an instant first paint; the live editor
         # swaps in over it once Milkdown binds the hydrated Yjs state.
-        content_html: document.preview_html,
+        content_html: document.preview_html(
+          editable: preview_editable,
+          sketch_interactive: preview_sketch_interactive
+        ),
+        # Client-measured render geometry (Mermaid figure heights) persisted
+        # from earlier snapshots; the editor pre-sizes its diagram figures from
+        # the same hints the preview skeletons used, so neither layer jumps
+        # when mermaid finishes rendering.
+        render_hints: document.render_hints || {},
         # First-H1 title derived on the server so the header reads correctly on
         # first paint, before the editor mounts and derives the same title.
         display_title: document.display_title,
@@ -326,6 +341,7 @@ class DocumentsController < InertiaController
       content:,
       spans:,
       title:,
+      render_hints: sanitize_render_hints(params[:render_hints]),
       token: owner_token,
       user: current_user
     )
@@ -382,6 +398,7 @@ class DocumentsController < InertiaController
         content:,
         spans:,
         title:,
+        render_hints: sanitize_render_hints(params[:render_hints]),
         token: owner_token,
         user: current_user
       )
@@ -418,6 +435,32 @@ class DocumentsController < InertiaController
       created_label:,
       age_group: created_at >= week_start ? "this_week" : "earlier"
     }
+  end
+
+  # Render hints are client-measured pixel geometry, so treat them as hostile:
+  # namespace allowlist, hash-shaped keys (FNV base36 of the diagram source),
+  # integer heights within the figure's plausible on-screen range.
+  RENDER_HINT_KEY = /\A[a-z0-9]{1,13}\z/
+  RENDER_HINT_HEIGHT_RANGE = (96..2000)
+  MAX_RENDER_HINTS = 200
+
+  def sanitize_render_hints(raw)
+    hints = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw
+    return nil unless hints.is_a?(Hash)
+
+    mermaid = hints["mermaid"]
+    return nil unless mermaid.is_a?(Hash)
+
+    cleaned = mermaid.filter_map do |key, value|
+      next unless key.to_s.match?(RENDER_HINT_KEY)
+
+      height = Integer(value, exception: false)
+      next unless height && RENDER_HINT_HEIGHT_RANGE.cover?(height)
+
+      [ key.to_s, height ]
+    end.first(MAX_RENDER_HINTS).to_h
+
+    cleaned.empty? ? nil : { "mermaid" => cleaned }
   end
 
   def sanitize_snapshot_spans(raw_spans)

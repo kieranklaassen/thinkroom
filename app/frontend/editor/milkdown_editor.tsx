@@ -84,7 +84,13 @@ import {
 } from './document_format'
 import { configureSlashMenu, slashMenu } from './slash_menu'
 import { readPointerAwarenessCtx, readPointers } from './read_pointers'
-import { mermaidDiagrams } from './mermaid'
+import {
+  collectMermaidRenderHints,
+  MERMAID_RENDERED_EVENT,
+  mermaidDiagrams,
+  mermaidRenderHintsCtx,
+  type MermaidRenderHints,
+} from './mermaid'
 import { richBlockWidthControls } from './rich_block_width'
 
 export interface EditorHandle {
@@ -136,6 +142,10 @@ interface EditorProps {
   /** Task controls can remain interactive while text editing is disabled,
    *  as in Read mode. Defaults to the text editability setting. */
   taskInteractive?: boolean
+  /** Persisted render geometry from documents#show (currently Mermaid figure
+   *  heights) so async renderers reserve their final space up front — the
+   *  same hints size the server preview's skeletons. */
+  renderHints?: { mermaid?: MermaidRenderHints }
   onReady?: (handle: EditorHandle) => void
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
@@ -203,7 +213,12 @@ function buildSnapshotPayload(
     binaryState += String.fromCharCode(byte)
   })
 
-  return { content, spans, state_vector: btoa(binaryState) }
+  // Measured diagram heights ride along so the next load (any client) can
+  // reserve the right space before mermaid renders.
+  const mermaid = collectMermaidRenderHints(view.dom)
+  const renderHints = Object.keys(mermaid).length > 0 ? { render_hints: { mermaid } } : {}
+
+  return { content, spans, state_vector: btoa(binaryState), ...renderHints }
 }
 
 function firstHeadingTitle(doc: ProseNode): string | null {
@@ -364,6 +379,7 @@ function CollabEditor({
   editable = true,
   suggesting = false,
   taskInteractive = editable,
+  renderHints,
   onReady,
   onStatus,
   onSpans,
@@ -396,6 +412,7 @@ function CollabEditor({
         .config((ctx) => {
           ctx.set(rootCtx, root)
           ctx.set(provenanceIdentityCtx.key, { name: identity.name })
+          ctx.set(mermaidRenderHintsCtx.key, renderHints?.mermaid ?? {})
           ctx.set(sketchControlsCtx.key, {
             edit: (data, mount, wrapper) => setSketchDraft({ data, mount, wrapper }),
             save: (data) => saveSketchRef.current(data),
@@ -505,6 +522,7 @@ function CollabEditor({
     let snapshotTimer: ReturnType<typeof setTimeout> | null = null
     let snapshotRetryTimer: ReturnType<typeof setTimeout> | null = null
     let cancelled = false
+    let mermaidHintTarget: HTMLElement | null = null
     const pushSnapshot = (attempt = 0) => {
       if (!canWriteRef.current) return
       editor.action((ctx) => {
@@ -523,6 +541,15 @@ function CollabEditor({
             console.warn('pruf: snapshot push failed', error)
           })
       })
+    }
+
+    // A finished diagram render changes measured geometry without a doc
+    // change, so the update listener never fires for it. Schedule a snapshot
+    // through the same debounce so fresh render hints reach the server.
+    const scheduleHintSnapshot = () => {
+      if (cancelled || !canWriteRef.current) return
+      if (snapshotTimer) clearTimeout(snapshotTimer)
+      snapshotTimer = setTimeout(pushSnapshot, SNAPSHOT_DEBOUNCE_MS)
     }
 
     let started = false
@@ -598,6 +625,9 @@ function CollabEditor({
 
         const title = firstHeadingTitle(ctx.get(editorViewCtx).state.doc)
         if (title) callbacksRef.current.onTitleChange?.(title)
+
+        mermaidHintTarget = ctx.get(editorViewCtx).dom
+        mermaidHintTarget.addEventListener(MERMAID_RENDERED_EVENT, scheduleHintSnapshot)
       })
 
       const handle = { editor, ydoc, provider }
@@ -631,6 +661,7 @@ function CollabEditor({
     return () => {
       cancelled = true
       provider.off('synced', start)
+      mermaidHintTarget?.removeEventListener(MERMAID_RENDERED_EVENT, scheduleHintSnapshot)
       if (snapshotTimer) clearTimeout(snapshotTimer)
       if (snapshotRetryTimer) clearTimeout(snapshotRetryTimer)
       try {

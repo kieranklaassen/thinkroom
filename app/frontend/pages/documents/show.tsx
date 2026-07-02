@@ -116,6 +116,11 @@ export interface DocumentProps {
     yjs_state_b64: string | null
     content_html: string
     display_title: string
+    // Persisted render geometry (Mermaid figure heights by source hash):
+    // the server sized the content_html skeletons from these, and the editor
+    // pre-sizes its own figures from the same values, so async diagram
+    // rendering never shifts the page.
+    render_hints: { mermaid?: Record<string, number> }
   }
   viewer: ViewerPayload
   // Server-rendered UI prefs from cookies — the source of truth for first
@@ -1366,6 +1371,7 @@ export default function DocumentShow({
                       connectionIdentity={connectionIdentity}
                       contentFormat={doc.content_format}
                       initialStateB64={doc.yjs_state_b64}
+                      renderHints={doc.render_hints}
                       seedContent={doc.seed_content}
                       seedVersion={doc.seed_version}
                       seedGranted={doc.seed_granted}

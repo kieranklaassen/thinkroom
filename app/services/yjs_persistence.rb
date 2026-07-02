@@ -63,8 +63,13 @@ class YjsPersistence
     # client has observed every Yjs update currently stored by the server.
     # A client may be ahead (its own cable frame is still in flight), but it
     # may not overwrite the API read model from behind.
+    #
+    # `render_hints` (optional, pre-sanitized by the controller) carries
+    # client-measured render geometry — currently Mermaid figure heights keyed
+    # by source hash — merged per namespace so hints from other diagrams are
+    # not lost between snapshots.
     def persist_snapshot(document, state_vector_b64:, content:, spans:, title: document.title,
-                         token: nil, user: nil)
+                         render_hints: nil, token: nil, user: nil)
       client_state = decode_state_vector(decode(state_vector_b64)) if state_vector_b64.present?
 
       lock_for(document.id).synchronize do
@@ -80,7 +85,11 @@ class YjsPersistence
             return false unless current
           end
 
-          document.update!(title:, content_snapshot: content, provenance_spans: spans)
+          attributes = { title:, content_snapshot: content, provenance_spans: spans }
+          if render_hints.present?
+            attributes[:render_hints] = merge_render_hints(document.render_hints || {}, render_hints)
+          end
+          document.update!(attributes)
         end
       end
       true
@@ -89,6 +98,19 @@ class YjsPersistence
     end
 
     private
+
+    # Keep at most MAX_RENDER_HINTS_PER_NAMESPACE entries per namespace,
+    # newest-wins: re-measured hashes move to the tail, and hashes for
+    # since-deleted diagrams eventually age out of the head.
+    MAX_RENDER_HINTS_PER_NAMESPACE = 200
+
+    def merge_render_hints(existing, incoming)
+      incoming.each_with_object(existing.deep_dup) do |(namespace, hints), merged|
+        current = merged[namespace].is_a?(Hash) ? merged[namespace] : {}
+        combined = current.except(*hints.keys).merge(hints)
+        merged[namespace] = combined.to_a.last(MAX_RENDER_HINTS_PER_NAMESPACE).to_h
+      end
+    end
 
     def load_ydoc(document)
       ydoc = Y::Doc.new

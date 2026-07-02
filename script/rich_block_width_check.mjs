@@ -121,11 +121,11 @@ try {
   await staticContext.addCookies([{ name: 'pruf_rich_width', value: '1088', url: BASE }])
   const staticPage = await staticContext.newPage()
   await staticPage.goto(`${BASE}/d/${slug}`)
-  await staticPage.locator('.doc-static-preview .doc-sketch-skeleton').waitFor()
+  await staticPage.locator('.doc-static-preview figure.thinkroom-sketch').waitFor()
   const staticGeometry = await staticPage.evaluate(() => ({
     prose: document.querySelector('.doc-static-preview .ProseMirror')?.getBoundingClientRect().width ?? 0,
-    sketch: document.querySelector('.doc-sketch-skeleton')?.getBoundingClientRect().width ?? 0,
-    table: document.querySelector('.doc-static-preview table')?.getBoundingClientRect().width ?? 0,
+    sketch: document.querySelector('.doc-static-preview figure.thinkroom-sketch')?.getBoundingClientRect().width ?? 0,
+    table: document.querySelector('.doc-static-preview .milkdown-table-block')?.getBoundingClientRect().width ?? 0,
     overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
   }))
   check(

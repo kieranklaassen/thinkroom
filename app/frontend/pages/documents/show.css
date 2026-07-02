@@ -11,13 +11,16 @@
 }
 
 .doc-page.is-read-mode .milkdown .prov--ai,
-.doc-page.is-read-mode .milkdown ins.sug-ins {
+.doc-page.is-read-mode .milkdown ins.sug-ins,
+.doc-page.is-read-mode .doc-static-preview span[data-provenance],
+.doc-page.is-read-mode .doc-static-preview ins[data-suggestion-id] {
   background: transparent;
   box-shadow: none;
   border-radius: 0;
 }
 
-.doc-page.is-read-mode .milkdown del.sug-del {
+.doc-page.is-read-mode .milkdown del.sug-del,
+.doc-page.is-read-mode .doc-static-preview del[data-suggestion-id] {
   display: none;
 }
 

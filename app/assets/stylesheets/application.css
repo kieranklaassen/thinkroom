@@ -80,6 +80,59 @@
   position: relative;
 }
 
+/* Table-block typography replica. The preview wraps tables in the editor's
+   .milkdown-table-block/.table-wrapper structure (DocumentPreviewHtml), but
+   the chrome's typography lives in app/frontend/editor/table_block.css, which
+   ships inside the code-split editor chunk and lands only after the editor
+   loads. Replicate the layout-affecting rules here (render-blocking) so the
+   preview table's geometry is final at first paint. Keep in sync with
+   table_block.css. */
+.doc-static-preview .milkdown-table-block {
+  display: block;
+}
+
+.doc-static-preview .milkdown-table-block .table-wrapper {
+  overflow-x: auto;
+  max-width: 100%;
+  scrollbar-width: thin;
+}
+
+.doc-static-preview .milkdown-table-block table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-ui);
+  font-size: 0.875em;
+  line-height: 1.45;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+.doc-static-preview .milkdown-table-block th,
+.doc-static-preview .milkdown-table-block td {
+  border: none;
+  border-bottom: 1px solid var(--line);
+  padding: 0.5em 0.75em;
+  vertical-align: baseline;
+}
+
+/* Commonmarker emits <thead><tr><th>; the editor marks header rows with
+   data-is-header. Style both shapes identically. */
+.doc-static-preview .milkdown-table-block tr[data-is-header] th,
+.doc-static-preview .milkdown-table-block thead th {
+  font-weight: 600;
+  border-bottom: 1px solid var(--ink-faint);
+  vertical-align: bottom;
+}
+
+.doc-static-preview .milkdown-table-block th:first-child,
+.doc-static-preview .milkdown-table-block td:first-child {
+  padding-inline-start: 0;
+}
+
+.doc-static-preview .milkdown-table-block th:last-child,
+.doc-static-preview .milkdown-table-block td:last-child {
+  padding-inline-end: 0;
+}
+
 /* ---------------------------------------------------------------------------
  * Header presence-bar reserved lane (on-load layout stability)
  *

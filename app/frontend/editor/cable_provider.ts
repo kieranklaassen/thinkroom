@@ -33,6 +33,9 @@ export interface DurableSnapshotPayload {
   content: string
   spans: unknown[]
   state_vector: string
+  /** Client-measured render geometry (Mermaid figure heights by source hash)
+   *  persisted server-side so future loads reserve space before rendering. */
+  render_hints?: { mermaid: Record<string, number> }
 }
 
 const toBase64 = (u8: Uint8Array): string => {
