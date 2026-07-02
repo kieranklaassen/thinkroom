@@ -2,7 +2,10 @@
 <html data-theme="<%= cookies[:proof_theme].to_s.presence_in(%w[proof whitey]) || "proof" %>">
   <head>
     <title data-inertia><%= @open_graph&.dig(:page_title) || content_for(:title) || "Thinkroom" %></title>
-    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <%# viewport-fit=cover is required by Ruby Native so env(safe-area-inset-*)
+        returns real values when the native web view extends behind the
+        status bar. Harmless on the open web. %>
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
     <% if @open_graph.present? %>
       <%= tag.meta name: "description", content: @open_graph[:description] %>
       <%= tag.link rel: "canonical", href: @open_graph[:url] %>
@@ -40,6 +43,9 @@
 
     <%# Includes all stylesheet files in app/assets/stylesheets %>
     <%= stylesheet_link_tag :app %>
+    <%# Ruby Native utility classes: native-hidden, native-inset-*, and the
+        native-back-button visibility rules. Inert outside the native app. %>
+    <%= stylesheet_link_tag :ruby_native %>
     <%= vite_stylesheet_tag "application" %>
     <%= vite_react_refresh_tag %>
     <%= vite_client_tag %>

@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 class InertiaController < ApplicationController
+  # Shares nativeApp/nativeForm props on every Inertia page so the frontend
+  # can adapt when running inside the Ruby Native iOS/Android shell.
+  include RubyNative::InertiaSupport
+
   # ViteRuby.digest chdirs into the project root — a process-global move.
   # Concurrent Inertia requests (two clients reloading off one broadcast,
   # or one client's simultaneous partial reloads) raced that chdir and 500'd

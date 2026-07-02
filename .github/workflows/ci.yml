@@ -165,7 +165,7 @@ jobs:
 
       - name: Run browser regression checks
         run: |
-          for check in sync_check link_check mermaid_check rich_block_width_check suggestion_list_replace_check export_check html_document_check meta_refresh_check mobile_zoom_check browser_check; do
+          for check in sync_check link_check mermaid_check rich_block_width_check suggestion_list_replace_check export_check html_document_check meta_refresh_check mobile_zoom_check native_shell_check browser_check; do
             echo "=== script/${check}.mjs"
             node "script/${check}.mjs"
           done

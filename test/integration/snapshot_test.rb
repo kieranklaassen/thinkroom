@@ -242,8 +242,9 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     end
 
     assert_response :no_content
+    full_state, = YjsPersistence.state_b64(@document.reload)
     persisted = Y::Doc.new
-    persisted.sync(@document.reload.yjs_state.unpack("C*"))
+    persisted.sync(Base64.strict_decode64(full_state).unpack("C*"))
     assert_equal "checked", persisted.get_text("task").to_s
     assert_equal "* [x] checked", @document.content_snapshot
   end
@@ -282,7 +283,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
          as: :json
 
     assert_response :no_content
-    assert @document.reload.yjs_state.present?
+    assert @document.reload.yjs_document_updates.exists?
   end
 
   test "durable sync update with no generation key still merges (rollout compatibility)" do
@@ -293,7 +294,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     post document_sync_update_path(@document.slug), params: { update: }, as: :json
 
     assert_response :no_content
-    assert @document.reload.yjs_state.present?
+    assert @document.reload.yjs_document_updates.exists?
   end
 
   test "durable sync update rejects malformed and oversized payloads" do

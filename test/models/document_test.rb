@@ -1,6 +1,45 @@
 require "test_helper"
 
 class DocumentTest < ActiveSupport::TestCase
+  test "replace_content! archives the wiped state with the pre-bump generation" do
+    doc = Document.create!(title: "Replaced", seed_content: "# Seed")
+    ydoc = Y::Doc.new
+    ydoc.get_text("t") << "about to be wiped"
+    YjsPersistence.merge(doc, Base64.strict_encode64(ydoc.diff.pack("C*")))
+    # replace_content! folds the update tail itself; folding here just lets
+    # the test capture the exact blob the archive must preserve.
+    YjsPersistence.fold!(doc)
+    wiped_blob = doc.reload.yjs_state
+    assert wiped_blob.present?
+    pre_bump_generation = doc.content_generation
+
+    doc.replace_content!(source: "# Replacement")
+
+    archive = doc.yjs_state_archives.where(kind: "replacement").sole
+    assert_equal wiped_blob, archive.yjs_state
+    assert_equal pre_bump_generation, archive.content_generation
+    assert_nil doc.reload.yjs_state_checksum
+  end
+
+  test "replace_content! on a document without state writes no replacement archive" do
+    doc = Document.create!(title: "Never edited", seed_content: "# Seed")
+
+    doc.replace_content!(source: "# Replacement")
+
+    assert_not doc.yjs_state_archives.exists?
+  end
+
+  test "yjs state archives reject unknown kinds and die with the document" do
+    doc = Document.create!(title: "Archived")
+    assert_raises(ActiveRecord::RecordInvalid) do
+      doc.yjs_state_archives.create!(kind: "bogus", content_generation: 0)
+    end
+
+    doc.yjs_state_archives.create!(kind: "checkpoint", content_generation: 0)
+    doc.destroy!
+    assert_equal 0, YjsStateArchive.count
+  end
+
   test "account ownership takes precedence over an anonymous token" do
     user = User.create!(
       name: "Kieran",

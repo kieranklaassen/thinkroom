@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_02_050000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_02_073441) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -138,6 +138,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_02_050000) do
     t.datetime "updated_at", null: false
     t.integer "user_id"
     t.binary "yjs_state"
+    t.string "yjs_state_checksum"
+    t.binary "yjs_state_vector"
     t.index ["owner_token"], name: "index_documents_on_owner_token"
     t.index ["slug"], name: "index_documents_on_slug", unique: true
     t.index ["user_id"], name: "index_documents_on_user_id"
@@ -196,6 +198,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_02_050000) do
     t.index ["google_uid"], name: "index_users_on_google_uid", unique: true
   end
 
+  create_table "yjs_document_updates", force: :cascade do |t|
+    t.integer "content_generation", null: false
+    t.datetime "created_at", null: false
+    t.integer "document_id", null: false
+    t.binary "payload", null: false
+    t.index ["document_id"], name: "index_yjs_document_updates_on_document_id"
+  end
+
+  create_table "yjs_state_archives", force: :cascade do |t|
+    t.integer "content_generation", null: false
+    t.datetime "created_at", null: false
+    t.integer "document_id", null: false
+    t.string "error"
+    t.string "kind", null: false
+    t.binary "yjs_state"
+    t.binary "yjs_state_vector"
+    t.index ["document_id", "kind", "created_at"], name: "idx_on_document_id_kind_created_at_571a89cbf8"
+    t.index ["document_id"], name: "index_yjs_state_archives_on_document_id"
+  end
+
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "activities", "documents"
@@ -207,4 +229,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_02_050000) do
   add_foreign_key "documents", "users"
   add_foreign_key "feedback_runs", "users"
   add_foreign_key "suggestions", "documents"
+  add_foreign_key "yjs_document_updates", "documents"
+  add_foreign_key "yjs_state_archives", "documents"
 end
