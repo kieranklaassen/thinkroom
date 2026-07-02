@@ -1,10 +1,10 @@
 /* ---------------------------------------------------------------------------
- * Tables: editorial typography + the table-block editing chrome.
+ * Tables: the table-block editing chrome.
  *
- * Typography follows Rutter/Tschichold and Tailwind Typography's prose
- * tables: horizontal rules only (no vertical rules, no outer frame, no
- * zebra), smaller UI sans with tabular numerals, header weight instead of a
- * background fill.
+ * The table TYPOGRAPHY (block/wrapper/table/cell rules) lives in the
+ * render-blocking app/assets/stylesheets/application.css, shared with the
+ * static preview so the two layers can never drift — see the "Table-block
+ * typography" section there.
  *
  * The chrome layer (handles, popover, add buttons) adapts Crepe's
  * theme/common/table.css to our tokens. Positioning invariants carried
@@ -13,57 +13,6 @@
  * grip pills counter-translate by 50% to straddle the table edge.
  * Imported from milkdown_editor.tsx next to the kit's base table CSS.
  * ------------------------------------------------------------------------- */
-
-.milkdown .ProseMirror {
-  --default-cell-min-width: 6ch;
-}
-
-.milkdown .milkdown-table-block {
-  display: block;
-}
-
-/* Scroll affordance: thin scrollbars where supported; on touch the cut-off
-   last column is the (classic) signal. A static right-edge fade was
-   considered and rejected — CSS can't tell overflowing wrappers from
-   fitting ones, and fading a fully-visible table reads as a bug. */
-.milkdown .milkdown-table-block .table-wrapper {
-  overflow-x: auto;
-  max-width: 100%;
-  scrollbar-width: thin;
-}
-
-.milkdown .milkdown-table-block table {
-  width: 100%;
-  border-collapse: collapse;
-  font-family: var(--font-ui);
-  font-size: 0.875em;
-  line-height: 1.45;
-  font-variant-numeric: lining-nums tabular-nums;
-}
-
-.milkdown .milkdown-table-block th,
-.milkdown .milkdown-table-block td {
-  border: none;
-  border-bottom: 1px solid var(--line);
-  padding: 0.5em 0.75em;
-  vertical-align: baseline;
-}
-
-.milkdown .milkdown-table-block tr[data-is-header] th {
-  font-weight: 600;
-  border-bottom: 1px solid var(--ink-faint);
-  vertical-align: bottom;
-}
-
-.milkdown .milkdown-table-block th:first-child,
-.milkdown .milkdown-table-block td:first-child {
-  padding-inline-start: 0;
-}
-
-.milkdown .milkdown-table-block th:last-child,
-.milkdown .milkdown-table-block td:last-child {
-  padding-inline-end: 0;
-}
 
 .milkdown .ProseMirror .selectedCell::after {
   background: color-mix(in srgb, var(--accent) 12%, transparent);
