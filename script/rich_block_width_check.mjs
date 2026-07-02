@@ -241,7 +241,9 @@ try {
     document.cookie = 'pruf_focus=1;path=/;samesite=lax'
   })
   await page.reload()
-  await page.locator('.doc-canvas.is-focus .thinkroom-sketch').waitFor({ timeout: 15_000 })
+  // The static preview shows a .thinkroom-sketch figure from first paint now,
+  // so wait for the LIVE editor's sketch (its width handle only exists there).
+  await page.locator('.doc-canvas.is-focus .doc-live-editor .thinkroom-sketch .rich-block-width-handle').waitFor({ timeout: 15_000 })
   const focused = await liveGeometry()
   const focusedCenter = focused.sketch.left + focused.sketch.width / 2
   const proseCenter = focused.prose.left + focused.prose.width / 2
@@ -258,7 +260,7 @@ try {
     document.cookie = 'pruf_focus=0;path=/;samesite=lax'
   })
   await page.reload()
-  await page.locator('.doc-page.is-panel-hidden .thinkroom-sketch').waitFor({ timeout: 15_000 })
+  await page.locator('.doc-page.is-panel-hidden .doc-live-editor .thinkroom-sketch .rich-block-width-handle').waitFor({ timeout: 15_000 })
   const panelHidden = await liveGeometry()
   check(
     panelHidden.sketch.width > reviewKeyed.sketch.width &&
