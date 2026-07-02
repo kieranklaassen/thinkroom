@@ -1859,9 +1859,18 @@ try {
       .catch(() => {})
     deletionCleared = await winB
       .waitForFunction(
-        () =>
-          !document.querySelector('.milkdown del.sug-del') &&
-          document.querySelector('.milkdown .ProseMirror')?.textContent?.includes('Suggest target'),
+        () => {
+          if (document.querySelector('.milkdown del.sug-del')) return false
+          // The other window's caret widget injects its user label into
+          // textContent mid-word ("Suggest⁠Quiet Lynx⁠ target…") — strip
+          // collaboration widgets before asserting on the document text.
+          const clone = document.querySelector('.milkdown .ProseMirror')?.cloneNode(true)
+          if (!clone) return false
+          clone
+            .querySelectorAll('.ProseMirror-yjs-cursor, .agent-cursor')
+            .forEach((el) => el.remove())
+          return clone.textContent?.includes('Suggest target') ?? false
+        },
         undefined,
         { timeout: 5000 },
       )

@@ -22,6 +22,8 @@ let cursorResizeObserver: ResizeObserver | null = null
 let cursorIntersectionObserver: IntersectionObserver | null = null
 let cursorMutationObserver: MutationObserver | null = null
 
+let cursorClampVerified = false
+
 const clampCursorLabels = () => {
   cursorClampFrame = null
   cursorLabels.forEach((label) => {
@@ -32,6 +34,27 @@ const clampCursorLabels = () => {
     if (rect.right > window.innerWidth - gutter) shift = window.innerWidth - gutter - rect.right
     if (rect.left + shift < gutter) shift += gutter - (rect.left + shift)
     label.style.setProperty('--agent-cursor-shift', `${Math.round(shift)}px`)
+  })
+  // A clamp scheduled during a viewport resize measures mid-reflow geometry
+  // (window.innerWidth itself lags), lands a stale shift, and nothing later
+  // corrects it. Verify once on the NEXT frame — where layout and
+  // innerWidth have settled — and re-clamp if any label sits out of bounds.
+  if (cursorClampVerified) {
+    cursorClampVerified = false
+    return
+  }
+  cursorClampVerified = true
+  cursorClampFrame = requestAnimationFrame(() => {
+    cursorClampFrame = null
+    const gutter = 8
+    let outOfBounds = false
+    cursorLabels.forEach((label) => {
+      const rect = label.getBoundingClientRect()
+      if (rect.width === 0) return
+      if (rect.right > window.innerWidth - gutter + 1 || rect.left < gutter - 1) outOfBounds = true
+    })
+    if (outOfBounds) clampCursorLabels()
+    else cursorClampVerified = false
   })
 }
 
@@ -95,13 +118,14 @@ const buildCursorDOM = (agent: AgentCursor): HTMLElement => {
   label.textContent = `✦ ${agent.name}`
   cursor.appendChild(label)
 
-  let destroyed = false
-  const setupFrame = requestAnimationFrame(() => {
-    if (!destroyed) registerCursorLabel(label)
-  })
+  // Register synchronously: a next-frame deferral opened a race where a
+  // widget destroyed and rebuilt within one frame (any decoration redraw)
+  // could tear the clamp manager down mid-handoff, leaving the visible
+  // label unobserved — it then never re-clamped on viewport resizes.
+  // Observing a not-yet-attached element is safe; the registration's own
+  // scheduleCursorClamp measures on the next frame, after PM attaches it.
+  registerCursorLabel(label)
   cursorCleanup.set(cursor, () => {
-    destroyed = true
-    cancelAnimationFrame(setupFrame)
     unregisterCursorLabel(label)
   })
 

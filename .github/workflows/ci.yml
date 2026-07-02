@@ -150,6 +150,7 @@ jobs:
         # minutes; keep it clear of the per-IP creation burst limit.
         env:
           THINKROOM_DOC_CREATION_BURST: "500"
+          THINKROOM_DOC_CREATION_DAILY: "500"
         run: |
           bin/vite dev &
           bin/rails server &
