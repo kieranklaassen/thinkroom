@@ -2007,6 +2007,9 @@ try {
     .locator('.mode-control-option')
     .filter({ has: widthPage.locator('.mode-control-option-label', { hasText: /^Read$/ }) })
     .click()
+  // The mode switch is a client-side re-render; wait for the Read layout to
+  // commit before measuring.
+  await widthPage.locator('.doc-page.is-read-mode').waitFor({ timeout: 5000 })
   const readGeometry = await widthPage.evaluate(() => ({
     main: document.querySelector('.doc-main').getBoundingClientRect().width,
     canvas: document.querySelector('.doc-canvas').getBoundingClientRect().width,
@@ -2044,6 +2047,9 @@ try {
     .locator('.mode-control-option')
     .filter({ has: widthPage.locator('.mode-control-option-label', { hasText: /^Edit$/ }) })
     .click()
+  // Wait for the Edit layout (the review gutter only exists outside Read)
+  // to commit before measuring — the switch is a client-side re-render.
+  await widthPage.locator('.margin-gutter').waitFor({ timeout: 5000 })
   const tabletEditGeometry = await widthPage.evaluate(() => ({
     viewport: window.innerWidth,
     canvas: document.querySelector('.doc-canvas').getBoundingClientRect().width,
