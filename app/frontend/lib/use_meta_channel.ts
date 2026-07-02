@@ -34,6 +34,14 @@ interface MetaChannelOptions {
  * the channel rejects the resubscription (no document → `reject`), and the
  * `rejected` callback routes through `onDeleted` too.
  */
+/**
+ * Props the controller feeds purely through cable events. Refetched whenever
+ * the channel (re)connects: the server renders the page before the socket is
+ * up, so a broadcast committed in that window — or while disconnected — is
+ * never received and the rail would stay stale until a manual reload.
+ */
+const CABLE_FED_PROPS = ['suggestions', 'comments', 'activities', 'presences']
+
 export function useMetaChannel(slug: string, options?: MetaChannelOptions): void {
   const onDeletedRef = useRef(options?.onDeleted)
   onDeletedRef.current = options?.onDeleted
@@ -62,9 +70,25 @@ export function useMetaChannel(slug: string, options?: MetaChannelOptions): void
       onDeletedRef.current?.()
     }
 
+    const scheduleReload = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        const only = [...pending]
+        pending.clear()
+        // async: a background reload must never cancel (and roll back)
+        // an in-flight optimistic mutation like accepting a suggestion.
+        router.reload({ only, async: true })
+      }, 150)
+    }
+
     const subscription = getConsumer(options?.connectionIdentity).subscriptions.create(
       { channel: 'DocumentMetaChannel', slug },
       {
+        connected: () => {
+          if (dead) return
+          for (const prop of CABLE_FED_PROPS) pending.add(prop)
+          scheduleReload()
+        },
         received: ({
           event,
           title,
@@ -103,14 +127,7 @@ export function useMetaChannel(slug: string, options?: MetaChannelOptions): void
             return
           }
           pending.add(event)
-          if (timer) clearTimeout(timer)
-          timer = setTimeout(() => {
-            const only = [...pending]
-            pending.clear()
-            // async: a background reload must never cancel (and roll back)
-            // an in-flight optimistic mutation like accepting a suggestion.
-            router.reload({ only, async: true })
-          }, 150)
+          scheduleReload()
         },
         rejected: () => {
           // The channel rejects when the document no longer exists —
