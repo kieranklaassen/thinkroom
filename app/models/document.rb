@@ -179,7 +179,7 @@ class Document < ApplicationRecord
       # Keep what this replacement is about to destroy — tagged with the
       # pre-bump generation so it is a manual-undo artifact only, never an
       # automatic restore candidate (see YjsStateArchive).
-      YjsStateArchive.record!(self, kind: "replacement") if yjs_state.present?
+      YjsStateArchive.record!(self, kind: YjsStateArchive::REPLACEMENT, generation: content_generation) if yjs_state.present?
       attributes = {
         seed_content: source,
         content_snapshot: nil,

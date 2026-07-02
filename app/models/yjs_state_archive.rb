@@ -4,7 +4,15 @@
 # restored automatically (restoring across a generation bump would
 # resurrect content a replacement deliberately wiped).
 class YjsStateArchive < ApplicationRecord
-  KINDS = %w[checkpoint replacement quarantine].freeze
+  # Interval-gated pre-merge snapshot — the automatic restore candidate.
+  CHECKPOINT = "checkpoint".freeze
+  # State wiped by Document#replace_content! — manual undo only (its
+  # generation is pre-bump, so automatic restore would resurrect content).
+  REPLACEMENT = "replacement".freeze
+  # Corrupt bytes kept for forensics — never restored.
+  QUARANTINE = "quarantine".freeze
+
+  KINDS = [ CHECKPOINT, REPLACEMENT, QUARANTINE ].freeze
 
   # Newest archives kept per document and kind; older ones are pruned on
   # every insert so retention stays bounded.

@@ -25,9 +25,6 @@ class YjsPersistence
   # bounding what a corrupt-blob heal can lose to one interval of edits.
   CHECKPOINT_INTERVAL = 10.minutes
 
-  # Newest archives kept per document and kind.
-  MAX_ARCHIVES_PER_KIND = 5
-
   class << self
     # Merge a base64-encoded Yjs update into the document's persisted state.
     #
@@ -84,7 +81,7 @@ class YjsPersistence
             document.update_columns(
               yjs_state: blob,
               yjs_state_vector: ydoc.state.pack("C*"),
-              yjs_state_checksum: Digest::SHA256.hexdigest(blob),
+              yjs_state_checksum: state_checksum(blob),
               seed_state: "seeded",
               updated_at: Time.current
             )
@@ -106,21 +103,8 @@ class YjsPersistence
       ActiveSupport::Notifications.instrument("state.yjs", document_id: document.id) do |payload|
         encoded = begin
           encode_handshake(document, payload)
-        rescue CorruptStateError => e
-          # The fast path holds no locks, so corruption is healed here:
-          # acquire both, re-check (another thread may have healed first),
-          # heal, and rebuild the handshake from the restored state.
-          lock_for(document.id).synchronize do
-            document.with_lock do
-              document.reload
-              begin
-                encode_handshake(document, payload)
-              rescue CorruptStateError
-                heal_corrupt_state!(document, e)
-                encode_handshake(document, payload)
-              end
-            end
-          end
+        rescue CorruptStateError
+          heal_and_reencode_handshake(document, payload)
         end
         # Outcome is assigned last so an exception leaves it unset and the
         # log subscriber's exception fallback classifies the event as a
@@ -150,9 +134,10 @@ class YjsPersistence
             if client_state && document.yjs_state.present?
               server_state = begin
                 decode_state_vector(server_state_vector(document))
-              rescue ArgumentError
-                # A corrupt stored vector must not masquerade as client
-                # staleness — derive the truth from the blob instead.
+              rescue ArgumentError, CorruptStateError
+                # A corrupt stored vector (or, on legacy rows without a
+                # stored vector, a corrupt blob) must not masquerade as
+                # client staleness — heal and derive the truth instead.
                 decode_state_vector(load_or_heal_ydoc(document).state)
               end
               current = server_state.all? do |client_id, clock|
@@ -212,9 +197,13 @@ class YjsPersistence
     def verify_checksum!(document)
       checksum = document.yjs_state_checksum
       return if checksum.blank? # legacy row — heals on its next merge
-      return if checksum == Digest::SHA256.hexdigest(document.yjs_state)
+      return if checksum == state_checksum(document.yjs_state)
 
       raise CorruptStateError, "document #{document.id}: yjs_state checksum mismatch"
+    end
+
+    def state_checksum(blob)
+      Digest::SHA256.hexdigest(blob)
     end
 
     def blob_loadable?(blob)
@@ -230,6 +219,13 @@ class YjsPersistence
       payload[:served_from] = from_columns ? "columns" : "rebuild"
       if from_columns
         verify_checksum!(document)
+        # Legacy rows carry no checksum yet, so probe loadability before
+        # serving — otherwise a corrupt pre-migration blob would be relayed
+        # verbatim on every join with no heal. The probe cost lasts only
+        # until the row's next merge stamps a checksum.
+        if document.yjs_state_checksum.blank? && !blob_loadable?(document.yjs_state)
+          raise CorruptStateError, "document #{document.id}: stored blob is not loadable"
+        end
         [
           Base64.strict_encode64(document.yjs_state),
           Base64.strict_encode64(document.yjs_state_vector)
@@ -243,6 +239,23 @@ class YjsPersistence
       end
     end
 
+    # The handshake fast path holds no locks, so corruption is healed here:
+    # acquire both, re-check (another thread may have healed first), heal,
+    # and rebuild the handshake from the restored state.
+    def heal_and_reencode_handshake(document, payload)
+      lock_for(document.id).synchronize do
+        document.with_lock do
+          document.reload
+          begin
+            encode_handshake(document, payload)
+          rescue CorruptStateError => e
+            heal_corrupt_state!(document, e)
+            encode_handshake(document, payload)
+          end
+        end
+      end
+    end
+
     # Contain-and-restore for a corrupt stored blob. Callers must hold both
     # the per-document mutex and the row lock. The corrupt bytes are
     # quarantined for forensics, then the newest loadable checkpoint from
@@ -252,17 +265,30 @@ class YjsPersistence
     # clients re-upload their state through the sync-reply handshake.
     def heal_corrupt_state!(document, error)
       ActiveSupport::Notifications.instrument("recovered.yjs", document_id: document.id) do |payload|
-        YjsStateArchive.record!(document, kind: "quarantine", error: error.message)
+        # A loadable blob with a mismatched checksum is not corruption — it
+        # is a write from a pre-checksum code version (mixed-version deploy
+        # window or rollback). Re-stamp instead of destroying healthy state.
+        if document.yjs_state.present? && blob_loadable?(document.yjs_state)
+          document.update_columns(
+            yjs_state_checksum: state_checksum(document.yjs_state),
+            updated_at: Time.current
+          )
+          payload[:restored_from] = "restamped"
+          payload[:outcome] = "recovered"
+          return
+        end
+
+        YjsStateArchive.record!(document, kind: YjsStateArchive::QUARANTINE, error: error.message)
 
         checkpoint = document.yjs_state_archives
-                             .where(kind: "checkpoint", content_generation: document.content_generation)
+                             .where(kind: YjsStateArchive::CHECKPOINT, content_generation: document.content_generation)
                              .order(created_at: :desc, id: :desc)
                              .detect { |archive| archive.yjs_state.present? && blob_loadable?(archive.yjs_state) }
         if checkpoint
           document.update_columns(
             yjs_state: checkpoint.yjs_state,
             yjs_state_vector: checkpoint.yjs_state_vector,
-            yjs_state_checksum: Digest::SHA256.hexdigest(checkpoint.yjs_state),
+            yjs_state_checksum: state_checksum(checkpoint.yjs_state),
             updated_at: Time.current
           )
           payload[:restored_from] = "checkpoint"
@@ -284,10 +310,12 @@ class YjsPersistence
     def maybe_checkpoint(document)
       return if document.yjs_state.blank?
 
-      newest = document.yjs_state_archives.where(kind: "checkpoint").maximum(:created_at)
+      newest = document.yjs_state_archives
+                       .where(kind: YjsStateArchive::CHECKPOINT, content_generation: document.content_generation)
+                       .maximum(:created_at)
       return if newest && newest > CHECKPOINT_INTERVAL.ago
 
-      YjsStateArchive.record!(document, kind: "checkpoint")
+      YjsStateArchive.record!(document, kind: YjsStateArchive::CHECKPOINT)
     end
 
     # Stored vector when present; otherwise derive from the blob (legacy rows).
