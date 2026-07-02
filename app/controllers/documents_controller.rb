@@ -91,19 +91,23 @@ class DocumentsController < InertiaController
     @agent_guide = AgentGuide.text(document, request.base_url)
     @open_graph = document_open_graph(document)
 
+    # Editor capabilities for THIS view, mirrored into the static preview so
+    # mode-dependent chrome (Mermaid source visibility, sketch caption
+    # affordance) is identical on both sides of the preview → editor swap.
+    writable = document.writable_by?(owner_token, user: current_user)
+
     # Claim the seed at page-render time so a fresh document paints its
     # template from props instead of waiting for the WebSocket round-trip.
     # Only the HTML editor path may claim — agent/JSON fetches above never
     # reach here, so a programmatic read can't burn the claim. Partial
     # reloads and prefetch-shaped requests are also excluded: only an
-    # initial render mounts an editor that will actually apply the grant,
-    # and a burned grant blocks the channel fallback for SEED_CLAIM_TIMEOUT.
-    seed_granted = initial_render? && !prefetch_request? && !link_preview_request && document.try_claim_seed
-
-    # Editor capabilities for THIS view, mirrored into the static preview so
-    # mode-dependent chrome (Mermaid source visibility, sketch caption
-    # affordance) is identical on both sides of the preview → editor swap.
-    writable = document.writable_by?(owner_token, user: current_user)
+    # initial render mounts an editor that will actually apply the grant.
+    # Read-only viewers never claim either: their client can't send the
+    # applied template anywhere (every write path is canWrite-gated), so a
+    # grant to them is burned for SEED_CLAIM_TIMEOUT and every viewer sees
+    # a blank document until it expires.
+    seed_granted = initial_render? && !prefetch_request? && !link_preview_request &&
+      writable && document.try_claim_seed
     preview_editable = writable && %w[edit suggest].include?(mode)
     preview_sketch_interactive = writable && mode == "edit"
 

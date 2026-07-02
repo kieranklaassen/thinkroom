@@ -2,7 +2,11 @@ module WriteRateLimited
   extend ActiveSupport::Concern
 
   STORE = Rails.env.test? ? ActiveSupport::Cache::MemoryStore.new : Rails.cache
-  DOCUMENT_CREATION_BURST_LIMIT = 20
+  # Env override for automation that legitimately bursts from one IP: the CI
+  # browser-check loop creates ~15+ documents against one server inside the
+  # 10-minute window, and local re-runs of those scripts trip the limit even
+  # faster. Production deployments leave this unset.
+  DOCUMENT_CREATION_BURST_LIMIT = Integer(ENV.fetch("THINKROOM_DOC_CREATION_BURST", 20))
   DOCUMENT_CREATION_DAILY_LIMIT = 100
   CONTRIBUTION_BURST_LIMIT = 60
   CONTRIBUTION_DAILY_LIMIT = 500

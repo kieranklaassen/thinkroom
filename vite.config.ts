@@ -30,8 +30,9 @@ export default defineConfig(({ isSsrBuild }) => ({
     // module node, so the entry executed TWICE per dev page load —
     // createInertiaApp booted the app a second time (hydrateRoot's
     // "container already passed to createRoot" warning, doubled boot work).
-    // The entry defines no refreshable components; esbuild still compiles
-    // the TSX, and editing it falls back to a full reload.
-    react({ exclude: [/entrypoints\/inertia\.tsx$/] }),
+    // The entry defines no refreshable components and editing it falls back
+    // to a full reload. node_modules stays excluded: a custom exclude
+    // REPLACES the plugin's default rather than extending it.
+    react({ exclude: [/\/node_modules\//, /entrypoints\/inertia\.tsx$/] }),
   ],
 }))

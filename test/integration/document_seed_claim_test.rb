@@ -142,6 +142,21 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "read-only viewers never burn the seed claim" do
+    # A viewer without write access can't send the applied template anywhere
+    # (every client write path is canWrite-gated), so granting them the seed
+    # would leave the document blank for everyone until the claim timeout.
+    @document.update!(owner_token: "owner", owner_name: "Owner", link_access: "view")
+
+    get document_page_path(@document.slug), headers: browser
+
+    assert_response :ok
+    assert_inertia_props do |props|
+      props[:document][:seed_granted] == false
+    end
+    assert_equal "pending", @document.reload.seed_state
+  end
+
   test "documents without seed markdown never grant the seed" do
     doc = Document.create!(title: "Blank", seed_markdown: nil)
 

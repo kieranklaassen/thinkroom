@@ -168,7 +168,15 @@ const richBlockWidthControlsProse = $prose(
           view.dom.querySelectorAll<HTMLElement>(BLOCK_QUERY).forEach((block) => {
             if (!block.querySelector(':scope > .rich-block-width-handle')) buildHandle(block)
           })
-          view.dom.querySelectorAll<HTMLButtonElement>('.rich-block-width-handle').forEach(syncHandleValue)
+          view.dom.querySelectorAll<HTMLButtonElement>('.rich-block-width-handle').forEach((handle) => {
+            // A block can leave the breakout set in place (e.g. a code block
+            // whose language becomes mermaid): drop its now-orphaned handle.
+            if (!handle.closest(BLOCK_SELECTOR)) {
+              handle.remove()
+              return
+            }
+            syncHandleValue(handle)
+          })
         }
         const scheduleSync = () => {
           if (frame !== null) return
