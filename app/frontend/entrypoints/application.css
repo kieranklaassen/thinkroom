@@ -961,10 +961,12 @@ a:focus-visible {
   opacity: 1;
 }
 
-/* Native back affordance for the Ruby Native shell. The gem stylesheet
- * keeps .native-back-button hidden until the shell adds body.can-go-back,
- * so this never renders in regular browsers. */
+/* Native back affordance for the Ruby Native shell. Hidden by default here
+ * AND by the gem stylesheet; only the gem's body.can-go-back rule (higher
+ * specificity) reveals it, so web users never see it even if the gem
+ * stylesheet fails to load. */
 .doc-back {
+  display: none;
   border: none;
   background: none;
   padding: 0 0.25rem 0 0;
@@ -3515,6 +3517,10 @@ a:focus-visible {
 @media (max-width: 48rem) {
   .doc-header {
     padding: 0.45rem 0.75rem;
+    /* The shorthand resets the base rule's safe-area padding-top; re-apply
+     * it here or the header sits under the notch on phones — the exact
+     * viewport the native shell uses. */
+    padding-top: calc(0.45rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
     gap: 0.5rem;
   }
 
@@ -3713,7 +3719,7 @@ a:focus-visible {
   }
 
   .landing-corner {
-    top: 0.75rem;
+    top: calc(0.75rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
     right: 0.75rem;
   }
 
