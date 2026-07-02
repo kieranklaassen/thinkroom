@@ -246,10 +246,16 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
     `Fetch the share URL (Accept: text/plain) for the full API guide.`
 
   const copyInstruction = useCallback(() => {
-    void navigator.clipboard.writeText(agentInstruction).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2400)
-    })
+    // Clipboard can be denied (permissions policy, non-secure origin). The
+    // prompt stays visible with its manual Copy button, so a rejected write
+    // must not surface as an unhandled rejection or fake a "Copied" state.
+    void navigator.clipboard.writeText(agentInstruction).then(
+      () => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2400)
+      },
+      () => {},
+    )
   }, [agentInstruction])
 
   // Revealing the prompt also copies it: the agent-start action is "give me the

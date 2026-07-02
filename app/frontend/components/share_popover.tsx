@@ -61,10 +61,15 @@ export function SharePopover({
     `your edits, suggestions, and comments will appear live, attributed to you.`
 
   const copy = useCallback((kind: 'link' | 'agent', text: string) => {
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(kind)
-      setTimeout(() => setCopied(null), 1600)
-    })
+    // Denied clipboard (permissions policy, non-secure origin) must not
+    // unhandled-reject or fake a "Copied" state — the URL stays selectable.
+    void navigator.clipboard.writeText(text).then(
+      () => {
+        setCopied(kind)
+        setTimeout(() => setCopied(null), 1600)
+      },
+      () => {},
+    )
   }, [])
 
   const runExport = useCallback(
