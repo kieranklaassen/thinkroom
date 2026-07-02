@@ -56,9 +56,19 @@ const page = await context.newPage()
 const errors = []
 let slug
 
-page.on('pageerror', (error) => errors.push(error.stack ?? String(error)))
+// Dev-server-only console noise, verified not to reproduce on clean loads or
+// in production builds (see script/export_check.mjs and the 2026-07-01
+// dogfood report): React's recoverable hydration de-opt under automation and
+// a StrictMode double-createRoot warning from an editor library.
+const expectedBrowserNoise = (message) =>
+  message.includes('Hydration failed because the server rendered') ||
+  message.includes('already been passed to createRoot()')
+page.on('pageerror', (error) => {
+  const message = error.stack ?? String(error)
+  if (!expectedBrowserNoise(message)) errors.push(message)
+})
 page.on('console', (message) => {
-  if (message.type() === 'error') errors.push(message.text())
+  if (message.type() === 'error' && !expectedBrowserNoise(message.text())) errors.push(message.text())
 })
 
 const liveGeometry = () => page.evaluate(() => {

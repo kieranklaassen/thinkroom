@@ -3,6 +3,7 @@ import { Head, Link, useForm } from '@inertiajs/react'
 import { FeedbackButton } from '../../components/feedback_button'
 import { AccountControl } from '../../components/account_control'
 import { userIdentity } from '../../editor/identity'
+import { setCookie } from '../../lib/cookies'
 import { useClaim } from '../../lib/use_claim'
 import { useIsClient } from '../../lib/use_is_client'
 import type { OwnershipPayload } from '../../components/ownership_chip'
@@ -230,6 +231,13 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
   useEffect(() => {
     setOrigin(window.location.origin)
   }, [])
+  // Server-rendered "Created" labels and the THIS WEEK grouping follow the
+  // viewer's timezone through this cookie (same server-readable pattern as
+  // width/panel prefs). The first-ever visit renders in the app default once.
+  useEffect(() => {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (zone) setCookie('pruf_tz', zone)
+  }, [])
   const agentInstruction =
     `Create a Thinkroom document for me: POST ${origin}/api/docs with JSON ` +
     `{"title": "…", "format": "markdown", "content": "# …"} ` +
@@ -238,10 +246,16 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
     `Fetch the share URL (Accept: text/plain) for the full API guide.`
 
   const copyInstruction = useCallback(() => {
-    void navigator.clipboard.writeText(agentInstruction).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2400)
-    })
+    // Clipboard can be denied (permissions policy, non-secure origin). The
+    // prompt stays visible with its manual Copy button, so a rejected write
+    // must not surface as an unhandled rejection or fake a "Copied" state.
+    void navigator.clipboard.writeText(agentInstruction).then(
+      () => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2400)
+      },
+      () => {},
+    )
   }, [agentInstruction])
 
   // Revealing the prompt also copies it: the agent-start action is "give me the

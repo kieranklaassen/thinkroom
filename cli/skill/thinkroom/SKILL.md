@@ -39,6 +39,16 @@ Read live state before changing anything:
 thinkroom show SHARE_URL --json
 ```
 
+The `content` field is the canonical Markdown source and may carry
+`<span data-provenance data-kind="ai" data-author="…" data-state="pending">`
+attribution marks; `plain_markdown` is the same text with marks stripped.
+When you update, the server stores your content verbatim: round-tripping
+`content` preserves everyone's existing attribution, but text you add inside
+someone else's span inherits their name. Wrap your new or changed passages in
+your own span (`data-author` = your `--agent` name) so provenance stays
+truthful; unwrapped text reads as unattributed. Never build an update from
+`plain_markdown` — that erases all existing attribution.
+
 For a document that is still an untouched seed, revise it in place:
 
 ```bash

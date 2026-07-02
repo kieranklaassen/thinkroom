@@ -45,6 +45,33 @@ class DocumentIndexTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "created labels and week grouping follow the viewer's timezone cookie" do
+    establish_identity
+    # 00:30 UTC is still "yesterday" in Los Angeles — the label and the
+    # this-week bucket must both follow the viewer's zone, not UTC.
+    created_at = Time.utc(2026, 7, 2, 0, 30)
+    doc = Document.create!(title: "Zoned", created_at: created_at)
+    post claim_document_path(doc.slug), params: { name: "Me" }
+
+    cookies[:pruf_tz] = "America/Los_Angeles"
+    travel_to created_at do
+      get root_path
+      assert_inertia_props do |props|
+        row = props[:yours].find { |r| r[:slug] == doc.slug }
+        row[:created_label] == "Jul 1" && row[:age_group] == "this_week"
+      end
+    end
+
+    cookies[:pruf_tz] = "not-a-zone"
+    travel_to created_at do
+      get root_path
+      assert_inertia_props do |props|
+        row = props[:yours].find { |r| r[:slug] == doc.slug }
+        row[:created_label] == created_at.in_time_zone.strftime("%b %-d")
+      end
+    end
+  end
+
   test "guest owner can replace and clear tags" do
     establish_identity
     post documents_path, params: { name: "Guest owner" }

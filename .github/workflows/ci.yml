@@ -114,3 +114,56 @@ jobs:
 
       - name: Scan production JS dependencies for known vulnerabilities
         run: npm audit --omit=dev --audit-level=moderate
+
+  browser_checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install packages
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libvips
+
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@9eb537ca036ebaed86729dcb9309076e4c5c3b74 # v1
+        with:
+          bundler-cache: true
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Prepare development database with the demo document
+        run: bin/rails db:prepare db:seed
+
+      - name: Start Rails and Vite
+        run: |
+          bin/vite dev &
+          bin/rails server &
+          for i in $(seq 1 90); do curl -fso /dev/null http://localhost:3000/up && break; sleep 1; done
+          curl -fso /dev/null http://localhost:3000/up
+
+      # First hit compiles the editor bundle through Vite's dev transform;
+      # do it once with a generous timeout so the checks' own waits stay tight.
+      - name: Warm the Vite module graph
+        run: |
+          node -e "const { chromium } = require('playwright'); (async () => { const b = await chromium.launch(); const p = await b.newPage(); await p.goto('http://localhost:3000/d/demo', { timeout: 180000, waitUntil: 'networkidle' }); await b.close() })()"
+
+      # browser_check is excluded until its comment-role leg is unblocked —
+      # see docs/dogfood-reports/2026-07-01-main-two-week-release-dogfood.md
+      # (selection stomping while a second tab is open).
+      - name: Run browser regression checks
+        run: |
+          for check in sync_check link_check mermaid_check rich_block_width_check suggestion_list_replace_check export_check html_document_check meta_refresh_check; do
+            echo "=== script/${check}.mjs"
+            node "script/${check}.mjs"
+          done

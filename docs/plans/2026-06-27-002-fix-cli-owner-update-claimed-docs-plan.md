@@ -1,7 +1,7 @@
 ---
 title: "fix: Let an authenticated CLI owner update their own claimed seed-stage document"
 type: fix
-status: active
+status: completed
 date: 2026-06-27
 origin: https://github.com/kieranklaassen/thinkroom/issues/112
 ---

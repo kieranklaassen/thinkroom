@@ -1,7 +1,7 @@
 ---
 title: "fix: Clamp out-of-range sketch heights instead of silently rendering raw JSON"
 type: fix
-status: active
+status: completed
 date: 2026-06-25
 origin: https://github.com/kieranklaassen/thinkroom/issues/59
 ---

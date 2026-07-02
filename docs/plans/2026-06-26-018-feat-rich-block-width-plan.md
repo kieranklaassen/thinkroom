@@ -1,7 +1,7 @@
 ---
 title: "feat: Let sketches and tables break out wider than prose"
 type: feat
-status: active
+status: completed
 date: 2026-06-26
 issue: 94
 ---

@@ -1,6 +1,7 @@
 import type { Ctx } from '@milkdown/kit/ctx'
-import { editorViewOptionsCtx, schemaCtx, serializerCtx } from '@milkdown/kit/core'
+import { editorViewCtx, editorViewOptionsCtx, schemaCtx, serializerCtx, type Editor } from '@milkdown/kit/core'
 import { DOMSerializer, Fragment, Slice, type Node } from '@milkdown/kit/prose/model'
+import type { EditorView } from '@milkdown/kit/prose/view'
 import {
   containsSketch,
   portableClipboardSerializer,
@@ -78,4 +79,66 @@ export function configureCleanClipboard(ctx: Ctx): void {
       )
     },
   }))
+}
+
+/**
+ * Read and Comment mode render the editor with `editable: false`, so
+ * ProseMirror never owns the DOM selection and a native copy serializes the
+ * raw live DOM — provenance spans, sketch scene internals, width handles and
+ * all. This document-level listener maps the native selection back to
+ * document positions and routes it through the same transformCopied /
+ * clipboardSerializer / clipboardTextSerializer chain an editable view uses,
+ * so copying while reading produces the identical clean flavors.
+ */
+export function bindReadModeCopy(editor: Editor): () => void {
+  let view: EditorView | null = null
+  editor.action((ctx) => {
+    view = ctx.get(editorViewCtx)
+  })
+  if (!view) return () => undefined
+  const editorView = view as EditorView
+
+  const positionAt = (container: globalThis.Node, offset: number, fallback: number): number => {
+    if (!editorView.dom.contains(container)) return fallback
+    try {
+      return editorView.posAtDOM(container, offset)
+    } catch {
+      return fallback
+    }
+  }
+
+  const onCopy = (event: ClipboardEvent) => {
+    if (editorView.editable || !event.clipboardData) return
+    const selection = window.getSelection()
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return
+    const range = selection.getRangeAt(0)
+    // A selection wholly outside the document (sidebar, header) stays native;
+    // one that spans past the document is clamped to the document's edges.
+    if (!range.intersectsNode(editorView.dom)) return
+
+    const docSize = editorView.state.doc.content.size
+    let from = positionAt(range.startContainer, range.startOffset, 0)
+    let to = positionAt(range.endContainer, range.endOffset, docSize)
+    if (from > to) [from, to] = [to, from]
+    if (from === to) return
+
+    let slice = editorView.state.doc.slice(from, to)
+    slice = editorView.someProp('transformCopied', (transform) => transform(slice, editorView)) ?? slice
+
+    const serializer =
+      editorView.someProp('clipboardSerializer') ?? DOMSerializer.fromSchema(editorView.state.schema)
+    const container = document.createElement('div')
+    serializer.serializeFragment(slice.content, { document }, container)
+
+    const text =
+      editorView.someProp('clipboardTextSerializer', (serialize) => serialize(slice, editorView)) ??
+      slice.content.textBetween(0, slice.content.size, '\n\n')
+
+    event.clipboardData.setData('text/html', container.innerHTML)
+    event.clipboardData.setData('text/plain', text)
+    event.preventDefault()
+  }
+
+  document.addEventListener('copy', onCopy)
+  return () => document.removeEventListener('copy', onCopy)
 }

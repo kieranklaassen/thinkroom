@@ -29,6 +29,13 @@ class DocumentModeRoutingTest < ActionDispatch::IntegrationTest
     assert_response :not_found
   end
 
+  test "/read canonicalizes to the bare document URL instead of 404ing" do
+    get "/d/#{@document.slug}/read", headers: browser
+
+    assert_response :moved_permanently
+    assert_equal document_page_path(@document.slug), URI(response.location).path
+  end
+
   test "locked owner can open an explicit mode but another viewer is redirected to Read" do
     get root_path
     post claim_document_path(@document.slug), params: { name: "Owner" }

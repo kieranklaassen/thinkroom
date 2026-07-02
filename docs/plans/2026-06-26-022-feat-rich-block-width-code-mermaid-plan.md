@@ -1,7 +1,7 @@
 ---
 title: "feat: Extend rich-block width to code blocks and Mermaid diagrams"
 type: feat
-status: active
+status: completed
 date: 2026-06-26
 origin: docs/brainstorms/riffrec-feedback/thinkroom-doc-feedback/problem-analysis.md
 ---

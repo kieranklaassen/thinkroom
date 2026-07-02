@@ -1,7 +1,7 @@
 ---
 title: "feat: Add an account-linked Thinkroom CLI and agent skill"
 type: feat
-status: active
+status: completed
 date: 2026-06-26
 issue: 91
 ---

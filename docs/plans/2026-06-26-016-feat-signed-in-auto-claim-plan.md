@@ -1,7 +1,7 @@
 ---
 title: "feat: Auto-claim fresh documents for signed-in users"
 type: feat
-status: active
+status: completed
 date: 2026-06-26
 issue: 89
 ---

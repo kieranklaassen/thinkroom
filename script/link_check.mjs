@@ -15,7 +15,7 @@ try {
       headers: { 'X-Agent-Name': 'link-check', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: 'Link click check',
-        markdown:
+        content:
           `# Link click check\n\n[Open this link](${expectedUrl})\n\n` +
           '- [ ] Complete this task\n',
       }),
