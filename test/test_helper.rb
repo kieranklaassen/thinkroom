@@ -2,6 +2,7 @@ ENV["RAILS_ENV"] ||= "test"
 require_relative "../config/environment"
 require "rails/test_help"
 require "inertia_rails/minitest"
+require_relative "test_helpers/session_cookie_assertions"
 
 module ActiveSupport
   class TestCase
