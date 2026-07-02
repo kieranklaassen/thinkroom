@@ -48,7 +48,7 @@ export default function AuthShow({ mode, google_enabled, csrf_token, return_to, 
             <>
               <form method="post" action="/auth/google_oauth2">
                 <input type="hidden" name="authenticity_token" value={csrf_token} />
-                <button className="auth-google" type="submit">
+                <button className="auth-google" type="submit" {...nativeHaptic('impact')}>
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path fill="#4285f4" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.3c1.9-1.8 2.9-4.4 2.9-7.4Z" />
                     <path fill="#34a853" d="M12 22c2.7 0 5-.9 6.7-2.4l-3.3-2.5c-.9.6-2.1 1-3.4 1-2.6 0-4.8-1.8-5.6-4.1H3v2.6A10 10 0 0 0 12 22Z" />
