@@ -64,7 +64,7 @@ class SyncChannel < ApplicationCable::Channel
         Base64.strict_decode64(update)
       rescue ArgumentError
         ActiveSupport::Notifications.instrument(
-          "frame_dropped.yjs", document_id: @document.id, reason: "malformed"
+          "frame_dropped.yjs", document_id: @document.id, outcome: "dropped_malformed"
         )
         return
       end
@@ -103,7 +103,7 @@ class SyncChannel < ApplicationCable::Channel
       if sequence > @next_sequence + MAX_SEQUENCE_GAP
         ActiveSupport::Notifications.instrument(
           "frame_dropped.yjs",
-          document_id: @document.id, reason: "gap",
+          document_id: @document.id, outcome: "dropped_gap",
           sequence: sequence, expected_sequence: @next_sequence
         )
         return

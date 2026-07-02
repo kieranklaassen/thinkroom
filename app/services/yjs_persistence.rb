@@ -24,7 +24,9 @@ class YjsPersistence
     # rather than persisted.
     def merge(document, base64_update, generation: nil, token: nil, user: nil)
       update = decode(base64_update)
-      instrument("merge.yjs", document_id: document.id, update_bytes: update.length) do |payload|
+      ActiveSupport::Notifications.instrument(
+        "merge.yjs", document_id: document.id, update_bytes: update.length
+      ) do |payload|
         entered_at = monotonic_ms
         lock_for(document.id).synchronize do
           document.with_lock do
@@ -60,6 +62,7 @@ class YjsPersistence
               updated_at: Time.current
             )
             payload[:outcome] = "merged"
+            true
           end
         end
       end
@@ -67,13 +70,18 @@ class YjsPersistence
 
     # => [full_state_b64, state_vector_b64] for the sync handshake.
     def state_b64(document)
-      instrument("state.yjs", document_id: document.id) do |payload|
+      ActiveSupport::Notifications.instrument("state.yjs", document_id: document.id) do |payload|
         payload[:blob_bytes] = document.yjs_state&.bytesize || 0
         ydoc = load_ydoc(document)
-        [
+        encoded = [
           Base64.strict_encode64(ydoc.full_diff.pack("C*")),
           Base64.strict_encode64(ydoc.state.pack("C*"))
         ]
+        # Outcome is assigned last so an exception leaves it unset and the
+        # log subscriber's exception fallback classifies the event as a
+        # failure rather than a success.
+        payload[:outcome] = "ok"
+        encoded
       end
     end
 
@@ -83,7 +91,7 @@ class YjsPersistence
     # may not overwrite the API read model from behind.
     def persist_snapshot(document, state_vector_b64:, content:, spans:, title: document.title,
                          token: nil, user: nil)
-      instrument("snapshot.yjs", document_id: document.id) do |payload|
+      ActiveSupport::Notifications.instrument("snapshot.yjs", document_id: document.id) do |payload|
         client_state = decode_state_vector(decode(state_vector_b64)) if state_vector_b64.present?
 
         lock_for(document.id).synchronize do
@@ -112,21 +120,16 @@ class YjsPersistence
         true
       rescue ArgumentError => e
         # A state vector that cannot be decoded is a client bug or corruption,
-        # not ordinary staleness — log it so it is distinguishable, but keep
-        # the false return so callers treat it as "snapshot not accepted".
+        # not ordinary staleness — the outcome (with the error message) makes
+        # it distinguishable in the event stream, while the false return keeps
+        # callers treating it as "snapshot not accepted".
         payload[:outcome] = "invalid_state_vector"
-        Rails.logger.warn("YjsPersistence: invalid state vector for document #{document.id}: #{e.message}")
+        payload[:error] = e.message
         false
       end
     end
 
     private
-
-    # Instrument wrapper: seeds the payload, defaults the outcome, and lets
-    # exceptions propagate after the event records the rejection outcome.
-    def instrument(event, payload, &)
-      ActiveSupport::Notifications.instrument(event, payload, &)
-    end
 
     def monotonic_ms
       Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)

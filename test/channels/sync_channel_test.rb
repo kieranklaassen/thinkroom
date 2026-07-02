@@ -7,17 +7,6 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     Base64.strict_encode64(ydoc.diff.pack("C*"))
   end
 
-  def capture_yjs_events(name)
-    events = []
-    subscription = ActiveSupport::Notifications.subscribe(name) do |event|
-      events << event
-    end
-    yield
-    events
-  ensure
-    ActiveSupport::Notifications.unsubscribe(subscription)
-  end
-
   def build_sequential_updates
     ydoc = Y::Doc.new
     text = ydoc.get_text("t")
@@ -343,13 +332,9 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     doc = Document.create!(title: "Poison metered")
     subscribe slug: doc.slug
 
-    events = capture_yjs_events("frame_dropped.yjs") do
+    assert_notification("frame_dropped.yjs", document_id: doc.id, outcome: "dropped_malformed") do
       perform :receive, { "type" => "update", "update" => "not!!base64!!", "cid" => "x" }
     end
-
-    payload = events.first.payload
-    assert_equal doc.id, payload[:document_id]
-    assert_equal "malformed", payload[:reason]
   end
 
   test "an excessive sequence gap emits a frame_dropped event and drops the frame" do
@@ -358,16 +343,15 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     update = build_update_b64("too far ahead")
     beyond_gap = SyncChannel::MAX_SEQUENCE_GAP + 2
 
-    events = capture_yjs_events("frame_dropped.yjs") do
+    assert_notification(
+      "frame_dropped.yjs",
+      outcome: "dropped_gap", sequence: beyond_gap, expected_sequence: 1
+    ) do
       assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
         perform :receive, { "type" => "update", "update" => update, "cid" => "x", "seq" => beyond_gap }
       end
     end
 
-    payload = events.first.payload
-    assert_equal "gap", payload[:reason]
-    assert_equal beyond_gap, payload[:sequence]
-    assert_equal 1, payload[:expected_sequence]
     assert_nil doc.reload.yjs_state
   end
 
