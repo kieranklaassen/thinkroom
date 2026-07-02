@@ -235,6 +235,13 @@ a:focus-visible {
   padding: 2rem;
 }
 
+/* Inside the native shell the web view extends behind the status bar and the
+   native nav bar sits above the page, so the landing needs the shell's
+   safe-area clearance on top. Inert on the open web (attribute absent). */
+[data-native-app] .landing {
+  padding-top: calc(2rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
+}
+
 .account-control {
   display: inline-flex;
   align-items: center;

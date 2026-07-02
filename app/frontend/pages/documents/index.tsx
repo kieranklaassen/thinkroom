@@ -324,7 +324,9 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
         </div>
         <main className="landing-main">
           <header className="landing-hero">
-            <h1 className="landing-wordmark">
+            {/* native-hidden: the native nav bar already says Thinkroom, so the
+                hero title would read twice inside the app. */}
+            <h1 className="landing-wordmark native-hidden">
               <Link href="/" className="landing-wordmark-link">
                 Thinkroom
               </Link>
