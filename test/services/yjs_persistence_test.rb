@@ -293,6 +293,110 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal "ordered independently", doc.reload.content_snapshot
   end
 
+  test "a second merge reuses the resident doc without reloading the blob" do
+    doc = Document.create!(title: "Resident")
+    client = Y::Doc.new
+    assert_notification("merge.yjs", cache: "miss") do
+      YjsPersistence.merge(doc, b64_update_for("first ", from_doc: client))
+    end
+
+    original = YjsPersistence.singleton_class.instance_method(:load_ydoc)
+    YjsPersistence.define_singleton_method(:load_ydoc) { |*| raise "cache hit must not reload" }
+    begin
+      assert_notification("merge.yjs", cache: "hit") do
+        YjsPersistence.merge(doc, b64_update_for("second", from_doc: client))
+      end
+    ensure
+      YjsPersistence.singleton_class.define_method(:load_ydoc, original)
+    end
+
+    assert_equal "first second", text_of(doc.reload)
+  end
+
+  test "an external blob write invalidates the resident doc" do
+    doc = Document.create!(title: "Externally written")
+    YjsPersistence.merge(doc, b64_update_for("cached content. "))
+
+    # Another writer (e.g. a different process) replaces the blob directly.
+    external = Y::Doc.new
+    external.get_text("t") << "external content. "
+    doc.reload.update_columns(
+      yjs_state: external.full_diff.pack("C*"),
+      yjs_state_vector: external.state.pack("C*")
+    )
+
+    assert_notification("merge.yjs", cache: "miss") do
+      YjsPersistence.merge(doc.reload, b64_update_for("appended."))
+    end
+
+    merged = text_of(doc.reload)
+    assert_includes merged, "external content", "the digest check must force a fresh load"
+    assert_includes merged, "appended"
+    assert_not_includes merged, "cached content", "the stale resident doc must not win"
+  end
+
+  test "replace_content! invalidates the resident doc via the generation" do
+    doc = Document.create!(title: "Regenerated", seed_content: "# Seed")
+    YjsPersistence.merge(doc, b64_update_for("old generation secret"))
+    doc.replace_content!(source: "# Replacement")
+
+    assert_notification("merge.yjs", cache: "miss") do
+      YjsPersistence.merge(doc.reload, b64_update_for("new generation"))
+    end
+
+    merged = text_of(doc.reload)
+    assert_not_includes merged, "old generation secret",
+                        "a resident doc from a wiped generation must never persist"
+    assert_includes merged, "new generation"
+  end
+
+  test "an out-of-order dependent pair converges on redelivery, matching pre-cache behavior" do
+    doc = Document.create!(title: "Pending")
+    client = Y::Doc.new
+    text = client.get_text("t")
+    text << "a"
+    first = client.diff
+    first_state = client.state
+    text << "b"
+    second = client.diff(first_state)
+
+    # Dependent frame first: y-rb does not retry pending structs across
+    # syncs, so this is a no-op — nothing persists, nothing corrupts.
+    assert_notification("merge.yjs", outcome: "noop") do
+      YjsPersistence.merge(doc, Base64.strict_encode64(second.pack("C*")))
+    end
+    assert_nil doc.reload.yjs_state
+
+    YjsPersistence.merge(doc, Base64.strict_encode64(first.pack("C*")))
+    # The client's next sync-reply re-delivers the dependent frame (the
+    # channel's seq buffer prevents this ordering for cable traffic anyway).
+    YjsPersistence.merge(doc, Base64.strict_encode64(second.pack("C*")))
+
+    assert_equal "ab", text_of(doc.reload)
+  end
+
+  test "the resident cache is bounded by an LRU cap" do
+    docs = (YjsPersistence::MAX_RESIDENT_DOCS + 1).times.map do |i|
+      Document.create!(title: "LRU #{i}")
+    end
+    docs.each { |d| YjsPersistence.merge(d, b64_update_for("x")) }
+
+    assert_not YjsPersistence.resident?(docs.first.id), "the least-recently-used entry must evict"
+    assert YjsPersistence.resident?(docs.last.id)
+  end
+
+  test "release evicts the resident doc and an unlocked mutex" do
+    doc = Document.create!(title: "Released")
+    YjsPersistence.merge(doc, b64_update_for("resident"))
+    assert YjsPersistence.resident?(doc.id)
+    assert YjsPersistence::LOCKS.key?(doc.id)
+
+    YjsPersistence.release(doc.id)
+
+    assert_not YjsPersistence.resident?(doc.id)
+    assert_not YjsPersistence::LOCKS.key?(doc.id)
+  end
+
   test "merge emits a merged event with byte sizes" do
     doc = Document.create!(title: "Metered")
     events = capture_notifications("merge.yjs") do

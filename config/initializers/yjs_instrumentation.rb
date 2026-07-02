@@ -37,7 +37,7 @@ Rails.application.config.after_initialize do
       duration_ms: event.duration.round(1)
     }
     %i[update_bytes blob_bytes blob_bytes_before blob_bytes_after lock_wait_ms
-       served_from sequence expected_sequence error].each do |key|
+       cache served_from sequence expected_sequence error].each do |key|
       fields[key] = payload[key] if payload.key?(key)
     end
     # Class and message ("Document::StaleGenerationError: Client generation 3

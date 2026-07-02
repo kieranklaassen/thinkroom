@@ -355,6 +355,30 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert_nil doc.reload.yjs_state
   end
 
+  test "the last unsubscribe evicts the resident doc" do
+    doc = Document.create!(title: "Evicted on exit")
+    subscribe slug: doc.slug
+    perform :receive, { "type" => "update", "update" => build_update_b64("typed"), "cid" => "x" }
+    assert YjsPersistence.resident?(doc.id)
+
+    unsubscribe
+
+    assert_not YjsPersistence.resident?(doc.id), "the editing session ended — the doc must leave memory"
+  end
+
+  test "unsubscribing while another subscriber remains keeps the resident doc" do
+    doc = Document.create!(title: "Still open")
+    SyncChannel.track_subscribe(doc.id) # a second, concurrent subscriber
+    subscribe slug: doc.slug
+    perform :receive, { "type" => "update", "update" => build_update_b64("typed"), "cid" => "x" }
+
+    unsubscribe
+
+    assert YjsPersistence.resident?(doc.id), "an open session must keep its resident doc"
+  ensure
+    SyncChannel.track_unsubscribe(doc.id)
+  end
+
   test "awareness messages relay without persisting" do
     doc = Document.create!(title: "Presence")
     subscribe slug: doc.slug

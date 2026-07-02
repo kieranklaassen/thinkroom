@@ -14,7 +14,13 @@ module ActiveSupport
     # WriteRateLimited::STORE is a single in-memory cache shared by every test in a
     # parallel worker process; without a reset, write requests accumulate across
     # unrelated tests and can trip burst limits that no individual test approaches.
-    setup { WriteRateLimited::STORE.clear }
+    # The Yjs resident-doc cache and subscriber refcounts leak the same way:
+    # rolled-back transactions reuse document ids across tests.
+    setup do
+      WriteRateLimited::STORE.clear
+      YjsPersistence.reset_cache!
+      SyncChannel::ACTIVE_SUBSCRIBERS.clear
+    end
 
     # Add more helper methods to be used by all tests here...
   end

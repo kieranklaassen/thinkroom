@@ -11,6 +11,17 @@ class YjsPersistence
   # is sufficient; the DB transaction below is the second guard.
   LOCKS = Concurrent::Map.new
 
+  # Resident merged docs, keyed by document id (the Hocuspocus model: hold
+  # the doc in memory while it is being edited instead of rehydrating the
+  # whole blob per frame). Validity is proven under the locks by generation
+  # + blob digest, so a stale entry can never persist a wrong write — see
+  # resident_ydoc. Entries evict on last disconnect (SyncChannel) and via
+  # the LRU cap below for writers without subscriptions (HTTP keepalive).
+  DOC_CACHE = Concurrent::Map.new
+  MAX_RESIDENT_DOCS = 256
+
+  ResidentDoc = Struct.new(:ydoc, :generation, :digest, :last_used_at)
+
   class << self
     # Merge a base64-encoded Yjs update into the document's persisted state.
     #
@@ -42,12 +53,17 @@ class YjsPersistence
                     "Client generation #{generation} is behind document generation #{document.content_generation}."
             end
 
-            ydoc = load_ydoc(document)
+            ydoc = resident_ydoc(document, payload)
             before = ydoc.state
             ydoc.sync(update)
             # A no-op update (e.g. the empty sync-reply a client joining an
             # empty doc sends) must not persist — flipping seed_state to
-            # "seeded" without content would permanently block the seed claim.
+            # "seeded" without content would permanently block the seed
+            # claim. (A causally dependent update whose dependency has not
+            # arrived also lands here: y-rb 0.7.0 does not retry pending
+            # structs across syncs, so the frame is dropped exactly as the
+            # fresh-doc-per-merge path dropped it, and the client's next
+            # sync-reply re-delivers it — no behavior change.)
             if ydoc.state == before
               payload[:outcome] = "noop"
               next
@@ -62,6 +78,7 @@ class YjsPersistence
               seed_state: "seeded",
               updated_at: Time.current
             )
+            remember_resident(document, ydoc, blob)
             payload[:outcome] = "merged"
             true
           end
@@ -152,10 +169,61 @@ class YjsPersistence
       end
     end
 
+    # Evict a document's resident doc and, when currently unlocked, its
+    # mutex. Called by SyncChannel when the last subscriber disconnects.
+    # Deleting an unlocked mutex while another thread still holds a
+    # reference can briefly yield two mutexes for one document; the row
+    # lock inside merge remains the second guard, so the race is benign.
+    def release(document_id)
+      DOC_CACHE.delete(document_id)
+      mutex = LOCKS[document_id]
+      LOCKS.delete(document_id) if mutex && !mutex.locked?
+    end
+
+    def resident?(document_id) = DOC_CACHE.key?(document_id)
+
+    def reset_cache! = DOC_CACHE.clear
+
     private
 
     def monotonic_ms
       Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
+    end
+
+    # The resident doc for a merge, validated under the locks: the entry
+    # must derive from this exact generation and stored blob, so external
+    # writes (digest mismatch) and replacements (generation bump) force a
+    # fresh load. A miss loads, caches, and counts toward the LRU cap.
+    def resident_ydoc(document, payload)
+      entry = DOC_CACHE[document.id]
+      digest = document.yjs_state.present? ? Digest::SHA256.hexdigest(document.yjs_state) : nil
+      if entry && entry.generation == document.content_generation && entry.digest == digest
+        payload[:cache] = "hit"
+        entry.last_used_at = monotonic_ms
+        return entry.ydoc
+      end
+
+      payload[:cache] = "miss"
+      ydoc = load_ydoc(document)
+      DOC_CACHE[document.id] = ResidentDoc.new(ydoc, document.content_generation, digest, monotonic_ms)
+      evict_lru_overflow
+      ydoc
+    end
+
+    # Refresh the entry after a persist so the digest matches the new blob.
+    def remember_resident(document, ydoc, blob)
+      DOC_CACHE[document.id] = ResidentDoc.new(
+        ydoc, document.content_generation, Digest::SHA256.hexdigest(blob), monotonic_ms
+      )
+    end
+
+    def evict_lru_overflow
+      return if DOC_CACHE.size <= MAX_RESIDENT_DOCS
+
+      entries = []
+      DOC_CACHE.each_pair { |id, entry| entries << [ id, entry.last_used_at ] }
+      entries.sort_by! { |_, used_at| used_at }
+      entries.first(DOC_CACHE.size - MAX_RESIDENT_DOCS).each { |id, _| DOC_CACHE.delete(id) }
     end
 
     def load_ydoc(document)
