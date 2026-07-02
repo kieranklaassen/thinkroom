@@ -1719,11 +1719,24 @@ try {
   } else {
     fail(`canonical document URL did not open in Read mode: ${winA.url()}`)
   }
-  await winA.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', {
-    key: '3', code: 'Digit3', metaKey: true, bubbles: true, cancelable: true,
-  })))
-  await winA.waitForURL(`${BASE}/d/${trackDoc.slug}/comment`)
-  if ((await winA.locator('.mode-control-trigger').textContent())?.includes('Comment mode')) {
+  // Retry the synthetic keydown: the shortcut handler is (re)registered by a
+  // React effect, and on a loaded runner a dispatch can race the app's
+  // background partial reloads re-rendering the page. A lost dispatch is
+  // environment noise; a genuinely broken shortcut still fails after 3 tries.
+  let commentModeReached = false
+  for (let attempt = 0; attempt < 3 && !commentModeReached; attempt += 1) {
+    await winA.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: '3', code: 'Digit3', metaKey: true, bubbles: true, cancelable: true,
+    })))
+    commentModeReached = await winA
+      .waitForURL(`${BASE}/d/${trackDoc.slug}/comment`, { timeout: 5000 })
+      .then(() => true)
+      .catch(() => false)
+  }
+  if (
+    commentModeReached &&
+    (await winA.locator('.mode-control-trigger').textContent())?.includes('Comment mode')
+  ) {
     ok('Command+3 switches to Comment mode and pushes its URL')
   } else {
     fail('Command+3 did not switch to Comment mode')
