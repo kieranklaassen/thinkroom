@@ -1,6 +1,7 @@
 // Focused document/sketch export regression check using Playwright.
 // Usage: BASE_URL=http://localhost:3000 node script/export_check.mjs
 import { chromium } from 'playwright'
+import { expectedBrowserNoise, waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 const AGENT_HEADERS = {
@@ -93,13 +94,6 @@ const restoreObjectUrlCreation = () =>
     delete window.__originalCreateObjectURL
   })
 const errors = []
-// Dev-server-only console noise, verified not to reproduce on clean loads or
-// in production builds (docs/dogfood-reports/2026-07-01-main-two-week-release-dogfood.md):
-// - React's recoverable hydration de-opt fires when automation interacts
-//   before hydration completes; clean Playwright loads show zero of these.
-const expectedBrowserNoise = (message) =>
-  message.includes('ResizeObserver loop completed with undelivered notifications') ||
-  message.includes('Hydration failed because the server rendered')
 page.on('pageerror', (error) => {
   const message = error.stack ?? String(error)
   if (!expectedBrowserNoise(message)) errors.push(message)
@@ -125,7 +119,7 @@ try {
   // The status dot is server-rendered live (optimistic) and the static
   // preview paints a .thinkroom-sketch figure from first byte, so neither can
   // gate interaction — wait for the hydrated editor before clicking chrome.
-  await page.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(page)
   await page.waitForSelector('.doc-live-editor .thinkroom-sketch', { timeout: 15000 })
   await page.locator('.mode-control-trigger').click()
   await page.getByRole('option', { name: /^Read / }).click()

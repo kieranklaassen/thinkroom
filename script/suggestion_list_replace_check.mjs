@@ -1,4 +1,5 @@
 import { chromium } from 'playwright'
+import { expectedBrowserNoise, waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 
@@ -28,7 +29,7 @@ const propose = async (slug, payload) => {
 
 const waitForEditor = async (page, slug) => {
   await page.goto(`${BASE}/d/${slug}/edit`)
-  await page.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await waitForLive(page)
   await page.waitForSelector('.milkdown .ProseMirror')
   await page.waitForTimeout(500)
 }
@@ -136,7 +137,7 @@ try {
 
   await page.waitForTimeout(1500)
   await page.reload()
-  await page.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await waitForLive(page)
   await page.waitForFunction(
     () => {
       const text = document.querySelector('.milkdown .ProseMirror')?.textContent ?? ''
@@ -150,9 +151,7 @@ try {
   )
   assert(true, 'selective bulk acceptance and task-list conversion persist across reload')
 
-  const fatalErrors = errors.filter(
-    (error) => !error.includes('Hydration failed because the server rendered'),
-  )
+  const fatalErrors = errors.filter((error) => !expectedBrowserNoise(error))
   assert(
     fatalErrors.length === 0,
     `browser console stays clean${fatalErrors.length ? `: ${fatalErrors.join('; ')}` : ''}`,

@@ -1,6 +1,7 @@
 // Two-window live-collaboration smoke check using Playwright.
 // Usage: BASE_URL=http://localhost:4123 node script/browser_check.mjs
 import { chromium } from 'playwright'
+import { waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 const SLUG = process.env.SLUG ?? 'demo'
@@ -24,13 +25,6 @@ const makePage = async (label) => {
   await page.goto(`${BASE}/d/${SLUG}`)
   return page
 }
-
-// Wait for full hydration (the stack's data-phase flips to "live" only once
-// the editor is interactive). The status dot is optimistic — it can read
-// "live" while the preview is still on screen — so interaction tests must
-// gate on this instead.
-const waitForLive = (page, timeout = 15000) =>
-  page.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout })
 
 // Exact-label option locator for the mode dropdown: hasText substring
 // matching would let "Read" match the "Read-only" descriptions.
@@ -299,8 +293,10 @@ try {
   await c.goto(`${BASE}/d/${created.slug}/edit`)
   await waitForLive(c)
   await c.waitForTimeout(800)
-  await c.click('.milkdown .ProseMirror')
-  await c.keyboard.press('Meta+ArrowDown')
+  // Click the known trailing paragraph — Meta+ArrowDown is a macOS-only
+  // caret binding that no-ops on the Linux runner.
+  await c.locator('.milkdown .ProseMirror > p', { hasText: 'Start here.' }).click()
+  await c.keyboard.press('End')
   await c.keyboard.press('Enter')
   await c.keyboard.type('## Shortcut heading check')
   const headingOk = await c
@@ -564,8 +560,10 @@ try {
     waitForLive(sketchA),
     waitForLive(sketchB),
   ])
-  await sketchA.locator('.milkdown .ProseMirror').click()
-  await sketchA.keyboard.press('Meta+ArrowDown')
+  // Click the known trailing paragraph — Meta+ArrowDown is a macOS-only
+  // caret binding that no-ops on the Linux runner.
+  await sketchA.locator('.milkdown .ProseMirror > p', { hasText: 'Body.' }).click()
+  await sketchA.keyboard.press('End')
   await sketchA.keyboard.press('Enter')
   await sketchA.keyboard.type('/')
   await sketchA.locator('.thinkroom-slash-menu[data-visible="true"]').waitFor({ timeout: 5000 })
@@ -1218,10 +1216,11 @@ try {
   await fmPage.goto(`${BASE}/d/${fmDoc.slug}/edit`)
   await waitForLive(fmPage)
   await assertFrontmatterRender(fmPage, 'initial render')
-  // Typing at the very top of the doc displaces the frontmatter; the guard
-  // must move it back above the typed paragraph before the snapshot lands.
-  await fmPage.click('.milkdown .ProseMirror')
-  await fmPage.keyboard.press('Meta+ArrowDown')
+  // Typing displaces content around the frontmatter; the guard must keep the
+  // fence first in the snapshot regardless. Click the known trailing
+  // paragraph (Meta+ArrowDown is macOS-only and no-ops on the Linux runner).
+  await fmPage.locator('.milkdown .ProseMirror > p', { hasText: 'Body paragraph.' }).click()
+  await fmPage.keyboard.press('End')
   await fmPage.keyboard.press('Enter')
   await fmPage.keyboard.type('Typed after seed.')
   let fmSnapshot = ''
@@ -1241,10 +1240,11 @@ try {
   await assertFrontmatterRender(fmPage, 'after reload')
   await fmPage.close()
 
-  // Type a unique sentinel at the start of the doc in A
+  // Type a unique sentinel into the first body paragraph in A. Click it
+  // directly — Meta+ArrowUp is a macOS-only caret binding that no-ops on the
+  // Linux runner, leaving the caret wherever a blind center click landed.
   const sentinel = `sync-${Date.now()}`
-  await a.click('.milkdown .ProseMirror')
-  await a.keyboard.press('Meta+ArrowUp')
+  await a.locator('.milkdown .ProseMirror > p').first().click()
   await a.keyboard.press('End')
   await a.keyboard.type(` ${sentinel}`)
 
@@ -2346,8 +2346,9 @@ try {
   // Not simulated here; see docs/plans/2026-06-07-001 R3.)
   await q.click('.mode-control-trigger')
   await modeOption(q, 'Suggest').click()
-  await q.click('.milkdown .ProseMirror')
-  await q.keyboard.press('Meta+ArrowDown')
+  // Click the known single paragraph — Meta+ArrowDown is a macOS-only caret
+  // binding that no-ops on the Linux runner.
+  await q.locator('.milkdown .ProseMirror > p', { hasText: 'Persistence paragraph' }).click()
   await q.keyboard.press('End')
   const trackedSentinel = `persist-${Date.now()}`
   await q.keyboard.type(` ${trackedSentinel}`)

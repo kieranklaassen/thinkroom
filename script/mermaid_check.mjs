@@ -1,6 +1,7 @@
 // Focused Mermaid browser regression.
 // Usage: BASE_URL=http://127.0.0.1:4123 node script/mermaid_check.mjs
 import { chromium, request } from 'playwright'
+import { waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://127.0.0.1:3000'
 const VALID_SOURCE = `flowchart LR
@@ -69,7 +70,7 @@ ${INVALID_SOURCE}
   slug = (await created.json()).slug
 
   await page.goto(`${BASE}/d/${slug}/edit`)
-  await page.locator('.doc-status--live').waitFor({ timeout: 15_000 })
+  await waitForLive(page)
   await page.locator('.mermaid-diagram[data-state="ready"]').waitFor({ timeout: 15_000 })
   await page.locator('.mermaid-diagram[data-state="error"]').waitFor({ timeout: 15_000 })
 

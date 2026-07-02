@@ -1,6 +1,7 @@
 // Focused sketch/table breakout regression check using Playwright.
 // Usage: BASE_URL=http://localhost:3000 node script/rich_block_width_check.mjs
 import { chromium, request } from 'playwright'
+import { expectedBrowserNoise, waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 const failures = []
@@ -56,11 +57,6 @@ const page = await context.newPage()
 const errors = []
 let slug
 
-// Dev-server-only console noise, verified not to reproduce on clean loads or
-// in production builds (see script/export_check.mjs and the 2026-07-01
-// dogfood report): React's recoverable hydration de-opt under automation.
-const expectedBrowserNoise = (message) =>
-  message.includes('Hydration failed because the server rendered')
 page.on('pageerror', (error) => {
   const message = error.stack ?? String(error)
   if (!expectedBrowserNoise(message)) errors.push(message)
@@ -107,7 +103,7 @@ try {
   // one-time seed claim. A JavaScript-disabled first visit would claim the
   // seed without ever mounting Milkdown, leaving a second session empty.
   await page.goto(`${BASE}/d/${slug}`)
-  await page.locator('.doc-status--live').waitFor({ timeout: 15_000 })
+  await waitForLive(page)
   await page.locator('.thinkroom-sketch .rich-block-width-handle').waitFor({ timeout: 15_000 })
   await page.locator('.milkdown-table-block .rich-block-width-handle').waitFor({ timeout: 15_000 })
   await page.locator('.doc-live-editor .ProseMirror > pre:not([data-language="mermaid"]) .rich-block-width-handle').waitFor({ timeout: 15_000 })
