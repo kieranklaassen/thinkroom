@@ -1,6 +1,8 @@
 .auth-page {
   display: grid;
   min-height: 100vh;
+  /* iOS Safari over-measures 100vh behind the dynamic toolbar. */
+  min-height: 100dvh;
   place-items: center;
   padding: 2rem 1rem;
 }
@@ -106,7 +108,8 @@
   background: var(--surface-raised);
   color: var(--ink);
   padding: 0.65rem 0.75rem;
-  font-size: 0.9rem;
+  /* 16px minimum: anything smaller makes iOS Safari zoom in on focus. */
+  font-size: 1rem;
   box-shadow: none;
 }
 
