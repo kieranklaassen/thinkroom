@@ -39,6 +39,12 @@ interface ActivityGroup {
   newest: ActivityPayload
   count: number
   lastAt: number
+  // React key: the id of the group's OLDEST member. A group keyed on its
+  // newest id changes identity whenever a fresh activity joins it, so React
+  // remounted the row and the card-in animation replayed from opacity 0 —
+  // the row's text visibly blinked out and faded back on every activities
+  // reload. The oldest member never changes as new entries join the head.
+  oldestId: number
 }
 
 // Consecutive entries by the same actor doing the same thing within a minute
@@ -56,9 +62,11 @@ function groupActivities(activities: ActivityPayload[]): ActivityGroup[] {
     ) {
       current.count += 1
       current.lastAt = at
+      // Entries iterate newest -> oldest, so the latest append is the oldest.
+      current.oldestId = activity.id
       continue
     }
-    groups.push({ newest: activity, count: 1, lastAt: at })
+    groups.push({ newest: activity, count: 1, lastAt: at, oldestId: activity.id })
   }
   return groups
 }
@@ -90,7 +98,7 @@ export function ActivityPanel({ activities }: { activities: ActivityPayload[] })
               : (ACTION_LABELS[newest.action] ?? newest.action)
           return (
             <li
-              key={newest.id}
+              key={group.oldestId}
               className={`activity-row activity-row--${newest.actor_kind}`}
             >
               <span className="activity-glyph">{ACTION_GLYPHS[newest.action] ?? '·'}</span>
