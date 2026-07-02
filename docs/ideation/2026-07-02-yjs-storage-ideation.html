@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ideation: Yjs Storage — Faster, More Scalable, More Best-Practice</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --bg: #fbfaf8;
+  --surface: #ffffff;
+  --ink: #1d1f24;
+  --ink-muted: #5c6270;
+  --line: #e4e2dc;
+  --accent: #0f6f5c;
+  --accent-soft: #e7f2ef;
+  --accent-text: #0b5747;
+  --warn: #9a5b00;
+  --warn-soft: #fdf3e3;
+  --warn-text: #7c4a02;
+  --info-soft: #eef1f8;
+  --info-text: #3b4a75;
+  --danger-text: #a33232;
+  --danger-soft: #fbecec;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.65;
+}
+.page {
+  max-width: 920px;
+  margin-inline: auto;
+  padding: 3rem 1.5rem 4rem;
+}
+p, li, dd { max-width: 74ch; }
+h1 { font-size: 1.85rem; line-height: 1.25; margin: 0.4rem 0 0.5rem; letter-spacing: -0.02em; }
+h2 { font-size: 1.3rem; margin: 3rem 0 1rem; letter-spacing: -0.01em; border-bottom: 1px solid var(--line); padding-bottom: 0.45rem; }
+h3 { font-size: 1.05rem; margin: 0; }
+code { font-family: var(--mono); font-size: 0.86em; background: #f1efe9; border-radius: 4px; padding: 0.08em 0.35em; }
+a { color: var(--accent-text); }
+strong { color: inherit; }
+.eyebrow {
+  font-size: 0.72rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--accent-text);
+}
+.doc-meta {
+  display: flex; flex-wrap: wrap; gap: 0.5rem 1.6rem;
+  font-size: 0.85rem; color: var(--ink-muted); margin: 0.8rem 0 0;
+}
+.doc-meta span b { color: var(--ink); font-weight: 600; }
+.stats {
+  display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1.6rem 0 0;
+}
+.stat {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 0.6rem 1rem; min-width: 118px;
+}
+.stat .n { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; }
+.stat .l { font-size: 0.74rem; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+section { margin-top: 0.5rem; }
+.jump {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 0.9rem 1.2rem; margin: 0 0 1.6rem;
+}
+.jump ol { margin: 0.3rem 0 0; padding-left: 1.3rem; }
+.jump li { margin: 0.2rem 0; }
+.jump .jl { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-muted); }
+article.idea {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: 1.4rem 1.6rem 1.3rem; margin: 0 0 1.5rem;
+}
+.idea-head { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.35rem; }
+.chip {
+  display: inline-block; font-family: var(--mono); font-size: 0.74rem; font-weight: 600;
+  border-radius: 999px; padding: 0.14em 0.7em; border: 1px solid transparent;
+}
+.chip.rank { background: var(--accent-soft); color: var(--accent-text); }
+.chip.axis { background: var(--info-soft); color: var(--info-text); }
+.chip.conf-high { background: var(--accent-soft); color: var(--accent-text); }
+.chip.conf-med { background: var(--warn-soft); color: var(--warn-text); }
+.chip.cx { background: #f1efe9; color: var(--ink-muted); }
+.idea dl { margin: 0.9rem 0 0; }
+.idea dt {
+  font-size: 0.72rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-muted); margin-top: 0.85rem;
+}
+.idea dd { margin: 0.25rem 0 0; }
+.idea dd.basis { font-size: 0.92rem; }
+figure { margin: 1.2rem 0 0.4rem; }
+figure svg { width: 100%; height: auto; display: block; }
+figcaption { font-size: 0.8rem; color: var(--ink-muted); margin-top: 0.4rem; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: 0.9rem; background: var(--surface); }
+th, td { border: 1px solid var(--line); padding: 0.5rem 0.7rem; text-align: left; vertical-align: top; }
+th { background: #f4f2ec; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); }
+.grounding-block { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 1.1rem 1.4rem; margin-bottom: 1rem; }
+.grounding-block h3 { font-size: 0.95rem; margin-bottom: 0.4rem; }
+.grounding-block ul { margin: 0.4rem 0 0; padding-left: 1.2rem; }
+.grounding-block li { margin: 0.28rem 0; }
+.callout {
+  border-radius: 10px; padding: 0.85rem 1.1rem; margin: 1rem 0;
+  background: var(--warn-soft);
+}
+.callout .co-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--warn-text); }
+.callout p { margin: 0.3rem 0 0; }
+footer.composition-signal {
+  margin-top: 3.5rem; padding-top: 1rem; border-top: 1px solid var(--line);
+  font-size: 0.8rem; color: var(--ink-muted);
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <div class="eyebrow">Ideation</div>
+  <h1>Yjs Storage — Faster, More Scalable, More Best-Practice</h1>
+  <div class="doc-meta">
+    <span>Date <b><time datetime="2026-07-02">2026-07-02</time></b></span>
+    <span>Topic <b>yjs-storage</b></span>
+    <span>Focus <b>make Yjs storage faster, more scalable, and more best-practice</b></span>
+    <span>Mode <b>repo-grounded</b></span>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="n">38</div><div class="l">Raw ideas</div></div>
+    <div class="stat"><div class="n">21</div><div class="l">After dedupe</div></div>
+    <div class="stat"><div class="n">7</div><div class="l">Survivors</div></div>
+    <div class="stat"><div class="n">5</div><div class="l">Axes covered</div></div>
+  </div>
+</header>
+
+<section id="grounding-context">
+<h2>Grounding Context</h2>
+
+<div class="grounding-block">
+<h3>Codebase Context</h3>
+<ul>
+<li><strong>Thinkroom</strong> — open-source, agent-native collaborative workspace. Ruby 3.4 / Rails 8.1, React 19 + TypeScript via Inertia. Real-time editing: Yjs (y-prosemirror, Milkdown) over Action Cable with server-side <code>y-rb</code> 0.7.0 (yrs Rust bindings). Storage is SQLite in dev <em>and</em> prod; Kamal deploys are pinned to <code>WEB_CONCURRENCY=1</code> because SQLite and Solid Cable share one volume.</li>
+<li><strong>Write path</strong> (<code>app/services/yjs_persistence.rb</code>): per frame — base64 decode → per-document in-process <code>Mutex</code> → <code>document.with_lock</code> + reload → build a fresh <code>Y::Doc</code> from the full stored blob → <code>sync(update)</code> → re-encode <code>full_diff</code> → rewrite the whole <code>yjs_state</code> blob. O(document) work per keystroke frame.</li>
+<li><strong>Read/join path</strong>: <code>state_b64</code> rebuilds a fresh <code>Y::Doc</code> per subscribe and ships full state + state vector; the same bytes already rode the page as the <code>yjs_state_b64</code> Inertia prop (instant paint), so a page load ships the document 2–3×.</li>
+<li><strong>Dual model</strong>: <code>yjs_state</code> blob is sync truth; client-pushed <code>content_markdown</code>/<code>provenance_spans</code> + server-rendered <code>content_html</code> are the agent/read-API projection. <code>content_generation</code> guards stale-CRDT resurrection after owner CLI <code>replace_content!</code>.</li>
+<li><strong>Ordering workaround</strong>: SyncChannel keeps a per-subscription client <code>seq</code> + gap buffer (<code>MAX_SEQUENCE_GAP=256</code>) because y-rb's <code>full_diff</code> silently drops unresolved pending structs — out-of-order persistence would lose edits on reload.</li>
+<li><strong>Standing findings</strong>: two validated-but-unfixed P2s (corrupt blob bricks every subscribe — <code>load_ydoc</code> has no rescue; cable frames unbounded vs 2&nbsp;MB HTTP caps), a P3 (<code>LOCKS</code> map never evicted), zero logging/metrics in the persistence service, and no SQLite backup tooling at all.</li>
+</ul>
+</div>
+
+<div class="grounding-block">
+<h3>Past Learnings</h3>
+<ul>
+<li>Team optimized correctness first: per-frame sequencing, generation guards, snapshot state-vector gates. No documented learnings on compaction, update logs, or perf benchmarks — greenfield territory.</li>
+<li>Failed approaches: the <code>y-rb_actioncable</code> gem (message loss, per-subscription doc memory); broadcast-only invalidation; <code>updated_at</code>-based staleness. Planned but never shipped: a 500&nbsp;ms debounced single-writer merge.</li>
+<li>Invariants any idea must keep: merge stays the authorization + generation + lock boundary; broadcast only after durable persist; dual-model separation stays; <code>document.with_lock</code> stays (only cross-process guard); no server-side Yjs structure authoring; <code>content_generation</code> (not timestamps) signals resets; protocol changes need gradual rollout compatibility.</li>
+</ul>
+</div>
+
+<div class="grounding-block">
+<h3>External Context</h3>
+<ul>
+<li><strong>Universal consensus</strong> across production Yjs backends: don't rewrite the full blob per update — append incremental updates, compact periodically. Yjs updates are commutative and idempotent, so appends need no ordering coordination.</li>
+<li><strong>yrs-kvstore</strong> (official, same Rust core as y-rb): per-doc keyspace {snapshot, state vector, sequenced updates}, periodic <code>flush_doc</code>. <strong>Hocuspocus</strong>: in-memory doc while clients connected, debounced store, flush on last disconnect. <strong>y-redis</strong>: stateless servers, stream per doc, separate compaction workers. <strong>Automerge repo</strong>: lock-free compaction — write new snapshot, delete only incorporated chunks; trigger when incremental bytes exceed snapshot size.</li>
+<li><strong>Kevin Jahns</strong>: blob-only update merging skips GC — a 50&nbsp;KB doc ballooning to 20&nbsp;MB is documented; yjs#710 shows naive <code>mergeUpdates</code> blowup (divide-and-conquer fixes it). yrs core exposes <code>merge_updates_v1</code> / <code>diff_updates_v1</code>, but the verifier confirmed <strong>y-rb 0.7.0 exposes none of them</strong> and only accepts <code>Array&lt;Integer&gt;</code> — update-level APIs require a gem fork/upstream PR.</li>
+<li>Verifier also confirmed by running the installed gem: y-rb hardcodes yrs defaults, so <strong>GC already runs</strong> on every fresh-doc rebuild — the current path is not accumulating tombstones (that hazard only appears if a blob-only merge path is adopted).</li>
+</ul>
+</div>
+
+<div class="grounding-block">
+<h3>Evidence Layer</h3>
+<p>Five evidence dossiers (write path, storage format, read/join path, concurrency/scaling, resilience) were extracted from the repo with <code>file:line</code> pointers; ideation agents and the basis verifier read them and spot-checked load-bearing quotes directly against
+<a href="https://github.com/kieranklaassen/thinkroom/blob/main/app/services/yjs_persistence.rb"><code>app/services/yjs_persistence.rb</code></a>,
+<a href="https://github.com/kieranklaassen/thinkroom/blob/main/app/channels/sync_channel.rb"><code>app/channels/sync_channel.rb</code></a>,
+<a href="https://github.com/kieranklaassen/thinkroom/blob/main/app/controllers/documents_controller.rb"><code>app/controllers/documents_controller.rb</code></a>,
+<a href="https://github.com/kieranklaassen/thinkroom/blob/main/app/frontend/editor/cable_provider.ts"><code>app/frontend/editor/cable_provider.ts</code></a>,
+<a href="https://github.com/kieranklaassen/thinkroom/blob/main/config/deploy.yml"><code>config/deploy.yml</code></a>, and
+<a href="https://github.com/kieranklaassen/thinkroom/blob/main/docs/residual-review-findings/feat-proof-reimagining.md"><code>docs/residual-review-findings/feat-proof-reimagining.md</code></a>. No fabricated citations were found; one candidate was refuted outright by running the installed gem.</p>
+</div>
+</section>
+
+<section id="topic-axes">
+<h2>Topic Axes</h2>
+<ol>
+<li>Write path / merge hot path</li>
+<li>Storage format and compaction</li>
+<li>Read/join path and sync handshake</li>
+<li>Concurrency and multi-process scaling</li>
+<li>Resilience and operational hardening</li>
+</ol>
+</section>
+
+<section id="ranked-ideas">
+<h2>Ranked Ideas</h2>
+
+<nav class="jump">
+<span class="jl">Jump to</span>
+<ol>
+<li><a href="#idea-1">Append-only update log + snapshot compaction</a></li>
+<li><a href="#idea-2">Instrument the persistence hot path first</a></li>
+<li><a href="#idea-3">Materialize the state vector and handshake at write time</a></li>
+<li><a href="#idea-4">Resident per-document Y::Doc session cache</a></li>
+<li><a href="#idea-5">Self-healing durability stack</a></li>
+<li><a href="#idea-6">Durable client outbox — close the reconnect drop window</a></li>
+<li><a href="#idea-7">Stateless durable-relay endgame</a></li>
+</ol>
+</nav>
+
+<article class="idea" id="idea-1">
+<div class="idea-head">
+  <span class="chip rank">#1</span>
+  <h3>Append-only update log + snapshot compaction</h3>
+  <span class="chip axis">Storage format &amp; compaction</span>
+  <span class="chip conf-high">Confidence 85%</span>
+  <span class="chip cx">Complexity High</span>
+</div>
+<dl>
+<dt>Description</dt>
+<dd>Change the durable act of <code>YjsPersistence.merge</code> from "rewrite the whole blob" to "INSERT the raw update bytes" into a <code>yjs_updates</code> table (document id, seq, payload, and — as a cheap rider — sender + generation + byte size for a transport-level audit trail). The merge boundary keeps its mutex, <code>with_lock</code>, writability, and generation checks; broadcast still fires only after the durable append. A compactor folds the log into the <code>yjs_state</code> snapshot by loading a real <code>Y::Doc</code> (yrs default GC runs there), writing the new snapshot, and deleting <em>only the rows it incorporated</em> — Automerge's lock-free rule — with an explicit policy for orphaned pending updates (rows whose causal dependency never arrived are retained and surfaced, not silently dropped). Triggers: log bytes exceed snapshot bytes, idle/last-disconnect, and a forced snapshot on <code>content_generation</code> bump. Once landed, the per-subscription seq/gap buffer becomes deletable: out-of-order arrival is harmless when raw updates are stored and merged as a full set.</dd>
+<dt>Basis</dt>
+<dd class="basis"><code>direct:</code> every non-no-op frame executes <code>document.update_columns(yjs_state: ydoc.full_diff.pack("C*"), ...)</code> after <code>load_ydoc</code> rebuilds a fresh doc from the whole blob (<code>app/services/yjs_persistence.rb</code>); the original editor plan specified a 500&nbsp;ms debounce that never shipped. <code>external:</code> yrs-kvstore (same Rust core) persists exactly this shape — snapshot + sequenced update keys + periodic <code>flush_doc</code>; Hocuspocus, y-redis, y-partykit, and Automerge all converge on append-then-compact. Verifier verdict: sound.</dd>
+<dt>Rationale</dt>
+<dd>Today one keystroke costs O(document): decode blob, Rust-merge, re-encode, rewrite the SQLite row — inside the app's only write path, under two locks. The append log caps per-frame work and SQLite write amplification at the size of the edit, which is the single biggest lever on typing latency at scale — and it deletes ~40 lines of sequencing machinery (including the <code>MAX_SEQUENCE_GAP</code> silent-drop data-loss vector) instead of hardening it. SQLite's WAL mode makes appends the cheap operation on this exact substrate.</dd>
+<dt>Downsides</dt>
+<dd>A schema migration and a new compaction subsystem with its own failure modes (orphan policy, crash-during-compaction). Reads must merge snapshot + tail until compaction runs. The no-op/<code>seed_state</code> guard needs rework. Rollout must keep seq-accepting behavior until old clients age out.</dd>
+</dl>
+<figure>
+<svg viewBox="0 0 860 260" role="img" aria-label="Before and after write path comparison">
+<style>
+.box { fill: #ffffff; stroke: #b9b5aa; stroke-width: 1.2; rx: 8; }
+.hot { fill: #fdf3e3; stroke: #d9a95e; stroke-width: 1.2; }
+.good { fill: #e7f2ef; stroke: #6aa898; stroke-width: 1.2; }
+.lbl { font: 600 13px "Inter", sans-serif; fill: #1d1f24; }
+.sub { font: 400 11px "Inter", sans-serif; fill: #5c6270; }
+.ttl { font: 700 12px "Inter", sans-serif; fill: #5c6270; letter-spacing: 1.5px; }
+.arr { stroke: #5c6270; stroke-width: 1.4; fill: none; marker-end: url(#ah); }
+</style>
+<defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#5c6270"/></marker></defs>
+<text x="20" y="28" class="ttl">TODAY — O(DOCUMENT) PER FRAME</text>
+<rect x="20" y="44" width="120" height="52" class="box" rx="8"/>
+<text x="32" y="66" class="lbl">update frame</text>
+<text x="32" y="82" class="sub">one keystroke burst</text>
+<line x1="140" y1="70" x2="180" y2="70" class="arr"/>
+<rect x="184" y="44" width="200" height="52" class="hot" rx="8"/>
+<text x="196" y="66" class="lbl">load full blob → Y::Doc</text>
+<text x="196" y="82" class="sub">sync + full_diff re-encode</text>
+<line x1="384" y1="70" x2="424" y2="70" class="arr"/>
+<rect x="428" y="44" width="180" height="52" class="hot" rx="8"/>
+<text x="440" y="66" class="lbl">rewrite whole blob</text>
+<text x="440" y="82" class="sub">UPDATE yjs_state</text>
+<line x1="608" y1="70" x2="648" y2="70" class="arr"/>
+<rect x="652" y="44" width="130" height="52" class="box" rx="8"/>
+<text x="664" y="66" class="lbl">broadcast</text>
+<text x="664" y="82" class="sub">after durable write</text>
+
+<text x="20" y="150" class="ttl">PROPOSED — O(UPDATE) PER FRAME, COMPACT IN BACKGROUND</text>
+<rect x="20" y="166" width="120" height="52" class="box" rx="8"/>
+<text x="32" y="188" class="lbl">update frame</text>
+<text x="32" y="204" class="sub">auth + generation check</text>
+<line x1="140" y1="192" x2="180" y2="192" class="arr"/>
+<rect x="184" y="166" width="200" height="52" class="good" rx="8"/>
+<text x="196" y="188" class="lbl">INSERT raw update</text>
+<text x="196" y="204" class="sub">yjs_updates append log</text>
+<line x1="384" y1="192" x2="424" y2="192" class="arr"/>
+<rect x="428" y="166" width="130" height="52" class="box" rx="8"/>
+<text x="440" y="188" class="lbl">broadcast</text>
+<text x="440" y="204" class="sub">after durable append</text>
+<line x1="558" y1="192" x2="598" y2="192" class="arr"/>
+<rect x="602" y="166" width="238" height="52" class="good" rx="8"/>
+<text x="614" y="188" class="lbl">compactor (triggered)</text>
+<text x="614" y="204" class="sub">real Y::Doc fold + GC → new snapshot</text>
+</svg>
+<figcaption>Illustrative contrast: the durable act shrinks from a whole-blob rewrite to an append; folding moves off the hot path.</figcaption>
+</figure>
+</article>
+
+<article class="idea" id="idea-2">
+<div class="idea-head">
+  <span class="chip rank">#2</span>
+  <h3>Instrument the persistence hot path first</h3>
+  <span class="chip axis">Resilience &amp; hardening</span>
+  <span class="chip conf-high">Confidence 95%</span>
+  <span class="chip cx">Complexity Low</span>
+</div>
+<dl>
+<dt>Description</dt>
+<dd>Wrap <code>merge</code>, <code>state_b64</code>, and <code>persist_snapshot</code> in <code>ActiveSupport::Notifications</code> events carrying duration, lock-wait time, update bytes, blob bytes before/after, and rejection kind (stale generation, gap drop, snapshot-gate refusal, decode failure). Stop <code>persist_snapshot</code> from swallowing decode errors as indistinguishable-from-staleness <code>false</code>. Export to logs or AppSignal and alert on merge-failure rate and blob-size p99.</dd>
+<dt>Basis</dt>
+<dd class="basis"><code>direct:</code> <code>app/services/yjs_persistence.rb</code> contains zero <code>Rails.logger</code> / <code>ActiveSupport::Notifications</code> / <code>instrument</code> calls (grep: no matches); <code>persist_snapshot</code> ends in <code>rescue ArgumentError → false</code> with no logging; the only pipeline signals are three <code>Rails.logger.warn</code> lines in the channel. Verifier verdict: sound.</dd>
+<dt>Rationale</dt>
+<dd>Every performance claim in this document — merge cost scales with doc size, bursts amplify writes, joins double-ship — is currently unmeasured, and every silent edit-loss mode (gap drops, stale rejections, swallowed decode failures) vanishes into a warn line or nothing. The measured thresholds are literally the compaction and debounce policy of ideas #1 and #4. This is the natural first PR: land instrumentation, collect dogfood data, then size everything else from real distributions.</dd>
+<dt>Downsides</dt>
+<dd>None material — small overhead per event; needs a decision on where metrics land (logs only vs AppSignal).</dd>
+</dl>
+</article>
+
+<article class="idea" id="idea-3">
+<div class="idea-head">
+  <span class="chip rank">#3</span>
+  <h3>Materialize the state vector and handshake at write time</h3>
+  <span class="chip axis">Read/join path &amp; handshake</span>
+  <span class="chip conf-high">Confidence 90%</span>
+  <span class="chip cx">Complexity Low</span>
+</div>
+<dl>
+<dt>Description</dt>
+<dd>Every subscribe currently calls <code>state_b64</code>, which rebuilds a fresh <code>Y::Doc</code> from the blob and re-encodes both <code>full_diff</code> and the state vector — immediately after a merge computed and discarded those exact values. Persist a <code>yjs_state_vector</code> column (and optionally a blob digest) inside the existing <code>update_columns</code> at merge time; <code>subscribed</code> then serves two stored byte columns with zero yrs instantiation. <code>replace_content!</code> nulls the sv alongside the blob. The stored sv is also the server-side half of any future differential handshake.</dd>
+<dt>Basis</dt>
+<dd class="basis"><code>direct:</code> <code>state_b64</code> calls <code>load_ydoc(document)</code> then encodes <code>full_diff</code> + <code>state</code> per invocation (<code>app/services/yjs_persistence.rb</code>). <code>external:</code> yrs-kvstore stores the state vector as its own key precisely so reads skip doc instantiation. Verifier verdict: sound.</dd>
+<dt>Rationale</dt>
+<dd>Joins are the read path that scales with audience — every reload, reconnect, and late-joining reviewer, plus reconnect storms after each deploy where every client re-runs the handshake at once, at exactly the moment the server is busiest. This makes join cost O(bytes served) instead of O(document) CPU, is one column and independently shippable this week, and becomes strictly more valuable under ideas #1 and #7.</dd>
+<dt>Downsides</dt>
+<dd>One more column that must stay coherent with the blob (single write site makes this easy); full-state bytes are still shipped until a differential handshake exists.</dd>
+</dl>
+</article>
+
+<article class="idea" id="idea-4">
+<div class="idea-head">
+  <span class="chip rank">#4</span>
+  <h3>Resident per-document Y::Doc session cache</h3>
+  <span class="chip axis">Write path / merge hot path</span>
+  <span class="chip conf-med">Confidence 70%</span>
+  <span class="chip cx">Complexity Medium</span>
+</div>
+<dl>
+<dt>Description</dt>
+<dd>Keep the merged <code>Y::Doc</code> in memory per document while subscriptions exist — the Hocuspocus model — evicting on last disconnect. Inside the existing mutex + <code>with_lock</code>, validate the cached doc against <code>content_generation</code> plus a blob digest after <code>reload</code>; on match, apply only the incoming update instead of rehydrating the whole blob; on mismatch (CLI replacement, cross-process write), fall back to the current full rebuild. The same registry finally gives the never-evicted <code>LOCKS</code> map an eviction lifecycle, with the standing rule that every per-document in-memory structure names its eviction trigger.</dd>
+<dt>Basis</dt>
+<dd class="basis"><code>direct:</code> <code>load_ydoc</code> builds <code>Y::Doc.new</code> and syncs the whole stored blob on every merge and every subscribe; the residual P3 notes the <code>LOCKS</code> map "grows one Mutex per document id, never evicted"; deploys are pinned <code>WEB_CONCURRENCY: "1"</code> so in-process coherence is already guaranteed. <code>external:</code> Hocuspocus and y-partykit hold the doc in memory while clients are connected. Verifier verdict: sound — and notes a resident doc is strictly <em>better</em> than today on the pending-struct hazard, since the current fresh-doc-per-merge path can silently drop cross-client dependent updates via <code>full_diff</code> while a resident doc retains pending structs until dependencies arrive.</dd>
+<dt>Rationale</dt>
+<dd>This captures most of idea #1's hot-path win — O(update) applies, no per-frame rehydration, subscribes served from the cached doc — with zero schema or protocol change, making it the credible incremental step if a new table is judged too invasive right now. Its invalidation story (generation + digest under <code>with_lock</code>) also defines exactly what multi-process would later require.</dd>
+<dt>Downsides</dt>
+<dd>Introduces authoritative in-memory state on the sync path (the thing the current design deliberately avoids); memory scales with concurrently-open docs; correctness depends on the single-process pin holding until the digest check is trusted. Team must decide whether this is a stepping stone to, or substitute for, idea #1.</dd>
+</dl>
+</article>
+
+<article class="idea" id="idea-5">
+<div class="idea-head">
+  <span class="chip rank">#5</span>
+  <h3>Self-healing durability stack</h3>
+  <span class="chip axis">Resilience &amp; hardening</span>
+  <span class="chip conf-high">Confidence 85%</span>
+  <span class="chip cx">Complexity Medium</span>
+</div>
+<dl>
+<dt>Description</dt>
+<dd>Three layers, each covering the failure the previous cannot. <strong>Prevent:</strong> round-trip-validate a newly encoded blob into a fresh <code>Y::Doc</code> before committing it, plus a checksum column — most corruption never lands. <strong>Contain:</strong> rescue in <code>load_ydoc</code>; on failure, quarantine the corrupt bytes to a side table (forensics, not deletion), fall back to the last-good retained snapshot, and let connected clients re-upload the missing tail via the sync-reply step that already exists in the protocol. Retain the last N generation-tagged snapshots and make <code>replace_content!</code> archive rather than null <code>yjs_state</code> — turning the product's most destructive operation into a reversible one. <strong>Recover:</strong> Litestream streaming replication of the SQLite file to off-host object storage, with a written and rehearsed restore procedure.</dd>
+<dt>Basis</dt>
+<dd class="basis"><code>direct:</code> validated P2 — "Corrupt stored yjs_state blob bricks every subscribe permanently" (<code>docs/residual-review-findings/feat-proof-reimagining.md</code>); <code>load_ydoc</code> confirmed rescue-free; <code>replace_content!</code> sets <code>yjs_state: nil</code>; grep for <code>backup|litestream</code> across the repo returns no matches. <code>external:</code> A/B firmware banks (validate before flipping, keep the old bank bootable). Verifier verdict: sound (all three components individually verified).</dd>
+<dt>Rationale</dt>
+<dd>The CRDT blobs are the one unreconstructable dataset in the product — snapshots and HTML are lossy derivations — and today they live as a single SQLite file on a single volume with a known permanent-outage failure mode and no backups. For a product whose strategy is provenance and trust, "put this document back" must be answerable before the first incident, not after. The plain P2 fix shape (degrade to empty doc) silently loses all content when no client happens to be connected; last-good fallback bounds the loss to at most one update.</dd>
+<dt>Downsides</dt>
+<dd>Round-trip validation adds CPU per blob write (cheap if writes are debounced/compacted per ideas #1/#4); snapshot retention adds storage; Litestream adds an ops dependency and (modest) hosting cost.</dd>
+</dl>
+<figure>
+<svg viewBox="0 0 860 150" role="img" aria-label="Three-layer durability stack">
+<style>
+.l1 { fill: #e7f2ef; stroke: #6aa898; stroke-width: 1.2; }
+.l2 { fill: #eef1f8; stroke: #8a97c0; stroke-width: 1.2; }
+.l3 { fill: #fdf3e3; stroke: #d9a95e; stroke-width: 1.2; }
+.lt { font: 600 13px "Inter", sans-serif; fill: #1d1f24; }
+.ls { font: 400 11px "Inter", sans-serif; fill: #5c6270; }
+.cover { font: 500 11px "Inter", sans-serif; fill: #5c6270; font-style: italic; }
+</style>
+<rect x="20" y="30" width="255" height="72" class="l1" rx="10"/>
+<text x="36" y="56" class="lt">1 · Prevent</text>
+<text x="36" y="74" class="ls">validate blob round-trip + checksum</text>
+<text x="36" y="90" class="ls">before commit</text>
+<rect x="300" y="30" width="255" height="72" class="l2" rx="10"/>
+<text x="316" y="56" class="lt">2 · Contain</text>
+<text x="316" y="74" class="ls">quarantine + last-good snapshot</text>
+<text x="316" y="90" class="ls">clients re-upload tail via sync-reply</text>
+<rect x="580" y="30" width="255" height="72" class="l3" rx="10"/>
+<text x="596" y="56" class="lt">3 · Recover</text>
+<text x="596" y="74" class="ls">Litestream off-host replication</text>
+<text x="596" y="90" class="ls">rehearsed restore</text>
+<text x="20" y="128" class="cover">covers: bad encode</text>
+<text x="300" y="128" class="cover">covers: corruption that landed anyway</text>
+<text x="580" y="128" class="cover">covers: volume / host loss</text>
+</svg>
+<figcaption>Illustrative layering: each layer handles the failure mode the previous one cannot reach.</figcaption>
+</figure>
+</article>
+
+<article class="idea" id="idea-6">
+<div class="idea-head">
+  <span class="chip rank">#6</span>
+  <h3>Durable client outbox — close the reconnect drop window</h3>
+  <span class="chip axis">Read/join path &amp; handshake</span>
+  <span class="chip conf-high">Confidence 80%</span>
+  <span class="chip cx">Complexity Medium</span>
+</div>
+<dl>
+<dt>Description</dt>
+<dd>Local Yjs updates made while <code>!synced</code> are dropped by <code>handleDocUpdate</code> and only re-sent at the next handshake — the documented user-visible bug being: accept a tracked edit, refresh before the handshake, and the edit reappears. The recovery machinery already exists: <code>persistCurrentState</code> sends <code>Y.encodeStateAsUpdate(doc, serverStateVector)</code> over a keepalive HTTP request into the same generation-guarded merge path. Extend it from checkbox toggles to a generic pagehide/visibilitychange flush of any pending diff (generation-stamped, under the ~64&nbsp;KiB keepalive cap), optionally backed by a localStorage outbox keyed by (document, generation) for crash recovery.</dd>
+<dt>Basis</dt>
+<dd class="basis"><code>direct:</code> "<code>CableProvider.handleDocUpdate</code> drops local updates while <code>!synced</code>… the tracked edit reappears" (<code>docs/plans/2026-06-07-001-fix-resolve-persistence-plan.md</code>); the diff-vs-server-vector keepalive path exists at <code>app/frontend/editor/cable_provider.ts</code> and lands in the generation-guarded <code>sync_update</code> endpoint. Verifier verdict: sound — the plan explicitly deferred the offline story as "its own feature," which is what this proposes.</dd>
+<dt>Rationale</dt>
+<dd>This is the one grounded entry describing a user-visible lost edit in a shipped feature, and the fix is mostly composition of existing pieces rather than new protocol. The generation stamp means a stale tab flushing after a CLI replacement cannot violate the resurrection guard. Storage-side ideas cannot close this gap alone — reconnect durability is a client-and-server contract.</dd>
+<dt>Downsides</dt>
+<dd>Keepalive body cap bounds what a single flush can carry (large pending diffs need the outbox path); localStorage outbox needs eviction and privacy consideration on shared machines.</dd>
+</dl>
+</article>
+
+<article class="idea" id="idea-7">
+<div class="idea-head">
+  <span class="chip rank">#7</span>
+  <h3>Stateless durable-relay endgame</h3>
+  <span class="chip axis">Concurrency &amp; multi-process scaling</span>
+  <span class="chip conf-med">Confidence 60%</span>
+  <span class="chip cx">Complexity High</span>
+</div>
+<dl>
+<dt>Description</dt>
+<dd>The horizon design idea #1's road leads to: the server never materializes a <code>Y::Doc</code> on any hot path. Writes run the authorization + generation checks (row fields, checkable under <code>with_lock</code>) and append; joins serve the last compacted snapshot plus the raw tail rows, and the <em>client</em> applies them — Yjs clients handle out-of-order application natively via their own pending-struct resolution. yrs runs only in the background compactor. Appends are coordination-free (updates commute), so the persistence layer stops being a reason for the <code>WEB_CONCURRENCY=1</code> pin — remaining constraints (Solid Cable polling, shared volume) become the explicit blockers to lift.</dd>
+<dt>Basis</dt>
+<dd class="basis"><code>direct:</code> the in-process lock exists precisely because "two concurrent receives could both read the same stored blob and the later write would drop the earlier update" (<code>app/services/yjs_persistence.rb</code>) — a read-modify-write hazard append-only writes do not have. <code>external:</code> y-redis (stateless servers, stream per doc, worker compaction) is this architecture in production; k_yrs_go compacts at read time past 100 rows. Verifier verdict: sound, with one named wrinkle — the no-op/<code>seed_state</code> guard needs rework.</dd>
+<dt>Rationale</dt>
+<dd>This converts correctness-by-topology (single process, in-process mutex) into correctness-by-format, which is what actually unlocks horizontal scaling — and it reframes the seq/gap machinery and per-frame merges as symptoms of one architectural choice rather than necessary complexity. It is deliberately ranked as the endgame, not the next step: land #2, #3, then #1 first; each stage is independently valuable and reversible.</dd>
+<dt>Downsides</dt>
+<dd>The server loses the ability to render current state synchronously (snapshot may lag the log); largest blast radius of any idea here; only worth it when measured load or multi-node requirements justify it.</dd>
+</dl>
+<figure>
+<svg viewBox="0 0 860 210" role="img" aria-label="Stateless relay topology">
+<style>
+.node { fill: #ffffff; stroke: #b9b5aa; stroke-width: 1.2; }
+.store { fill: #eef1f8; stroke: #8a97c0; stroke-width: 1.2; }
+.bg2 { fill: #e7f2ef; stroke: #6aa898; stroke-width: 1.2; }
+.nl { font: 600 13px "Inter", sans-serif; fill: #1d1f24; }
+.ns { font: 400 11px "Inter", sans-serif; fill: #5c6270; }
+.edge { stroke: #5c6270; stroke-width: 1.4; fill: none; marker-end: url(#ah2); }
+.el { font: 500 11px "Inter", sans-serif; fill: #5c6270; paint-order: stroke fill; stroke: #fbfaf8; stroke-width: 3px; }
+</style>
+<defs><marker id="ah2" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#5c6270"/></marker></defs>
+<rect x="20" y="30" width="150" height="56" class="node" rx="10"/>
+<text x="36" y="54" class="nl">clients</text>
+<text x="36" y="72" class="ns">apply snapshot + tail</text>
+<rect x="20" y="120" width="150" height="56" class="node" rx="10"/>
+<text x="36" y="144" class="nl">relay workers ×N</text>
+<text x="36" y="162" class="ns">authz + append, no yrs</text>
+<rect x="360" y="75" width="190" height="56" class="store" rx="10"/>
+<text x="376" y="99" class="nl">snapshot + update log</text>
+<text x="376" y="117" class="ns">SQLite (WAL) tables</text>
+<rect x="660" y="75" width="180" height="56" class="bg2" rx="10"/>
+<text x="676" y="99" class="nl">compactor</text>
+<text x="676" y="117" class="ns">only place yrs runs</text>
+<line x1="95" y1="120" x2="95" y2="86" class="edge"/>
+<text x="104" y="107" class="el">sync</text>
+<line x1="170" y1="148" x2="360" y2="110" class="edge"/>
+<text x="228" y="148" class="el">append (coordination-free)</text>
+<line x1="550" y1="95" x2="660" y2="95" class="edge"/>
+<text x="566" y="88" class="el">fold + GC</text>
+</svg>
+<figcaption>Illustrative topology: relays append and serve bytes; the CRDT engine runs only in the background compactor.</figcaption>
+</figure>
+</article>
+
+<div class="callout">
+<span class="co-label">Sequencing note</span>
+<p>The survivors form a verified roadmap, not seven competing bets: <strong>#2 (instrument) → #3 (materialize sv) → #1 (append log, absorbing the seq-buffer deletion) → #7 (stateless relay)</strong>, with <strong>#4</strong> as the no-schema-change alternative fork after #3, and <strong>#5 / #6</strong> schedulable independently at any point. Each stage is independently shippable and makes the next one cheaper.</p>
+</div>
+</section>
+
+<section id="rejection-summary">
+<h2>Rejection Summary</h2>
+<p>38 raw ideas deduped to 21 candidates plus 5 cross-cutting syntheses; a fresh-context verifier spot-checked every basis against the repo and the installed y-rb gem (verdicts: 11 sound, 12 weak, 1 refuted). Cuts and the reasons:</p>
+<table>
+<thead><tr><th>#</th><th>Idea</th><th>Reason rejected</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Blob-only merge via yrs differential update APIs</td><td>Verifier ran the gem: y-rb 0.7.0 exposes no <code>merge_updates</code>-family bindings — requires a gem fork; folded into idea #1's card as the no-schema-change fork to weigh.</td></tr>
+<tr><td>2</td><td>Group commit / burst coalescing in the drain loop</td><td>Mischaracterized: the drain loop multi-drains only after out-of-order gaps fill, and mutex-blocked cross-client threads never queue — no burst to fold; premature without idea #2's measurements.</td></tr>
+<tr><td>3</td><td>Kill the byte-array FFI tax (binary Strings across y-rb)</td><td>Diagnosis verified, but y-rb only accepts <code>Array&lt;Integer&gt;</code> (verifier confirmed empirically) — the fix is the same gem fork as the blob-only merge; the in-app double-decode half is too small to stand alone.</td></tr>
+<tr><td>4</td><td>Differential join handshake (client sv → server delta)</td><td>Load-bearing on the y-rb <code>diff</code> multi-client-vector bug the codebase itself documents as a workaround; blocked until that bug is fixed. Idea #3 delivers the cheap half now.</td></tr>
+<tr><td>5</td><td>Binary state endpoint with ETag (drop the props blob)</td><td>Revisits a deliberate instant-paint architecture decision without the regression evidence its own plan asks for; the cited ETag key (a persisted seq) doesn't exist yet.</td></tr>
+<tr><td>6</td><td>Retire the seq/gap buffer (standalone)</td><td>Sound only with an orphaned-pending-update policy the candidate didn't specify; absorbed into idea #1's design and roadmap.</td></tr>
+<tr><td>7</td><td>Tombstone GC on last-disconnect</td><td><strong>Refuted:</strong> verifier ran the gem — y-rb hardcodes yrs defaults, so GC already runs on every fresh-doc rebuild; the Jahns caveat applies to blob-only merging, not the current path.</td></tr>
+<tr><td>8</td><td>Attributed update ledger as provenance</td><td>Transport-level audit ("who submitted which bytes") oversold as content provenance, which would require interpreting updates — forbidden by invariant. Kept as an honest rider on idea #1.</td></tr>
+<tr><td>9</td><td>Coordinated size-cap hierarchy across cable/HTTP/props</td><td>Sound near-miss cut by survivor budget — every cited cap verified; schedule the cable-frame cap inside idea #5's hardening work.</td></tr>
+<tr><td>10</td><td>Server-driven backpressure / coalescing-window hint</td><td>Adaptive protocol for a contention problem nobody has measured, on a single-process deployment, before instrumentation exists — premature.</td></tr>
+<tr><td>11</td><td>Headless snapshot refresh (server derives read model)</td><td>Requires reimplementing the client's Milkdown/ProseMirror serialization in Ruby against the "server never interprets document structure" stance, and provenance spans can't be derived server-side — the refresh would stay partially stale anyway.</td></tr>
+<tr><td>12</td><td>Eviction discipline for per-doc in-memory structures</td><td>The P3 finding restated as a rule — code-review-sized, not meeting-sized; folded into idea #4 as a requirement.</td></tr>
+<tr><td>13</td><td>Synthesis: update log as product substrate</td><td>Built on one sound leg and two weak ones; "time-travel" conflicts with compaction deleting the rows it needs — synergy overstated.</td></tr>
+<tr><td>14</td><td>Synthesis: write-time materialization of the whole read path</td><td>"All reads become I/O" is false while it includes the diff handshake (needs doc materialization or the buggy binding); the true subset survives as idea #3.</td></tr>
+<tr><td>15</td><td>Synthesis: contention-adaptive write path</td><td>Composes two premature ideas (group commit + backpressure) whose shared prerequisite — measured contention — doesn't exist yet.</td></tr>
+</tbody>
+</table>
+<p>All five topic axes have at least one survivor — no coverage gaps.</p>
+</section>
+
+<footer class="composition-signal">Composed 2026-07-02 by ce-ideate (repo-grounded) from the prompt "ideas to make yjs storage faster, more scalable, and more best-practice" — grounding: 5 evidence dossiers, institutional learnings, and external Yjs-ecosystem research; bases verified by a fresh-context verifier against the repo and the installed y-rb 0.7.0 gem.</footer>
+
+</div>
+</body>
+</html>
