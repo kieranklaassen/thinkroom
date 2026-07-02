@@ -335,29 +335,8 @@ class DocumentsController < InertiaController
     state_vector = params[:state_vector].to_s
     return head :content_too_large if state_vector.bytesize > MAX_STATE_VECTOR_BYTES
 
-    normalization = document.html? ? HtmlDocumentSanitizer.snapshot(content) : nil
-    content = normalization.content if normalization
-
-    spans = sanitize_snapshot_spans(params[:spans])
-    previous_title = document.title
-    title = DocumentTitle.call(format: document.content_format, content:) || previous_title
-
-    persisted = YjsPersistence.persist_snapshot(
-      document,
-      state_vector_b64: state_vector.presence,
-      content:,
-      spans:,
-      title:,
-      render_hints: sanitize_render_hints(params[:render_hints]),
-      token: owner_token,
-      user: current_user
-    )
-    return render json: { error: "Snapshot is stale; retry from current document state." },
-                  status: :conflict unless persisted
-
-    DocumentAsset.claim_from_html!(document:, source: content) if document.html?
-    broadcast_title(document) if title != previous_title
-    render json: { normalized: normalization&.changed? || false }
+    result = persist_snapshot_from_params(document, content:, state_vector:)
+    render json: result if result
   end
 
   # Discrete editor actions (currently task-checkbox toggles) also send their
@@ -394,26 +373,7 @@ class DocumentsController < InertiaController
                     status: :unprocessable_entity if state_vector.blank?
       return head :content_too_large if state_vector.bytesize > MAX_STATE_VECTOR_BYTES
 
-      normalization = document.html? ? HtmlDocumentSanitizer.snapshot(content) : nil
-      content = normalization.content if normalization
-      spans = sanitize_snapshot_spans(params[:spans])
-      previous_title = document.title
-      title = DocumentTitle.call(format: document.content_format, content:) || previous_title
-      persisted = YjsPersistence.persist_snapshot(
-        document,
-        state_vector_b64: state_vector,
-        content:,
-        spans:,
-        title:,
-        render_hints: sanitize_render_hints(params[:render_hints]),
-        token: owner_token,
-        user: current_user
-      )
-      return render json: { error: "Snapshot is stale; retry from current document state." },
-                    status: :conflict unless persisted
-
-      DocumentAsset.claim_from_html!(document:, source: content) if document.html?
-      broadcast_title(document) if title != previous_title
+      return unless persist_snapshot_from_params(document, content:, state_vector:)
     end
 
     head :no_content
@@ -422,6 +382,37 @@ class DocumentsController < InertiaController
   end
 
   private
+
+  # Shared tail of the snapshot and sync_update actions: normalize + persist
+  # the derived snapshot, guard against stale state vectors, then run the
+  # post-persist side effects. Returns the success payload, or nil after
+  # rendering the conflict response itself.
+  def persist_snapshot_from_params(document, content:, state_vector:)
+    normalization = document.html? ? HtmlDocumentSanitizer.snapshot(content) : nil
+    content = normalization.content if normalization
+    previous_title = document.title
+    title = DocumentTitle.call(format: document.content_format, content:) || previous_title
+
+    persisted = YjsPersistence.persist_snapshot(
+      document,
+      state_vector_b64: state_vector.presence,
+      content:,
+      spans: sanitize_snapshot_spans(params[:spans]),
+      title:,
+      render_hints: RenderHints.sanitize(params[:render_hints]),
+      token: owner_token,
+      user: current_user
+    )
+    unless persisted
+      render json: { error: "Snapshot is stale; retry from current document state." },
+             status: :conflict
+      return nil
+    end
+
+    DocumentAsset.claim_from_html!(document:, source: content) if document.html?
+    broadcast_title(document) if title != previous_title
+    { normalized: normalization&.changed? || false }
+  end
 
   def broadcast_title(document)
     DocumentMetaChannel.broadcast_event(document, :title, title: document.title)
@@ -442,35 +433,6 @@ class DocumentsController < InertiaController
       created_label:,
       age_group: created_at >= week_start ? "this_week" : "earlier"
     }
-  end
-
-  # Render hints are client-measured pixel geometry, so treat them as hostile:
-  # namespace allowlist, hash-shaped keys (FNV base36 of the diagram source),
-  # integer heights within the figure's plausible on-screen range.
-  RENDER_HINT_KEY = /\A[a-z0-9]{1,13}\z/
-  RENDER_HINT_HEIGHT_RANGE = (96..2000)
-  # Per-request ingest cap. Must not exceed the storage-side cap
-  # (YjsPersistence::MAX_RENDER_HINTS_PER_NAMESPACE) or the newest-wins merge
-  # would evict hints this same request just accepted.
-  MAX_RENDER_HINTS = 200
-
-  def sanitize_render_hints(raw)
-    hints = raw.respond_to?(:to_unsafe_h) ? raw.to_unsafe_h : raw
-    return nil unless hints.is_a?(Hash)
-
-    mermaid = hints["mermaid"]
-    return nil unless mermaid.is_a?(Hash)
-
-    cleaned = mermaid.filter_map do |key, value|
-      next unless key.to_s.match?(RENDER_HINT_KEY)
-
-      height = Integer(value, exception: false)
-      next unless height && RENDER_HINT_HEIGHT_RANGE.cover?(height)
-
-      [ key.to_s, height ]
-    end.first(MAX_RENDER_HINTS).to_h
-
-    cleaned.empty? ? nil : { "mermaid" => cleaned }
   end
 
   def sanitize_snapshot_spans(raw_spans)
