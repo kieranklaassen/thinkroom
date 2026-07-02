@@ -2,6 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useMediaQuery } from '../lib/use_media_query'
 import { useDismissable } from '../lib/use_dismissable'
+import type { LinkAccess } from './ownership_chip'
+
+const LINK_ACCESS_HINTS: Record<LinkAccess, string> = {
+  edit: 'Anyone with the link can open and edit this live document.',
+  comment: 'Anyone with the link can read and comment on this live document.',
+  view: 'Anyone with the link can read this document.',
+}
 
 /** Share is two audiences, one URL: humans get the editor, agents fetching the
  *  same link discover the API. The popover teaches both — copy the link for a
@@ -9,6 +16,8 @@ import { useDismissable } from '../lib/use_dismissable'
 export function SharePopover({
   agentsActive,
   exportReady,
+  linkAccess,
+  canChangeAccess,
   onExportMarkdown,
   onExportHtml,
   onPrint,
@@ -16,6 +25,10 @@ export function SharePopover({
 }: {
   agentsActive: number
   exportReady: boolean
+  /** What the shared link actually grants, so the hint never oversells. */
+  linkAccess: LinkAccess
+  /** Owners get pointed at where the level is changed. */
+  canChangeAccess: boolean
   onExportMarkdown: () => void | Promise<void>
   onExportHtml: () => void | Promise<void>
   onPrint: () => void
@@ -83,7 +96,10 @@ export function SharePopover({
     >
       <div className="share-section">
         <div className="share-section-title">Share link</div>
-        <p className="share-section-hint">Anyone with the link can open and join this live document.</p>
+        <p className="share-section-hint">
+          {LINK_ACCESS_HINTS[linkAccess]}
+          {canChangeAccess ? ' Change link access from the ⋯ menu.' : ''}
+        </p>
         <div className="share-copy-row">
           <code className="share-url">{url}</code>
           <button className="share-copy" onClick={() => copy('link', url)}>

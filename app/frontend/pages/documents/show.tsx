@@ -1294,6 +1294,8 @@ export default function DocumentShow({
             <SharePopover
               agentsActive={presences.length}
               exportReady={Boolean(handle)}
+              linkAccess={ownership.link_access}
+              canChangeAccess={ownership.yours}
               onExportMarkdown={exportMarkdown}
               onExportHtml={exportHtml}
               onPrint={printDocument}
