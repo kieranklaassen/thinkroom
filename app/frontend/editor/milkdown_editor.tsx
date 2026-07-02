@@ -32,7 +32,7 @@ import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import type { Node as ProseNode } from '@milkdown/kit/prose/model'
 import { TextSelection } from '@milkdown/kit/prose/state'
-import { CableProvider, type DurableSnapshotPayload } from './cable_provider'
+import { CableProvider, type DurableSnapshotPayload, type RenderHints } from './cable_provider'
 import { gatedCursorAwareness } from './cursor_awareness'
 import { lazyShikiParser, loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
@@ -87,12 +87,10 @@ import {
 import { configureSlashMenu, slashMenu } from './slash_menu'
 import { readPointerAwarenessCtx, readPointers } from './read_pointers'
 import {
+  bindMermaidHintPersistence,
   collectMermaidRenderHints,
-  MERMAID_RENDERED_EVENT,
   mermaidDiagrams,
   mermaidRenderHintsCtx,
-  type MermaidRenderHints,
-  type RenderHints,
 } from './mermaid'
 import { richBlockWidthControls } from './rich_block_width'
 
@@ -526,7 +524,7 @@ function CollabEditor({
     let snapshotTimer: ReturnType<typeof setTimeout> | null = null
     let snapshotRetryTimer: ReturnType<typeof setTimeout> | null = null
     let cancelled = false
-    let mermaidHintTarget: HTMLElement | null = null
+    let unbindMermaidHints: (() => void) | null = null
     const pushSnapshot = (attempt = 0) => {
       if (!canWriteRef.current) return
       editor.action((ctx) => {
@@ -550,26 +548,6 @@ function CollabEditor({
     const scheduleSnapshot = () => {
       if (snapshotTimer) clearTimeout(snapshotTimer)
       snapshotTimer = setTimeout(pushSnapshot, SNAPSHOT_DEBOUNCE_MS)
-    }
-
-    // A finished diagram render changes measured geometry without a doc
-    // change, so the update listener never fires for it. Schedule a snapshot
-    // through the same debounce so fresh render hints reach the server —
-    // but only when a measured height actually differs from what the server
-    // already knows. Diagrams re-render on every mount, so an ungated
-    // schedule would re-POST the full document on every load.
-    const knownMermaidHints: MermaidRenderHints = { ...renderHints?.mermaid }
-    const scheduleHintSnapshot = () => {
-      if (cancelled || !canWriteRef.current || !mermaidHintTarget) return
-      const measured = collectMermaidRenderHints(mermaidHintTarget)
-      const changed = Object.entries(measured).some(
-        ([hash, height]) => knownMermaidHints[hash] !== height,
-      )
-      if (!changed) return
-      // Optimistic: the push is debounced and best-effort, and every doc
-      // update re-sends all measured hints anyway.
-      Object.assign(knownMermaidHints, measured)
-      scheduleSnapshot()
     }
 
     let started = false
@@ -618,26 +596,26 @@ function CollabEditor({
           )
         }
         service.connect()
-        if (seed && seedKind && seedKind !== 'human') {
-          // Must run after connect(): only then has ySyncPlugin rendered the
-          // seeded Yjs content into the view. The dispatched marks flow back
-          // through the binding, so peers receive attributed content.
-          attributeSeedToAgent(ctx.get(editorViewCtx), seedAuthor ?? '')
-          // The updated listener skips addToHistory:false transactions, so
-          // the chip never sees the marked doc on its own — push it directly.
-          callbacksRef.current.onSpans?.(
-            collectSpans(ctx.get(editorViewCtx).state.doc, {
-              excludePendingInsertions: true,
-            }),
-          )
-        }
         if (seed) {
-          // Persist the applied seed NOW over HTTP (keepalive) instead of
-          // waiting for the cable handshake. The cable path drops local
-          // updates until 'sync' arrives, so a claimant that navigated away
-          // within the first seconds burned the seed claim and left the
-          // document blank for every viewer until the claim timeout. The
-          // sync_update endpoint also broadcasts, so already-connected
+          if (seedKind && seedKind !== 'human') {
+            // Must run after connect(): only then has ySyncPlugin rendered
+            // the seeded Yjs content into the view. The dispatched marks flow
+            // back through the binding, so peers receive attributed content.
+            attributeSeedToAgent(ctx.get(editorViewCtx), seedAuthor ?? '')
+            // The updated listener skips addToHistory:false transactions, so
+            // the chip never sees the marked doc on its own — push directly.
+            callbacksRef.current.onSpans?.(
+              collectSpans(ctx.get(editorViewCtx).state.doc, {
+                excludePendingInsertions: true,
+              }),
+            )
+          }
+          // Persist the applied (and attributed) seed NOW over HTTP
+          // (keepalive) instead of waiting for the cable handshake. The cable
+          // path drops local updates until 'sync' arrives, so a claimant that
+          // navigated away within the first seconds burned the seed claim and
+          // left the document blank for every viewer until the claim timeout.
+          // The sync_update endpoint also broadcasts, so already-connected
           // viewers receive the seeded content live.
           provider.persistCurrentState(buildSnapshotPayload(ctx, ydoc, contentFormat))
         }
@@ -659,8 +637,13 @@ function CollabEditor({
         const title = firstHeadingTitle(ctx.get(editorViewCtx).state.doc)
         if (title) callbacksRef.current.onTitleChange?.(title)
 
-        mermaidHintTarget = ctx.get(editorViewCtx).dom
-        mermaidHintTarget.addEventListener(MERMAID_RENDERED_EVENT, scheduleHintSnapshot)
+        if (canWrite) {
+          unbindMermaidHints = bindMermaidHintPersistence(
+            ctx.get(editorViewCtx).dom,
+            renderHints?.mermaid,
+            scheduleSnapshot,
+          )
+        }
       })
 
       const handle = { editor, ydoc, provider }
@@ -694,7 +677,7 @@ function CollabEditor({
     return () => {
       cancelled = true
       provider.off('synced', start)
-      mermaidHintTarget?.removeEventListener(MERMAID_RENDERED_EVENT, scheduleHintSnapshot)
+      unbindMermaidHints?.()
       if (snapshotTimer) clearTimeout(snapshotTimer)
       if (snapshotRetryTimer) clearTimeout(snapshotRetryTimer)
       try {

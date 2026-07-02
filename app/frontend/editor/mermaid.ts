@@ -13,13 +13,6 @@ type MermaidApi = (typeof import('mermaid'))['default']
  * preview → editor swap pixel-identical. */
 export type MermaidRenderHints = Record<string, number>
 
-/** Wire shape of Document#render_hints — client-measured render geometry
- * namespaced by renderer. Shared by the show props, the editor props, and
- * the durable snapshot payload so the three cannot drift. */
-export interface RenderHints {
-  mermaid?: MermaidRenderHints
-}
-
 export const mermaidRenderHintsCtx = $ctx<MermaidRenderHints, 'mermaidRenderHints'>(
   {},
   'mermaidRenderHints',
@@ -191,6 +184,33 @@ export const collectMermaidRenderHints = (root: HTMLElement): MermaidRenderHints
       if (height > 0) hints[figure.dataset.sourceHash!] = height
     })
   return hints
+}
+
+/**
+ * Persist fresh diagram geometry: a finished render changes measured heights
+ * without a doc change, so the editor's update listener never fires for it.
+ * Listens for rendered diagrams under `root` and calls `scheduleSnapshot` —
+ * but only when a measured height actually differs from what the server
+ * already knows. Diagrams re-render on every mount, so an ungated schedule
+ * would re-POST the full document on every load. Returns the unbind.
+ */
+export const bindMermaidHintPersistence = (
+  root: HTMLElement,
+  serverHints: MermaidRenderHints | undefined,
+  scheduleSnapshot: () => void,
+): (() => void) => {
+  const known: MermaidRenderHints = { ...serverHints }
+  const onRendered = () => {
+    const measured = collectMermaidRenderHints(root)
+    const changed = Object.entries(measured).some(([hash, height]) => known[hash] !== height)
+    if (!changed) return
+    // Optimistic: the push is debounced and best-effort, and every doc
+    // update re-sends all measured hints anyway.
+    Object.assign(known, measured)
+    scheduleSnapshot()
+  }
+  root.addEventListener(MERMAID_RENDERED_EVENT, onRendered)
+  return () => root.removeEventListener(MERMAID_RENDERED_EVENT, onRendered)
 }
 
 /**

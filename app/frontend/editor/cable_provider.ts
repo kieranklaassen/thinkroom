@@ -1,8 +1,15 @@
 import type { Consumer, Subscription } from '@rails/actioncable'
 import { getConsumer } from '../lib/cable'
 import { csrfToken } from '../lib/csrf'
-import type { RenderHints } from './mermaid'
+import type { MermaidRenderHints } from './mermaid'
 import * as Y from 'yjs'
+
+/** Wire shape of Document#render_hints — client-measured render geometry
+ * namespaced by renderer. Shared by the show props, the editor props, and
+ * the durable snapshot payload so the three cannot drift. */
+export interface RenderHints {
+  mermaid?: MermaidRenderHints
+}
 import {
   Awareness,
   applyAwarenessUpdate,

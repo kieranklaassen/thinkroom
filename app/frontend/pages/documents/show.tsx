@@ -34,7 +34,7 @@ import {
   type SuggestionPayload,
 } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
-import type { RenderHints } from '../../editor/mermaid'
+import type { RenderHints } from '../../editor/cable_provider'
 import { bindReadModeCopy } from '../../editor/clipboard'
 import { bindReadPointerBroadcast } from '../../editor/read_pointers'
 import { bindViewportBroadcast, bindViewportFollow } from '../../editor/viewport_follow'
