@@ -43,6 +43,18 @@ declare module '@ruby-native/react' {
     selected?: boolean
   }): ReactElement
 
+  /**
+   * Floating action button. Requires `icon` (or a matching `icons` entry) —
+   * the component throws without one. `href` navigates; `click` clicks a
+   * DOM element by CSS selector.
+   */
+  export function NativeFab(props: {
+    icon?: string
+    icons?: { ios?: string; android?: string }
+    href?: string
+    click?: string
+  }): ReactElement
+
   /** Marks the page as a form so native back navigation skips it. */
   export function NativeForm(): ReactElement
 

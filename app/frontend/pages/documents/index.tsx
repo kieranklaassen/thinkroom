@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Head, Link, useForm } from '@inertiajs/react'
-import { NativeNavbar, NativeButton, NativeMenuItem, nativeHaptic } from '@ruby-native/react'
+import { NativeNavbar, NativeButton, NativeMenuItem, NativeFab, nativeHaptic } from '@ruby-native/react'
 import { FeedbackButton } from '../../components/feedback_button'
 import { AccountControl } from '../../components/account_control'
 import { userIdentity } from '../../editor/identity'
@@ -311,8 +311,11 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
           )}
           {isClient && <NativeMenuItem title="Send feedback" click=".feedback-button button" />}
         </NativeButton>
-        <NativeButton icon="plus" click="#new-document-button" />
       </NativeNavbar>
+      {/* Floating action button, sibling of the navbar (its own signal
+          element). While a create is in flight the only feedback is the web
+          hero button's disabled "Creating…" state; repeat taps are no-ops. */}
+      <NativeFab icon="plus" click="#new-document-button" />
       <div className="landing">
         <div className="landing-corner">
           <AccountControl viewer={viewer} />
