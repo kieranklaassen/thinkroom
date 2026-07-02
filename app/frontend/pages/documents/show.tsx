@@ -1315,15 +1315,11 @@ export default function DocumentShow({
             )}
           </div>
           <div className="doc-header-right">
-            {/* ≤3 groups: identity/presence · Share · ⋯ menu */}
+            {/* ≤3 groups: presence/identity · Share · ⋯ menu. Presence sits on
+                the cluster's open left edge (its reserved lane blends into the
+                header's free middle space) and your own identity chip anchors
+                the right, next to Share. */}
             <div className="doc-header-people">
-              <IdentityChip
-                identity={identity}
-                guest={guest}
-                authenticated={Boolean(viewer.account)}
-                onRenamed={handleRenamed}
-              />
-              {!isReading && <ProvenanceSummaryChip spans={spans} />}
               <PresenceBar
                 humans={peers}
                 agents={presences}
@@ -1332,6 +1328,13 @@ export default function DocumentShow({
                 onFollow={(clientId) => {
                   setFollowingClientId((current) => current === clientId ? null : clientId)
                 }}
+              />
+              {!isReading && <ProvenanceSummaryChip spans={spans} />}
+              <IdentityChip
+                identity={identity}
+                guest={guest}
+                authenticated={Boolean(viewer.account)}
+                onRenamed={handleRenamed}
               />
             </div>
             {!isReading && pendingSuggestionCount > 1 && (
