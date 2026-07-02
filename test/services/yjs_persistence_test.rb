@@ -119,7 +119,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal "server content", client.get_text("t").to_s
   end
 
-  test "merge persists the state vector alongside the blob" do
+  test "merge persists the state vector and checksum alongside the blob" do
     doc = Document.create!(title: "Vectored")
     YjsPersistence.merge(doc, b64_update_for("content"))
     doc.reload
@@ -128,6 +128,154 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     ydoc = Y::Doc.new
     ydoc.sync(doc.yjs_state.unpack("C*"))
     assert_equal ydoc.state, doc.yjs_state_vector.unpack("C*")
+    assert_equal Digest::SHA256.hexdigest(doc.yjs_state), doc.yjs_state_checksum
+  end
+
+  test "merge refuses to persist a blob that cannot round-trip" do
+    doc = Document.create!(title: "Unloadable")
+    original = YjsPersistence.singleton_class.instance_method(:blob_loadable?)
+    YjsPersistence.define_singleton_method(:blob_loadable?) { |*| false }
+    begin
+      assert_notification("merge.yjs", outcome: "rejected_invalid_encode") do
+        assert_raises(YjsPersistence::EncodeValidationError) do
+          YjsPersistence.merge(doc, b64_update_for("would brick"))
+        end
+      end
+    ensure
+      YjsPersistence.singleton_class.define_method(:blob_loadable?, original)
+    end
+
+    assert_nil doc.reload.yjs_state, "a rejected encode must not persist"
+  end
+
+  test "a corrupt blob on merge heals from the latest same-generation checkpoint" do
+    doc = Document.create!(title: "Healable")
+    YjsPersistence.merge(doc, b64_update_for("first. "))
+    # The second merge checkpoints the pre-merge state ("first. ").
+    YjsPersistence.merge(doc, b64_update_for("second. ", from_doc: doc_from(doc)))
+    assert_equal 1, doc.yjs_state_archives.where(kind: "checkpoint").count
+
+    doc.reload.update_columns(yjs_state: "garbage-bytes")
+
+    event = assert_notification("recovered.yjs", outcome: "recovered", restored_from: "checkpoint") do
+      YjsPersistence.merge(doc.reload, b64_update_for("third."))
+    end
+    assert_equal doc.id, event.payload[:document_id]
+
+    merged = text_of(doc.reload)
+    assert_includes merged, "first", "checkpoint content must be restored"
+    assert_includes merged, "third", "the incoming update must still apply"
+    assert_not_includes merged, "second", "edits after the checkpoint are the bounded loss"
+
+    quarantine = doc.yjs_state_archives.where(kind: "quarantine").sole
+    assert_equal "garbage-bytes", quarantine.yjs_state
+    assert quarantine.error.present?
+  end
+
+  test "a corrupt blob with no checkpoint heals to empty" do
+    doc = Document.create!(title: "Empty heal")
+    YjsPersistence.merge(doc, b64_update_for("only content"))
+    doc.reload.update_columns(yjs_state: "garbage-bytes")
+
+    assert_notification("recovered.yjs", restored_from: "empty") do
+      YjsPersistence.merge(doc.reload, b64_update_for("fresh start"))
+    end
+
+    assert_equal "fresh start", text_of(doc.reload)
+    assert doc.yjs_state_archives.where(kind: "quarantine").exists?
+  end
+
+  test "healing never restores a replacement archive from a previous generation" do
+    doc = Document.create!(title: "No resurrection", seed_content: "# Seed")
+    YjsPersistence.merge(doc, b64_update_for("pre-replacement secret. "))
+    doc.replace_content!(source: "# Replacement")
+    assert doc.yjs_state_archives.where(kind: "replacement").exists?
+
+    YjsPersistence.merge(doc.reload, b64_update_for("new generation content"))
+    doc.reload.update_columns(yjs_state: "garbage-bytes")
+
+    assert_notification("recovered.yjs", restored_from: "empty") do
+      YjsPersistence.merge(doc.reload, b64_update_for("after heal"))
+    end
+
+    merged = text_of(doc.reload)
+    assert_not_includes merged, "pre-replacement secret",
+                        "a heal must never resurrect content a replacement wiped"
+  end
+
+  test "a corrupt blob on the join path heals instead of bricking" do
+    doc = Document.create!(title: "Join heal")
+    YjsPersistence.merge(doc, b64_update_for("served content"))
+    doc.reload.update_columns(yjs_state: "garbage-bytes")
+
+    full_state, state_vector = nil
+    assert_notification("recovered.yjs", restored_from: "empty") do
+      full_state, state_vector = YjsPersistence.state_b64(doc.reload)
+    end
+
+    assert full_state.present?
+    assert state_vector.present?
+    assert doc.reload.yjs_state_archives.where(kind: "quarantine").exists?
+  end
+
+  test "a corrupt blob does not raise out of the snapshot gate" do
+    doc = Document.create!(title: "Snapshot heal", content_snapshot: "current")
+    YjsPersistence.merge(doc, b64_update_for("server content"))
+    doc.reload.update_columns(yjs_state: "garbage-bytes", yjs_state_vector: "also-garbage")
+
+    persisted = YjsPersistence.persist_snapshot(
+      doc.reload,
+      state_vector_b64: Base64.strict_encode64(Y::Doc.new.state.pack("C*")),
+      content: "fresh", spans: []
+    )
+
+    assert persisted, "after healing to empty, a fresh client snapshot is acceptable"
+    assert_equal "fresh", doc.reload.content_snapshot
+  end
+
+  test "a legacy row without a checksum loads without verification" do
+    doc = Document.create!(title: "Legacy checksum")
+    YjsPersistence.merge(doc, b64_update_for("old row"))
+    doc.update_columns(yjs_state_checksum: nil, yjs_state_vector: nil)
+
+    full_state, = YjsPersistence.state_b64(doc.reload)
+
+    client = Y::Doc.new
+    client.sync(Base64.strict_decode64(full_state).unpack("C*"))
+    assert_equal "old row", client.get_text("t").to_s
+  end
+
+  test "checkpoints are interval-gated" do
+    doc = Document.create!(title: "Checkpointed")
+    YjsPersistence.merge(doc, b64_update_for("one. "))
+    YjsPersistence.merge(doc, b64_update_for("two. ", from_doc: doc_from(doc)))
+    YjsPersistence.merge(doc, b64_update_for("three. ", from_doc: doc_from(doc)))
+    assert_equal 1, doc.yjs_state_archives.where(kind: "checkpoint").count,
+                 "checkpoints within the interval must not accumulate"
+
+    travel YjsPersistence::CHECKPOINT_INTERVAL + 1.minute do
+      YjsPersistence.merge(doc, b64_update_for("four.", from_doc: doc_from(doc)))
+    end
+    assert_equal 2, doc.yjs_state_archives.where(kind: "checkpoint").count
+  end
+
+  test "archive pruning keeps the newest entries per kind" do
+    doc = Document.create!(title: "Pruned")
+    YjsPersistence.merge(doc, b64_update_for("content"))
+    doc.reload
+
+    8.times { YjsStateArchive.record!(doc, kind: "checkpoint") }
+    assert_equal YjsStateArchive::MAX_PER_KIND, doc.yjs_state_archives.where(kind: "checkpoint").count
+
+    YjsStateArchive.record!(doc, kind: "quarantine", error: "x")
+    assert_equal 1, doc.yjs_state_archives.where(kind: "quarantine").count,
+                 "pruning one kind must not touch another"
+  end
+
+  def doc_from(document)
+    ydoc = Y::Doc.new
+    ydoc.sync(document.reload.yjs_state.unpack("C*"))
+    ydoc
   end
 
   test "state_b64 serves the handshake from columns without building a doc" do

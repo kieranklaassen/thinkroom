@@ -42,6 +42,7 @@ class Document < ApplicationRecord
   has_many :activities, dependent: :destroy
   has_many :agent_presences, dependent: :destroy
   has_many :document_assets, dependent: :destroy
+  has_many :yjs_state_archives, dependent: :destroy
   belongs_to :user, optional: true
 
   before_validation :ensure_slug, on: :create
@@ -175,12 +176,17 @@ class Document < ApplicationRecord
   def replace_content!(source:, title: nil, seed_author_kind: nil, seed_author_name: nil)
     with_lock do
       reload
+      # Keep what this replacement is about to destroy — tagged with the
+      # pre-bump generation so it is a manual-undo artifact only, never an
+      # automatic restore candidate (see YjsStateArchive).
+      YjsStateArchive.record!(self, kind: "replacement") if yjs_state.present?
       attributes = {
         seed_content: source,
         content_snapshot: nil,
         provenance_spans: [],
         yjs_state: nil,
         yjs_state_vector: nil,
+        yjs_state_checksum: nil,
         seed_state: "pending",
         seed_claimed_at: nil,
         # Advances the generation so any SyncChannel client still holding a

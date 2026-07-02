@@ -4,12 +4,29 @@
 # joining clients. See README for why we relay manually instead of using
 # y-rb_actioncable's channel.
 class YjsPersistence
+  # Raised when a freshly encoded blob fails the round-trip probe: persisting
+  # it would brick every future load, so the frame is rejected instead
+  # (SyncChannel's rescue keeps it unbroadcast — durable-before-broadcast).
+  class EncodeValidationError < StandardError; end
+
+  # Raised when a stored blob fails its checksum or cannot be synced into a
+  # fresh doc. Callers holding the document locks heal via
+  # heal_corrupt_state! and retry.
+  class CorruptStateError < StandardError; end
+
   # Per-document, in-process locks. ActionCable handles channel actions on a
   # thread pool; without this, two concurrent receives could both read the same
   # stored blob and the later write would drop the earlier update. The app runs
   # single-process in development (async cable adapter), so an in-process lock
   # is sufficient; the DB transaction below is the second guard.
   LOCKS = Concurrent::Map.new
+
+  # A merge archives the pre-merge state at most this often per document,
+  # bounding what a corrupt-blob heal can lose to one interval of edits.
+  CHECKPOINT_INTERVAL = 10.minutes
+
+  # Newest archives kept per document and kind.
+  MAX_ARCHIVES_PER_KIND = 5
 
   class << self
     # Merge a base64-encoded Yjs update into the document's persisted state.
@@ -42,7 +59,7 @@ class YjsPersistence
                     "Client generation #{generation} is behind document generation #{document.content_generation}."
             end
 
-            ydoc = load_ydoc(document)
+            ydoc = load_or_heal_ydoc(document)
             before = ydoc.state
             ydoc.sync(update)
             # A no-op update (e.g. the empty sync-reply a client joining an
@@ -56,9 +73,18 @@ class YjsPersistence
             payload[:blob_bytes_before] = document.yjs_state&.bytesize || 0
             blob = ydoc.full_diff.pack("C*")
             payload[:blob_bytes_after] = blob.bytesize
+            unless blob_loadable?(blob)
+              payload[:outcome] = "rejected_invalid_encode"
+              raise EncodeValidationError,
+                    "Refusing to persist a blob that cannot round-trip into a fresh doc " \
+                    "(document #{document.id})."
+            end
+
+            maybe_checkpoint(document)
             document.update_columns(
               yjs_state: blob,
               yjs_state_vector: ydoc.state.pack("C*"),
+              yjs_state_checksum: Digest::SHA256.hexdigest(blob),
               seed_state: "seeded",
               updated_at: Time.current
             )
@@ -78,22 +104,24 @@ class YjsPersistence
     # vector nil) fall back to rebuilding; their next merge heals them.
     def state_b64(document)
       ActiveSupport::Notifications.instrument("state.yjs", document_id: document.id) do |payload|
-        payload[:blob_bytes] = document.yjs_state&.bytesize || 0
-        from_columns = document.yjs_state.present? && document.yjs_state_vector.present?
-        payload[:served_from] = from_columns ? "columns" : "rebuild"
-        encoded =
-          if from_columns
-            [
-              Base64.strict_encode64(document.yjs_state),
-              Base64.strict_encode64(document.yjs_state_vector)
-            ]
-          else
-            ydoc = load_ydoc(document)
-            [
-              Base64.strict_encode64(ydoc.full_diff.pack("C*")),
-              Base64.strict_encode64(ydoc.state.pack("C*"))
-            ]
+        encoded = begin
+          encode_handshake(document, payload)
+        rescue CorruptStateError => e
+          # The fast path holds no locks, so corruption is healed here:
+          # acquire both, re-check (another thread may have healed first),
+          # heal, and rebuild the handshake from the restored state.
+          lock_for(document.id).synchronize do
+            document.with_lock do
+              document.reload
+              begin
+                encode_handshake(document, payload)
+              rescue CorruptStateError
+                heal_corrupt_state!(document, e)
+                encode_handshake(document, payload)
+              end
+            end
           end
+        end
         # Outcome is assigned last so an exception leaves it unset and the
         # log subscriber's exception fallback classifies the event as a
         # failure rather than a success.
@@ -125,7 +153,7 @@ class YjsPersistence
               rescue ArgumentError
                 # A corrupt stored vector must not masquerade as client
                 # staleness — derive the truth from the blob instead.
-                decode_state_vector(load_ydoc(document).state)
+                decode_state_vector(load_or_heal_ydoc(document).state)
               end
               current = server_state.all? do |client_id, clock|
                 client_state.fetch(client_id, 0) >= clock
@@ -160,8 +188,106 @@ class YjsPersistence
 
     def load_ydoc(document)
       ydoc = Y::Doc.new
-      ydoc.sync(document.yjs_state.unpack("C*")) if document.yjs_state.present?
+      if document.yjs_state.present?
+        verify_checksum!(document)
+        begin
+          ydoc.sync(document.yjs_state.unpack("C*"))
+        rescue StandardError => e
+          raise CorruptStateError, "document #{document.id}: #{e.class}: #{e.message}"
+        end
+      end
       ydoc
+    end
+
+    # For callers already holding both document locks (merge,
+    # persist_snapshot): a corrupt blob heals in place and the load retries
+    # once on the restored state.
+    def load_or_heal_ydoc(document)
+      load_ydoc(document)
+    rescue CorruptStateError => e
+      heal_corrupt_state!(document, e)
+      load_ydoc(document)
+    end
+
+    def verify_checksum!(document)
+      checksum = document.yjs_state_checksum
+      return if checksum.blank? # legacy row — heals on its next merge
+      return if checksum == Digest::SHA256.hexdigest(document.yjs_state)
+
+      raise CorruptStateError, "document #{document.id}: yjs_state checksum mismatch"
+    end
+
+    def blob_loadable?(blob)
+      Y::Doc.new.sync(blob.unpack("C*"))
+      true
+    rescue StandardError
+      false
+    end
+
+    def encode_handshake(document, payload)
+      payload[:blob_bytes] = document.yjs_state&.bytesize || 0
+      from_columns = document.yjs_state.present? && document.yjs_state_vector.present?
+      payload[:served_from] = from_columns ? "columns" : "rebuild"
+      if from_columns
+        verify_checksum!(document)
+        [
+          Base64.strict_encode64(document.yjs_state),
+          Base64.strict_encode64(document.yjs_state_vector)
+        ]
+      else
+        ydoc = load_ydoc(document)
+        [
+          Base64.strict_encode64(ydoc.full_diff.pack("C*")),
+          Base64.strict_encode64(ydoc.state.pack("C*"))
+        ]
+      end
+    end
+
+    # Contain-and-restore for a corrupt stored blob. Callers must hold both
+    # the per-document mutex and the row lock. The corrupt bytes are
+    # quarantined for forensics, then the newest loadable checkpoint from
+    # the *current* content generation is restored — never an older
+    # generation, which would resurrect content a replacement wiped. With
+    # no restorable checkpoint the document degrades to empty and connected
+    # clients re-upload their state through the sync-reply handshake.
+    def heal_corrupt_state!(document, error)
+      ActiveSupport::Notifications.instrument("recovered.yjs", document_id: document.id) do |payload|
+        YjsStateArchive.record!(document, kind: "quarantine", error: error.message)
+
+        checkpoint = document.yjs_state_archives
+                             .where(kind: "checkpoint", content_generation: document.content_generation)
+                             .order(created_at: :desc, id: :desc)
+                             .detect { |archive| archive.yjs_state.present? && blob_loadable?(archive.yjs_state) }
+        if checkpoint
+          document.update_columns(
+            yjs_state: checkpoint.yjs_state,
+            yjs_state_vector: checkpoint.yjs_state_vector,
+            yjs_state_checksum: Digest::SHA256.hexdigest(checkpoint.yjs_state),
+            updated_at: Time.current
+          )
+          payload[:restored_from] = "checkpoint"
+        else
+          document.update_columns(
+            yjs_state: nil,
+            yjs_state_vector: nil,
+            yjs_state_checksum: nil,
+            updated_at: Time.current
+          )
+          payload[:restored_from] = "empty"
+        end
+        payload[:outcome] = "recovered"
+      end
+    end
+
+    # Interval-gated archive of the pre-merge state, bounding what a future
+    # heal can lose to at most one interval of edits. Caller holds both locks.
+    def maybe_checkpoint(document)
+      return if document.yjs_state.blank?
+
+      newest = document.yjs_state_archives.where(kind: "checkpoint").maximum(:created_at)
+      return if newest && newest > CHECKPOINT_INTERVAL.ago
+
+      YjsStateArchive.record!(document, kind: "checkpoint")
     end
 
     # Stored vector when present; otherwise derive from the blob (legacy rows).

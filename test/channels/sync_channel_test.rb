@@ -355,6 +355,21 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert_nil doc.reload.yjs_state
   end
 
+  test "subscribing to a document with a corrupt blob heals instead of bricking" do
+    doc = Document.create!(title: "Corrupted")
+    YjsPersistence.merge(doc, build_update_b64("was here"))
+    doc.reload.update_columns(yjs_state: "garbage-bytes")
+
+    subscribe slug: doc.slug
+
+    assert subscription.confirmed?
+    message = transmissions.last
+    assert_equal "sync", message["type"]
+    assert message.key?("update"), "the handshake must still be served after healing"
+    assert doc.reload.yjs_state_archives.where(kind: "quarantine").exists?,
+           "the corrupt bytes must be quarantined for forensics"
+  end
+
   test "awareness messages relay without persisting" do
     doc = Document.create!(title: "Presence")
     subscribe slug: doc.slug
