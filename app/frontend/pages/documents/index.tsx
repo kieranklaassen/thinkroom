@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Head, Link, useForm } from '@inertiajs/react'
+import { NativeNavbar, NativeButton, nativeHaptic } from '@ruby-native/react'
 import { FeedbackButton } from '../../components/feedback_button'
 import { AccountControl } from '../../components/account_control'
 import { userIdentity } from '../../editor/identity'
@@ -292,6 +293,12 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
   return (
     <>
       <Head title="Thinkroom" />
+      {/* Ruby Native chrome: hidden signal elements the iOS/Android shell
+          reads. The plus button clicks the web "New document" button so the
+          native action reuses the exact same submission path. */}
+      <NativeNavbar title="Thinkroom">
+        <NativeButton icon="plus" click="#new-document-button" />
+      </NativeNavbar>
       <div className="landing">
         <div className="landing-corner">
           <AccountControl viewer={viewer} />
@@ -310,10 +317,12 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
             <p className="landing-byline">From the creator of Compound Engineering.</p>
             <div className="landing-actions">
               <button
+                id="new-document-button"
                 className="btn btn-primary"
                 type="button"
                 disabled={processing}
                 onClick={() => post('/documents')}
+                {...nativeHaptic('impact')}
               >
                 {processing ? 'Creating…' : 'New document'}
               </button>

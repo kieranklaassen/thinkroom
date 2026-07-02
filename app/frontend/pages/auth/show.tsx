@@ -1,4 +1,5 @@
 import { Form, Head, Link } from '@inertiajs/react'
+import { NativeForm, NativeNavbar, nativeHaptic } from '@ruby-native/react'
 import './show.css'
 
 interface Props {
@@ -6,6 +7,7 @@ interface Props {
   google_enabled: boolean
   csrf_token: string
   return_to: string | null
+  nativeApp: boolean
 }
 
 const errorText = (error: unknown): string | null => {
@@ -13,7 +15,7 @@ const errorText = (error: unknown): string | null => {
   return typeof error === 'string' ? error : null
 }
 
-export default function AuthShow({ mode, google_enabled, csrf_token, return_to }: Props) {
+export default function AuthShow({ mode, google_enabled, csrf_token, return_to, nativeApp }: Props) {
   const registering = mode === 'register'
   const title = registering ? 'Create your account' : 'Welcome back'
   const switchPath = registering ? '/login' : '/signup'
@@ -24,6 +26,10 @@ export default function AuthShow({ mode, google_enabled, csrf_token, return_to }
   return (
     <>
       <Head title={`${title} · Thinkroom`} />
+      {/* Ruby Native chrome: navbar title plus a form marker so native back
+          navigation skips this page after a successful sign-in. */}
+      <NativeNavbar title={registering ? 'Create account' : 'Sign in'} />
+      <NativeForm />
       <main className="auth-page">
         <section className="auth-card" aria-labelledby="auth-heading">
           <Link href="/" className="auth-wordmark" aria-label="Thinkroom home">
@@ -99,7 +105,9 @@ export default function AuthShow({ mode, google_enabled, csrf_token, return_to }
                     />
                   </label>
                 )}
-                {!registering && (
+                {/* Native sign-ins are always remembered server-side, so the
+                    checkbox would be a no-op inside the app. */}
+                {!registering && !nativeApp && (
                   <label className="auth-remember">
                     <input name="remember_me" type="checkbox" value="1" />
                     <span>Remember me for 30 days</span>
@@ -110,7 +118,12 @@ export default function AuthShow({ mode, google_enabled, csrf_token, return_to }
                     {errorText(errors.email) || errorText(errors.form)}
                   </p>
                 )}
-                <button className="btn btn-primary auth-submit" type="submit" disabled={processing}>
+                <button
+                  className="btn btn-primary auth-submit"
+                  type="submit"
+                  disabled={processing}
+                  {...nativeHaptic('impact')}
+                >
                   {processing ? 'Working…' : registering ? 'Create account' : 'Sign in'}
                 </button>
               </div>
