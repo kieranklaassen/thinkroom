@@ -89,4 +89,34 @@ class DocumentSocialPreviewTest < ActiveSupport::TestCase
     assert_equal "Plan", preview.title
     assert_equal "Planet-scale ideas need context.", preview.description
   end
+
+  test "surfaces the owner as the author with an initial and the tags as labels" do
+    document = Document.create!(
+      title: "Roadmap",
+      owner_name: "ada lovelace",
+      tags: [ "Planning", "Q3", "Research", "Extra" ],
+      seed_content: "Body"
+    )
+
+    preview = DocumentSocialPreview.new(document)
+
+    assert_equal "ada lovelace", preview.author
+    assert_equal "A", preview.author_initial
+    assert_equal %w[Planning Q3 Research], preview.labels
+  end
+
+  test "falls back to the seed author and omits attribution when anonymous" do
+    seeded = Document.create!(
+      title: "Agent draft",
+      seed_author_kind: "agent",
+      seed_author_name: "Gemini",
+      seed_content: "Body"
+    )
+    anonymous = Document.create!(title: "No owner", seed_content: "Body")
+
+    assert_equal "Gemini", DocumentSocialPreview.new(seeded).author
+    assert_nil DocumentSocialPreview.new(anonymous).author
+    assert_nil DocumentSocialPreview.new(anonymous).author_initial
+    assert_empty DocumentSocialPreview.new(anonymous).labels
+  end
 end
