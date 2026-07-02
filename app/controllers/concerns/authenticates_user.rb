@@ -3,13 +3,14 @@ module AuthenticatesUser
 
   private
 
-  def complete_authentication(user)
+  def complete_authentication(user, remember: false)
     destination = safe_return_to(session[:return_to])
     anonymous_token = owner_token
 
     user.claim_documents!(anonymous_token)
     reset_session
     session[:user_id] = user.id
+    session[:remember_me] = true if remember
     replace_owner_token!
 
     destination || root_path

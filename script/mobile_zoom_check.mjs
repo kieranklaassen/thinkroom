@@ -28,11 +28,13 @@ const auditPage = async (page, path, { expectFields }) => {
   if (expectFields) await page.waitForSelector('input:not([type=hidden])')
 
   // contenteditable focuses zoom on iOS too — the Milkdown editor surface
-  // on document pages must hold the same floor as native fields.
+  // on document pages must hold the same floor as native fields. Inputs that
+  // never summon the keyboard (checkboxes, radios, buttons) never zoom.
   const inputs = await page.evaluate(() => {
+    const NO_KEYBOARD = ['hidden', 'checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'file', 'color', 'image']
     const fields = [...document.querySelectorAll('input, textarea, select, [contenteditable="true"]')]
     return fields
-      .filter((field) => field.type !== 'hidden' && field.getClientRects().length > 0)
+      .filter((field) => !NO_KEYBOARD.includes(field.type) && field.getClientRects().length > 0)
       .map((field) => ({
         label: `${field.tagName.toLowerCase()}[name=${field.name || field.className.split(' ')[0] || '?'}]`,
         fontPx: parseFloat(getComputedStyle(field).fontSize),

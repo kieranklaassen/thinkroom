@@ -99,6 +99,12 @@ export default function AuthShow({ mode, google_enabled, csrf_token, return_to }
                     />
                   </label>
                 )}
+                {!registering && (
+                  <label className="auth-remember">
+                    <input name="remember_me" type="checkbox" value="1" />
+                    <span>Remember me for 30 days</span>
+                  </label>
+                )}
                 {(errorText(errors.email) || errorText(errors.form)) && (
                   <p className="auth-error" role="alert">
                     {errorText(errors.email) || errorText(errors.form)}

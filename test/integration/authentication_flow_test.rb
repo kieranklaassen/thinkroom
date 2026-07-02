@@ -77,6 +77,48 @@ class AuthenticationFlowTest < ActionDispatch::IntegrationTest
     assert_redirected_to document_page_path(document.slug)
   end
 
+  test "remembered login issues a session cookie that persists for 30 days" do
+    user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
+
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase", remember_me: "1" }
+
+    assert_response :see_other
+    assert_equal user.id, session[:user_id]
+    expiry = session_cookie_expiry
+    assert_not_nil expiry, "remembered login must set an expiry on the session cookie"
+    assert_in_delta 30.days.from_now.to_i, expiry.to_i, 1.hour.to_i
+  end
+
+  test "remembered session slides the expiry window on later requests" do
+    user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase", remember_me: "1" }
+
+    get root_path
+
+    assert_not_nil session_cookie_expiry, "later requests must keep re-issuing the persistent cookie"
+  end
+
+  test "plain login keeps a browser-session cookie" do
+    user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
+
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase" }
+
+    assert_response :see_other
+    assert_equal user.id, session[:user_id]
+    assert_nil session_cookie_expiry, "login without remember_me must not set a cookie expiry"
+  end
+
+  test "logout clears the remembered session persistence" do
+    user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase", remember_me: "1" }
+
+    delete logout_path
+
+    assert_nil session[:user_id]
+    post identity_path, params: { name: "Guest again" }
+    assert_nil session_cookie_expiry, "session cookies after logout must revert to browser-session"
+  end
+
   test "logout removes account ownership from the guest session" do
     user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
     document = Document.create!(title: "Private to account", user:, owner_name: user.name)
@@ -133,5 +175,17 @@ class AuthenticationFlowTest < ActionDispatch::IntegrationTest
   def inertia_error(key)
     errors = session[:inertia_errors] || {}
     errors[key] || errors[key.to_s]
+  end
+
+  # Expiry of the session cookie set by the latest response, or nil when the
+  # cookie is a browser-session cookie (or was not re-issued).
+  def session_cookie_expiry
+    key = Rails.application.config.session_options.fetch(:key)
+    header = Array(response.headers["Set-Cookie"]).flat_map { |value| value.split("\n") }
+    cookie = header.find { |value| value.start_with?("#{key}=") }
+    return nil unless cookie
+
+    expires = cookie[/expires=([^;]+)/i, 1]
+    expires && Time.zone.parse(expires)
   end
 end
