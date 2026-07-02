@@ -54,6 +54,14 @@ class DocumentsController < InertiaController
   # the guide invisibly so even a raw text fetch of the page surfaces it.
   def show
     document = Document.find_by!(slug: params[:slug])
+
+    # Read's canonical URL is the bare document path. /read is routable only
+    # so a hand-edited or agent-guessed mode URL canonicalizes instead of
+    # 404ing next to its routable /edit|/suggest|/comment siblings.
+    if params[:mode] == "read"
+      return redirect_to document_page_path(document.slug), status: :moved_permanently
+    end
+
     link_preview_request = link_preview_user_agent?
     mode = requested_document_mode(document)
 
