@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_02_065649) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_02_073441) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -197,6 +197,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_02_065649) do
     t.index ["google_uid"], name: "index_users_on_google_uid", unique: true
   end
 
+  create_table "yjs_document_updates", force: :cascade do |t|
+    t.integer "content_generation", null: false
+    t.datetime "created_at", null: false
+    t.integer "document_id", null: false
+    t.binary "payload", null: false
+    t.index ["document_id"], name: "index_yjs_document_updates_on_document_id"
+  end
+
   create_table "yjs_state_archives", force: :cascade do |t|
     t.integer "content_generation", null: false
     t.datetime "created_at", null: false
@@ -220,5 +228,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_02_065649) do
   add_foreign_key "documents", "users"
   add_foreign_key "feedback_runs", "users"
   add_foreign_key "suggestions", "documents"
+  add_foreign_key "yjs_document_updates", "documents"
   add_foreign_key "yjs_state_archives", "documents"
 end
