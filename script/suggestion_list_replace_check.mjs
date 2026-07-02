@@ -151,9 +151,7 @@ try {
   assert(true, 'selective bulk acceptance and task-list conversion persist across reload')
 
   const fatalErrors = errors.filter(
-    (error) =>
-      !error.includes('ReactDOMClient.createRoot()') &&
-      !error.includes('Hydration failed because the server rendered'),
+    (error) => !error.includes('Hydration failed because the server rendered'),
   )
   assert(
     fatalErrors.length === 0,

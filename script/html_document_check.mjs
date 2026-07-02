@@ -31,11 +31,9 @@ for (const [label, page] of [
 ]) {
   // Dev-server-only console noise, verified not to reproduce on clean loads
   // or in production builds (see script/export_check.mjs and the 2026-07-01
-  // dogfood report): React's recoverable hydration de-opt under automation
-  // and a StrictMode double-createRoot warning from an editor library.
+  // dogfood report): React's recoverable hydration de-opt under automation.
   const expectedBrowserNoise = (message) =>
     message.includes('Hydration failed because the server rendered') ||
-    message.includes('already been passed to createRoot()') ||
     // The accept→apply→reopen compensation (Suggestion#reopen_after_failed_apply!)
     // can 409 one PATCH mid-dance before converging; the run asserts the final
     // applied state, so the transient conflict is expected collaboration noise.

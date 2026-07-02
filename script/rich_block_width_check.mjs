@@ -58,11 +58,9 @@ let slug
 
 // Dev-server-only console noise, verified not to reproduce on clean loads or
 // in production builds (see script/export_check.mjs and the 2026-07-01
-// dogfood report): React's recoverable hydration de-opt under automation and
-// a StrictMode double-createRoot warning from an editor library.
+// dogfood report): React's recoverable hydration de-opt under automation.
 const expectedBrowserNoise = (message) =>
-  message.includes('Hydration failed because the server rendered') ||
-  message.includes('already been passed to createRoot()')
+  message.includes('Hydration failed because the server rendered')
 page.on('pageerror', (error) => {
   const message = error.stack ?? String(error)
   if (!expectedBrowserNoise(message)) errors.push(message)

@@ -158,12 +158,9 @@ jobs:
         run: |
           node -e "const { chromium } = require('playwright'); (async () => { const b = await chromium.launch(); const p = await b.newPage(); await p.goto('http://localhost:3000/d/demo', { timeout: 180000, waitUntil: 'networkidle' }); await b.close() })()"
 
-      # browser_check is excluded until its comment-role leg is unblocked —
-      # see docs/dogfood-reports/2026-07-01-main-two-week-release-dogfood.md
-      # (selection stomping while a second tab is open).
       - name: Run browser regression checks
         run: |
-          for check in sync_check link_check mermaid_check rich_block_width_check suggestion_list_replace_check export_check html_document_check meta_refresh_check; do
+          for check in sync_check link_check mermaid_check rich_block_width_check suggestion_list_replace_check export_check html_document_check meta_refresh_check browser_check; do
             echo "=== script/${check}.mjs"
             node "script/${check}.mjs"
           done

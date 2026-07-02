@@ -97,12 +97,9 @@ const errors = []
 // in production builds (docs/dogfood-reports/2026-07-01-main-two-week-release-dogfood.md):
 // - React's recoverable hydration de-opt fires when automation interacts
 //   before hydration completes; clean Playwright loads show zero of these.
-// - The double-createRoot warning is a StrictMode dev double-mount inside an
-//   editor library (container is not #app; app code has one createRoot call).
 const expectedBrowserNoise = (message) =>
   message.includes('ResizeObserver loop completed with undelivered notifications') ||
-  message.includes('Hydration failed because the server rendered') ||
-  message.includes('already been passed to createRoot()')
+  message.includes('Hydration failed because the server rendered')
 page.on('pageerror', (error) => {
   const message = error.stack ?? String(error)
   if (!expectedBrowserNoise(message)) errors.push(message)
@@ -125,8 +122,11 @@ try {
   const created = await response.json()
 
   await page.goto(`${BASE}/d/${created.slug}`)
-  await page.waitForSelector('.doc-status--live', { timeout: 15000 })
-  await page.waitForSelector('.thinkroom-sketch', { timeout: 15000 })
+  // The status dot is server-rendered live (optimistic) and the static
+  // preview paints a .thinkroom-sketch figure from first byte, so neither can
+  // gate interaction — wait for the hydrated editor before clicking chrome.
+  await page.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await page.waitForSelector('.doc-live-editor .thinkroom-sketch', { timeout: 15000 })
   await page.locator('.mode-control-trigger').click()
   await page.getByRole('option', { name: /^Read / }).click()
   assert(
