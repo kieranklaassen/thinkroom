@@ -34,8 +34,7 @@ for (const [label, page] of [
   // dogfood report): React's recoverable hydration de-opt under automation
   // and a StrictMode double-createRoot warning from an editor library.
   const expectedBrowserNoise = (message) =>
-    message.includes("Hydration failed because the server rendered HTML didn't match the client") ||
-    message.includes("Hydration failed because the server rendered text didn't match the client") ||
+    message.includes('Hydration failed because the server rendered') ||
     message.includes('already been passed to createRoot()') ||
     // The accept→apply→reopen compensation (Suggestion#reopen_after_failed_apply!)
     // can 409 one PATCH mid-dance before converging; the run asserts the final

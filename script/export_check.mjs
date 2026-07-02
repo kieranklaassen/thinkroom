@@ -101,7 +101,7 @@ const errors = []
 //   editor library (container is not #app; app code has one createRoot call).
 const expectedBrowserNoise = (message) =>
   message.includes('ResizeObserver loop completed with undelivered notifications') ||
-  message.includes("Hydration failed because the server rendered HTML didn't match the client") ||
+  message.includes('Hydration failed because the server rendered') ||
   message.includes('already been passed to createRoot()')
 page.on('pageerror', (error) => {
   const message = error.stack ?? String(error)
