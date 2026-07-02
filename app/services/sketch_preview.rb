@@ -1,21 +1,56 @@
-# Server-side port of the editor's lightweight sketch renderer
-# (app/frontend/editor/sketch/preview.ts renderSketchPreview), so the static
-# first-paint preview shows the actual drawing instead of a blank box. The two
-# renderers must stay geometrically identical: same bounds math, same padding,
-# same primitives — the live editor paints the same shapes over this SVG at
-# swap time and any drift reads as flicker.
+# Server-side sketch rendering for the static first-paint preview: the full
+# <figure> the live node view builds (frame, washi tape, caption) holding an
+# SVG port of the editor's lightweight renderer
+# (app/frontend/editor/sketch/preview.ts renderSketchPreview), so first paint
+# shows the actual drawing instead of a blank box. Figure structure mirrors
+# node_view.ts and the SVG must stay geometrically identical to preview.ts:
+# same bounds math, same padding, same primitives — the live editor paints
+# the same shapes over this at swap time and any drift reads as flicker.
 #
 # Input scenes come exclusively through ThinkroomSketch.parse, which validates
 # element types, colors (SAFE_COLOR), and point shapes — so attribute values
 # interpolated here are already constrained, and all text lands in Nokogiri
 # text nodes (escaped).
-class SketchPreviewSvg
+class SketchPreview
   PADDING = 24 # SKETCH_PADDING in preview.ts
 
   class << self
+    # The sketch <figure> matching the live node view: frame + deterministic
+    # tape variation + preview area at the reserved height + caption.
+    # parsed: a ThinkroomSketch::Parsed with a present (editor-valid) id.
+    def figure(document, parsed, interactive:)
+      figure = element(document, "figure",
+        "class" => interactive ? "thinkroom-sketch is-editable" : "thinkroom-sketch",
+        "data-sketch-id" => parsed.id,
+        "style" => tape_style(parsed.id))
+
+      preview = element(document, "div",
+        "class" => "thinkroom-sketch-preview",
+        "style" => "height: #{parsed.height}px")
+      preview << svg(parsed.scene, document:)
+      figure << preview
+
+      caption_classes = [ "thinkroom-sketch-caption" ]
+      caption_classes << "is-empty" if parsed.description.blank?
+      caption_classes << "is-editable" if interactive
+      caption = element(document, "figcaption", "class" => caption_classes.join(" "))
+      title = element(document, "input",
+        "class" => "thinkroom-sketch-title",
+        "type" => "text",
+        "value" => parsed.description,
+        "readonly" => "",
+        "tabindex" => "-1",
+        "aria-label" => "Sketch title")
+      title["placeholder"] = "Add a title…" if interactive
+      caption << title
+      figure << caption
+
+      figure
+    end
+
     # scene: a validated scene Hash (ThinkroomSketch::Parsed#scene).
     # Returns an SVG element (Nokogiri node) built in `document`'s context.
-    def node(scene, document:)
+    def svg(scene, document:)
       live = scene.fetch("elements", []).reject { |element| element["isDeleted"] == true }
       bounds = content_bounds(live)
 
@@ -142,6 +177,19 @@ class SketchPreviewSvg
       element(document, "polyline",
         "points" => points, "stroke" => stroke, "stroke-width" => fmt(stroke_width),
         "fill" => "none", "stroke-linecap" => "round")
+    end
+
+    # FNV-1a over the id's code points, matching syncTapeVariation in
+    # app/frontend/editor/sketch/node_view.ts so the washi tape sits at the
+    # identical width/offset/angle across the preview → editor swap.
+    def tape_style(id)
+      hash = id.to_s.each_char.reduce(2_166_136_261) do |acc, character|
+        ((acc ^ character.ord) * 16_777_619) & 0xFFFFFFFF
+      end
+      width = 86 + hash % 23
+      offset = ((hash >> 8) % 21) - 10
+      angle = (((hash >> 16) % 29) - 14) / 10.0
+      "--sketch-tape-width: #{width}px; --sketch-tape-offset: #{offset}px; --sketch-tape-angle: #{fmt(angle)}deg"
     end
 
     def element(document, name, attrs = {})

@@ -225,8 +225,8 @@ class DocumentPreviewHtmlTest < ActiveSupport::TestCase
     high = DocumentPreviewHtml.call(format: "markdown", content: sketch_fence(height: 999_999))
     low = DocumentPreviewHtml.call(format: "markdown", content: sketch_fence(height: 10))
 
-    assert_includes high, "height: #{DocumentPreviewHtml::MAX_SKETCH_HEIGHT}px"
-    assert_includes low, "height: #{DocumentPreviewHtml::MIN_SKETCH_HEIGHT}px"
+    assert_includes high, "height: #{ThinkroomSketch::MAX_HEIGHT}px"
+    assert_includes low, "height: #{ThinkroomSketch::MIN_HEIGHT}px"
   end
 
   test "falls back to the default height when the sketch omits one" do
@@ -235,7 +235,7 @@ class DocumentPreviewHtmlTest < ActiveSupport::TestCase
 
     html = DocumentPreviewHtml.call(format: "markdown", content: fence)
 
-    assert_includes html, "height: #{DocumentPreviewHtml::DEFAULT_SKETCH_HEIGHT}px"
+    assert_includes html, "height: #{ThinkroomSketch::DEFAULT_HEIGHT}px"
   end
 
   test "renders an html sketch figure at its reserved height" do

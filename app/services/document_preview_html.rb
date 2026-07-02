@@ -17,10 +17,6 @@
 #   - Sketches render as the real sketch figure (border/caption/tape) with a
 #     server-drawn SVG of the scene — not a gray placeholder.
 class DocumentPreviewHtml
-  DEFAULT_SKETCH_HEIGHT = ThinkroomSketch::DEFAULT_HEIGHT
-  MIN_SKETCH_HEIGHT = ThinkroomSketch::MIN_HEIGHT
-  MAX_SKETCH_HEIGHT = ThinkroomSketch::MAX_HEIGHT
-
   class << self
     # editable: whether the editor will mount with contenteditable (Edit or
     #   Suggest mode for a writer) — controls Mermaid source visibility.
@@ -73,18 +69,13 @@ class DocumentPreviewHtml
     # app/frontend/editor/mermaid.ts so persisted render hints line up with
     # the hashes the editor computes for its diagram figures.
     def mermaid_source_hash(source)
-      fnv1a(source.encode(Encoding::UTF_16LE).unpack("v*")).to_s(36)
+      hash = source.encode(Encoding::UTF_16LE).unpack("v*").reduce(2_166_136_261) do |acc, unit|
+        ((acc ^ unit) * 16_777_619) & 0xFFFFFFFF
+      end
+      hash.to_s(36)
     end
 
     private
-
-    # 32-bit FNV-1a folded over integer units. Callers pick the unit stream to
-    # match their JS counterpart exactly (UTF-16 code units vs. code points).
-    def fnv1a(units)
-      units.reduce(2_166_136_261) do |hash, unit|
-        ((hash ^ unit) * 16_777_619) & 0xFFFFFFFF
-      end
-    end
 
     # Block containers whose children are block elements; the whitespace between
     # those children is the markdown renderer's pretty-printing, never content.
@@ -260,16 +251,15 @@ class DocumentPreviewHtml
       value.is_a?(Integer) && value.positive? ? value : nil
     end
 
-    # Replace each sketch with the same figure the live node view builds —
-    # frame, tape, preview area at the reserved height, caption — holding a
-    # server-drawn SVG of the scene. First paint shows the actual drawing and
-    # the editor's identical figure swaps in with zero shift. Runs
-    # post-sanitize; every scene passes ThinkroomSketch validation (element
-    # types, colors, points) before anything is rendered, and unrecognized
-    # payloads keep their sanitized code-block/figure form.
+    # Replace each sketch with the same figure the live node view builds
+    # (SketchPreview.figure) so first paint shows the actual drawing and the
+    # editor's identical figure swaps in with zero shift. Runs post-sanitize;
+    # every scene passes ThinkroomSketch validation (element types, colors,
+    # points) before anything is rendered, and unrecognized payloads keep
+    # their sanitized code-block/figure form.
     def replace_sketches(fragment, format:, interactive:)
-      sketch_nodes(fragment, format:).each do |node, sketch|
-        node.replace(sketch_figure(node.document, sketch, interactive:))
+      sketch_nodes(fragment, format:).each do |node, parsed|
+        node.replace(SketchPreview.figure(node.document, parsed, interactive:))
       end
     end
 
@@ -279,103 +269,22 @@ class DocumentPreviewHtml
           parsed = ThinkroomSketch.parse(
             node["data-scene"],
             description: node["data-description"],
-            format_version: node["data-format-version"]
-          )
-          next unless parsed
-
-          [ node, {
-            parsed:,
+            format_version: node["data-format-version"],
             id: node["data-sketch-id"].to_s,
-            height: clamp_height(node["data-sketch-height"])
-          } ]
+            height: node["data-sketch-height"]
+          )
+          [ node, parsed ] if parsed
         end
       else
         # The excalidraw fence sanitizes down to <pre><code>{scene json}</code></pre>
         # (the lang hint is dropped), so the JSON payload itself is the signal.
+        # A nil id means the fence is not editor-recognizable (normalizeSketchData
+        # would keep it a code block there), so it stays a code block here too.
         fragment.css("pre > code").filter_map do |code|
-          payload = parse_sketch_payload(code.text) or next
-          parsed = ThinkroomSketch.parse_markdown_fence(code.text, payload:)
-          next unless parsed
-
-          # The editor only accepts fences whose id matches this pattern
-          # (normalizeSketchData); anything else stays a code block there,
-          # so it must stay a code block here too.
-          id = payload["id"].to_s[/\A[a-zA-Z0-9_-]{1,100}\z/]
-          next unless id
-
-          [ code.parent, {
-            parsed:,
-            id:,
-            height: clamp_height(payload["height"])
-          } ]
+          parsed = ThinkroomSketch.parse_markdown_fence(code.text)
+          [ code.parent, parsed ] if parsed&.id
         end
       end
-    end
-
-    # Match only a real sketch payload, not any code block that happens to hold
-    # JSON with a "scene" key. The live editor keys sketches on a lang=excalidraw
-    # fence, but the sanitizer strips that hint — so mirror the sketch wrapper
-    # shape instead (a formatVersion plus an excalidraw scene). Otherwise a
-    # JSON/Ruby code sample gets erased into a blank skeleton on first paint.
-    def parse_sketch_payload(text)
-      data = JSON.parse(text)
-      return nil unless data.is_a?(Hash) && data.key?("formatVersion")
-
-      scene = data["scene"]
-      data if scene.is_a?(Hash) && scene["type"] == "excalidraw"
-    rescue JSON::ParserError
-      nil
-    end
-
-    def sketch_figure(document, sketch, interactive:)
-      parsed = sketch[:parsed]
-      figure = Nokogiri::XML::Node.new("figure", document)
-      figure["class"] = interactive ? "thinkroom-sketch is-editable" : "thinkroom-sketch"
-      figure["data-sketch-id"] = sketch[:id]
-      figure["style"] = tape_style(sketch[:id])
-
-      preview = Nokogiri::XML::Node.new("div", document)
-      preview["class"] = "thinkroom-sketch-preview"
-      preview["style"] = "height: #{sketch[:height]}px"
-      preview << SketchPreviewSvg.node(parsed.scene, document:)
-      figure << preview
-
-      caption = Nokogiri::XML::Node.new("figcaption", document)
-      caption_classes = [ "thinkroom-sketch-caption" ]
-      caption_classes << "is-empty" if parsed.description.blank?
-      caption_classes << "is-editable" if interactive
-      caption["class"] = caption_classes.join(" ")
-      title = Nokogiri::XML::Node.new("input", document)
-      title["class"] = "thinkroom-sketch-title"
-      title["type"] = "text"
-      title["value"] = parsed.description
-      title["readonly"] = ""
-      title["tabindex"] = "-1"
-      title["aria-label"] = "Sketch title"
-      title["placeholder"] = "Add a title…" if interactive
-      caption << title
-      figure << caption
-
-      figure
-    end
-
-    # Same FNV hash the node view uses for its tape variation CSS variables
-    # (syncTapeVariation in app/frontend/editor/sketch/node_view.ts), so the
-    # washi tape sits at the identical width/offset/angle across the swap.
-    def tape_style(id)
-      hash = fnv1a(id.to_s.each_char.map(&:ord))
-      width = 86 + hash % 23
-      offset = ((hash >> 8) % 21) - 10
-      angle = (((hash >> 16) % 29) - 14) / 10.0
-      angle_text = angle == angle.truncate ? angle.truncate.to_s : angle.to_s
-      "--sketch-tape-width: #{width}px; --sketch-tape-offset: #{offset}px; --sketch-tape-angle: #{angle_text}deg"
-    end
-
-    def clamp_height(raw)
-      value = raw.to_i
-      return DEFAULT_SKETCH_HEIGHT if value <= 0
-
-      value.clamp(MIN_SKETCH_HEIGHT, MAX_SKETCH_HEIGHT)
     end
   end
 end
