@@ -155,7 +155,20 @@ try {
     fail(`comment link mode matrix diverged: ${JSON.stringify(guestModes)}`)
   }
   await accessGuest.keyboard.press('Escape')
-  await accessGuest.locator('.milkdown .ProseMirror p').first().dblclick()
+  // Headless Chromium doesn't word-select on dblclick outside an editable
+  // ProseMirror view, so select the way a user does: a real mouse drag
+  // across the paragraph, which ProseMirror observes into its state and the
+  // selection watcher turns into the comment toolbar.
+  const commentParagraph = await accessGuest.locator('.doc-live-editor .ProseMirror p').first().boundingBox()
+  await accessGuest.mouse.move(commentParagraph.x + 4, commentParagraph.y + commentParagraph.height / 2)
+  await accessGuest.mouse.down()
+  await accessGuest.mouse.move(
+    commentParagraph.x + commentParagraph.width * 0.7,
+    commentParagraph.y + commentParagraph.height / 2,
+    { steps: 8 },
+  )
+  await accessGuest.mouse.up()
+  await accessGuest.locator('.selection-toolbar.is-placed').waitFor({ timeout: 5000 })
   await accessGuest.locator('.selection-toolbar button', { hasText: 'Comment' }).click()
   const accessComment = `Comment-role check ${Date.now()}`
   await accessGuest.getByPlaceholder('Say something about this…').fill(accessComment)
@@ -2327,6 +2340,13 @@ try {
   if (process.exitCode !== 1) console.log('\nAll browser checks passed.')
 } catch (err) {
   fail(`browser check crashed: ${err.message}`)
+  // Post-mortem for timeouts: dump each open page's URL so the failing
+  // context is identifiable without re-running under a debugger.
+  for (const context of browser.contexts()) {
+    for (const page of context.pages()) {
+      console.error(`  open page: ${page.url()}`)
+    }
+  }
 } finally {
   await browser.close()
 }
