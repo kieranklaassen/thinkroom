@@ -71,6 +71,10 @@ export function gatedCursorAwareness(awareness: Awareness): Awareness {
       if (property === 'on') {
         return (event: string, listener: AwarenessChangeListener) => {
           if (event !== 'change') return target.on(event as 'change', listener as never)
+          // Keyed by listener, so registering the SAME listener twice would
+          // orphan the first gate's raw registration. y-prosemirror's cursor
+          // plugin registers each listener exactly once, which is the only
+          // consumer this façade is handed to.
           const gate = buildGate(listener)
           gates.set(listener, gate)
           return target.on('change', gate.gated as never)
