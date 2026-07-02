@@ -108,7 +108,14 @@ export function ActivityPanel({ activities }: { activities: ActivityPayload[] })
                   <em className="activity-detail"> — {newest.detail}</em>
                 )}
               </span>
-              <time className="activity-time">{timeAgo(newest.created_at)}</time>
+              {/* timeAgo depends on Date.now(): when a timestamp crosses a
+                  display bucket between SSR and hydration ("just now" ->
+                  "1m ago"), the text mismatch makes React regenerate the
+                  WHOLE tree — the entire page blinks. Suppress on this node
+                  only; React patches the text in place instead. */}
+              <time className="activity-time" suppressHydrationWarning>
+                {timeAgo(newest.created_at)}
+              </time>
             </li>
           )
         })}
