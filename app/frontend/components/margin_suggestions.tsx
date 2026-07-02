@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { nativeHaptic } from '@ruby-native/react'
 import { editorViewCtx, parserCtx, schemaCtx } from '@milkdown/kit/core'
 import { TextSelection } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
@@ -261,6 +262,7 @@ export function MarginSuggestions({
                   event.stopPropagation()
                   resolve(suggestion, onAccept)
                 }}
+                {...nativeHaptic('success')}
               >
                 Accept
               </button>
@@ -271,6 +273,7 @@ export function MarginSuggestions({
                   event.stopPropagation()
                   resolve(suggestion, onReject)
                 }}
+                {...nativeHaptic('warning')}
               >
                 Reject
               </button>

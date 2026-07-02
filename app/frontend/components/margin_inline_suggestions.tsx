@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { nativeHaptic } from '@ruby-native/react'
 import { editorViewCtx } from '@milkdown/kit/core'
 import { TextSelection } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
@@ -186,6 +187,7 @@ export function MarginInlineSuggestions({ inline, handle, spans, focusMode }: Pr
                   event.stopPropagation()
                   resolve(s, true)
                 }}
+                {...nativeHaptic('success')}
               >
                 Accept
               </button>
@@ -195,6 +197,7 @@ export function MarginInlineSuggestions({ inline, handle, spans, focusMode }: Pr
                   event.stopPropagation()
                   resolve(s, false)
                 }}
+                {...nativeHaptic('warning')}
               >
                 Reject
               </button>
@@ -243,10 +246,10 @@ export function InlineSuggestionSheetList({ inline, handle }: SheetProps) {
           {s.deletedText && <del className="margin-old">{truncate(s.deletedText, 160)}</del>}
           {s.insertedText && <p className="margin-new">{truncate(s.insertedText, 400)}</p>}
           <div className="suggestion-actions">
-            <button className="btn-accept" onClick={() => resolve(s, true)}>
+            <button className="btn-accept" onClick={() => resolve(s, true)} {...nativeHaptic('success')}>
               Accept
             </button>
-            <button className="btn-reject" onClick={() => resolve(s, false)}>
+            <button className="btn-reject" onClick={() => resolve(s, false)} {...nativeHaptic('warning')}>
               Reject
             </button>
           </div>

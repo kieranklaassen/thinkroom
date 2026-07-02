@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Head, Link, router, usePoll } from '@inertiajs/react'
+import { nativeHaptic } from '@ruby-native/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { TextSelection } from '@milkdown/kit/prose/state'
 import {
@@ -1233,6 +1234,24 @@ export default function DocumentShow({
       >
         <header className="doc-header">
           <div className="doc-header-left">
+            {/* Only visible inside the Ruby Native shell (body.can-go-back
+                toggles it); asks the shell to pop the native history. */}
+            <button
+              type="button"
+              className="native-back-button doc-back"
+              aria-label="Back"
+              onClick={() => window.RubyNative?.postMessage({ action: 'back' })}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path
+                  d="M15.75 19.5L8.25 12l7.5-7.5"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
             <Link href="/" className="doc-home" aria-label="Home">
               T.
             </Link>
@@ -1287,6 +1306,7 @@ export default function DocumentShow({
                 className="accept-all-button"
                 disabled={acceptingAll}
                 onClick={() => void acceptAllSuggestions()}
+                {...nativeHaptic('success')}
               >
                 {acceptingAll ? 'Accepting…' : `Accept all ${pendingSuggestionCount}`}
               </button>

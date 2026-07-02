@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { nativeHaptic } from '@ruby-native/react'
 import { useDismissable } from '../lib/use_dismissable'
 import { useMediaQuery } from '../lib/use_media_query'
 
@@ -86,6 +87,7 @@ export function ModeControl({
             onChange(value)
             setOpen(false)
           }}
+          {...nativeHaptic('selection')}
         >
           <span className="mode-control-option-check" aria-hidden="true">
             {mode === value ? '✓' : ''}

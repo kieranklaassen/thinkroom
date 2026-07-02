@@ -34,6 +34,9 @@
 # Local agent state
 /.claude/
 
+# Ruby Native
+.ruby_native/
+
 # Local feedback recordings and extracted artifacts
 /riffrec-*.zip
 /docs/brainstorms/riffrec-feedback/

@@ -918,6 +918,11 @@ a:focus-visible {
   justify-content: space-between;
   gap: 1rem;
   padding: 0.5rem 1rem;
+  /* Clears the status bar / Dynamic Island in the Ruby Native shell and
+   * installed PWAs; resolves to the base 0.5rem in regular browsers. The
+   * shell pushes real inset heights into --ruby-native-* on Android, where
+   * env() stays 0. */
+  padding-top: calc(0.5rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--line);
@@ -954,6 +959,26 @@ a:focus-visible {
 
 .doc-home:hover {
   opacity: 1;
+}
+
+/* Native back affordance for the Ruby Native shell. Hidden by default here
+ * AND by the gem stylesheet; only the gem's body.can-go-back rule (higher
+ * specificity) reveals it, so web users never see it even if the gem
+ * stylesheet fails to load. */
+.doc-back {
+  display: none;
+  border: none;
+  background: none;
+  padding: 0 0.25rem 0 0;
+  color: var(--ink);
+  opacity: 0.85;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.doc-back svg {
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .doc-title {
@@ -3218,7 +3243,8 @@ a:focus-visible {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 0.25rem;
-  padding: 0.35rem 0.6rem calc(0.35rem + env(safe-area-inset-bottom));
+  padding: 0.35rem 0.6rem
+    calc(0.35rem + var(--ruby-native-safe-area-inset-bottom, env(safe-area-inset-bottom)));
   background: color-mix(in srgb, var(--surface) 90%, transparent);
   backdrop-filter: blur(10px);
   border-top: 1px solid var(--line);
@@ -3286,7 +3312,7 @@ a:focus-visible {
   background: var(--surface-raised);
   border-radius: 16px 16px 0 0;
   box-shadow: 0 -8px 32px rgb(0 0 0 / 0.16);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: var(--ruby-native-safe-area-inset-bottom, env(safe-area-inset-bottom));
   animation: sheet-up 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
@@ -3426,7 +3452,8 @@ a:focus-visible {
     width: auto;
     min-width: 0;
     max-width: none;
-    padding: 2rem 1.25rem calc(7rem + env(safe-area-inset-bottom));
+    padding: 2rem 1.25rem
+      calc(7rem + var(--ruby-native-safe-area-inset-bottom, env(safe-area-inset-bottom)));
   }
 
   .document-width-handle {
@@ -3490,6 +3517,10 @@ a:focus-visible {
 @media (max-width: 48rem) {
   .doc-header {
     padding: 0.45rem 0.75rem;
+    /* The shorthand resets the base rule's safe-area padding-top; re-apply
+     * it here or the header sits under the notch on phones — the exact
+     * viewport the native shell uses. */
+    padding-top: calc(0.45rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
     gap: 0.5rem;
   }
 
@@ -3525,7 +3556,7 @@ a:focus-visible {
     z-index: 80;
     border-radius: 16px 16px 0 0;
     border-bottom: none;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: var(--ruby-native-safe-area-inset-bottom, env(safe-area-inset-bottom));
     animation: sheet-up 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 
@@ -3670,7 +3701,8 @@ a:focus-visible {
 
 .landing-corner {
   position: absolute;
-  top: 1rem;
+  /* Extra offset only inside the Ruby Native shell / installed PWAs. */
+  top: calc(1rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
   right: 1rem;
   display: flex;
   align-items: center;
@@ -3687,7 +3719,7 @@ a:focus-visible {
   }
 
   .landing-corner {
-    top: 0.75rem;
+    top: calc(0.75rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
     right: 0.75rem;
   }
 
