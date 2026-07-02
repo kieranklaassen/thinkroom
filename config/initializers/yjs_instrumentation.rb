@@ -13,9 +13,12 @@ Rails.application.config.after_initialize do
     outcome = payload[:outcome] || (payload[:exception] ? "error" : "ok")
 
     # Failure outcomes self-classify by the emitters' naming convention
-    # (rejected_* / invalid_* / dropped_*, plus the exception fallback), so
-    # new success outcomes never rot an allowlist into false warns.
-    failure = outcome == "error" || outcome.start_with?("rejected_", "invalid_", "dropped_")
+    # (rejected_* / invalid_* / dropped_* / recovered*, plus the exception
+    # fallback), so new success outcomes never rot an allowlist into false
+    # warns. Recoveries are successes for the caller but demand operator
+    # attention, so they log at warn too.
+    failure = outcome == "error" ||
+              outcome.start_with?("rejected_", "invalid_", "dropped_", "recovered")
 
     # Pick the level before building the log line: the merge path emits an
     # event per collaborative frame, and assembling a string that a
@@ -37,7 +40,7 @@ Rails.application.config.after_initialize do
       duration_ms: event.duration.round(1)
     }
     %i[update_bytes blob_bytes blob_bytes_before blob_bytes_after lock_wait_ms
-       served_from sequence expected_sequence error].each do |key|
+       served_from restored_from sequence expected_sequence error].each do |key|
       fields[key] = payload[key] if payload.key?(key)
     end
     # Class and message ("Document::StaleGenerationError: Client generation 3

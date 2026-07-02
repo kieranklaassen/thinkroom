@@ -87,3 +87,67 @@ bin/kamal deploy
 
 DNS for every `KAMAL_PROXY_HOSTS` entry must point to a configured host before
 the first TLS-enabled deploy.
+
+## Back up the SQLite database with Litestream
+
+The CRDT blobs in `storage/production.sqlite3` are the only copy of every
+document's live state — the content snapshots and HTML projections are lossy
+derivations. The Kamal volume is a single point of failure, so stream the
+database off-host with [Litestream](https://litestream.io/) before relying on
+the deployment for real work.
+
+Add a Litestream accessory to `config/deploy.yml` (adjust the bucket, region,
+and endpoint for your object store; any S3-compatible target works):
+
+```yaml
+accessories:
+  litestream:
+    image: litestream/litestream:0.3
+    hosts:
+      - <your production host>
+    volumes:
+      - "<%= ENV.fetch("KAMAL_STORAGE_VOLUME") %>:/rails/storage"
+    files:
+      - config/litestream.yml:/etc/litestream.yml
+    env:
+      secret:
+        - LITESTREAM_ACCESS_KEY_ID
+        - LITESTREAM_SECRET_ACCESS_KEY
+    cmd: replicate
+```
+
+With `config/litestream.yml`:
+
+```yaml
+dbs:
+  - path: /rails/storage/production.sqlite3
+    replicas:
+      - type: s3
+        bucket: your-backup-bucket
+        path: thinkroom/production
+        region: auto
+        # endpoint: https://<account>.r2.cloudflarestorage.com  # non-AWS stores
+```
+
+Add the two secrets to `.kamal/secrets`, then `bin/kamal accessory boot litestream`.
+The queue/cache/cable databases are derivable and do not need replication.
+
+### Rehearse the restore before you need it
+
+A backup that has never been restored is a hope, not a backup. On the host
+(or any machine with the credentials):
+
+1. Restore to a scratch path — never directly over the live file:
+   `litestream restore -config /etc/litestream.yml -o /tmp/restored.sqlite3 /rails/storage/production.sqlite3`
+2. Integrity-check the restored file:
+   `sqlite3 /tmp/restored.sqlite3 "PRAGMA integrity_check;"` (expect `ok`) and
+   spot-check `SELECT COUNT(*) FROM documents;`.
+3. To actually fail over: stop the app (`bin/kamal app stop`), move the
+   restored file into place on the volume, clear derived state that may be
+   ahead of the restore (`DELETE FROM solid_cable_messages;` on the cable DB
+   is safe — it is transient), and `bin/kamal app boot`.
+4. Clients holding newer state than the restore point re-upload it through
+   the sync handshake on reconnect; `yjs_state_archives` checkpoints inside
+   the database itself cover shorter-horizon, per-document recovery.
+
+Rehearse steps 1-2 quarterly; they are read-only and safe against production.
