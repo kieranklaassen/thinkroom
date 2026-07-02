@@ -33,6 +33,7 @@ import type { EditorView } from '@milkdown/kit/prose/view'
 import type { Node as ProseNode } from '@milkdown/kit/prose/model'
 import { TextSelection } from '@milkdown/kit/prose/state'
 import { CableProvider, type DurableSnapshotPayload } from './cable_provider'
+import { gatedCursorAwareness } from './cursor_awareness'
 import { lazyShikiParser, loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
 import type { UserIdentity } from './identity'
@@ -71,6 +72,7 @@ import {
   trashIcon,
 } from './table_icons'
 import { agentCursors } from './agent_cursors'
+import { codeBlockView } from './code_block_view'
 import { configureCleanClipboard } from './clipboard'
 import { renderSoftBreaks } from './line_breaks'
 import { interactiveTaskListItems, taskPersistenceCtx } from './task_list_items'
@@ -475,6 +477,7 @@ function CollabEditor({
           }))
         })
         .use(commonmark)
+        .use(codeBlockView)
         .use(gfm)
         .use(interactiveTaskListItems)
         .use(tableBlock)
@@ -570,7 +573,11 @@ function CollabEditor({
       editor.action((ctx) => {
         const service = ctx.get(collabServiceCtx)
         ctx.set(readPointerAwarenessCtx.key, provider.awareness)
-        service.bindDoc(ydoc).setAwareness(provider.awareness)
+        // The service's awareness feeds ONLY y-prosemirror's cursor plugin,
+        // whose per-tick dispatches stomp native selections in non-editable
+        // modes — hand it the gated façade so it re-renders only when the
+        // remote cursor slice actually changed. Sync (bindDoc) is unaffected.
+        service.bindDoc(ydoc).setAwareness(gatedCursorAwareness(provider.awareness))
         ctx.set(taskPersistenceCtx.key, {
           persist: () =>
             provider.persistCurrentState(buildSnapshotPayload(ctx, ydoc, contentFormat)),
@@ -606,6 +613,16 @@ function CollabEditor({
               excludePendingInsertions: true,
             }),
           )
+        }
+        if (seed) {
+          // Persist the applied seed NOW over HTTP (keepalive) instead of
+          // waiting for the cable handshake. The cable path drops local
+          // updates until 'sync' arrives, so a claimant that navigated away
+          // within the first seconds burned the seed claim and left the
+          // document blank for every viewer until the claim timeout. The
+          // sync_update endpoint also broadcasts, so already-connected
+          // viewers receive the seeded content live.
+          provider.persistCurrentState(buildSnapshotPayload(ctx, ydoc, contentFormat))
         }
 
         ctx.set(selectionCallbackCtx.key, {
