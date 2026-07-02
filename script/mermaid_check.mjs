@@ -136,16 +136,16 @@ ${INVALID_SOURCE}
   await staticPage.goto(`${BASE}/d/${slug}`)
   await staticPage.locator('.doc-static-preview figure.mermaid-diagram').first().waitFor({ timeout: 15_000 })
   const staticGeometry = await staticPage.evaluate(() => {
-    const skeleton = document.querySelector('.doc-static-preview .ProseMirror > figure.mermaid-diagram')
+    const figure = document.querySelector('.doc-static-preview .ProseMirror > figure.mermaid-diagram')
     const prose = document.querySelector('.doc-static-preview .ProseMirror')
     return {
-      skeleton: Math.round(skeleton?.getBoundingClientRect().width ?? 0),
+      figure: Math.round(figure?.getBoundingClientRect().width ?? 0),
       prose: Math.round(prose?.getBoundingClientRect().width ?? 0),
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     }
   })
   check(
-    staticGeometry.skeleton > staticGeometry.prose && staticGeometry.overflow === 0,
+    staticGeometry.figure > staticGeometry.prose && staticGeometry.overflow === 0,
     'server preview breaks the Mermaid placeholder out to the rich width on first paint',
     JSON.stringify(staticGeometry),
   )

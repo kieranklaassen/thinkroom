@@ -25,6 +25,20 @@ const makePage = async (label) => {
   return page
 }
 
+// Wait for full hydration (the stack's data-phase flips to "live" only once
+// the editor is interactive). The status dot is optimistic — it can read
+// "live" while the preview is still on screen — so interaction tests must
+// gate on this instead.
+const waitForLive = (page, timeout = 15000) =>
+  page.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout })
+
+// Exact-label option locator for the mode dropdown: hasText substring
+// matching would let "Read" match the "Read-only" descriptions.
+const modeOption = (page, label) =>
+  page
+    .locator('.mode-control-option')
+    .filter({ has: page.locator('.mode-control-option-label', { hasText: new RegExp(`^${label}$`) }) })
+
 try {
   const landing = await browser.newPage()
   // Headless shell denies clipboard writes by default; real browsers allow them
@@ -92,7 +106,7 @@ try {
   // before the editor boots and persists the applied template leaves the
   // document blank for every other viewer until the claim times out — wait
   // for the live editor to show the seeded text before navigating away.
-  await landing.locator('.doc-editor-stack[data-phase="live"]').waitFor({ timeout: 15000 })
+  await waitForLive(landing)
   await landing
     .locator('.doc-live-editor .ProseMirror p', { hasText: 'Start writing' })
     .waitFor({ timeout: 15000 })
@@ -130,7 +144,7 @@ try {
   // The status dot is server-rendered live (optimistic), so it can't gate
   // interaction: a click before hydration lands on inert SSR chrome. The
   // 'live' editor phase is set client-side, so it proves React is attached.
-  await landing.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(landing)
   await landing.getByRole('button', { name: 'More options' }).click()
   const accessOptions = landing.locator('.header-menu-access-option')
   await accessOptions.first().waitFor({ timeout: 10000 })
@@ -153,7 +167,7 @@ try {
   // editor interaction. Drag-selection below needs the LIVE editor: during
   // boot the visible layer is the user-select:none static preview and a
   // drag lands nowhere — wait for the instant-paint swap to complete.
-  await accessGuest.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(accessGuest)
   await accessGuest.click('.mode-control-trigger')
   const guestModes = await accessGuest.locator('.mode-control-option').evaluateAll((options) =>
     options.map((option) => ({
@@ -257,12 +271,12 @@ try {
 
   const a = await makePage('a')
   await a.waitForSelector('.milkdown .ProseMirror', { timeout: 15000 })
-  await a.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 10000 })
+  await waitForLive(a, 10000)
   ok('editor mounted and live in window A')
 
   const b = await makePage('b')
   await b.waitForSelector('.milkdown .ProseMirror', { timeout: 15000 })
-  await b.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 10000 })
+  await waitForLive(b, 10000)
   ok('editor mounted and live in window B')
 
   // Let the initial y-prosemirror binding render settle in both windows —
@@ -283,7 +297,7 @@ try {
   ).json()
   const c = await browser.newPage()
   await c.goto(`${BASE}/d/${created.slug}/edit`)
-  await c.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(c)
   await c.waitForTimeout(800)
   await c.click('.milkdown .ProseMirror')
   await c.keyboard.press('Meta+ArrowDown')
@@ -322,8 +336,8 @@ try {
   await titleB.setViewportSize({ width: 1440, height: 900 })
   await titleA.goto(`${BASE}/d/${titleDoc.slug}/edit`)
   await titleB.goto(`${BASE}/d/${titleDoc.slug}/edit`)
-  await titleA.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
-  await titleB.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(titleA)
+  await waitForLive(titleB)
   const renamedTitle = `Renamed title ${Date.now()}`
   await titleA.locator('.milkdown .ProseMirror h1').click({ clickCount: 3 })
   await titleA.keyboard.type(renamedTitle)
@@ -353,7 +367,7 @@ try {
   if (persistedTitle === renamedTitle) ok('H1 title persists to the API')
   else fail(`H1 title did not persist: ${JSON.stringify(persistedTitle)}`)
   await titleA.reload()
-  await titleA.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(titleA)
   if ((await titleA.locator('.doc-title').innerText()) === renamedTitle) {
     ok('H1 title survives reload')
   } else {
@@ -434,8 +448,8 @@ try {
   })
   await taskA.goto(`${BASE}/d/${taskDoc.slug}/edit`)
   await taskB.goto(`${BASE}/d/${taskDoc.slug}/edit`)
-  await taskA.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
-  await taskB.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(taskA)
+  await waitForLive(taskB)
   const taskCheckboxes = taskA.locator(
     '.milkdown .ProseMirror li[data-item-type="task"] input[type="checkbox"]',
   )
@@ -477,7 +491,7 @@ try {
     fail(`checked task did not persist: ${JSON.stringify(taskMarkdown)}`)
   }
   await taskA.reload()
-  await taskA.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(taskA)
   if (await taskA.locator('.task-checkbox').nth(0).isChecked()) {
     ok('checked task survives reload')
   } else {
@@ -490,7 +504,7 @@ try {
   blockTaskWebSocketUpdates = true
   await taskA.locator('.task-checkbox').nth(0).uncheck()
   await taskA.reload()
-  await taskA.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(taskA)
   if (!(await taskA.locator('.task-checkbox').nth(0).isChecked())) {
     ok('task toggle survives an immediate reload')
   } else {
@@ -502,14 +516,14 @@ try {
   // suggest-changes transform or the native control toggles without changing
   // ProseMirror/Yjs and silently reverts on reload.
   await taskA.goto(`${BASE}/d/${taskDoc.slug}/suggest`)
-  await taskA.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(taskA)
   await taskA.waitForFunction(
     () => document.querySelector('.mode-control-trigger')?.textContent?.includes('Suggest'),
     { timeout: 5000 },
   )
   await taskA.locator('.task-checkbox').nth(0).check()
   await taskA.reload()
-  await taskA.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(taskA)
   if (await taskA.locator('.task-checkbox').nth(0).isChecked()) {
     ok('task toggle persists in Suggest mode')
   } else {
@@ -547,8 +561,8 @@ try {
     sketchB.goto(`${BASE}/d/${sketchDoc.slug}/edit`),
   ])
   await Promise.all([
-    sketchA.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 }),
-    sketchB.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 }),
+    waitForLive(sketchA),
+    waitForLive(sketchB),
   ])
   await sketchA.locator('.milkdown .ProseMirror').click()
   await sketchA.keyboard.press('Meta+ArrowDown')
@@ -798,9 +812,7 @@ try {
       if (sketches.length === 0) return
       if (sketches.every((node) => node.querySelector('[data-renderer="excalidraw"]'))) {
         window.__exactRendererAt = performance.now()
-        return true
       }
-      return false
     }
     const observer = new MutationObserver(() => {
       const stack = document.querySelector('.doc-editor-stack')
@@ -938,7 +950,7 @@ try {
   ).json()
   const insertSketchPage = await browser.newPage({ viewport: { width: 1280, height: 900 } })
   await insertSketchPage.goto(`${BASE}/d/${emptySketchDoc.slug}/edit`)
-  await insertSketchPage.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(insertSketchPage)
   await insertSketchPage.locator('.sketch-add-inline').waitFor({ state: 'visible', timeout: 5000 })
   await insertSketchPage.locator('.sketch-add-inline').click()
   await insertSketchPage.locator('.thinkroom-sketch.is-editing').waitFor({ timeout: 15000 })
@@ -995,7 +1007,7 @@ try {
   ).json()
   const malformedPage = await browser.newPage()
   await malformedPage.goto(`${BASE}/d/${malformedDoc.slug}`)
-  await malformedPage.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(malformedPage)
   if (
     (await malformedPage.locator('.thinkroom-sketch').count()) === 0 &&
     (await malformedPage.locator('pre code').innerText()).includes('malformed_points')
@@ -1014,7 +1026,7 @@ try {
   await failedChunkPage.goto(`${BASE}/d/${malformedDoc.slug}/edit`)
   // Clicks must wait for the live editor: before the instant-paint swap the
   // only .milkdown .ProseMirror is the inert server preview.
-  await failedChunkPage.locator('.doc-editor-stack[data-phase="live"]').waitFor({ timeout: 15000 })
+  await waitForLive(failedChunkPage)
   // Click the trailing paragraph directly — Meta+ArrowDown is a macOS-only
   // caret binding, and on Linux Chromium a center click lands inside the
   // code fence, turning /sketch into literal code text.
@@ -1048,7 +1060,7 @@ try {
   })
   const clipboardPage = await clipboardContext.newPage()
   await clipboardPage.goto(`${BASE}/d/${clipboardDoc.slug}/edit`)
-  await clipboardPage.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(clipboardPage)
   await clipboardPage.locator('.milkdown .ProseMirror').click()
   // ControlOrMeta: bare Meta+A/C are macOS-only and silently no-op on the
   // Linux CI runner, leaving whatever the landing auto-copy last wrote.
@@ -1129,7 +1141,7 @@ try {
   }
   const sb = await browser.newPage()
   await sb.goto(`${BASE}/d/${softDoc.slug}`)
-  await sb.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(sb)
   await assertSoftBreakRender(sb, 'initial render')
   // The 900ms snapshot debounce resets on every update — poll the API until
   // the snapshot lands instead of gambling on a fixed sleep.
@@ -1150,7 +1162,7 @@ try {
   // Reload exercises the persisted-state reparse path (no drift on repeated
   // open/serialize cycles).
   await sb.reload()
-  await sb.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(sb)
   await assertSoftBreakRender(sb, 'after reload')
   await sb.close()
 
@@ -1204,7 +1216,7 @@ try {
   }
   const fmPage = await browser.newPage()
   await fmPage.goto(`${BASE}/d/${fmDoc.slug}/edit`)
-  await fmPage.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(fmPage)
   await assertFrontmatterRender(fmPage, 'initial render')
   // Typing at the very top of the doc displaces the frontmatter; the guard
   // must move it back above the typed paragraph before the snapshot lands.
@@ -1225,7 +1237,7 @@ try {
     fail(`frontmatter serialization drifted: ${JSON.stringify(fmSnapshot.slice(0, 120))}`)
   }
   await fmPage.reload()
-  await fmPage.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(fmPage)
   await assertFrontmatterRender(fmPage, 'after reload')
   await fmPage.close()
 
@@ -1255,7 +1267,7 @@ try {
   ok('content survived reload (server persistence works)')
   // The interactions below click INSIDE the editor; wait out the instant-paint
   // swap so the clicks reach the live ProseMirror, not the inert preview.
-  await a.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(a)
 
 
   // --- Provenance checks ---
@@ -1412,7 +1424,7 @@ try {
   if (themeAfter === 'whitey') ok('theme persisted across reload')
   else fail(`theme lost on reload: ${themeAfter}`)
   // Menu clicks need hydration — before the swap the SSR chrome is inert.
-  await a.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(a)
   await a.locator('.header-menu-trigger').click()
   await a.locator('.theme-option', { hasText: 'Thinkroom' }).click()
   await a.keyboard.press('Escape')
@@ -1671,7 +1683,7 @@ try {
   ).json()
   const winA = await makePage('a')
   await winA.goto(`${BASE}/d/${trackDoc.slug}`)
-  await winA.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(winA)
   const modeDocumentRequests = []
   const recordModeDocumentRequest = (request) => {
     const path = new URL(request.url()).pathname
@@ -1712,10 +1724,7 @@ try {
     fail('Command+3 did not switch to Comment mode')
   }
   await winA.click('.mode-control-trigger')
-  await winA
-    .locator('.mode-control-option')
-    .filter({ has: winA.locator('.mode-control-option-label', { hasText: /^Suggest$/ }) })
-    .click()
+  await modeOption(winA, 'Suggest').click()
   await winA.waitForURL(`${BASE}/d/${trackDoc.slug}/suggest`)
   const editorSessionPreserved = await winA
     .locator('.milkdown .ProseMirror')
@@ -1745,7 +1754,7 @@ try {
   }
   winA.off('request', recordModeDocumentRequest)
   await winA.reload()
-  await winA.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(winA)
   if ((await winA.locator('.mode-control-trigger').textContent())?.includes('Suggest mode')) {
     ok('reloading a mode URL restores that mode from the server')
   } else {
@@ -1754,7 +1763,7 @@ try {
 
   const winB = await makePage('b')
   await winB.goto(`${BASE}/d/${trackDoc.slug}/edit`)
-  await winB.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(winB)
   await winA.waitForTimeout(1500)
 
   // The deletion leg below strikes the first 7 characters, so the insertion
@@ -1882,10 +1891,7 @@ try {
 
   // --- Comment mode: click-to-comment ---
   await winB.click('.mode-control-trigger')
-  await winB
-    .locator('.mode-control-option')
-    .filter({ has: winB.locator('.mode-control-option-label', { hasText: /^Comment$/ }) })
-    .click()
+  await modeOption(winB, 'Comment').click()
   await winB.locator('.milkdown .ProseMirror p').first().click()
   await winB
     .locator('.selection-toolbar button', { hasText: 'Comment on this paragraph' })
@@ -1904,10 +1910,10 @@ try {
   // --- Demo doc: localStorage tampering cannot unlock suggest mode ---
   const demoPage = await browser.newPage()
   await demoPage.goto(`${BASE}/d/${SLUG}`)
-  await demoPage.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(demoPage)
   await demoPage.evaluate((slug) => localStorage.setItem(`pruf:mode:${slug}`, 'suggest'), SLUG)
   await demoPage.reload()
-  await demoPage.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(demoPage)
   const demoMode = (await demoPage.locator('.mode-control-trigger').textContent())?.trim()
   if (demoMode?.startsWith('Edit')) ok('demo doc ignored a tampered stored mode (locked to Edit)')
   else fail(`demo doc mode after tamper: "${demoMode}"`)
@@ -1941,7 +1947,7 @@ try {
   const widthContext = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const widthPage = await widthContext.newPage()
   await widthPage.goto(`${BASE}/d/${widthDoc.slug}/edit`)
-  await widthPage.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(widthPage)
   // The handle rail is a zero-width strip (its grip is a floating span), so
   // Playwright's default visible-state wait would never resolve.
   await widthPage.waitForSelector('.document-width-handle', { state: 'attached' })
@@ -1949,7 +1955,7 @@ try {
   const defaultWidth = await widthPage.locator('.doc-main').evaluate((el) => el.getBoundingClientRect().width)
   await widthContext.addCookies([{ name: 'pruf_width', value: '1120', url: BASE }])
   await widthPage.reload()
-  await widthPage.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(widthPage)
   const constrainedWidth = await widthPage.locator('.doc-main').evaluate((el) => el.getBoundingClientRect().width)
   await widthPage.locator('.document-width-handle').focus()
   await widthPage.keyboard.press('ArrowLeft')
@@ -1986,7 +1992,7 @@ try {
 
   const beforeReloadWidth = await widthPage.locator('.doc-main').evaluate((el) => el.getBoundingClientRect().width)
   await widthPage.reload()
-  await widthPage.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(widthPage)
   const reloadedWidth = await widthPage.locator('.doc-main').evaluate((el) => el.getBoundingClientRect().width)
   if (reloadedWidth === beforeReloadWidth) ok('custom document width survives reload at first paint')
   else fail(`custom width changed on reload: ${beforeReloadWidth}px -> ${reloadedWidth}px`)
@@ -2003,10 +2009,7 @@ try {
   await widthPage.click('.mode-control-trigger')
   // Match the label exactly: the Comment option's description also contains
   // the word "Read-only", so a bare hasText hits two options.
-  await widthPage
-    .locator('.mode-control-option')
-    .filter({ has: widthPage.locator('.mode-control-option-label', { hasText: /^Read$/ }) })
-    .click()
+  await modeOption(widthPage, 'Read').click()
   // The mode switch is a client-side re-render; wait for the Read layout to
   // commit before measuring.
   await widthPage.locator('.doc-page.is-read-mode').waitFor({ timeout: 5000 })
@@ -2043,10 +2046,7 @@ try {
 
   await widthPage.setViewportSize({ width: 1024, height: 900 })
   await widthPage.click('.mode-control-trigger')
-  await widthPage
-    .locator('.mode-control-option')
-    .filter({ has: widthPage.locator('.mode-control-option-label', { hasText: /^Edit$/ }) })
-    .click()
+  await modeOption(widthPage, 'Edit').click()
   // Wait for the Edit layout (the review gutter only exists outside Read)
   // to commit before measuring — the switch is a client-side re-render.
   await widthPage.locator('.margin-gutter').waitFor({ timeout: 5000 })
@@ -2096,7 +2096,7 @@ try {
   await ipadPage.goto(`${BASE}/d/${widthDoc.slug}/edit`)
   // Wait out hydration: an automation-triggered hydration de-opt re-renders
   // the tree, and an evaluate racing it can catch a half-replaced DOM.
-  await ipadPage.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(ipadPage)
   const ipadGeometry = await ipadPage.evaluate(() => ({
     coarse: matchMedia('(hover: none) and (pointer: coarse)').matches,
     viewport: window.innerWidth,
@@ -2136,7 +2136,7 @@ try {
   ).json()
   const p = await makePage('a')
   await p.goto(`${BASE}/d/${placeDoc.slug}/edit`)
-  await p.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(p)
   await p.waitForTimeout(1000)
 
   const selectionRect = () =>
@@ -2268,7 +2268,7 @@ try {
 
   const q = await makePage('persist')
   await q.goto(`${BASE}/d/${persistDoc.slug}/edit`)
-  await q.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(q)
   await q.waitForTimeout(800) // initial Yjs bind + margin card placement settle
 
   // Accept one, reject the other; both decisions must survive a reload.
@@ -2281,7 +2281,7 @@ try {
     timeout: 10000,
   })
   await q.reload()
-  await q.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(q)
   await q.waitForTimeout(800) // post-reload card re-derivation settle
   const cardsBack = await q.locator('.margin-card').count()
   if (cardsBack === 0) ok('accepted and rejected suggestions stayed resolved across reload')
@@ -2331,7 +2331,7 @@ try {
     { timeout: 10000 },
   )
   await q.reload()
-  await q.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(q)
   await q.waitForTimeout(800) // post-reload comment list settle
   const resolvedCameBack = await q
     .locator('.comment-card:not(.is-resolved)', { hasText: persistComment })
@@ -2345,10 +2345,7 @@ try {
   // next reconnect handshake — a refresh inside that window loses them.
   // Not simulated here; see docs/plans/2026-06-07-001 R3.)
   await q.click('.mode-control-trigger')
-  await q
-    .locator('.mode-control-option')
-    .filter({ has: q.locator('.mode-control-option-label', { hasText: /^Suggest$/ }) })
-    .click()
+  await modeOption(q, 'Suggest').click()
   await q.click('.milkdown .ProseMirror')
   await q.keyboard.press('Meta+ArrowDown')
   await q.keyboard.press('End')
@@ -2358,7 +2355,7 @@ try {
   await q.waitForTimeout(1200) // let the insertion itself persist first
   await q.locator('.margin-card--inline .btn-accept').first().click()
   await q.reload()
-  await q.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(q)
   await q.waitForTimeout(1200)
   const trackedStillMarked = await q
     .locator('.milkdown ins.sug-ins', { hasText: trackedSentinel })
@@ -2415,7 +2412,7 @@ try {
   })
   const bulk = await makePage('a')
   await bulk.goto(`${BASE}/d/${bulkDoc.slug}/edit`)
-  await bulk.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(bulk)
   await bulk.waitForTimeout(1000)
 
   // Per-card accept of the multi-block suggestion first — exercises the
@@ -2475,7 +2472,7 @@ try {
   }
   await bulk.waitForTimeout(1500) // let the snapshot debounce flush
   await bulk.reload()
-  await bulk.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout: 15000 })
+  await waitForLive(bulk)
   await bulk.waitForTimeout(800)
   const bulkPersisted = await bulk
     .waitForFunction(assertBulkDocState, undefined, { timeout: 10000 })
