@@ -11,6 +11,13 @@ import {
 // preview path below touches it, and it is already async + fire-and-forget.
 const loadExcalidraw = () => import('@excalidraw/excalidraw')
 
+// Warm the renderer as soon as this module reaches the browser (window-gated
+// so the SSR graph stays Excalidraw-free): by the time the collab doc binds
+// and sketch node views build, the module is resident and the pre-paint
+// microtask renders the EXACT preview into the first painted frame instead
+// of flashing the lightweight fallback and upgrading a beat later.
+if (typeof window !== 'undefined') void loadExcalidraw()
+
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const SKETCH_PADDING = 24
 
