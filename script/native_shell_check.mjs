@@ -139,6 +139,10 @@ try {
     'login: #auth-submit is the credentials submit button',
   )
   check(
+    (await page.locator('form[action="/auth/google_oauth2"] #auth-submit').count()) === 0,
+    'login: Google OAuth submit button does not collide with #auth-submit',
+  )
+  check(
     (await page.locator('input[type="email"][autocomplete="username"]').count()) === 1,
     'login: email field pairs with iOS credential autofill',
   )

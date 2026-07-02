@@ -44,12 +44,13 @@ declare module '@ruby-native/react' {
   }): ReactElement
 
   /**
-   * Floating action button. Requires `icon` (or a matching `icons` entry) —
-   * the component throws without one. `href` navigates; `click` clicks a
-   * DOM element by CSS selector.
+   * Floating action button. `icon` is required: on the open web the platform
+   * is unknown, so an `icons`-only usage falls back to `icon` and throws when
+   * it is absent. `href` navigates; `click` clicks a DOM element by CSS
+   * selector.
    */
   export function NativeFab(props: {
-    icon?: string
+    icon: string
     icons?: { ios?: string; android?: string }
     href?: string
     click?: string
