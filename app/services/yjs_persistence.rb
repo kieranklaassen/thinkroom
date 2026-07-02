@@ -58,6 +58,7 @@ class YjsPersistence
             payload[:blob_bytes_after] = blob.bytesize
             document.update_columns(
               yjs_state: blob,
+              yjs_state_vector: ydoc.state.pack("C*"),
               seed_state: "seeded",
               updated_at: Time.current
             )
@@ -69,14 +70,30 @@ class YjsPersistence
     end
 
     # => [full_state_b64, state_vector_b64] for the sync handshake.
+    #
+    # The stored blob is exactly the previous merge's full_diff output and
+    # the stored vector its state, so when both columns are present the
+    # handshake is served from them directly — no Y::Doc instantiation.
+    # Documents written before yjs_state_vector existed (blob present,
+    # vector nil) fall back to rebuilding; their next merge heals them.
     def state_b64(document)
       ActiveSupport::Notifications.instrument("state.yjs", document_id: document.id) do |payload|
         payload[:blob_bytes] = document.yjs_state&.bytesize || 0
-        ydoc = load_ydoc(document)
-        encoded = [
-          Base64.strict_encode64(ydoc.full_diff.pack("C*")),
-          Base64.strict_encode64(ydoc.state.pack("C*"))
-        ]
+        from_columns = document.yjs_state.present? && document.yjs_state_vector.present?
+        payload[:served_from] = from_columns ? "columns" : "rebuild"
+        encoded =
+          if from_columns
+            [
+              Base64.strict_encode64(document.yjs_state),
+              Base64.strict_encode64(document.yjs_state_vector)
+            ]
+          else
+            ydoc = load_ydoc(document)
+            [
+              Base64.strict_encode64(ydoc.full_diff.pack("C*")),
+              Base64.strict_encode64(ydoc.state.pack("C*"))
+            ]
+          end
         # Outcome is assigned last so an exception leaves it unset and the
         # log subscriber's exception fallback classifies the event as a
         # failure rather than a success.
@@ -103,7 +120,13 @@ class YjsPersistence
             end
 
             if client_state && document.yjs_state.present?
-              server_state = decode_state_vector(load_ydoc(document).state)
+              server_state = begin
+                decode_state_vector(server_state_vector(document))
+              rescue ArgumentError
+                # A corrupt stored vector must not masquerade as client
+                # staleness — derive the truth from the blob instead.
+                decode_state_vector(load_ydoc(document).state)
+              end
               current = server_state.all? do |client_id, clock|
                 client_state.fetch(client_id, 0) >= clock
               end
@@ -139,6 +162,13 @@ class YjsPersistence
       ydoc = Y::Doc.new
       ydoc.sync(document.yjs_state.unpack("C*")) if document.yjs_state.present?
       ydoc
+    end
+
+    # Stored vector when present; otherwise derive from the blob (legacy rows).
+    def server_state_vector(document)
+      return document.yjs_state_vector.unpack("C*") if document.yjs_state_vector.present?
+
+      load_ydoc(document).state
     end
 
     def decode(base64_update)

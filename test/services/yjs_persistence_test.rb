@@ -119,6 +119,121 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal "server content", client.get_text("t").to_s
   end
 
+  test "merge persists the state vector alongside the blob" do
+    doc = Document.create!(title: "Vectored")
+    YjsPersistence.merge(doc, b64_update_for("content"))
+    doc.reload
+
+    assert doc.yjs_state_vector.present?
+    ydoc = Y::Doc.new
+    ydoc.sync(doc.yjs_state.unpack("C*"))
+    assert_equal ydoc.state, doc.yjs_state_vector.unpack("C*")
+  end
+
+  test "state_b64 serves the handshake from columns without building a doc" do
+    doc = Document.create!(title: "Fast join")
+    YjsPersistence.merge(doc, b64_update_for("column served"))
+    doc.reload
+
+    event = nil
+    original = Y::Doc.method(:new)
+    Y::Doc.define_singleton_method(:new) { |*| raise "state_b64 must not build a Y::Doc" }
+    begin
+      event = assert_notification("state.yjs", served_from: "columns") do
+        full_state, state_vector = YjsPersistence.state_b64(doc)
+        assert_equal Base64.strict_encode64(doc.yjs_state), full_state
+        assert_equal Base64.strict_encode64(doc.yjs_state_vector), state_vector
+      end
+    ensure
+      Y::Doc.define_singleton_method(:new, original)
+    end
+
+    client = Y::Doc.new
+    client.sync(doc.yjs_state.unpack("C*"))
+    assert_equal "column served", client.get_text("t").to_s
+    assert_equal "ok", event.payload[:outcome]
+  end
+
+  test "a legacy row without a stored vector falls back to rebuilding" do
+    doc = Document.create!(title: "Legacy")
+    YjsPersistence.merge(doc, b64_update_for("old row"))
+    doc.update_columns(yjs_state_vector: nil)
+    doc.reload
+
+    full_state, state_vector = nil, nil
+    assert_notification("state.yjs", served_from: "rebuild") do
+      full_state, state_vector = YjsPersistence.state_b64(doc)
+    end
+
+    client = Y::Doc.new
+    client.sync(Base64.strict_decode64(full_state).unpack("C*"))
+    assert_equal "old row", client.get_text("t").to_s
+    assert state_vector.present?
+  end
+
+  test "replace_content! clears the stored state vector until the next merge" do
+    doc = Document.create!(title: "Reset", seed_content: "# Seed")
+    YjsPersistence.merge(doc, b64_update_for("live"))
+    assert doc.reload.yjs_state_vector.present?
+
+    doc.replace_content!(source: "# Replacement")
+    assert_nil doc.reload.yjs_state_vector
+
+    YjsPersistence.merge(doc, b64_update_for("fresh"))
+    assert doc.reload.yjs_state_vector.present?
+  end
+
+  test "the snapshot staleness gate reads the stored vector without building a doc" do
+    doc = Document.create!(title: "Snapshot", content_snapshot: "current")
+    YjsPersistence.merge(doc, b64_update_for("server content"))
+    stale_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+
+    original = YjsPersistence.singleton_class.instance_method(:load_ydoc)
+    YjsPersistence.define_singleton_method(:load_ydoc) { |*| raise "gate must not build a Y::Doc" }
+    begin
+      persisted = YjsPersistence.persist_snapshot(
+        doc.reload, state_vector_b64: stale_vector, content: "stale", spans: []
+      )
+      assert_not persisted
+    ensure
+      YjsPersistence.singleton_class.define_method(:load_ydoc, original)
+    end
+
+    assert_equal "current", doc.reload.content_snapshot
+  end
+
+  test "a corrupt stored vector falls back to the blob for the snapshot gate" do
+    doc = Document.create!(title: "Snapshot", content_snapshot: "current")
+    client = Y::Doc.new
+    YjsPersistence.merge(doc, b64_update_for("server content", from_doc: client))
+    doc.update_columns(yjs_state_vector: [ 0x85, 0xff ].pack("C*"))
+
+    stale_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+    assert_not YjsPersistence.persist_snapshot(
+      doc.reload, state_vector_b64: stale_vector, content: "stale", spans: []
+    ), "a behind client must still be rejected when the stored vector is corrupt"
+
+    current_vector = Base64.strict_encode64(client.state.pack("C*"))
+    assert YjsPersistence.persist_snapshot(
+      doc.reload, state_vector_b64: current_vector, content: "fresh", spans: []
+    ), "a current client must still be accepted when the stored vector is corrupt"
+    assert_equal "fresh", doc.reload.content_snapshot
+  end
+
+  test "snapshot staleness gate works from a legacy row without a stored vector" do
+    doc = Document.create!(title: "Snapshot", content_snapshot: "current")
+    YjsPersistence.merge(doc, b64_update_for("server content"))
+    doc.update_columns(yjs_state_vector: nil)
+    stale_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+
+    persisted = YjsPersistence.persist_snapshot(
+      doc.reload, state_vector_b64: stale_vector, content: "stale", spans: []
+    )
+
+    assert_not persisted
+    assert_equal "current", doc.reload.content_snapshot
+  end
+
   test "snapshot persistence rejects a client behind the current Yjs state" do
     doc = Document.create!(title: "Snapshot", content_snapshot: "current")
     YjsPersistence.merge(doc, b64_update_for("server content"))
@@ -237,6 +352,9 @@ class YjsPersistenceTest < ActiveSupport::TestCase
   test "a state_b64 failure is not classified as a success event" do
     doc = Document.create!(title: "Corrupt join")
     YjsPersistence.merge(doc, b64_update_for("content"))
+    # Legacy row shape (no stored vector) forces the rebuild path, which is
+    # where a corrupt blob can raise.
+    doc.update_columns(yjs_state_vector: nil)
 
     original = YjsPersistence.singleton_class.instance_method(:load_ydoc)
     YjsPersistence.define_singleton_method(:load_ydoc) { |*| raise "corrupt blob" }
