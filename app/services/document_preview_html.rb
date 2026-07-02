@@ -38,9 +38,15 @@ class DocumentPreviewHtml
         # "anchor">). The live Milkdown editor renders a bare <h1>, so without
         # this the preview's heading is structurally taller and the first
         # paragraph jumps ~30px when the editor swaps in.
+        #
+        # render.unsafe passes raw HTML through to the sanitizer below instead
+        # of dropping it. The editor parses inline HTML (provenance spans,
+        # suggestion ins/del) into marks, so a preview that drops those tags
+        # loses their tint until the swap — a visible color flash.
+        # HtmlDocumentSanitizer remains the security boundary either way.
         rendered = Commonmarker.to_html(
           source,
-          options: { extension: { header_ids: nil } },
+          options: { render: { unsafe: true }, extension: { header_ids: nil } },
           plugins: { table: true, strikethrough: true, tasklist: true }
         )
         mark_mermaid_fences(rendered)

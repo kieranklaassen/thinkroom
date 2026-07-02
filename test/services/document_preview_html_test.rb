@@ -128,12 +128,36 @@ class DocumentPreviewHtmlTest < ActiveSupport::TestCase
     assert_match(/<div class="milkdown-table-block"><div class="table-wrapper"><table>/, html)
   end
 
-  test "strips scripts and unsafe markup in markdown" do
+  test "raw script blocks render as inert text, matching the editor" do
     html = DocumentPreviewHtml.call(format: "markdown", content: "<script>alert(1)</script>\n\nsafe")
 
+    # The editor shows raw HTML blocks as literal text (data-type="html"
+    # spans); Commonmarker's tagfilter + the sanitizer keep the preview
+    # identical — visible escaped source, never an executable element.
     refute_includes html, "<script"
-    refute_includes html, "alert(1)"
+    assert_includes html, "&lt;script"
     assert_includes html, "safe"
+  end
+
+  test "keeps provenance spans from raw markdown HTML so tints paint first frame" do
+    html = DocumentPreviewHtml.call(
+      format: "markdown",
+      content: %(x <span data-provenance data-kind="ai" data-author="G" data-state="pending">tinted</span> y)
+    )
+
+    assert_includes html, 'data-provenance=""'
+    assert_includes html, 'data-state="pending"'
+  end
+
+  test "strips event handlers from raw markdown HTML" do
+    html = DocumentPreviewHtml.call(
+      format: "markdown",
+      content: %(hello <span onmouseover="steal()">x</span> <img src="https://evil.example/x.png" onerror="steal()">)
+    )
+
+    refute_includes html, "onmouseover"
+    refute_includes html, "onerror"
+    refute_includes html, "evil.example"
   end
 
   test "strips event handlers and scripts on the html passthrough path" do
