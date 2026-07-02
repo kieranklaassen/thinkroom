@@ -1,6 +1,8 @@
 .auth-page {
   display: grid;
   min-height: 100vh;
+  /* iOS Safari over-measures 100vh behind the dynamic toolbar. */
+  min-height: 100dvh;
   place-items: center;
   padding: 2rem 1rem;
 }
@@ -106,7 +108,8 @@
   background: var(--surface-raised);
   color: var(--ink);
   padding: 0.65rem 0.75rem;
-  font-size: 0.9rem;
+  /* 16px minimum: anything smaller makes iOS Safari zoom in on focus. */
+  font-size: 1rem;
   box-shadow: none;
 }
 
@@ -118,6 +121,28 @@
 
 .auth-fields input[aria-invalid='true'] {
   border-color: color-mix(in srgb, #b3261e 45%, var(--line));
+}
+
+/* Row layout + compact box: overrides the grid label and full-width input
+   rules that style the text fields. */
+.auth-fields .auth-remember {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+  font-size: 0.84rem;
+  font-weight: 450;
+}
+
+.auth-fields .auth-remember input {
+  width: 1.05rem;
+  height: 1.05rem;
+  min-height: 0;
+  padding: 0;
+  border-radius: 4px;
+  /* @tailwindcss/forms paints the checked box with currentColor. */
+  color: var(--ink);
 }
 
 .auth-error {

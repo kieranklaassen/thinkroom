@@ -3406,7 +3406,8 @@ a:focus-visible {
 
 .sheet-body .comment-input {
   min-height: 44px;
-  font-size: 0.9rem;
+  /* 16px minimum so iOS Safari doesn't zoom in when the composer focuses. */
+  font-size: 1rem;
 }
 
 .sheet-body .comment-resolve,
@@ -4285,6 +4286,26 @@ a:focus-visible {
     min-height: 44px;
     opacity: 1;
     pointer-events: auto;
+  }
+
+  /* 16px minimum on text inputs: anything smaller makes iOS Safari zoom in
+     on focus. Desktop keeps the compact chrome sizes. */
+  .document-tag-editor input,
+  .comment-input,
+  .identity-input,
+  .thinkroom-sketch-title {
+    font-size: 1rem;
+  }
+
+  .document-tag-editor input,
+  .document-tag-save {
+    height: 2.75rem;
+  }
+
+  /* 36px, not the 44px convention: the input sits inside the sticky doc
+     header, which a 44px field would visibly inflate. */
+  .identity-input {
+    min-height: 2.25rem;
   }
 }
 
