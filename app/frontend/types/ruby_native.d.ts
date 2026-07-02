@@ -30,6 +30,42 @@ declare module '@ruby-native/react' {
     children?: ReactNode
   }): ReactElement
 
+  /**
+   * Dropdown menu entry inside a NativeButton. `href` navigates; `click`
+   * clicks a DOM element by CSS selector.
+   */
+  export function NativeMenuItem(props: {
+    title: string
+    href?: string
+    click?: string
+    icon?: string
+    icons?: { ios?: string; android?: string }
+    selected?: boolean
+  }): ReactElement
+
+  /**
+   * Floating action button. `icon` is required: on the open web the platform
+   * is unknown, so an `icons`-only usage falls back to `icon` and throws when
+   * it is absent. `href` navigates; `click` clicks a DOM element by CSS
+   * selector.
+   */
+  export function NativeFab(props: {
+    icon: string
+    icons?: { ios?: string; android?: string }
+    href?: string
+    click?: string
+  }): ReactElement
+
+  /**
+   * Nav-bar submit button for form pages. `click` clicks a DOM element by
+   * CSS selector (defaults to [type='submit'] — pass an explicit scoped
+   * selector when the page has more than one submit button).
+   */
+  export function NativeSubmitButton(props: {
+    title?: string
+    click?: string
+  }): ReactElement
+
   /** Marks the page as a form so native back navigation skips it. */
   export function NativeForm(): ReactElement
 

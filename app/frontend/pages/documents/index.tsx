@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Head, Link, useForm } from '@inertiajs/react'
-import { NativeNavbar, NativeButton, nativeHaptic } from '@ruby-native/react'
+import { NativeNavbar, NativeButton, NativeMenuItem, NativeFab, nativeHaptic } from '@ruby-native/react'
 import { FeedbackButton } from '../../components/feedback_button'
 import { AccountControl } from '../../components/account_control'
 import { userIdentity } from '../../editor/identity'
@@ -289,16 +289,32 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
     showAllEarlier || activeTag ? earlier : earlier.slice(0, EARLIER_PREVIEW_LIMIT)
   const hiddenEarlierCount = earlier.length - visibleEarlier.length
   const claimerName = identityName
+  const hasDemo = recent.some((document) => document.slug === 'demo')
 
   return (
     <>
       <Head title="Thinkroom" />
       {/* Ruby Native chrome: hidden signal elements the iOS/Android shell
-          reads. The plus button clicks the web "New document" button so the
-          native action reuses the exact same submission path. */}
+          reads. Menu items and the plus button click or navigate to existing
+          web controls so every native action reuses the web submission path. */}
       <NativeNavbar title="Thinkroom">
-        <NativeButton icon="plus" click="#new-document-button" />
+        <NativeButton position="leading" icon="person.crop.circle">
+          {viewer.account ? (
+            <NativeMenuItem title="Sign out" click="#account-signout" />
+          ) : (
+            <NativeMenuItem title="Sign in" href="/login?return_to=%2F" />
+          )}
+        </NativeButton>
+        <NativeButton position="trailing" icon="ellipsis.circle">
+          <NativeMenuItem title="Have an agent start one" click="#agent-start-trigger" />
+          {hasDemo && <NativeMenuItem title="Open the demo" href="/d/demo" />}
+          {isClient && <NativeMenuItem title="Send feedback" click=".feedback-button button" />}
+        </NativeButton>
       </NativeNavbar>
+      {/* Floating action button, sibling of the navbar (its own signal
+          element). While a create is in flight the only feedback is the web
+          hero button's disabled "Creating…" state; repeat taps are no-ops. */}
+      <NativeFab icon="plus" click="#new-document-button" />
       <div className="landing">
         <div className="landing-corner">
           <AccountControl viewer={viewer} />
@@ -336,7 +352,7 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
               >
                 Have an agent start one
               </button>
-              {recent.some((document) => document.slug === 'demo') && (
+              {hasDemo && (
                 <Link href="/d/demo" className="btn btn-ghost" prefetch>
                   Open the demo
                 </Link>
