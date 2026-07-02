@@ -17,7 +17,11 @@ class DocumentsController < InertiaController
   inertia_config ssr_enabled: -> { %w[show index].include?(action_name) }
 
   def index
-    now = Time.current
+    # Date labels and the THIS WEEK bucket follow the viewer's timezone via
+    # the pruf_tz cookie (set client-side from Intl); unknown or absent zones
+    # fall back to the app default.
+    zone = ActiveSupport::TimeZone[cookies[:pruf_tz].to_s] || Time.zone
+    now = Time.current.in_time_zone(zone)
     week_start = now.beginning_of_week
     # Signed-in ownership follows the account across browsers. Guests retain
     # the original permanent-cookie ownership model.
@@ -35,14 +39,14 @@ class DocumentsController < InertiaController
     docs = Document.where(slug: slugs).index_by(&:slug)
     render inertia: "documents/index", props: {
       yours: yours.map do |document|
-        index_document_props(document, week_start:, current_year: now.year)
+        index_document_props(document, week_start:, current_year: now.year, zone:)
       end,
       # Recent rows carry ownership state so claimable docs can offer an
       # inline claim affordance. Render-time staleness is fine: the claim
       # POST is race-tolerant and the scoped reload reconciles the lists.
       recent: slugs.filter_map { |slug| docs[slug] unless your_slugs.include?(slug) }
                    .map do |d|
-                     index_document_props(d, week_start:, current_year: now.year)
+                     index_document_props(d, week_start:, current_year: now.year, zone:)
                        .merge(d.ownership_props(owner_token, viewer_user: current_user))
                    end
     }
@@ -399,8 +403,8 @@ class DocumentsController < InertiaController
     DocumentMetaChannel.broadcast_event(document, :title, title: document.title)
   end
 
-  def index_document_props(document, week_start:, current_year:)
-    created_at = document.created_at.in_time_zone
+  def index_document_props(document, week_start:, current_year:, zone: Time.zone)
+    created_at = document.created_at.in_time_zone(zone)
     created_label = if created_at.year == current_year
       created_at.strftime("%b %-d")
     else
