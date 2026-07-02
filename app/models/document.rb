@@ -180,6 +180,7 @@ class Document < ApplicationRecord
         content_snapshot: nil,
         provenance_spans: [],
         yjs_state: nil,
+        yjs_state_vector: nil,
         seed_state: "pending",
         seed_claimed_at: nil,
         # Advances the generation so any SyncChannel client still holding a
