@@ -95,18 +95,53 @@ const readPointerProse = $prose((ctx) => new Plugin({
   view(view) {
     let awareness: Awareness | null = null
     let destroyed = false
+    let frame: number | null = null
+    let lastSnapshot: string | null = null
 
+    // Only the peers' readPointer anchors (and the identity rendered in the
+    // pointer chip) feed the decorations, so only dispatch when that slice of
+    // awareness actually changed. Awareness 'change' fires for EVERY peer
+    // update — cursors, viewports, presence — and an unconditional dispatch
+    // per tick both stomps a collaborator's in-flight native text selection
+    // (the view re-imposes its state selection over a mid-drag DOM range)
+    // and, dispatched synchronously, recurses into a stack overflow when a
+    // publisher re-emits during updateState (y-prosemirror's cursor does
+    // under a pending suggestion). Snapshot-gate plus one frame of
+    // coalescing removes both failure modes.
+    const pointerSnapshot = (): string => {
+      if (!awareness) return ''
+      const parts: string[] = []
+      awareness.getStates().forEach((rawState, clientId) => {
+        if (clientId === awareness!.clientID) return
+        const state = rawState as AwarenessState
+        const anchor = state.readPointer?.anchor
+        if (!anchor) return
+        parts.push(
+          `${clientId}:${JSON.stringify(anchor)}:${state.user?.name ?? ''}:${state.user?.color ?? ''}`,
+        )
+      })
+      return parts.sort().join('|')
+    }
     const refresh = () => {
+      frame = null
       if (destroyed) return
+      const snapshot = pointerSnapshot()
+      if (snapshot === lastSnapshot) return
+      lastSnapshot = snapshot
       view.dispatch(view.state.tr.setMeta(readPointerKey, true))
+    }
+    const scheduleRefresh = () => {
+      if (destroyed || frame !== null) return
+      frame = requestAnimationFrame(refresh)
     }
     const bindAwareness = () => {
       const nextAwareness = ctx.get(readPointerAwarenessCtx.key)
       if (nextAwareness === awareness) return
-      awareness?.off('change', refresh)
+      awareness?.off('change', scheduleRefresh)
       awareness = nextAwareness
-      awareness?.on('change', refresh)
-      queueMicrotask(refresh)
+      lastSnapshot = null
+      awareness?.on('change', scheduleRefresh)
+      scheduleRefresh()
     }
 
     bindAwareness()
@@ -114,7 +149,8 @@ const readPointerProse = $prose((ctx) => new Plugin({
       update: bindAwareness,
       destroy: () => {
         destroyed = true
-        awareness?.off('change', refresh)
+        if (frame !== null) cancelAnimationFrame(frame)
+        awareness?.off('change', scheduleRefresh)
       },
     }
   },
