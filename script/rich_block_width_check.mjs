@@ -1,6 +1,7 @@
 // Focused sketch/table breakout regression check using Playwright.
 // Usage: BASE_URL=http://localhost:3000 node script/rich_block_width_check.mjs
 import { chromium, request } from 'playwright'
+import { expectedBrowserNoise, waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 const failures = []
@@ -56,13 +57,6 @@ const page = await context.newPage()
 const errors = []
 let slug
 
-// Dev-server-only console noise, verified not to reproduce on clean loads or
-// in production builds (see script/export_check.mjs and the 2026-07-01
-// dogfood report): React's recoverable hydration de-opt under automation and
-// a StrictMode double-createRoot warning from an editor library.
-const expectedBrowserNoise = (message) =>
-  message.includes('Hydration failed because the server rendered') ||
-  message.includes('already been passed to createRoot()')
 page.on('pageerror', (error) => {
   const message = error.stack ?? String(error)
   if (!expectedBrowserNoise(message)) errors.push(message)
@@ -109,7 +103,7 @@ try {
   // one-time seed claim. A JavaScript-disabled first visit would claim the
   // seed without ever mounting Milkdown, leaving a second session empty.
   await page.goto(`${BASE}/d/${slug}`)
-  await page.locator('.doc-status--live').waitFor({ timeout: 15_000 })
+  await waitForLive(page)
   await page.locator('.thinkroom-sketch .rich-block-width-handle').waitFor({ timeout: 15_000 })
   await page.locator('.milkdown-table-block .rich-block-width-handle').waitFor({ timeout: 15_000 })
   await page.locator('.doc-live-editor .ProseMirror > pre:not([data-language="mermaid"]) .rich-block-width-handle').waitFor({ timeout: 15_000 })
@@ -121,11 +115,11 @@ try {
   await staticContext.addCookies([{ name: 'pruf_rich_width', value: '1088', url: BASE }])
   const staticPage = await staticContext.newPage()
   await staticPage.goto(`${BASE}/d/${slug}`)
-  await staticPage.locator('.doc-static-preview .doc-sketch-skeleton').waitFor()
+  await staticPage.locator('.doc-static-preview figure.thinkroom-sketch').waitFor()
   const staticGeometry = await staticPage.evaluate(() => ({
     prose: document.querySelector('.doc-static-preview .ProseMirror')?.getBoundingClientRect().width ?? 0,
-    sketch: document.querySelector('.doc-sketch-skeleton')?.getBoundingClientRect().width ?? 0,
-    table: document.querySelector('.doc-static-preview table')?.getBoundingClientRect().width ?? 0,
+    sketch: document.querySelector('.doc-static-preview figure.thinkroom-sketch')?.getBoundingClientRect().width ?? 0,
+    table: document.querySelector('.doc-static-preview .milkdown-table-block')?.getBoundingClientRect().width ?? 0,
     overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
   }))
   check(
@@ -241,7 +235,9 @@ try {
     document.cookie = 'pruf_focus=1;path=/;samesite=lax'
   })
   await page.reload()
-  await page.locator('.doc-canvas.is-focus .thinkroom-sketch').waitFor({ timeout: 15_000 })
+  // The static preview shows a .thinkroom-sketch figure from first paint now,
+  // so wait for the LIVE editor's sketch (its width handle only exists there).
+  await page.locator('.doc-canvas.is-focus .doc-live-editor .thinkroom-sketch .rich-block-width-handle').waitFor({ timeout: 15_000 })
   const focused = await liveGeometry()
   const focusedCenter = focused.sketch.left + focused.sketch.width / 2
   const proseCenter = focused.prose.left + focused.prose.width / 2
@@ -258,7 +254,7 @@ try {
     document.cookie = 'pruf_focus=0;path=/;samesite=lax'
   })
   await page.reload()
-  await page.locator('.doc-page.is-panel-hidden .thinkroom-sketch').waitFor({ timeout: 15_000 })
+  await page.locator('.doc-page.is-panel-hidden .doc-live-editor .thinkroom-sketch .rich-block-width-handle').waitFor({ timeout: 15_000 })
   const panelHidden = await liveGeometry()
   check(
     panelHidden.sketch.width > reviewKeyed.sketch.width &&

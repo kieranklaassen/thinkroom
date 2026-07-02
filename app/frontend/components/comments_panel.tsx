@@ -94,7 +94,11 @@ export function CommentsPanel({
               <span className={`author-chip author-chip--${comment.author_kind}`}>
                 {comment.author_name}
               </span>
-              <span className="comment-time">{timeAgo(comment.created_at)}</span>
+              {/* timeAgo depends on Date.now(); a bucket flip between SSR and
+                 hydration would otherwise regenerate the whole tree. */}
+              <span className="comment-time" suppressHydrationWarning>
+                {timeAgo(comment.created_at)}
+              </span>
             </div>
             {comment.anchor_text && (
               <blockquote
@@ -135,7 +139,11 @@ export function CommentsPanel({
                 <span className={`author-chip author-chip--${comment.author_kind}`}>
                   {comment.author_name}
                 </span>
-                <span className="comment-time">{timeAgo(comment.created_at)}</span>
+                {/* timeAgo depends on Date.now(); a bucket flip between SSR and
+                 hydration would otherwise regenerate the whole tree. */}
+              <span className="comment-time" suppressHydrationWarning>
+                {timeAgo(comment.created_at)}
+              </span>
               </div>
               <p className="comment-body">{comment.body}</p>
             </li>

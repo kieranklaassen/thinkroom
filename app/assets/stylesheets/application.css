@@ -55,14 +55,6 @@
   overflow: hidden;
 }
 
-/* Match the cell box model ProseMirror injects so cell content lays out
-   identically. --default-cell-min-width mirrors editor/table_block.css (6ch);
-   with fixed layout + equal columns this min-width stays inert here, but
-   keeping it makes the preview self-consistent if columns ever narrow. */
-.doc-static-preview .ProseMirror {
-  --default-cell-min-width: 6ch;
-}
-
 .doc-static-preview .ProseMirror td,
 .doc-static-preview .ProseMirror th {
   vertical-align: top;
@@ -78,6 +70,74 @@
 /* prosemirror-view base: list items are positioned for marker handling. */
 .doc-static-preview .ProseMirror li {
   position: relative;
+}
+
+/* ---------------------------------------------------------------------------
+ * Table-block typography — the single copy, serving BOTH the live editor and
+ * the static preview (the preview wraps tables in the editor's
+ * .milkdown-table-block/.table-wrapper structure; see DocumentPreviewHtml).
+ * It lives here rather than in the code-split editor chunk because the
+ * preview paints before any JS, and both layers must resolve identical
+ * geometry from first paint. app/frontend/editor/table_block.css keeps only
+ * the editing chrome (handles, popover, grips).
+ *
+ * Typography follows Rutter/Tschichold and Tailwind Typography's prose
+ * tables: horizontal rules only (no vertical rules, no outer frame, no
+ * zebra), smaller UI sans with tabular numerals, header weight instead of a
+ * background fill.
+ * ------------------------------------------------------------------------- */
+:is(.milkdown, .doc-static-preview) .ProseMirror {
+  --default-cell-min-width: 6ch;
+}
+
+:is(.milkdown, .doc-static-preview) .milkdown-table-block {
+  display: block;
+}
+
+/* Scroll affordance: thin scrollbars where supported; on touch the cut-off
+   last column is the (classic) signal. A static right-edge fade was
+   considered and rejected — CSS can't tell overflowing wrappers from
+   fitting ones, and fading a fully-visible table reads as a bug. */
+:is(.milkdown, .doc-static-preview) .milkdown-table-block .table-wrapper {
+  overflow-x: auto;
+  max-width: 100%;
+  scrollbar-width: thin;
+}
+
+:is(.milkdown, .doc-static-preview) .milkdown-table-block table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-ui);
+  font-size: 0.875em;
+  line-height: 1.45;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+
+:is(.milkdown, .doc-static-preview) .milkdown-table-block th,
+:is(.milkdown, .doc-static-preview) .milkdown-table-block td {
+  border: none;
+  border-bottom: 1px solid var(--line);
+  padding: 0.5em 0.75em;
+  vertical-align: baseline;
+}
+
+/* Commonmarker emits <thead><tr><th> in the preview; the editor marks header
+   rows with data-is-header. Style both shapes identically. */
+:is(.milkdown, .doc-static-preview) .milkdown-table-block tr[data-is-header] th,
+.doc-static-preview .milkdown-table-block thead th {
+  font-weight: 600;
+  border-bottom: 1px solid var(--ink-faint);
+  vertical-align: bottom;
+}
+
+:is(.milkdown, .doc-static-preview) .milkdown-table-block th:first-child,
+:is(.milkdown, .doc-static-preview) .milkdown-table-block td:first-child {
+  padding-inline-start: 0;
+}
+
+:is(.milkdown, .doc-static-preview) .milkdown-table-block th:last-child,
+:is(.milkdown, .doc-static-preview) .milkdown-table-block td:last-child {
+  padding-inline-end: 0;
 }
 
 /* ---------------------------------------------------------------------------

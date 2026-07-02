@@ -48,6 +48,19 @@ class MarkdownSketchAuditTest < ActiveSupport::TestCase
     assert result.unrecognized?
   end
 
+  test "treats a missing or invalid id as unrecognized, matching the editor" do
+    # The editor (normalizeSketchData) and the static preview keep these as
+    # code blocks, so the create-time signal must warn about them too.
+    scene = { type: "excalidraw", version: 2, elements: [] }
+    [ nil, "bad id with spaces", "x" * 101 ].each do |id|
+      payload = { formatVersion: 1, scene: }.merge(id.nil? ? {} : { id: })
+      result = MarkdownSketchAudit.call("```excalidraw\n#{JSON.generate(payload)}\n```")
+
+      assert_equal 1, result.fence_count, "id #{id.inspect}"
+      assert result.unrecognized?, "id #{id.inspect} should be unrecognized"
+    end
+  end
+
   test "treats valid-JSON-but-non-Hash and unencodable bodies as unrecognized without raising" do
     # These bodies make DocumentPlainText's old code raise; the audit must agree
     # (unrecognized) and never raise, since both run on the create request.

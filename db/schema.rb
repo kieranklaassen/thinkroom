@@ -126,6 +126,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_02_073441) do
     t.string "owner_name", limit: 255
     t.string "owner_token"
     t.json "provenance_spans", default: []
+    t.json "render_hints", default: {}, null: false
     t.string "seed_author_kind"
     t.string "seed_author_name", limit: 255
     t.datetime "seed_claimed_at"

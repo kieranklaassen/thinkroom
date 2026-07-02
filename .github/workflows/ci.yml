@@ -146,6 +146,11 @@ jobs:
         run: bin/rails db:prepare db:seed
 
       - name: Start Rails and Vite
+        # The check loop legitimately creates ~15+ documents from one IP in
+        # minutes; keep it clear of the per-IP creation burst limit.
+        env:
+          THINKROOM_DOC_CREATION_BURST: "500"
+          THINKROOM_DOC_CREATION_DAILY: "500"
         run: |
           bin/vite dev &
           bin/rails server &
@@ -158,12 +163,9 @@ jobs:
         run: |
           node -e "const { chromium } = require('playwright'); (async () => { const b = await chromium.launch(); const p = await b.newPage(); await p.goto('http://localhost:3000/d/demo', { timeout: 180000, waitUntil: 'networkidle' }); await b.close() })()"
 
-      # browser_check is excluded until its comment-role leg is unblocked —
-      # see docs/dogfood-reports/2026-07-01-main-two-week-release-dogfood.md
-      # (selection stomping while a second tab is open).
       - name: Run browser regression checks
         run: |
-          for check in sync_check link_check mermaid_check rich_block_width_check suggestion_list_replace_check export_check html_document_check meta_refresh_check mobile_zoom_check native_shell_check; do
+          for check in sync_check link_check mermaid_check rich_block_width_check suggestion_list_replace_check export_check html_document_check meta_refresh_check mobile_zoom_check native_shell_check browser_check; do
             echo "=== script/${check}.mjs"
             node "script/${check}.mjs"
           done

@@ -25,6 +25,14 @@ export default defineConfig(({ isSsrBuild }) => ({
     // bundle to public/vite-ssr/ssr.js (vite-plugin-ruby keys the SSR input
     // as "ssr"); config.ssr_bundle in the initializer points there.
     inertia({ ssr: 'entrypoints/inertia.tsx' }),
-    react(),
+    // The Inertia entry is excluded from react-refresh: the refresh footer
+    // adds a timestamped self-import once the SSR warmup invalidates the
+    // module node, so the entry executed TWICE per dev page load —
+    // createInertiaApp booted the app a second time (hydrateRoot's
+    // "container already passed to createRoot" warning, doubled boot work).
+    // The entry defines no refreshable components and editing it falls back
+    // to a full reload. node_modules stays excluded: a custom exclude
+    // REPLACES the plugin's default rather than extending it.
+    react({ exclude: [/\/node_modules\//, /entrypoints\/inertia\.tsx$/] }),
   ],
 }))

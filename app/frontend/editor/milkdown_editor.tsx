@@ -32,7 +32,8 @@ import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import type { Node as ProseNode } from '@milkdown/kit/prose/model'
 import { TextSelection } from '@milkdown/kit/prose/state'
-import { CableProvider, type DurableSnapshotPayload } from './cable_provider'
+import { CableProvider, type DurableSnapshotPayload, type RenderHints } from './cable_provider'
+import { gatedCursorAwareness } from './cursor_awareness'
 import { lazyShikiParser, loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
 import type { UserIdentity } from './identity'
@@ -71,6 +72,7 @@ import {
   trashIcon,
 } from './table_icons'
 import { agentCursors } from './agent_cursors'
+import { codeBlockView } from './code_block_view'
 import { configureCleanClipboard } from './clipboard'
 import { renderSoftBreaks } from './line_breaks'
 import { interactiveTaskListItems, taskPersistenceCtx } from './task_list_items'
@@ -84,7 +86,12 @@ import {
 } from './document_format'
 import { configureSlashMenu, slashMenu } from './slash_menu'
 import { readPointerAwarenessCtx, readPointers } from './read_pointers'
-import { mermaidDiagrams } from './mermaid'
+import {
+  bindMermaidHintPersistence,
+  collectMermaidRenderHints,
+  mermaidDiagrams,
+  mermaidRenderHintsCtx,
+} from './mermaid'
 import { richBlockWidthControls } from './rich_block_width'
 
 export interface EditorHandle {
@@ -136,6 +143,10 @@ interface EditorProps {
   /** Task controls can remain interactive while text editing is disabled,
    *  as in Read mode. Defaults to the text editability setting. */
   taskInteractive?: boolean
+  /** Persisted render geometry from documents#show (currently Mermaid figure
+   *  heights) so async renderers reserve their final space up front — the
+   *  same hints size the server preview's skeletons. */
+  renderHints?: RenderHints
   onReady?: (handle: EditorHandle) => void
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
@@ -203,7 +214,12 @@ function buildSnapshotPayload(
     binaryState += String.fromCharCode(byte)
   })
 
-  return { content, spans, state_vector: btoa(binaryState) }
+  // Measured diagram heights ride along so the next load (any client) can
+  // reserve the right space before mermaid renders.
+  const mermaid = collectMermaidRenderHints(view.dom)
+  const renderHints = Object.keys(mermaid).length > 0 ? { render_hints: { mermaid } } : {}
+
+  return { content, spans, state_vector: btoa(binaryState), ...renderHints }
 }
 
 function firstHeadingTitle(doc: ProseNode): string | null {
@@ -364,6 +380,7 @@ function CollabEditor({
   editable = true,
   suggesting = false,
   taskInteractive = editable,
+  renderHints,
   onReady,
   onStatus,
   onSpans,
@@ -396,6 +413,7 @@ function CollabEditor({
         .config((ctx) => {
           ctx.set(rootCtx, root)
           ctx.set(provenanceIdentityCtx.key, { name: identity.name })
+          ctx.set(mermaidRenderHintsCtx.key, renderHints?.mermaid ?? {})
           ctx.set(sketchControlsCtx.key, {
             edit: (data, mount, wrapper) => setSketchDraft({ data, mount, wrapper }),
             save: (data) => saveSketchRef.current(data),
@@ -458,6 +476,7 @@ function CollabEditor({
           }))
         })
         .use(commonmark)
+        .use(codeBlockView)
         .use(gfm)
         .use(interactiveTaskListItems)
         .use(tableBlock)
@@ -505,6 +524,7 @@ function CollabEditor({
     let snapshotTimer: ReturnType<typeof setTimeout> | null = null
     let snapshotRetryTimer: ReturnType<typeof setTimeout> | null = null
     let cancelled = false
+    let unbindMermaidHints: (() => void) | null = null
     const pushSnapshot = (attempt = 0) => {
       if (!canWriteRef.current) return
       editor.action((ctx) => {
@@ -525,6 +545,11 @@ function CollabEditor({
       })
     }
 
+    const scheduleSnapshot = () => {
+      if (snapshotTimer) clearTimeout(snapshotTimer)
+      snapshotTimer = setTimeout(pushSnapshot, SNAPSHOT_DEBOUNCE_MS)
+    }
+
     let started = false
     const syncSuggesting = (instance: Editor) => {
       try {
@@ -543,7 +568,11 @@ function CollabEditor({
       editor.action((ctx) => {
         const service = ctx.get(collabServiceCtx)
         ctx.set(readPointerAwarenessCtx.key, provider.awareness)
-        service.bindDoc(ydoc).setAwareness(provider.awareness)
+        // The service's awareness feeds ONLY y-prosemirror's cursor plugin,
+        // whose per-tick dispatches stomp native selections in non-editable
+        // modes — hand it the gated façade so it re-renders only when the
+        // remote cursor slice actually changed. Sync (bindDoc) is unaffected.
+        service.bindDoc(ydoc).setAwareness(gatedCursorAwareness(provider.awareness))
         ctx.set(taskPersistenceCtx.key, {
           persist: () =>
             provider.persistCurrentState(buildSnapshotPayload(ctx, ydoc, contentFormat)),
@@ -567,18 +596,28 @@ function CollabEditor({
           )
         }
         service.connect()
-        if (seed && seedKind && seedKind !== 'human') {
-          // Must run after connect(): only then has ySyncPlugin rendered the
-          // seeded Yjs content into the view. The dispatched marks flow back
-          // through the binding, so peers receive attributed content.
-          attributeSeedToAgent(ctx.get(editorViewCtx), seedAuthor ?? '')
-          // The updated listener skips addToHistory:false transactions, so
-          // the chip never sees the marked doc on its own — push it directly.
-          callbacksRef.current.onSpans?.(
-            collectSpans(ctx.get(editorViewCtx).state.doc, {
-              excludePendingInsertions: true,
-            }),
-          )
+        if (seed) {
+          if (seedKind && seedKind !== 'human') {
+            // Must run after connect(): only then has ySyncPlugin rendered
+            // the seeded Yjs content into the view. The dispatched marks flow
+            // back through the binding, so peers receive attributed content.
+            attributeSeedToAgent(ctx.get(editorViewCtx), seedAuthor ?? '')
+            // The updated listener skips addToHistory:false transactions, so
+            // the chip never sees the marked doc on its own — push directly.
+            callbacksRef.current.onSpans?.(
+              collectSpans(ctx.get(editorViewCtx).state.doc, {
+                excludePendingInsertions: true,
+              }),
+            )
+          }
+          // Persist the applied (and attributed) seed NOW over HTTP
+          // (keepalive) instead of waiting for the cable handshake. The cable
+          // path drops local updates until 'sync' arrives, so a claimant that
+          // navigated away within the first seconds burned the seed claim and
+          // left the document blank for every viewer until the claim timeout.
+          // The sync_update endpoint also broadcasts, so already-connected
+          // viewers receive the seeded content live.
+          provider.persistCurrentState(buildSnapshotPayload(ctx, ydoc, contentFormat))
         }
 
         ctx.set(selectionCallbackCtx.key, {
@@ -592,12 +631,19 @@ function CollabEditor({
           callbacksRef.current.onSpans?.(collectSpans(doc, { excludePendingInsertions: true }))
           const title = firstHeadingTitle(doc)
           if (title) callbacksRef.current.onTitleChange?.(title)
-          if (snapshotTimer) clearTimeout(snapshotTimer)
-          snapshotTimer = setTimeout(pushSnapshot, SNAPSHOT_DEBOUNCE_MS)
+          scheduleSnapshot()
         })
 
         const title = firstHeadingTitle(ctx.get(editorViewCtx).state.doc)
         if (title) callbacksRef.current.onTitleChange?.(title)
+
+        if (canWrite) {
+          unbindMermaidHints = bindMermaidHintPersistence(
+            ctx.get(editorViewCtx).dom,
+            renderHints?.mermaid,
+            scheduleSnapshot,
+          )
+        }
       })
 
       const handle = { editor, ydoc, provider }
@@ -631,6 +677,7 @@ function CollabEditor({
     return () => {
       cancelled = true
       provider.off('synced', start)
+      unbindMermaidHints?.()
       if (snapshotTimer) clearTimeout(snapshotTimer)
       if (snapshotRetryTimer) clearTimeout(snapshotRetryTimer)
       try {

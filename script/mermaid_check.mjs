@@ -1,6 +1,7 @@
 // Focused Mermaid browser regression.
 // Usage: BASE_URL=http://127.0.0.1:4123 node script/mermaid_check.mjs
 import { chromium, request } from 'playwright'
+import { waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://127.0.0.1:3000'
 const VALID_SOURCE = `flowchart LR
@@ -69,7 +70,7 @@ ${INVALID_SOURCE}
   slug = (await created.json()).slug
 
   await page.goto(`${BASE}/d/${slug}/edit`)
-  await page.locator('.doc-status--live').waitFor({ timeout: 15_000 })
+  await waitForLive(page)
   await page.locator('.mermaid-diagram[data-state="ready"]').waitFor({ timeout: 15_000 })
   await page.locator('.mermaid-diagram[data-state="error"]').waitFor({ timeout: 15_000 })
 
@@ -134,18 +135,18 @@ ${INVALID_SOURCE}
   const staticContext = await browser.newContext({ viewport: { width: 1280, height: 900 }, javaScriptEnabled: false })
   const staticPage = await staticContext.newPage()
   await staticPage.goto(`${BASE}/d/${slug}`)
-  await staticPage.locator('.doc-static-preview .doc-mermaid-skeleton').first().waitFor({ timeout: 15_000 })
+  await staticPage.locator('.doc-static-preview figure.mermaid-diagram').first().waitFor({ timeout: 15_000 })
   const staticGeometry = await staticPage.evaluate(() => {
-    const skeleton = document.querySelector('.doc-static-preview .ProseMirror > .doc-mermaid-skeleton')
+    const figure = document.querySelector('.doc-static-preview .ProseMirror > figure.mermaid-diagram')
     const prose = document.querySelector('.doc-static-preview .ProseMirror')
     return {
-      skeleton: Math.round(skeleton?.getBoundingClientRect().width ?? 0),
+      figure: Math.round(figure?.getBoundingClientRect().width ?? 0),
       prose: Math.round(prose?.getBoundingClientRect().width ?? 0),
       overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
     }
   })
   check(
-    staticGeometry.skeleton > staticGeometry.prose && staticGeometry.overflow === 0,
+    staticGeometry.figure > staticGeometry.prose && staticGeometry.overflow === 0,
     'server preview breaks the Mermaid placeholder out to the rich width on first paint',
     JSON.stringify(staticGeometry),
   )

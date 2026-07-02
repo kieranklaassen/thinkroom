@@ -71,6 +71,19 @@ class DocumentPlainTextTest < ActiveSupport::TestCase
                  DocumentPlainText.call(format: "html", content: html)
   end
 
+  test "leaves an invalid-id excalidraw fence visible, matching the editor" do
+    # normalizeSketchData keeps a fence without a valid id as a code block, so
+    # the text projection must echo its raw JSON rather than claim a sketch.
+    payload = { id: "bad id with spaces", formatVersion: 1, description: "Nope",
+                scene: { type: "excalidraw", version: 2, elements: [] } }
+    content = "```excalidraw\n#{JSON.generate(payload)}\n```"
+
+    result = DocumentPlainText.call(format: "markdown", content:)
+
+    refute_includes result, "Sketch:"
+    assert_includes result, "bad id with spaces" # raw JSON stays visible
+  end
+
   test "leaves a malformed excalidraw fence body visible instead of raising" do
     # Valid JSON but not a recognizable sketch: a bare array/number/string, and
     # a number that overflows to Infinity (unencodable). Previously these raised

@@ -114,8 +114,17 @@ class Document < ApplicationRecord
 
   # Sanitized HTML of the current content, painted on first load so the editor
   # frame shows real text before Milkdown finishes binding the hydrated state.
-  def preview_html
-    DocumentPreviewHtml.call(format: content_format, content: current_content)
+  # `editable`/`sketch_interactive` describe the editor the viewer is about to
+  # get, so mode-dependent chrome (Mermaid source, sketch caption affordance)
+  # is identical on both sides of the preview → editor swap.
+  def preview_html(editable: false, sketch_interactive: false)
+    DocumentPreviewHtml.call(
+      format: content_format,
+      content: current_content,
+      editable:,
+      sketch_interactive:,
+      render_hints: render_hints || {}
+    )
   end
 
   # The title to show before the editor mounts. The editor derives the header

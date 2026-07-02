@@ -98,7 +98,7 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert_equal %(must equal "excalidraw".), markdown_source.dig("schema", "scene", "type").split("(required) ").last
     assert_includes markdown_source["recognition"], "Sketch:"
     assert_includes markdown_source["recognition"], "—" # matches semantic_text's em-dash
-    assert_includes markdown_source["enforcement"], "id" # the editor-vs-create signal boundary
+    assert_includes markdown_source["enforcement"], "id" # id is a shared recognition criterion
     assert_includes markdown_source["reference"], "docs.excalidraw.com"
     assert_includes markdown_source["example"], "```excalidraw"
     # The documented example must actually pass server-side recognition, or the

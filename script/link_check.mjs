@@ -1,6 +1,7 @@
 // Focused browser regression for links inside the editable document surface.
 // Usage: BASE_URL=http://localhost:3000 node script/link_check.mjs
 import { chromium } from 'playwright'
+import { waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 const expectedUrl = 'https://example.com/pruf-link-check'
@@ -24,7 +25,7 @@ try {
 
   const page = await context.newPage()
   await page.goto(`${BASE}/d/${created.slug}`)
-  await page.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await waitForLive(page)
   await page.locator('.milkdown .prov--ai').first().waitFor({ timeout: 5000 })
 
   await page.locator('.mode-control-trigger').click()
@@ -84,7 +85,7 @@ try {
     { timeout: 10000 },
   )
   await page.reload()
-  await page.waitForSelector('.doc-status--live', { timeout: 15000 })
+  await waitForLive(page)
   const restoredTask = page.locator('.milkdown .task-checkbox').first()
   if (!(await restoredTask.isChecked())) {
     throw new Error('Read-mode task change did not survive reload')

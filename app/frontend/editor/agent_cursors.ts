@@ -22,22 +22,54 @@ let cursorResizeObserver: ResizeObserver | null = null
 let cursorIntersectionObserver: IntersectionObserver | null = null
 let cursorMutationObserver: MutationObserver | null = null
 
-const clampCursorLabels = () => {
+const CURSOR_LABEL_GUTTER = 8
+
+const clampCursorLabels = (verify = true) => {
   cursorClampFrame = null
   cursorLabels.forEach((label) => {
-    const gutter = 8
     label.style.removeProperty('--agent-cursor-shift')
     const rect = label.getBoundingClientRect()
     let shift = 0
-    if (rect.right > window.innerWidth - gutter) shift = window.innerWidth - gutter - rect.right
-    if (rect.left + shift < gutter) shift += gutter - (rect.left + shift)
+    if (rect.right > window.innerWidth - CURSOR_LABEL_GUTTER) {
+      shift = window.innerWidth - CURSOR_LABEL_GUTTER - rect.right
+    }
+    if (rect.left + shift < CURSOR_LABEL_GUTTER) {
+      shift += CURSOR_LABEL_GUTTER - (rect.left + shift)
+    }
     label.style.setProperty('--agent-cursor-shift', `${Math.round(shift)}px`)
+  })
+  // A clamp scheduled during a viewport resize measures mid-reflow geometry
+  // (window.innerWidth itself lags), lands a stale shift, and nothing later
+  // corrects it. Verify once on the NEXT frame — where layout and
+  // innerWidth have settled — and re-clamp (unverified, so this cannot
+  // loop) if any label sits out of bounds.
+  if (!verify) return
+  cursorClampFrame = requestAnimationFrame(() => {
+    cursorClampFrame = null
+    let outOfBounds = false
+    cursorLabels.forEach((label) => {
+      const rect = label.getBoundingClientRect()
+      if (rect.width === 0) return
+      if (
+        rect.right > window.innerWidth - CURSOR_LABEL_GUTTER + 1 ||
+        rect.left < CURSOR_LABEL_GUTTER - 1
+      ) {
+        outOfBounds = true
+      }
+    })
+    if (outOfBounds) clampCursorLabels(false)
   })
 }
 
 const scheduleCursorClamp = () => {
-  if (cursorClampFrame !== null) return
-  cursorClampFrame = requestAnimationFrame(clampCursorLabels)
+  // Cancel-and-replace rather than coalesce-and-drop: a request that lands
+  // while a verify frame is pending must still produce a fresh clamp.
+  // Dropping it loses e.g. a resize arriving mid-verify — the verify can
+  // measure pre-reflow geometry as in-bounds, and with the request swallowed
+  // nothing ever re-clamps, stranding the label outside the new viewport.
+  // Replacement stays coalesced: at most one callback runs per frame.
+  if (cursorClampFrame !== null) cancelAnimationFrame(cursorClampFrame)
+  cursorClampFrame = requestAnimationFrame(() => clampCursorLabels())
 }
 
 const startCursorClampManager = () => {
@@ -95,13 +127,14 @@ const buildCursorDOM = (agent: AgentCursor): HTMLElement => {
   label.textContent = `✦ ${agent.name}`
   cursor.appendChild(label)
 
-  let destroyed = false
-  const setupFrame = requestAnimationFrame(() => {
-    if (!destroyed) registerCursorLabel(label)
-  })
+  // Register synchronously: a next-frame deferral opened a race where a
+  // widget destroyed and rebuilt within one frame (any decoration redraw)
+  // could tear the clamp manager down mid-handoff, leaving the visible
+  // label unobserved — it then never re-clamped on viewport resizes.
+  // Observing a not-yet-attached element is safe; the registration's own
+  // scheduleCursorClamp measures on the next frame, after PM attaches it.
+  registerCursorLabel(label)
   cursorCleanup.set(cursor, () => {
-    destroyed = true
-    cancelAnimationFrame(setupFrame)
     unregisterCursorLabel(label)
   })
 

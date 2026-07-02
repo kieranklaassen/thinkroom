@@ -14,8 +14,14 @@ class ThinkroomSketch
     rectangle diamond ellipse line arrow freedraw text frame
   ].freeze
   SAFE_COLOR = /\A(?:transparent|#[0-9a-f]{3,8})\z/i
+  # The id pattern the editor requires before it recognizes a payload as a
+  # sketch (normalizeSketchData in app/frontend/editor/sketch/scene.ts).
+  VALID_ID = /\A[a-zA-Z0-9_-]{1,100}\z/
 
-  Parsed = Data.define(:scene, :description, :labels, :shape_types) do
+  # `id` is present for every markdown fence (parse_markdown_fence rejects
+  # fences without an editor-valid one); it is nil only when a direct `parse`
+  # caller has no id to carry (e.g. the HTML sanitizer validating a scene).
+  Parsed = Data.define(:scene, :description, :labels, :shape_types, :id, :height) do
     def semantic_text
       parts = [ description.presence, labels.presence&.join(", ") ].compact
       parts.empty? ? "Sketch" : "Sketch: #{parts.join(" — ")}"
@@ -23,7 +29,7 @@ class ThinkroomSketch
   end
 
   class << self
-    def parse(scene_json, description: "", format_version: FORMAT_VERSION)
+    def parse(scene_json, description: "", format_version: FORMAT_VERSION, id: nil, height: nil)
       source = scene_json.to_s
       return if source.blank? || source.bytesize > MAX_SCENE_BYTES
       return unless format_version.to_i == FORMAT_VERSION
@@ -40,9 +46,20 @@ class ThinkroomSketch
       end.uniq.first(50)
       shape_types = scene.fetch("elements").filter_map { |element| element["type"] }.uniq
 
-      Parsed.new(scene:, description:, labels:, shape_types:)
+      Parsed.new(scene:, description:, labels:, shape_types:, id:, height: clamp_height(height))
     rescue JSON::ParserError, JSON::NestingError
       nil
+    end
+
+    # Height is a render hint, not a scene-correctness constraint. Mirrors
+    # normalizeSketchData (scene.ts): anything non-numeric or <= 0 falls back
+    # to the default, everything else clamps into [MIN, MAX] — so all
+    # surfaces agree and a valid scene never breaks over its height.
+    def clamp_height(raw)
+      value = raw.respond_to?(:to_i) ? raw.to_i : 0
+      return DEFAULT_HEIGHT if value <= 0
+
+      value.clamp(MIN_HEIGHT, MAX_HEIGHT)
     end
 
     # Parse one markdown excalidraw fence body (the JSON inside a ```excalidraw
@@ -56,10 +73,19 @@ class ThinkroomSketch
       payload = JSON.parse(code_text.to_s)
       return unless payload.is_a?(Hash)
 
+      # The editor only recognizes fences whose id matches VALID_ID
+      # (normalizeSketchData keeps everything else a code block), so reject
+      # them here too: create-time recognition, plain_text, the audit
+      # warning, and the static preview all share the editor's accept set.
+      id = payload["id"].to_s[VALID_ID]
+      return unless id
+
       parse(
         JSON.generate(payload.fetch("scene")),
         description: payload["description"],
-        format_version: payload["formatVersion"]
+        format_version: payload["formatVersion"],
+        id:,
+        height: payload["height"]
       )
     rescue JSON::ParserError, JSON::NestingError, JSON::GeneratorError, KeyError
       nil

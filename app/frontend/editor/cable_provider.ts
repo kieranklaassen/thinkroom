@@ -1,7 +1,15 @@
 import type { Consumer, Subscription } from '@rails/actioncable'
 import { getConsumer } from '../lib/cable'
 import { csrfToken } from '../lib/csrf'
+import type { MermaidRenderHints } from './mermaid'
 import * as Y from 'yjs'
+
+/** Wire shape of Document#render_hints — client-measured render geometry
+ * namespaced by renderer. Shared by the show props, the editor props, and
+ * the durable snapshot payload so the three cannot drift. */
+export interface RenderHints {
+  mermaid?: MermaidRenderHints
+}
 import {
   Awareness,
   applyAwarenessUpdate,
@@ -33,6 +41,9 @@ export interface DurableSnapshotPayload {
   content: string
   spans: unknown[]
   state_vector: string
+  /** Client-measured render geometry (Mermaid figure heights by source hash)
+   *  persisted server-side so future loads reserve space before rendering. */
+  render_hints?: RenderHints
 }
 
 const toBase64 = (u8: Uint8Array): string => {

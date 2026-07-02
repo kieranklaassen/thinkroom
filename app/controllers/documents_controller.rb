@@ -91,14 +91,25 @@ class DocumentsController < InertiaController
     @agent_guide = AgentGuide.text(document, request.base_url)
     @open_graph = document_open_graph(document)
 
+    # Editor capabilities for THIS view, mirrored into the static preview so
+    # mode-dependent chrome (Mermaid source visibility, sketch caption
+    # affordance) is identical on both sides of the preview → editor swap.
+    writable = document.writable_by?(owner_token, user: current_user)
+
     # Claim the seed at page-render time so a fresh document paints its
     # template from props instead of waiting for the WebSocket round-trip.
     # Only the HTML editor path may claim — agent/JSON fetches above never
     # reach here, so a programmatic read can't burn the claim. Partial
     # reloads and prefetch-shaped requests are also excluded: only an
-    # initial render mounts an editor that will actually apply the grant,
-    # and a burned grant blocks the channel fallback for SEED_CLAIM_TIMEOUT.
-    seed_granted = initial_render? && !prefetch_request? && !link_preview_request && document.try_claim_seed
+    # initial render mounts an editor that will actually apply the grant.
+    # Read-only viewers never claim either: their client can't send the
+    # applied template anywhere (every write path is canWrite-gated), so a
+    # grant to them is burned for SEED_CLAIM_TIMEOUT and every viewer sees
+    # a blank document until it expires.
+    seed_granted = initial_render? && !prefetch_request? && !link_preview_request &&
+      writable && document.try_claim_seed
+    preview_editable = writable && %w[edit suggest].include?(mode)
+    preview_sketch_interactive = writable && mode == "edit"
 
     render inertia: "documents/show", props: {
       # Cookie-backed UI prefs and the path-derived mode are both available to
@@ -106,7 +117,10 @@ class DocumentsController < InertiaController
       # Mode deliberately comes from the URL rather than a browser preference:
       # links, reloads, and Inertia history are now its source of truth.
       ui: ui_prefs(mode:),
-      document: document.slice(:id, :slug, :title, :content_format).merge(
+      # Lambda so partial reloads (suggestions/comments/presences polls) skip
+      # the expensive parts entirely — preview HTML rendering and the Base64
+      # Yjs state encode only run when the document prop is actually sent.
+      document: -> { document.slice(:id, :slug, :title, :content_format).merge(
         seed_content: document.seed_content,
         seed_version: document.updated_at.iso8601(6),
         seed_granted: seed_granted,
@@ -116,12 +130,20 @@ class DocumentsController < InertiaController
         yjs_state_b64: (Base64.strict_encode64(document.yjs_state) if document.yjs_state.present?),
         # Server-rendered prose for an instant first paint; the live editor
         # swaps in over it once Milkdown binds the hydrated Yjs state.
-        content_html: document.preview_html,
+        content_html: document.preview_html(
+          editable: preview_editable,
+          sketch_interactive: preview_sketch_interactive
+        ),
+        # Client-measured render geometry (Mermaid figure heights) persisted
+        # from earlier snapshots; the editor pre-sizes its diagram figures from
+        # the same hints the preview skeletons used, so neither layer jumps
+        # when mermaid finishes rendering.
+        render_hints: document.render_hints || {},
         # First-H1 title derived on the server so the header reads correctly on
         # first paint, before the editor mounts and derives the same title.
         display_title: document.display_title,
         **(document.content_format == "markdown" ? { seed_markdown: document.seed_content } : {})
-      ),
+      ) },
       # Ownership rides its own lazy prop so claim events reload cheaply —
       # never re-shipping the Yjs state embedded in the document prop above.
       ownership: -> { document.ownership_props(owner_token, viewer_user: current_user) },
@@ -313,28 +335,8 @@ class DocumentsController < InertiaController
     state_vector = params[:state_vector].to_s
     return head :content_too_large if state_vector.bytesize > MAX_STATE_VECTOR_BYTES
 
-    normalization = document.html? ? HtmlDocumentSanitizer.snapshot(content) : nil
-    content = normalization.content if normalization
-
-    spans = sanitize_snapshot_spans(params[:spans])
-    previous_title = document.title
-    title = DocumentTitle.call(format: document.content_format, content:) || previous_title
-
-    persisted = YjsPersistence.persist_snapshot(
-      document,
-      state_vector_b64: state_vector.presence,
-      content:,
-      spans:,
-      title:,
-      token: owner_token,
-      user: current_user
-    )
-    return render json: { error: "Snapshot is stale; retry from current document state." },
-                  status: :conflict unless persisted
-
-    DocumentAsset.claim_from_html!(document:, source: content) if document.html?
-    broadcast_title(document) if title != previous_title
-    render json: { normalized: normalization&.changed? || false }
+    result = persist_snapshot_from_params(document, content:, state_vector:)
+    render json: result if result
   end
 
   # Discrete editor actions (currently task-checkbox toggles) also send their
@@ -371,25 +373,7 @@ class DocumentsController < InertiaController
                     status: :unprocessable_entity if state_vector.blank?
       return head :content_too_large if state_vector.bytesize > MAX_STATE_VECTOR_BYTES
 
-      normalization = document.html? ? HtmlDocumentSanitizer.snapshot(content) : nil
-      content = normalization.content if normalization
-      spans = sanitize_snapshot_spans(params[:spans])
-      previous_title = document.title
-      title = DocumentTitle.call(format: document.content_format, content:) || previous_title
-      persisted = YjsPersistence.persist_snapshot(
-        document,
-        state_vector_b64: state_vector,
-        content:,
-        spans:,
-        title:,
-        token: owner_token,
-        user: current_user
-      )
-      return render json: { error: "Snapshot is stale; retry from current document state." },
-                    status: :conflict unless persisted
-
-      DocumentAsset.claim_from_html!(document:, source: content) if document.html?
-      broadcast_title(document) if title != previous_title
+      return unless persist_snapshot_from_params(document, content:, state_vector:)
     end
 
     head :no_content
@@ -398,6 +382,37 @@ class DocumentsController < InertiaController
   end
 
   private
+
+  # Shared tail of the snapshot and sync_update actions: normalize + persist
+  # the derived snapshot, guard against stale state vectors, then run the
+  # post-persist side effects. Returns the success payload, or nil after
+  # rendering the conflict response itself.
+  def persist_snapshot_from_params(document, content:, state_vector:)
+    normalization = document.html? ? HtmlDocumentSanitizer.snapshot(content) : nil
+    content = normalization.content if normalization
+    previous_title = document.title
+    title = DocumentTitle.call(format: document.content_format, content:) || previous_title
+
+    persisted = YjsPersistence.persist_snapshot(
+      document,
+      state_vector_b64: state_vector.presence,
+      content:,
+      spans: sanitize_snapshot_spans(params[:spans]),
+      title:,
+      render_hints: RenderHints.sanitize(params[:render_hints]),
+      token: owner_token,
+      user: current_user
+    )
+    unless persisted
+      render json: { error: "Snapshot is stale; retry from current document state." },
+             status: :conflict
+      return nil
+    end
+
+    DocumentAsset.claim_from_html!(document:, source: content) if document.html?
+    broadcast_title(document) if title != previous_title
+    { normalized: normalization&.changed? || false }
+  end
 
   def broadcast_title(document)
     DocumentMetaChannel.broadcast_event(document, :title, title: document.title)

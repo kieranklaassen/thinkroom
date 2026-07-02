@@ -84,3 +84,27 @@ const [documentTitle] = useState(doc.display_title || doc.title)
 ```
 
 Verification that the swap is genuinely zero-shift: a CPU-throttled Playwright run sampling each element's `getBoundingClientRect().top` per frame plus a `layout-shift` PerformanceObserver — assert **0 blank frames** and **CLS 0.0000** with every element stable from the first painted frame.
+
+## Round two (2026-07-02): rich-block parity
+
+Re-measuring with a torture document (image, two Mermaid diagrams, two sketches, wide table, highlighted code) found the preview drifting from the editor by **up to 512px of cumulative block height** — every drift is a jump at the swap. The catalog of two-renderer traps, beyond the original `\n`-between-blocks one:
+
+- **`<br>\n`**: Commonmarker emits a newline after every `<br>`; under `white-space: break-spaces` that newline is a *second* forced break, so each soft line break made the preview one line taller. Strip the newline after each `<br>`.
+- **ProseMirror trailing breaks**: a textblock ending in a non-text inline (block image) or a hard break gets a separator + `ProseMirror-trailingBreak` — one extra line box the plain HTML doesn't have. Replicate the exact DOM.
+- **Chrome-wrapped blocks**: the editor renders tables inside `.milkdown-table-block` (UI font at 0.875em, own padding — +93px vs a bare prose table) and sketches inside a bordered figure with a caption bar (+53px vs a bare height box). The preview must emit the editor's own markup/classes, not simplified stand-ins. Any chrome CSS that ships in the code-split editor chunk needs a render-blocking replica for the preview (see `app/assets/stylesheets/application.css`).
+- **Content-dependent async heights** (Mermaid): nothing server-side can predict the rendered SVG height, so persist it — editor snapshots now carry measured figure heights keyed by an FNV hash of the diagram source (`documents.render_hints`), and both the preview skeleton and the next editor mount pre-size from the same hints. First-ever render still grows once; every load after is zero-shift.
+- **Marks vs attributes**: editor tints ride mark-derived classes (`.prov--ai`, `.sug-ins`); the preview only has sanitized data attributes. Style the attributes identically (including read-mode overrides) or the tint pops in at swap.
+- **Renderer scratch DOM**: `mermaid.render()` measures in a div appended to `<body>`, transiently extending the page by the diagram height (~100ms scrollbar jump). Render into a hidden `position:fixed` host.
+- **Raw HTML in markdown**: `Commonmarker` drops raw HTML by default (`unsafe: false`), silently deleting provenance spans from seed-only previews. Render unsafe and let `HtmlDocumentSanitizer` stay the security boundary — the editor shows dropped-tag content as literal text anyway.
+
+The block-by-block parity harness (materialize `content_html` inside the live `.doc-editor-stack`, diff every top-level block's outer height against the editor's) is the fastest way to find the next drift: it reports per-block deltas instead of a single CLS number.
+
+## Round three (2026-07-02): the idle redraw loop
+
+Chasing "still flickering" past pixel parity found a 60fps feedback loop, not a paint bug: **any foreign chrome appended inside a ProseMirror-rendered node makes PM's DOMObserver re-render that node** (deleting the chrome), and if the chrome's owner rebuilds on mutation, the two fight forever. The rich-block width handle inside plain `<pre>` blocks burned a full core at idle (900 DOM mutations/s) on every document with a code block, and each per-frame `updateState` re-imposed the state selection over in-flight native drags — the real cause of the "comment-mode selection stomping" escalation and of caret clicks (review popover) getting eaten.
+
+Rules of thumb:
+- Chrome living inside a PM-rendered node requires a **node view** whose `ignoreMutation` scopes PM's attention to the editable `contentDOM` (see `app/frontend/editor/code_block_view.ts`; sketches and tables were already node views, which is why only code blocks looped).
+- Measure idle: a healthy document page has **zero** editor mutations and zero `updateState` calls per second at rest. A MutationObserver over the editor subtree is a two-minute check and catches this whole bug class.
+- Anything that dispatches per awareness tick (y-prosemirror's cursor plugin) belongs behind a slice-snapshot + rAF gate (`cursor_awareness.ts`, mirroring `read_pointers.ts`).
+- Clamp/measure passes scheduled during a viewport resize read mid-reflow geometry (`window.innerWidth` lags); verify on the next frame (`agent_cursors.ts`).

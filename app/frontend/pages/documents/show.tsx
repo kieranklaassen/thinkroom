@@ -35,6 +35,7 @@ import {
   type SuggestionPayload,
 } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
+import type { RenderHints } from '../../editor/cable_provider'
 import { bindReadModeCopy } from '../../editor/clipboard'
 import { bindReadPointerBroadcast } from '../../editor/read_pointers'
 import { bindViewportBroadcast, bindViewportFollow } from '../../editor/viewport_follow'
@@ -117,6 +118,11 @@ export interface DocumentProps {
     yjs_state_b64: string | null
     content_html: string
     display_title: string
+    // Persisted render geometry (Mermaid figure heights by source hash):
+    // the server sized the content_html skeletons from these, and the editor
+    // pre-sizes its own figures from the same values, so async diagram
+    // rendering never shifts the page.
+    render_hints: RenderHints
   }
   viewer: ViewerPayload
   // Server-rendered UI prefs from cookies — the source of truth for first
@@ -175,6 +181,33 @@ const capAnchor = (text: string): string => {
 
 const skippedSuggestionNotice = (count: number): string =>
   `${count} suggestion${count === 1 ? '' : 's'} skipped because the target is missing, ambiguous, or empty; ${count === 1 ? 'it remains' : 'they remain'} pending for individual review.`
+
+// Resolves once every image in the live editor has finished loading (or
+// errored — a broken image settles at its broken-glyph size either way), or
+// after `capMs` so nothing can pin the preview layer forever. The separator
+// imgs ProseMirror inserts have no src and are excluded.
+const waitForEditorImages = (capMs: number): Promise<void> => {
+  const pending = Array.from(
+    document.querySelectorAll<HTMLImageElement>('.doc-live-editor .ProseMirror img[src]'),
+  ).filter((img) => !img.complete)
+  if (pending.length === 0) return Promise.resolve()
+
+  return new Promise((resolve) => {
+    let remaining = pending.length
+    const timer = setTimeout(() => resolve(), capMs)
+    const settle = () => {
+      remaining -= 1
+      if (remaining === 0) {
+        clearTimeout(timer)
+        resolve()
+      }
+    }
+    pending.forEach((img) => {
+      img.addEventListener('load', settle, { once: true })
+      img.addEventListener('error', settle, { once: true })
+    })
+  })
+}
 
 export default function DocumentShow({
   document: doc,
@@ -1386,6 +1419,7 @@ export default function DocumentShow({
                       connectionIdentity={connectionIdentity}
                       contentFormat={doc.content_format}
                       initialStateB64={doc.yjs_state_b64}
+                      renderHints={doc.render_hints}
                       seedContent={doc.seed_content}
                       seedVersion={doc.seed_version}
                       seedGranted={doc.seed_granted}
@@ -1395,14 +1429,26 @@ export default function DocumentShow({
                       suggesting={ownership.can_write && effectiveMode === 'suggest'}
                       taskInteractive={ownership.can_write && effectiveMode !== 'comment'}
                       onReady={(h) => {
-                        setReadyEditor({ key: editorSessionKey, handle: h })
-                        // Wait two frames so ProseMirror has painted the synced
-                        // content before the preview is removed.
-                        requestAnimationFrame(() =>
+                        // The preview's images carry server-known width/height
+                        // attributes; the editor's ProseMirror image nodes
+                        // don't, so an editor image that hasn't decoded yet
+                        // holds ZERO height and everything below it sits 320px
+                        // high until the bytes arrive — a visible double-jump
+                        // right after the swap on real-latency connections.
+                        // The visible layer flips at booting→revealing (the
+                        // moment `handle` is set), so hold BOTH phase changes
+                        // until the editor's images have pixels (capped so a
+                        // broken image can't pin the preview), then give
+                        // ProseMirror two frames to paint before the preview
+                        // is dropped.
+                        void waitForEditorImages(1500).then(() => {
+                          setReadyEditor({ key: editorSessionKey, handle: h })
                           requestAnimationFrame(() =>
-                            setSwappedEditorKey(editorSessionKey),
-                          ),
-                        )
+                            requestAnimationFrame(() =>
+                              setSwappedEditorKey(editorSessionKey),
+                            ),
+                          )
+                        })
                       }}
                       onStatus={setStatus}
                       onSpans={setSpans}

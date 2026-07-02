@@ -133,8 +133,13 @@ class YjsPersistence
     # client has observed every Yjs update currently stored by the server.
     # A client may be ahead (its own cable frame is still in flight), but it
     # may not overwrite the API read model from behind.
+    #
+    # `render_hints` (optional, pre-sanitized by the controller) carries
+    # client-measured render geometry — currently Mermaid figure heights keyed
+    # by source hash — merged per namespace so hints from other diagrams are
+    # not lost between snapshots.
     def persist_snapshot(document, state_vector_b64:, content:, spans:, title: document.title,
-                         token: nil, user: nil)
+                         render_hints: nil, token: nil, user: nil)
       ActiveSupport::Notifications.instrument("snapshot.yjs", document_id: document.id) do |payload|
         client_state = decode_state_vector(decode(state_vector_b64)) if state_vector_b64.present?
 
@@ -168,7 +173,11 @@ class YjsPersistence
               end
             end
 
-            document.update!(title:, content_snapshot: content, provenance_spans: spans)
+            attributes = { title:, content_snapshot: content, provenance_spans: spans }
+            if render_hints.present?
+              attributes[:render_hints] = RenderHints.merge(document.render_hints || {}, render_hints)
+            end
+            document.update!(attributes)
             payload[:outcome] = "persisted"
           end
         end
