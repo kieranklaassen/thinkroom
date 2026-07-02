@@ -27,12 +27,14 @@ const auditPage = async (page, path, { expectFields }) => {
   await page.waitForFunction(() => (document.getElementById('app')?.childElementCount ?? 0) > 0)
   if (expectFields) await page.waitForSelector('input:not([type=hidden])')
 
+  // contenteditable focuses zoom on iOS too — the Milkdown editor surface
+  // on document pages must hold the same floor as native fields.
   const inputs = await page.evaluate(() => {
-    const fields = [...document.querySelectorAll('input, textarea, select')]
+    const fields = [...document.querySelectorAll('input, textarea, select, [contenteditable="true"]')]
     return fields
       .filter((field) => field.type !== 'hidden' && field.getClientRects().length > 0)
       .map((field) => ({
-        label: `${field.tagName.toLowerCase()}[name=${field.name || field.className || '?'}]`,
+        label: `${field.tagName.toLowerCase()}[name=${field.name || field.className.split(' ')[0] || '?'}]`,
         fontPx: parseFloat(getComputedStyle(field).fontSize),
       }))
   })
@@ -57,6 +59,41 @@ const auditPage = async (page, path, { expectFields }) => {
   }
 }
 
+// The page sweeps only see fields that render at load. The composer, tag
+// editor, identity, and sketch-caption inputs mount behind interactions, so
+// probe them with synthetic elements — this also proves the emulated context
+// really matches the coarse-pointer media query the 16px rules live in.
+const assertTouchRules = async (page) => {
+  const probe = await page.evaluate((min) => {
+    if (!window.matchMedia('(hover: none), (pointer: coarse)').matches) {
+      return ['emulated context does not match the coarse-pointer media query']
+    }
+    const failures = []
+    const host = document.createElement('div')
+    document.body.append(host)
+    const probes = [
+      ['comment composer', '<textarea class="comment-input"></textarea>'],
+      ['tag editor', '<div class="document-tag-editor"><input></div>'],
+      ['identity chip', '<input class="identity-input">'],
+      ['sketch caption', '<figcaption class="thinkroom-sketch-caption"><input class="thinkroom-sketch-title"></figcaption>'],
+    ]
+    for (const [name, html] of probes) {
+      host.innerHTML = html
+      const field = host.querySelector('input, textarea')
+      const fontPx = parseFloat(getComputedStyle(field).fontSize)
+      if (fontPx < min) failures.push(`${name} input is ${fontPx}px on touch — below ${min}px`)
+    }
+    host.remove()
+    return failures
+  }, MIN_FONT_PX)
+
+  if (probe.length > 0) {
+    for (const message of probe) fail(message)
+  } else {
+    ok('interaction-gated inputs hold the 16px floor under the coarse-pointer rules')
+  }
+}
+
 const browser = await chromium.launch()
 try {
   // No Safari userAgent spoof: Rails `allow_browser versions: :modern`
@@ -71,6 +108,7 @@ try {
   const page = await context.newPage()
 
   await auditPage(page, '/login', { expectFields: true })
+  await assertTouchRules(page)
   await auditPage(page, '/signup', { expectFields: true })
   await auditPage(page, '/', { expectFields: false })
   await auditPage(page, `/d/${SLUG}`, { expectFields: false })

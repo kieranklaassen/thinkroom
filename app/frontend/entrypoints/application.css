@@ -4268,7 +4268,8 @@ a:focus-visible {
      on focus. Desktop keeps the compact chrome sizes. */
   .document-tag-editor input,
   .comment-input,
-  .identity-input {
+  .identity-input,
+  .thinkroom-sketch-title {
     font-size: 1rem;
   }
 
@@ -4277,6 +4278,8 @@ a:focus-visible {
     height: 2.75rem;
   }
 
+  /* 36px, not the 44px convention: the input sits inside the sticky doc
+     header, which a 44px field would visibly inflate. */
   .identity-input {
     min-height: 2.25rem;
   }
