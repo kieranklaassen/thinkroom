@@ -289,6 +289,7 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
     showAllEarlier || activeTag ? earlier : earlier.slice(0, EARLIER_PREVIEW_LIMIT)
   const hiddenEarlierCount = earlier.length - visibleEarlier.length
   const claimerName = identityName
+  const hasDemo = recent.some((document) => document.slug === 'demo')
 
   return (
     <>
@@ -306,9 +307,7 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
         </NativeButton>
         <NativeButton position="trailing" icon="ellipsis.circle">
           <NativeMenuItem title="Have an agent start one" click="#agent-start-trigger" />
-          {recent.some((document) => document.slug === 'demo') && (
-            <NativeMenuItem title="Open the demo" href="/d/demo" />
-          )}
+          {hasDemo && <NativeMenuItem title="Open the demo" href="/d/demo" />}
           {isClient && <NativeMenuItem title="Send feedback" click=".feedback-button button" />}
         </NativeButton>
       </NativeNavbar>
@@ -353,7 +352,7 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
               >
                 Have an agent start one
               </button>
-              {recent.some((document) => document.slug === 'demo') && (
+              {hasDemo && (
                 <Link href="/d/demo" className="btn btn-ghost" prefetch>
                   Open the demo
                 </Link>

@@ -18,6 +18,7 @@ const errorText = (error: unknown): string | null => {
 export default function AuthShow({ mode, google_enabled, csrf_token, return_to, nativeApp }: Props) {
   const registering = mode === 'register'
   const title = registering ? 'Create your account' : 'Welcome back'
+  const actionTitle = registering ? 'Create account' : 'Sign in'
   const switchPath = registering ? '/login' : '/signup'
   const switchHref = return_to
     ? `${switchPath}?${new URLSearchParams({ return_to }).toString()}`
@@ -32,9 +33,9 @@ export default function AuthShow({ mode, google_enabled, csrf_token, return_to, 
           navbar submit button clicks #auth-submit — scoped, because the Google
           OAuth form's submit button appears earlier in the DOM and the default
           [type='submit'] selector would hit it first. */}
-      <NativeNavbar title={registering ? 'Create account' : 'Sign in'} pullToRefresh={false} />
+      <NativeNavbar title={actionTitle} pullToRefresh={false} />
       <NativeForm />
-      <NativeSubmitButton title={registering ? 'Create account' : 'Sign in'} click="#auth-submit" />
+      <NativeSubmitButton title={actionTitle} click="#auth-submit" />
       <main className="auth-page">
         <section className="auth-card" aria-labelledby="auth-heading">
           <Link href="/" className="auth-wordmark" aria-label="Thinkroom home">
@@ -133,7 +134,7 @@ export default function AuthShow({ mode, google_enabled, csrf_token, return_to, 
                   disabled={processing}
                   {...nativeHaptic('impact')}
                 >
-                  {processing ? 'Working…' : registering ? 'Create account' : 'Sign in'}
+                  {processing ? 'Working…' : actionTitle}
                 </button>
               </div>
             )}
