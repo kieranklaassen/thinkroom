@@ -117,7 +117,10 @@ class DocumentsController < InertiaController
       # Mode deliberately comes from the URL rather than a browser preference:
       # links, reloads, and Inertia history are now its source of truth.
       ui: ui_prefs(mode:),
-      document: document.slice(:id, :slug, :title, :content_format).merge(
+      # Lambda so partial reloads (suggestions/comments/presences polls) skip
+      # the expensive parts entirely — preview HTML rendering and the Base64
+      # Yjs state encode only run when the document prop is actually sent.
+      document: -> { document.slice(:id, :slug, :title, :content_format).merge(
         seed_content: document.seed_content,
         seed_version: document.updated_at.iso8601(6),
         seed_granted: seed_granted,
@@ -140,7 +143,7 @@ class DocumentsController < InertiaController
         # first paint, before the editor mounts and derives the same title.
         display_title: document.display_title,
         **(document.content_format == "markdown" ? { seed_markdown: document.seed_content } : {})
-      ),
+      ) },
       # Ownership rides its own lazy prop so claim events reload cheaply —
       # never re-shipping the Yjs state embedded in the document prop above.
       ownership: -> { document.ownership_props(owner_token, viewer_user: current_user) },
@@ -446,6 +449,9 @@ class DocumentsController < InertiaController
   # integer heights within the figure's plausible on-screen range.
   RENDER_HINT_KEY = /\A[a-z0-9]{1,13}\z/
   RENDER_HINT_HEIGHT_RANGE = (96..2000)
+  # Per-request ingest cap. Must not exceed the storage-side cap
+  # (YjsPersistence::MAX_RENDER_HINTS_PER_NAMESPACE) or the newest-wins merge
+  # would evict hints this same request just accepted.
   MAX_RENDER_HINTS = 200
 
   def sanitize_render_hints(raw)

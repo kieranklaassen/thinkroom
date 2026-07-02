@@ -52,8 +52,11 @@ class ThinkroomSketch
     # and so a malformed body (non-Hash JSON, a value that can't be re-encoded,
     # a missing scene) is reported as unrecognized rather than raising and
     # 500ing the request that renders or audits it.
-    def parse_markdown_fence(code_text)
-      payload = JSON.parse(code_text.to_s)
+    #
+    # Callers that already hold the parsed fence JSON (DocumentPreviewHtml
+    # reads id/height from it first) pass it as `payload:` to skip re-parsing.
+    def parse_markdown_fence(code_text, payload: nil)
+      payload ||= JSON.parse(code_text.to_s)
       return unless payload.is_a?(Hash)
 
       parse(

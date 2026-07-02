@@ -25,17 +25,27 @@ export const codeBlockView = $view(
     const dom = document.createElement('pre')
     const contentDOM = document.createElement('code')
 
+    // Writes only on real changes: setting an attribute to its current value
+    // still queues a mutation record, which would wake the width-handle
+    // plugin's MutationObserver on every keystroke inside the block.
+    const setAttrs = (element: HTMLElement, attrs: Record<string, unknown> | undefined) => {
+      Object.entries(attrs ?? {}).forEach(([key, value]) => {
+        if (value == null) return
+        const next = String(value)
+        if (element.getAttribute(key) !== next) element.setAttribute(key, next)
+      })
+    }
+
     const applyAttrs = (current: typeof node) => {
       const attrs = ctx.get(codeBlockAttr.key)(current)
-      Object.entries(attrs.pre ?? {}).forEach(([key, value]) => {
-        if (value != null) dom.setAttribute(key, String(value))
-      })
-      Object.entries(attrs.code ?? {}).forEach(([key, value]) => {
-        if (value != null) contentDOM.setAttribute(key, String(value))
-      })
+      setAttrs(dom, attrs.pre)
+      setAttrs(contentDOM, attrs.code)
       const language = current.attrs.language as string
-      if (language && language.length > 0) dom.dataset.language = language
-      else delete dom.dataset.language
+      if (language && language.length > 0) {
+        if (dom.dataset.language !== language) dom.dataset.language = language
+      } else {
+        delete dom.dataset.language
+      }
     }
 
     applyAttrs(node)

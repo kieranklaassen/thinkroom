@@ -28,6 +28,10 @@ type AwarenessChangeListener = (...args: never[]) => void
  */
 export function gatedCursorAwareness(awareness: Awareness): Awareness {
   const gates = new Map<AwarenessChangeListener, { gated: () => void; cancel: () => void }>()
+  // y-prosemirror reads methods like getStates on every decoration pass;
+  // cache the bindings so each property access doesn't allocate a fresh
+  // bound function.
+  const boundMethods = new Map<PropertyKey, unknown>()
 
   const cursorSnapshot = (): string => {
     const parts: string[] = []
@@ -83,9 +87,15 @@ export function gatedCursorAwareness(awareness: Awareness): Awareness {
         }
       }
       const value = Reflect.get(target, property)
+      if (typeof value !== 'function') return value
       // Bind methods to the real awareness so their internal state access
       // (observer maps, local state, doc) never sees the proxy as `this`.
-      return typeof value === 'function' ? value.bind(target) : value
+      let bound = boundMethods.get(property)
+      if (!bound) {
+        bound = value.bind(target)
+        boundMethods.set(property, bound)
+      }
+      return bound
     },
   })
 }

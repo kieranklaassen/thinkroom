@@ -13,6 +13,13 @@ type MermaidApi = (typeof import('mermaid'))['default']
  * preview → editor swap pixel-identical. */
 export type MermaidRenderHints = Record<string, number>
 
+/** Wire shape of Document#render_hints — client-measured render geometry
+ * namespaced by renderer. Shared by the show props, the editor props, and
+ * the durable snapshot payload so the three cannot drift. */
+export interface RenderHints {
+  mermaid?: MermaidRenderHints
+}
+
 export const mermaidRenderHintsCtx = $ctx<MermaidRenderHints, 'mermaidRenderHints'>(
   {},
   'mermaidRenderHints',

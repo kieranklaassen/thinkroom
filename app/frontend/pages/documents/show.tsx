@@ -34,6 +34,7 @@ import {
   type SuggestionPayload,
 } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
+import type { RenderHints } from '../../editor/mermaid'
 import { bindReadModeCopy } from '../../editor/clipboard'
 import { bindReadPointerBroadcast } from '../../editor/read_pointers'
 import { bindViewportBroadcast, bindViewportFollow } from '../../editor/viewport_follow'
@@ -120,7 +121,7 @@ export interface DocumentProps {
     // the server sized the content_html skeletons from these, and the editor
     // pre-sizes its own figures from the same values, so async diagram
     // rendering never shifts the page.
-    render_hints: { mermaid?: Record<string, number> }
+    render_hints: RenderHints
   }
   viewer: ViewerPayload
   // Server-rendered UI prefs from cookies — the source of truth for first

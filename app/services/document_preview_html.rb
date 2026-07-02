@@ -73,14 +73,18 @@ class DocumentPreviewHtml
     # app/frontend/editor/mermaid.ts so persisted render hints line up with
     # the hashes the editor computes for its diagram figures.
     def mermaid_source_hash(source)
-      hash = 2_166_136_261
-      source.encode(Encoding::UTF_16LE).unpack("v*").each do |unit|
-        hash = ((hash ^ unit) * 16_777_619) & 0xFFFFFFFF
-      end
-      hash.to_s(36)
+      fnv1a(source.encode(Encoding::UTF_16LE).unpack("v*")).to_s(36)
     end
 
     private
+
+    # 32-bit FNV-1a folded over integer units. Callers pick the unit stream to
+    # match their JS counterpart exactly (UTF-16 code units vs. code points).
+    def fnv1a(units)
+      units.reduce(2_166_136_261) do |hash, unit|
+        ((hash ^ unit) * 16_777_619) & 0xFFFFFFFF
+      end
+    end
 
     # Block containers whose children are block elements; the whitespace between
     # those children is the markdown renderer's pretty-printing, never content.
@@ -93,6 +97,10 @@ class DocumentPreviewHtml
     # to the already-supported data-language attribute before sanitizing so the
     # instant preview can mark diagram blocks without trusting arbitrary HTML.
     def mark_mermaid_fences(html)
+      # The parse/serialize round-trip is pure overhead for the common
+      # zero-mermaid document; without the substring the loop can't match.
+      return html unless html.match?(/lang="mermaid"/i)
+
       fragment = Nokogiri::HTML5.fragment(html)
       fragment.css("pre[lang]").each do |pre|
         next unless pre["lang"].to_s.casecmp?("mermaid")
@@ -132,7 +140,7 @@ class DocumentPreviewHtml
         sibling = br.next_sibling
         next unless sibling&.text?
 
-        trimmed = sibling.content.sub(/\A\n/, "")
+        trimmed = sibling.content.delete_prefix("\n")
         if trimmed.empty?
           sibling.remove
         else
@@ -176,21 +184,30 @@ class DocumentPreviewHtml
     SIGNED_BLOB_SRC = %r{\A/rails/active_storage/blobs/(?:redirect|proxy)/([^/]+)/}
 
     def annotate_image_dimensions(fragment)
-      fragment.css("img[src]").each do |img|
+      targets = fragment.css("img[src]").filter_map do |img|
         next if img["width"].present? || img["class"].to_s.include?("ProseMirror-separator")
 
-        match = SIGNED_BLOB_SRC.match(img["src"].to_s)
-        next unless match
+        signed_id = SIGNED_BLOB_SRC.match(img["src"].to_s)&.[](1)
+        [ img, signed_id ] if signed_id
+      end
+      return if targets.empty?
 
-        blob = ActiveStorage::Blob.find_signed(match[1])
-        width = blob&.metadata&.dig("width")
-        height = blob&.metadata&.dig("height")
+      # One batched SELECT instead of a find_signed per <img>. The signature
+      # check (verifier + :blob_id purpose, exactly what Blob.find_signed
+      # does) still gates every id; unverifiable or missing blobs just skip.
+      blob_ids = targets.map(&:last).uniq.index_with do |signed_id|
+        ActiveStorage.verifier.verified(signed_id, purpose: :blob_id)
+      end.compact
+      blobs = ActiveStorage::Blob.where(id: blob_ids.values).index_by(&:id)
+
+      targets.each do |img, signed_id|
+        metadata = blobs[blob_ids[signed_id]]&.metadata
+        width = metadata&.dig("width")
+        height = metadata&.dig("height")
         next unless width.present? && height.present?
 
         img["width"] = width.to_s
         img["height"] = height.to_s
-      rescue ActiveSupport::MessageVerifier::InvalidSignature, ActiveRecord::RecordNotFound
-        next
       end
     end
 
@@ -237,7 +254,7 @@ class DocumentPreviewHtml
     end
 
     def mermaid_hint(hints, source)
-      return nil unless hints.is_a?(Hash)
+      return nil unless hints.is_a?(Hash) && hints.any?
 
       value = hints[mermaid_source_hash(source)]
       value.is_a?(Integer) && value.positive? ? value : nil
@@ -277,7 +294,7 @@ class DocumentPreviewHtml
         # (the lang hint is dropped), so the JSON payload itself is the signal.
         fragment.css("pre > code").filter_map do |code|
           payload = parse_sketch_payload(code.text) or next
-          parsed = ThinkroomSketch.parse_markdown_fence(code.text)
+          parsed = ThinkroomSketch.parse_markdown_fence(code.text, payload:)
           next unless parsed
 
           # The editor only accepts fences whose id matches this pattern
@@ -346,10 +363,7 @@ class DocumentPreviewHtml
     # (syncTapeVariation in app/frontend/editor/sketch/node_view.ts), so the
     # washi tape sits at the identical width/offset/angle across the swap.
     def tape_style(id)
-      hash = 2_166_136_261
-      id.to_s.each_char do |character|
-        hash = ((hash ^ character.ord) * 16_777_619) & 0xFFFFFFFF
-      end
+      hash = fnv1a(id.to_s.each_char.map(&:ord))
       width = 86 + hash % 23
       offset = ((hash >> 8) % 21) - 10
       angle = (((hash >> 16) % 29) - 14) / 10.0

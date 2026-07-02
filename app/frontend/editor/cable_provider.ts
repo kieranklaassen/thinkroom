@@ -1,6 +1,7 @@
 import type { Consumer, Subscription } from '@rails/actioncable'
 import { getConsumer } from '../lib/cable'
 import { csrfToken } from '../lib/csrf'
+import type { RenderHints } from './mermaid'
 import * as Y from 'yjs'
 import {
   Awareness,
@@ -35,7 +36,7 @@ export interface DurableSnapshotPayload {
   state_vector: string
   /** Client-measured render geometry (Mermaid figure heights by source hash)
    *  persisted server-side so future loads reserve space before rendering. */
-  render_hints?: { mermaid: Record<string, number> }
+  render_hints?: RenderHints
 }
 
 const toBase64 = (u8: Uint8Array): string => {

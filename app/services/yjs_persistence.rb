@@ -11,6 +11,11 @@ class YjsPersistence
   # is sufficient; the DB transaction below is the second guard.
   LOCKS = Concurrent::Map.new
 
+  # Storage-side cap on persisted render hints, newest-wins per namespace.
+  # DocumentsController::MAX_RENDER_HINTS (the per-request ingest cap) must
+  # stay <= this or a single snapshot's accepted hints could evict themselves.
+  MAX_RENDER_HINTS_PER_NAMESPACE = 200
+
   class << self
     # Merge a base64-encoded Yjs update into the document's persisted state.
     #
@@ -102,8 +107,6 @@ class YjsPersistence
     # Keep at most MAX_RENDER_HINTS_PER_NAMESPACE entries per namespace,
     # newest-wins: re-measured hashes move to the tail, and hashes for
     # since-deleted diagrams eventually age out of the head.
-    MAX_RENDER_HINTS_PER_NAMESPACE = 200
-
     def merge_render_hints(existing, incoming)
       incoming.each_with_object(existing.deep_dup) do |(namespace, hints), merged|
         current = merged[namespace].is_a?(Hash) ? merged[namespace] : {}

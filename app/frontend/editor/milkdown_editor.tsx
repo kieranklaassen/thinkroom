@@ -92,6 +92,7 @@ import {
   mermaidDiagrams,
   mermaidRenderHintsCtx,
   type MermaidRenderHints,
+  type RenderHints,
 } from './mermaid'
 import { richBlockWidthControls } from './rich_block_width'
 
@@ -147,7 +148,7 @@ interface EditorProps {
   /** Persisted render geometry from documents#show (currently Mermaid figure
    *  heights) so async renderers reserve their final space up front — the
    *  same hints size the server preview's skeletons. */
-  renderHints?: { mermaid?: MermaidRenderHints }
+  renderHints?: RenderHints
   onReady?: (handle: EditorHandle) => void
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
@@ -546,13 +547,29 @@ function CollabEditor({
       })
     }
 
-    // A finished diagram render changes measured geometry without a doc
-    // change, so the update listener never fires for it. Schedule a snapshot
-    // through the same debounce so fresh render hints reach the server.
-    const scheduleHintSnapshot = () => {
-      if (cancelled || !canWriteRef.current) return
+    const scheduleSnapshot = () => {
       if (snapshotTimer) clearTimeout(snapshotTimer)
       snapshotTimer = setTimeout(pushSnapshot, SNAPSHOT_DEBOUNCE_MS)
+    }
+
+    // A finished diagram render changes measured geometry without a doc
+    // change, so the update listener never fires for it. Schedule a snapshot
+    // through the same debounce so fresh render hints reach the server —
+    // but only when a measured height actually differs from what the server
+    // already knows. Diagrams re-render on every mount, so an ungated
+    // schedule would re-POST the full document on every load.
+    const knownMermaidHints: MermaidRenderHints = { ...renderHints?.mermaid }
+    const scheduleHintSnapshot = () => {
+      if (cancelled || !canWriteRef.current || !mermaidHintTarget) return
+      const measured = collectMermaidRenderHints(mermaidHintTarget)
+      const changed = Object.entries(measured).some(
+        ([hash, height]) => knownMermaidHints[hash] !== height,
+      )
+      if (!changed) return
+      // Optimistic: the push is debounced and best-effort, and every doc
+      // update re-sends all measured hints anyway.
+      Object.assign(knownMermaidHints, measured)
+      scheduleSnapshot()
     }
 
     let started = false
@@ -636,8 +653,7 @@ function CollabEditor({
           callbacksRef.current.onSpans?.(collectSpans(doc, { excludePendingInsertions: true }))
           const title = firstHeadingTitle(doc)
           if (title) callbacksRef.current.onTitleChange?.(title)
-          if (snapshotTimer) clearTimeout(snapshotTimer)
-          snapshotTimer = setTimeout(pushSnapshot, SNAPSHOT_DEBOUNCE_MS)
+          scheduleSnapshot()
         })
 
         const title = firstHeadingTitle(ctx.get(editorViewCtx).state.doc)
