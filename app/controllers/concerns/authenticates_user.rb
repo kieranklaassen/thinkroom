@@ -10,7 +10,10 @@ module AuthenticatesUser
     user.claim_documents!(anonymous_token)
     reset_session
     session[:user_id] = user.id
-    session[:remember_me] = true if remember
+    # Ruby Native app users are always remembered (per rubynative.com/docs/
+    # authentication) so the wrapped app never logs them out unexpectedly.
+    # Covers password, signup, and OAuth sign-ins in one place.
+    session[:remember_me] = true if remember || native_app?
     replace_owner_token!
 
     destination || root_path

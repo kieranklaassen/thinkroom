@@ -1,0 +1,40 @@
+# Ruby Native reads this file on launch to configure the native app shell.
+# Served as JSON from GET /native/config. Edit and relaunch the native app
+# to see changes (reloaded per request in development).
+# https://rubynative.com/docs/setup
+
+app:
+  # Normal mode: no native screen transitions. Advanced Mode needs a
+  # Stimulus bridge dependency the app doesn't carry.
+  # https://rubynative.com/docs/advanced-mode
+  mode: normal
+  # No entry_path and no tabs: the app is document-centric (home list +
+  # editor), so it launches as a single stack at "/".
+
+# https://rubynative.com/docs/appearance
+appearance:
+  # Matches --accent in app/frontend/entrypoints/application.css.
+  tint_color: "#b65c3d"
+
+  # Matches --surface (warm paper). Shown during launch and as the
+  # safe-area fill, so it must match the CSS body background to avoid a
+  # white flash before content paints.
+  background_color: "#faf8f4"
+
+  # Both Thinkroom themes (proof, whitey) are light; the web app has no OS
+  # dark mode. Forcing light keeps the status bar and window background
+  # consistent with the page.
+  theme: light
+
+  # Hold the launch screen with a spinner until the web content paints.
+  splash:
+    enabled: true
+    spinner_color: "#b65c3d"
+    status_bar: dark
+
+# Native OAuth: each listed path opens in a system browser sheet
+# (ASWebAuthenticationSession) instead of the in-app web view. List only
+# authorize paths, never callbacks. https://rubynative.com/docs/oauth
+auth:
+  oauth_paths:
+    - /auth/google_oauth2
