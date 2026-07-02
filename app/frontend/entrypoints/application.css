@@ -2752,23 +2752,23 @@ a:focus-visible {
 }
 
 .mode-control-popover {
-  width: 16rem;
-  padding: 0.35rem;
+  width: 13.5rem;
+  padding: 0.25rem;
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.1rem;
 }
 
 .mode-control-option {
   display: grid;
-  grid-template-columns: 1rem minmax(0, 1fr) auto;
+  grid-template-columns: 0.85rem minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.4rem;
   width: 100%;
   border: none;
   background: transparent;
-  border-radius: 7px;
-  padding: 0.45rem 0.55rem;
+  border-radius: 6px;
+  padding: 0.32rem 0.45rem;
   text-align: left;
   cursor: pointer;
 }
@@ -2786,17 +2786,18 @@ a:focus-visible {
   background: transparent;
 }
 
+/* Selected = soft tint + checkmark. No accent bars or outlines — the check
+   column already carries the state. */
 .mode-control-option.is-active {
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface-raised));
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-raised));
 }
 
 .mode-control-option-check {
   align-self: start;
   color: var(--accent);
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 700;
-  line-height: 1.25rem;
+  line-height: 1.15rem;
 }
 
 .mode-control-option-copy {
@@ -2804,30 +2805,32 @@ a:focus-visible {
   min-width: 0;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.1rem;
+  gap: 0.05rem;
 }
 
 .mode-control-option-label {
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   font-weight: 550;
   color: var(--ink);
+  line-height: 1.15rem;
 }
 
 .mode-control-option-hint {
-  font-size: 0.7rem;
+  font-size: 0.65rem;
+  line-height: 1.3;
   color: var(--ink-faint);
 }
 
 .mode-control-shortcut {
   align-self: center;
-  min-width: 2rem;
+  min-width: 1.6rem;
   border: 1px solid var(--line);
-  border-radius: 5px;
+  border-radius: 4px;
   background: var(--surface);
   color: var(--ink-faint);
   font-family: var(--font-mono);
-  font-size: 0.62rem;
-  line-height: 1.35rem;
+  font-size: 0.58rem;
+  line-height: 1.15rem;
   text-align: center;
 }
 
@@ -3563,6 +3566,12 @@ a:focus-visible {
   .share-copy {
     min-height: 44px;
     padding: 0.3rem 0.8rem;
+  }
+
+  /* The condensed desktop rows are too tight for touch — the mode sheet
+   * keeps 44px-friendly rows. */
+  .mode-control-option {
+    padding: 0.55rem 0.6rem;
   }
 }
 
