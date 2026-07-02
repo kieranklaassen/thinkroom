@@ -79,15 +79,15 @@ class YjsPersistence
     def state_b64(document)
       ActiveSupport::Notifications.instrument("state.yjs", document_id: document.id) do |payload|
         payload[:blob_bytes] = document.yjs_state&.bytesize || 0
+        from_columns = document.yjs_state.present? && document.yjs_state_vector.present?
+        payload[:served_from] = from_columns ? "columns" : "rebuild"
         encoded =
-          if document.yjs_state.present? && document.yjs_state_vector.present?
-            payload[:served_from] = "columns"
+          if from_columns
             [
               Base64.strict_encode64(document.yjs_state),
               Base64.strict_encode64(document.yjs_state_vector)
             ]
           else
-            payload[:served_from] = "rebuild"
             ydoc = load_ydoc(document)
             [
               Base64.strict_encode64(ydoc.full_diff.pack("C*")),
@@ -120,7 +120,13 @@ class YjsPersistence
             end
 
             if client_state && document.yjs_state.present?
-              server_state = decode_state_vector(server_state_vector(document))
+              server_state = begin
+                decode_state_vector(server_state_vector(document))
+              rescue ArgumentError
+                # A corrupt stored vector must not masquerade as client
+                # staleness — derive the truth from the blob instead.
+                decode_state_vector(load_ydoc(document).state)
+              end
               current = server_state.all? do |client_id, clock|
                 client_state.fetch(client_id, 0) >= clock
               end
@@ -158,9 +164,7 @@ class YjsPersistence
       ydoc
     end
 
-    # The server-side state vector for staleness gating: the merge-time
-    # column when present, else derived from the blob (legacy rows written
-    # before yjs_state_vector existed).
+    # Stored vector when present; otherwise derive from the blob (legacy rows).
     def server_state_vector(document)
       return document.yjs_state_vector.unpack("C*") if document.yjs_state_vector.present?
 

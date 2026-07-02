@@ -183,6 +183,43 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert doc.reload.yjs_state_vector.present?
   end
 
+  test "the snapshot staleness gate reads the stored vector without building a doc" do
+    doc = Document.create!(title: "Snapshot", content_snapshot: "current")
+    YjsPersistence.merge(doc, b64_update_for("server content"))
+    stale_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+
+    original = YjsPersistence.singleton_class.instance_method(:load_ydoc)
+    YjsPersistence.define_singleton_method(:load_ydoc) { |*| raise "gate must not build a Y::Doc" }
+    begin
+      persisted = YjsPersistence.persist_snapshot(
+        doc.reload, state_vector_b64: stale_vector, content: "stale", spans: []
+      )
+      assert_not persisted
+    ensure
+      YjsPersistence.singleton_class.define_method(:load_ydoc, original)
+    end
+
+    assert_equal "current", doc.reload.content_snapshot
+  end
+
+  test "a corrupt stored vector falls back to the blob for the snapshot gate" do
+    doc = Document.create!(title: "Snapshot", content_snapshot: "current")
+    client = Y::Doc.new
+    YjsPersistence.merge(doc, b64_update_for("server content", from_doc: client))
+    doc.update_columns(yjs_state_vector: [ 0x85, 0xff ].pack("C*"))
+
+    stale_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+    assert_not YjsPersistence.persist_snapshot(
+      doc.reload, state_vector_b64: stale_vector, content: "stale", spans: []
+    ), "a behind client must still be rejected when the stored vector is corrupt"
+
+    current_vector = Base64.strict_encode64(client.state.pack("C*"))
+    assert YjsPersistence.persist_snapshot(
+      doc.reload, state_vector_b64: current_vector, content: "fresh", spans: []
+    ), "a current client must still be accepted when the stored vector is corrupt"
+    assert_equal "fresh", doc.reload.content_snapshot
+  end
+
   test "snapshot staleness gate works from a legacy row without a stored vector" do
     doc = Document.create!(title: "Snapshot", content_snapshot: "current")
     YjsPersistence.merge(doc, b64_update_for("server content"))
