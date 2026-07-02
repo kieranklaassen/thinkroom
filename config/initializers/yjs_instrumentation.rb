@@ -1,6 +1,6 @@
 # Renders the structured events emitted by YjsPersistence and SyncChannel
-# (merge.yjs, state.yjs, snapshot.yjs, frame_dropped.yjs) as single-line
-# structured logs. Payloads carry ids, outcomes, and byte sizes only — never
+# (merge.yjs, state.yjs, snapshot.yjs, fold.yjs, recovered.yjs,
+# frame_dropped.yjs) as single-line structured logs. Payloads carry ids, outcomes, and byte sizes only — never
 # document content. External APMs can subscribe to the same /\.yjs$/ events.
 Rails.application.config.after_initialize do
   # Successful hot-path operations slower than this are logged at info so
@@ -40,7 +40,8 @@ Rails.application.config.after_initialize do
       duration_ms: event.duration.round(1)
     }
     %i[update_bytes blob_bytes blob_bytes_before blob_bytes_after lock_wait_ms
-       served_from restored_from sequence expected_sequence error].each do |key|
+       tail_rows rows integrated retained served_from restored_from
+       sequence expected_sequence error].each do |key|
       fields[key] = payload[key] if payload.key?(key)
     end
     # Class and message ("Document::StaleGenerationError: Client generation 3

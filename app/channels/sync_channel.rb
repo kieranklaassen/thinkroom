@@ -25,6 +25,20 @@
 class SyncChannel < ApplicationCable::Channel
   MAX_SEQUENCE_GAP = 256
 
+  # In-process subscriber refcount per document id, driving the
+  # fold-on-last-disconnect compaction trigger. Entries are removed when
+  # the count reaches zero, so the map only holds actively-open documents.
+  ACTIVE_SUBSCRIBERS = Concurrent::Map.new
+
+  def self.track_subscribe(document_id)
+    ACTIVE_SUBSCRIBERS.compute(document_id) { |count| count.to_i + 1 }
+  end
+
+  # => remaining subscriber count (0 removes the entry).
+  def self.track_unsubscribe(document_id)
+    ACTIVE_SUBSCRIBERS.compute(document_id) { |count| count.to_i > 1 ? count - 1 : nil }.to_i
+  end
+
   def subscribed
     @document = Document.find_by(slug: params[:slug])
     return reject unless @document
@@ -33,6 +47,7 @@ class SyncChannel < ApplicationCable::Channel
     @next_sequence = 1
     @pending_updates = {}
     stream_for @document
+    self.class.track_subscribe(@document.id)
 
     full_state, state_vector = YjsPersistence.state_b64(@document)
     message = { type: "sync", update: full_state, sv: state_vector, generation: @document.content_generation }
@@ -48,6 +63,17 @@ class SyncChannel < ApplicationCable::Channel
       message[:seed_author_name] = @document.seed_author_name if @document.seed_author_name
     end
     transmit(message)
+  end
+
+  def unsubscribed
+    return unless @document
+    return unless self.class.track_unsubscribe(@document.id).zero?
+
+    # Last subscriber gone: fold the update tail into the snapshot so cold
+    # reads (instant-paint props, the next join) serve current state.
+    YjsPersistence.fold!(@document)
+  rescue StandardError => e
+    Rails.logger.warn("SyncChannel: fold on disconnect failed: #{e.class}: #{e.message}")
   end
 
   def receive(data)

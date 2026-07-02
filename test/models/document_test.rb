@@ -6,7 +6,11 @@ class DocumentTest < ActiveSupport::TestCase
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "about to be wiped"
     YjsPersistence.merge(doc, Base64.strict_encode64(ydoc.diff.pack("C*")))
+    # replace_content! folds the update tail itself; folding here just lets
+    # the test capture the exact blob the archive must preserve.
+    YjsPersistence.fold!(doc)
     wiped_blob = doc.reload.yjs_state
+    assert wiped_blob.present?
     pre_bump_generation = doc.content_generation
 
     doc.replace_content!(source: "# Replacement")

@@ -138,7 +138,7 @@ class SyncChannelTest < ActionCable::Channel::TestCase
       perform :receive, { "type" => "update", "update" => update, "cid" => "abc" }
     end
 
-    assert doc.reload.yjs_state.present?
+    assert doc.reload.yjs_document_updates.exists?, "the frame must be durably appended"
   end
 
   test "subscribing transmits the document's current content generation" do
@@ -187,7 +187,7 @@ class SyncChannelTest < ActionCable::Channel::TestCase
       }
     end
 
-    assert doc.reload.yjs_state.present?
+    assert doc.reload.yjs_document_updates.exists?
   end
 
   test "a frame with no generation key still merges (rollout compatibility)" do
@@ -200,7 +200,7 @@ class SyncChannelTest < ActionCable::Channel::TestCase
       perform :receive, { "type" => "update", "update" => update, "cid" => "legacy-client" }
     end
 
-    assert doc.reload.yjs_state.present?
+    assert doc.reload.yjs_document_updates.exists?
   end
 
   test "locked non-owner updates are rejected without persistence or relay" do
@@ -217,7 +217,7 @@ class SyncChannelTest < ActionCable::Channel::TestCase
       perform :receive, { "type" => "update", "update" => update, "cid" => "reader" }
     end
 
-    assert_nil doc.reload.yjs_state
+    assert_not doc.reload.yjs_document_updates.exists?
     assert_equal "write-denied", transmissions.last["type"]
   end
 
@@ -238,7 +238,7 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     ) do
       perform :receive, { "type" => "update", "update" => update, "cid" => "owner" }
     end
-    assert doc.reload.yjs_state.present?
+    assert doc.reload.yjs_document_updates.exists?
   end
 
   test "locked readers still relay awareness" do
@@ -306,8 +306,9 @@ class SyncChannelTest < ActionCable::Channel::TestCase
       }
     end
 
+    full_state, = YjsPersistence.state_b64(doc.reload)
     persisted = Y::Doc.new
-    persisted.sync(doc.reload.yjs_state.unpack("C*"))
+    persisted.sync(Base64.strict_decode64(full_state).unpack("C*"))
     assert_equal "ab", persisted.get_text("t").to_s
   end
 
@@ -355,9 +356,38 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert_nil doc.reload.yjs_state
   end
 
+  test "the last unsubscribe folds the update tail into the snapshot" do
+    doc = Document.create!(title: "Folded on exit")
+    subscribe slug: doc.slug
+    perform :receive, { "type" => "update", "update" => build_update_b64("typed"), "cid" => "x" }
+    assert doc.reload.yjs_document_updates.exists?
+    assert_nil doc.yjs_state
+
+    unsubscribe
+
+    doc.reload
+    assert doc.yjs_state.present?, "the disconnect fold must materialize the snapshot"
+    assert_not doc.yjs_document_updates.exists?
+  end
+
+  test "unsubscribing while another subscriber remains does not fold" do
+    doc = Document.create!(title: "Still open")
+    SyncChannel.track_subscribe(doc.id) # a second, concurrent subscriber
+    subscribe slug: doc.slug
+    perform :receive, { "type" => "update", "update" => build_update_b64("typed"), "cid" => "x" }
+
+    unsubscribe
+
+    assert doc.reload.yjs_document_updates.exists?, "the tail must stay unfolded while a subscriber remains"
+    assert_nil doc.yjs_state
+  ensure
+    SyncChannel.track_unsubscribe(doc.id)
+  end
+
   test "subscribing to a document with a corrupt blob heals instead of bricking" do
     doc = Document.create!(title: "Corrupted")
     YjsPersistence.merge(doc, build_update_b64("was here"))
+    YjsPersistence.fold!(doc)
     doc.reload.update_columns(yjs_state: "garbage-bytes")
 
     subscribe slug: doc.slug

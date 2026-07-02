@@ -43,6 +43,7 @@ class Document < ApplicationRecord
   has_many :agent_presences, dependent: :destroy
   has_many :document_assets, dependent: :destroy
   has_many :yjs_state_archives, dependent: :destroy
+  has_many :yjs_document_updates, dependent: :delete_all
   belongs_to :user, optional: true
 
   before_validation :ensure_slug, on: :create
@@ -92,12 +93,13 @@ class Document < ApplicationRecord
   end
 
   # True while the seed is still what every reader sees: no editor has pushed a
-  # snapshot (content_snapshot nil) and no live CRDT exists (yjs_state blank).
-  # This is the only state where overwriting the seed actually changes what
-  # humans and agents read — once either is set, current_content shadows the
-  # seed, so a seed write would be a silent no-op.
+  # snapshot (content_snapshot nil) and no live CRDT exists (neither a folded
+  # yjs_state blob nor unfolded rows in the update log). This is the only
+  # state where overwriting the seed actually changes what humans and agents
+  # read — once either is set, current_content shadows the seed, so a seed
+  # write would be a silent no-op.
   def seed_stage?
-    content_snapshot.nil? && yjs_state.blank?
+    content_snapshot.nil? && yjs_state.blank? && !yjs_document_updates.exists?
   end
 
   def plain_text
@@ -174,12 +176,19 @@ class Document < ApplicationRecord
   attr_reader :auto_rejected_suggestions
 
   def replace_content!(source:, title: nil, seed_author_kind: nil, seed_author_name: nil)
+    # Fold the unfolded update tail into the snapshot first so the
+    # replacement archive below captures the complete pre-wipe state (the
+    # fold takes the persistence mutex, so it must run before with_lock).
+    YjsPersistence.fold!(self)
     with_lock do
       reload
       # Keep what this replacement is about to destroy — tagged with the
       # pre-bump generation so it is a manual-undo artifact only, never an
       # automatic restore candidate (see YjsStateArchive).
       YjsStateArchive.record!(self, kind: YjsStateArchive::REPLACEMENT, generation: content_generation) if yjs_state.present?
+      # Any straggler rows appended between the fold above and this lock
+      # belong to the wiped generation — delete them with it.
+      yjs_document_updates.delete_all
       attributes = {
         seed_content: source,
         content_snapshot: nil,
@@ -328,7 +337,7 @@ class Document < ApplicationRecord
   # for the WebSocket) and the SyncChannel subscribe handshake (fallback for
   # stale-claim reclaim when an HTTP-granted seeder never applied).
   def try_claim_seed
-    return false if yjs_state.present? || seed_content.blank?
+    return false if yjs_state.present? || yjs_document_updates.exists? || seed_content.blank?
     # Read-side short-circuit: a fresh claim can't be won, so don't issue
     # a write per page load of a just-claimed doc. The conditional UPDATE
     # below remains the single source of truth under concurrency.

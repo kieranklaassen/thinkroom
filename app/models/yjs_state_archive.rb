@@ -35,8 +35,12 @@ class YjsStateArchive < ApplicationRecord
       yjs_state_vector: document.yjs_state_vector,
       error:
     )
+    prune!(document, kind)
+    archive
+  end
+
+  def self.prune!(document, kind)
     stale_ids = where(document:, kind:).order(created_at: :desc, id: :desc).offset(MAX_PER_KIND).ids
     where(id: stale_ids).delete_all if stale_ids.any?
-    archive
   end
 end

@@ -4,11 +4,6 @@
 # joining clients. See README for why we relay manually instead of using
 # y-rb_actioncable's channel.
 class YjsPersistence
-  # Raised when a freshly encoded blob fails the round-trip probe: persisting
-  # it would brick every future load, so the frame is rejected instead
-  # (SyncChannel's rescue keeps it unbroadcast — durable-before-broadcast).
-  class EncodeValidationError < StandardError; end
-
   # Raised when a stored blob fails its checksum or cannot be synced into a
   # fresh doc. Callers holding the document locks heal via
   # heal_corrupt_state! and retry.
@@ -21,9 +16,22 @@ class YjsPersistence
   # is sufficient; the DB transaction below is the second guard.
   LOCKS = Concurrent::Map.new
 
-  # A merge archives the pre-merge state at most this often per document,
+  # A fold archives the pre-fold state at most this often per document,
   # bounding what a corrupt-blob heal can lose to one interval of edits.
   CHECKPOINT_INTERVAL = 10.minutes
+
+  # A merge triggers an inline fold when the tail reaches this many rows,
+  # bounding tail growth during long sessions with no joins or disconnects.
+  FOLD_THRESHOLD = 64
+
+  # A retained (pending) log row whose causal dependency never arrives is an
+  # orphan: after this long it is quarantined to yjs_state_archives instead
+  # of being refolded forever or silently dropped.
+  ORPHAN_TTL = 1.hour
+
+  # The byte signature of an exactly-empty v1 update (zero structs, zero
+  # deletes) — what a joining client with nothing new sends as sync-reply.
+  EMPTY_UPDATE = [ 0, 0 ].freeze
 
   class << self
     # Merge a base64-encoded Yjs update into the document's persisted state.
@@ -56,36 +64,28 @@ class YjsPersistence
                     "Client generation #{generation} is behind document generation #{document.content_generation}."
             end
 
-            ydoc = load_or_heal_ydoc(document)
-            before = ydoc.state
-            ydoc.sync(update)
-            # A no-op update (e.g. the empty sync-reply a client joining an
-            # empty doc sends) must not persist — flipping seed_state to
-            # "seeded" without content would permanently block the seed claim.
-            if ydoc.state == before
+            # The empty update (a joining client's sync-reply when it has
+            # nothing new) must not append — flipping seed_state to
+            # "seeded" without content would permanently block the seed
+            # claim, and every join would bloat the log otherwise.
+            if update == EMPTY_UPDATE
               payload[:outcome] = "noop"
               next
             end
 
-            payload[:blob_bytes_before] = document.yjs_state&.bytesize || 0
-            blob = ydoc.full_diff.pack("C*")
-            payload[:blob_bytes_after] = blob.bytesize
-            unless blob_loadable?(blob)
-              payload[:outcome] = "rejected_invalid_encode"
-              raise EncodeValidationError,
-                    "Refusing to persist a blob that cannot round-trip into a fresh doc " \
-                    "(document #{document.id})."
-            end
-
-            maybe_checkpoint(document)
-            document.update_columns(
-              yjs_state: blob,
-              yjs_state_vector: ydoc.state.pack("C*"),
-              yjs_state_checksum: state_checksum(blob),
-              seed_state: "seeded",
-              updated_at: Time.current
+            # The durable act: an O(update) append. No Y::Doc is built on
+            # this path — folds materialize the tail into the snapshot
+            # columns on joins, thresholds, and disconnects.
+            document.yjs_document_updates.create!(
+              content_generation: document.content_generation,
+              payload: update.pack("C*")
             )
-            payload[:outcome] = "merged"
+            unless document.seed_state == "seeded"
+              document.update_columns(seed_state: "seeded", updated_at: Time.current)
+            end
+            payload[:outcome] = "appended"
+            payload[:tail_rows] = document.yjs_document_updates.count
+            perform_fold(document) if payload[:tail_rows] >= FOLD_THRESHOLD
             true
           end
         end
@@ -102,7 +102,11 @@ class YjsPersistence
     def state_b64(document)
       ActiveSupport::Notifications.instrument("state.yjs", document_id: document.id) do |payload|
         encoded = begin
-          encode_handshake(document, payload)
+          if document.yjs_document_updates.exists?
+            fold_and_encode_handshake(document, payload)
+          else
+            encode_handshake(document, payload)
+          end
         rescue CorruptStateError
           heal_and_reencode_handshake(document, payload)
         end
@@ -130,6 +134,10 @@ class YjsPersistence
               payload[:outcome] = "rejected_locked"
               raise Document::EditingLockedError, "This document is read-only."
             end
+
+            # The staleness gate must compare against the full live state,
+            # so unfolded tail rows are folded into the snapshot first.
+            perform_fold(document) if document.yjs_document_updates.exists?
 
             if client_state && document.yjs_state.present?
               server_state = begin
@@ -165,10 +173,143 @@ class YjsPersistence
       end
     end
 
+    # Fold the document's update tail into its snapshot columns, acquiring
+    # the persistence locks. Lifecycle callers (last disconnect,
+    # replace_content!) use this; merge/persist_snapshot fold inline under
+    # the locks they already hold.
+    def fold!(document)
+      return unless document.yjs_document_updates.exists?
+
+      lock_for(document.id).synchronize do
+        document.with_lock do
+          document.reload
+          perform_fold(document)
+        end
+      end
+    end
+
     private
 
     def monotonic_ms
       Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
+    end
+
+    # Materialize snapshot + tail and persist, deleting only rows provably
+    # incorporated. Callers must hold both locks. Returns the folded doc.
+    #
+    # Row classification:
+    # - older generation           -> delete (a replacement wiped that state)
+    # - advanced the doc state     -> integrated, delete
+    # - unchanged + self-contained -> duplicate of snapshot content, delete
+    # - unchanged + not self-contained -> pending structs whose causal
+    #   dependency has not arrived; retain for the next fold, quarantine
+    #   after ORPHAN_TTL rather than refolding forever or dropping silently
+    def perform_fold(document)
+      rows = document.yjs_document_updates.order(:id).to_a
+      return load_or_heal_ydoc(document) if rows.empty?
+
+      ActiveSupport::Notifications.instrument("fold.yjs", document_id: document.id, rows: rows.length) do |payload|
+        ydoc = load_or_heal_ydoc(document)
+        initial_state = ydoc.state
+        integrated_ids = []
+        retained = []
+
+        rows.each do |row|
+          if row.content_generation != document.content_generation
+            integrated_ids << row.id
+            next
+          end
+
+          before = ydoc.state
+          begin
+            ydoc.sync(row.payload.unpack("C*"))
+          rescue StandardError
+            retained << row # undecodable row: TTL quarantine below
+            next
+          end
+          if ydoc.state != before || self_contained_update?(row.payload)
+            integrated_ids << row.id
+          else
+            retained << row
+          end
+        end
+
+        quarantine_orphans(document, retained)
+        payload[:integrated] = integrated_ids.length
+        payload[:retained] = retained.length
+
+        if ydoc.state != initial_state
+          blob = ydoc.full_diff.pack("C*")
+          payload[:blob_bytes_after] = blob.bytesize
+          unless blob_loadable?(blob)
+            # Serve clients from the in-memory doc but never persist a blob
+            # that would brick future loads; rows stay for the next fold.
+            payload[:outcome] = "invalid_encode"
+            return ydoc
+          end
+
+          maybe_checkpoint(document)
+          document.update_columns(
+            yjs_state: blob,
+            yjs_state_vector: ydoc.state.pack("C*"),
+            yjs_state_checksum: state_checksum(blob),
+            updated_at: Time.current
+          )
+        end
+
+        document.yjs_document_updates.where(id: integrated_ids).delete_all if integrated_ids.any?
+        payload[:outcome] = "folded"
+        ydoc
+      end
+    end
+
+    # A state-unchanged row whose structs apply cleanly to a fresh doc is
+    # dependency-free, so the fold's snapshot must already contain it — a
+    # duplicate. Structs that stay pending on a fresh doc were pending in
+    # the fold too.
+    def self_contained_update?(blob)
+      probe = Y::Doc.new
+      base = probe.state
+      probe.sync(blob.unpack("C*"))
+      probe.state != base
+    rescue StandardError
+      false
+    end
+
+    def quarantine_orphans(document, retained)
+      orphans = retained.select { |row| row.created_at < ORPHAN_TTL.ago }
+      return if orphans.empty?
+
+      orphans.each do |row|
+        document.yjs_state_archives.create!(
+          kind: YjsStateArchive::QUARANTINE,
+          content_generation: row.content_generation,
+          yjs_state: row.payload,
+          error: "orphaned pending update: causal dependency never arrived"
+        )
+      end
+      YjsStateArchive.prune!(document, YjsStateArchive::QUARANTINE)
+      document.yjs_document_updates.where(id: orphans.map(&:id)).delete_all
+      retained.reject! { |row| orphans.include?(row) }
+    end
+
+    # Serve a handshake that includes unfolded tail rows: acquire both
+    # locks, fold, and encode from the materialized doc. The doc (not the
+    # columns) is authoritative here so a degraded fold — one that could
+    # not persist — still serves clients the complete state.
+    def fold_and_encode_handshake(document, payload)
+      lock_for(document.id).synchronize do
+        document.with_lock do
+          document.reload
+          ydoc = perform_fold(document)
+          payload[:served_from] = "fold"
+          payload[:blob_bytes] = document.yjs_state&.bytesize || 0
+          [
+            Base64.strict_encode64(ydoc.full_diff.pack("C*")),
+            Base64.strict_encode64(ydoc.state.pack("C*"))
+          ]
+        end
+      end
     end
 
     def load_ydoc(document)
