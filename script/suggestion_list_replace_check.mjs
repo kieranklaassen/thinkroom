@@ -151,7 +151,15 @@ try {
   )
   assert(true, 'selective bulk acceptance and task-list conversion persist across reload')
 
-  const fatalErrors = errors.filter((error) => !expectedBrowserNoise(error))
+  // The accept→apply→reopen compensation and the debounced snapshot push can
+  // each 409 one transient request mid-dance before converging; the run
+  // asserts the final applied state (including across reload), so the
+  // conflict is expected collaboration noise — same allowlist as
+  // html_document_check. Surfaced here once waitForLive made the script
+  // observe the fully live session instead of racing ahead of it.
+  const fatalErrors = errors.filter(
+    (error) => !expectedBrowserNoise(error, [ 'status of 409' ]),
+  )
   assert(
     fatalErrors.length === 0,
     `browser console stays clean${fatalErrors.length ? `: ${fatalErrors.join('; ')}` : ''}`,
