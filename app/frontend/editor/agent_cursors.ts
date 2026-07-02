@@ -62,7 +62,13 @@ const clampCursorLabels = (verify = true) => {
 }
 
 const scheduleCursorClamp = () => {
-  if (cursorClampFrame !== null) return
+  // Cancel-and-replace rather than coalesce-and-drop: a request that lands
+  // while a verify frame is pending must still produce a fresh clamp.
+  // Dropping it loses e.g. a resize arriving mid-verify — the verify can
+  // measure pre-reflow geometry as in-bounds, and with the request swallowed
+  // nothing ever re-clamps, stranding the label outside the new viewport.
+  // Replacement stays coalesced: at most one callback runs per frame.
+  if (cursorClampFrame !== null) cancelAnimationFrame(cursorClampFrame)
   cursorClampFrame = requestAnimationFrame(() => clampCursorLabels())
 }
 

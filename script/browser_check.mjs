@@ -1687,7 +1687,12 @@ try {
   const modeDocumentRequests = []
   const recordModeDocumentRequest = (request) => {
     const path = new URL(request.url()).pathname
-    if (request.method() === 'GET' && path.startsWith(`/d/${trackDoc.slug}`)) {
+    // Inertia PARTIAL reloads are the app's own background traffic (the 45s
+    // presence poll, meta-channel refreshes) and can fire at any moment —
+    // they don't indicate a mode-switch document request. A real regression
+    // shows up as a full navigation or a non-partial Inertia visit.
+    const partial = request.headers()['x-inertia-partial-data']
+    if (request.method() === 'GET' && !partial && path.startsWith(`/d/${trackDoc.slug}`)) {
       modeDocumentRequests.push(path)
     }
   }
