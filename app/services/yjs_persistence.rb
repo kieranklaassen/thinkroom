@@ -73,6 +73,16 @@ class YjsPersistence
               next
             end
 
+            # An undecodable update must be rejected before it becomes
+            # durable: appended garbage would flip seed_state, broadcast to
+            # peers, and clog every future fold. The probe is O(update) on
+            # a fresh doc — updates with unmet causal dependencies park
+            # cleanly and do not raise.
+            unless decodable_update?(update)
+              payload[:outcome] = "rejected_undecodable"
+              raise ArgumentError, "undecodable Yjs update for document #{document.id}"
+            end
+
             # The durable act: an O(update) append. No Y::Doc is built on
             # this path — folds materialize the tail into the snapshot
             # columns on joins, thresholds, and disconnects.
@@ -94,9 +104,10 @@ class YjsPersistence
 
     # => [full_state_b64, state_vector_b64] for the sync handshake.
     #
-    # The stored blob is exactly the previous merge's full_diff output and
-    # the stored vector its state, so when both columns are present the
-    # handshake is served from them directly — no Y::Doc instantiation.
+    # The stored blob is exactly the previous fold's materialized snapshot
+    # and the stored vector its state, so when both columns are present and
+    # no unfolded tail exists the handshake is served from them directly —
+    # no Y::Doc instantiation.
     # Documents written before yjs_state_vector existed (blob present,
     # vector nil) fall back to rebuilding; their next merge heals them.
     def state_b64(document)
@@ -197,20 +208,31 @@ class YjsPersistence
     # Materialize snapshot + tail and persist, deleting only rows provably
     # incorporated. Callers must hold both locks. Returns the folded doc.
     #
-    # Row classification:
-    # - older generation           -> delete (a replacement wiped that state)
-    # - advanced the doc state     -> integrated, delete
-    # - unchanged + self-contained -> duplicate of snapshot content, delete
-    # - unchanged + not self-contained -> pending structs whose causal
-    #   dependency has not arrived; retain for the next fold, quarantine
-    #   after ORPHAN_TTL rather than refolding forever or dropping silently
+    # Row classification (deletions live in the delete set and do not
+    # advance the state vector, so the vector alone cannot prove
+    # incorporation):
+    # - older generation      -> delete (a replacement wiped that state)
+    # - advanced the vector   -> integrated, delete
+    # - zero-struct payload   -> a pure delete-set frame; its deletes either
+    #   applied to known structs or reference content the server never had
+    #   (a moot tombstone) — integrated, delete
+    # - struct-carrying, vector unchanged, self-contained -> duplicate of
+    #   snapshot content, delete
+    # - otherwise -> pending structs whose causal dependency has not
+    #   arrived; retain for the next fold, quarantine after ORPHAN_TTL
+    #   rather than refolding forever or dropping silently
+    #
+    # Known residual: a single frame mixing already-integrated structs with
+    # structs pending on a missing cross-client dependency classifies as
+    # integrated (the vector advanced) and its pending half is dropped by
+    # full_diff — the same window the pre-log architecture had on every
+    # merge; per-client frame ordering upstream makes it equally rare here.
     def perform_fold(document)
       rows = document.yjs_document_updates.order(:id).to_a
       return load_or_heal_ydoc(document) if rows.empty?
 
       ActiveSupport::Notifications.instrument("fold.yjs", document_id: document.id, rows: rows.length) do |payload|
         ydoc = load_or_heal_ydoc(document)
-        initial_state = ydoc.state
         integrated_ids = []
         retained = []
 
@@ -227,7 +249,7 @@ class YjsPersistence
             retained << row # undecodable row: TTL quarantine below
             next
           end
-          if ydoc.state != before || self_contained_update?(row.payload)
+          if ydoc.state != before || zero_struct_update?(row.payload) || self_contained_update?(row.payload)
             integrated_ids << row.id
           else
             retained << row
@@ -238,8 +260,14 @@ class YjsPersistence
         payload[:integrated] = integrated_ids.length
         payload[:retained] = retained.length
 
-        if ydoc.state != initial_state
-          blob = ydoc.full_diff.pack("C*")
+        # The blob (not the vector) is the persistence signal: delete-only
+        # folds change the encoded delete set without advancing the vector.
+        # A truly empty doc (only stale/retained rows on a never-folded
+        # document) must not persist the empty encoding — a present-but-empty
+        # yjs_state would block seed claims.
+        blob = ydoc.full_diff.pack("C*")
+        still_empty = document.yjs_state.nil? && blob == EMPTY_UPDATE.pack("C*")
+        if blob != document.yjs_state && !still_empty
           payload[:blob_bytes_after] = blob.bytesize
           unless blob_loadable?(blob)
             # Serve clients from the in-memory doc but never persist a blob
@@ -263,7 +291,17 @@ class YjsPersistence
       end
     end
 
-    # A state-unchanged row whose structs apply cleanly to a fresh doc is
+    # A v1 update whose struct count is zero carries only a delete set —
+    # the shape of a backspace-only frame or a joiner's sync-reply echo on
+    # a document with deletion history.
+    def zero_struct_update?(blob)
+      count, = decode_var_uint(blob.unpack("C*"), 0)
+      count.zero?
+    rescue ArgumentError
+      false
+    end
+
+    # A vector-unchanged row whose structs apply cleanly to a fresh doc is
     # dependency-free, so the fold's snapshot must already contain it — a
     # duplicate. Structs that stay pending on a fresh doc were pending in
     # the fold too.
@@ -276,19 +314,28 @@ class YjsPersistence
       false
     end
 
+    # Updates with unmet causal dependencies park cleanly; genuine garbage
+    # raises inside yrs.
+    def decodable_update?(update)
+      Y::Doc.new.sync(update)
+      true
+    rescue StandardError
+      false
+    end
+
     def quarantine_orphans(document, retained)
       orphans = retained.select { |row| row.created_at < ORPHAN_TTL.ago }
       return if orphans.empty?
 
       orphans.each do |row|
         document.yjs_state_archives.create!(
-          kind: YjsStateArchive::QUARANTINE,
+          kind: YjsStateArchive::ORPHAN,
           content_generation: row.content_generation,
           yjs_state: row.payload,
           error: "orphaned pending update: causal dependency never arrived"
         )
       end
-      YjsStateArchive.prune!(document, YjsStateArchive::QUARANTINE)
+      YjsStateArchive.prune!(document, YjsStateArchive::ORPHAN)
       document.yjs_document_updates.where(id: orphans.map(&:id)).delete_all
       retained.reject! { |row| orphans.include?(row) }
     end
@@ -304,10 +351,7 @@ class YjsPersistence
           ydoc = perform_fold(document)
           payload[:served_from] = "fold"
           payload[:blob_bytes] = document.yjs_state&.bytesize || 0
-          [
-            Base64.strict_encode64(ydoc.full_diff.pack("C*")),
-            Base64.strict_encode64(ydoc.state.pack("C*"))
-          ]
+          encode_ydoc_b64(ydoc)
         end
       end
     end
@@ -343,6 +387,13 @@ class YjsPersistence
       raise CorruptStateError, "document #{document.id}: yjs_state checksum mismatch"
     end
 
+    def encode_ydoc_b64(ydoc)
+      [
+        Base64.strict_encode64(ydoc.full_diff.pack("C*")),
+        Base64.strict_encode64(ydoc.state.pack("C*"))
+      ]
+    end
+
     def state_checksum(blob)
       Digest::SHA256.hexdigest(blob)
     end
@@ -372,11 +423,7 @@ class YjsPersistence
           Base64.strict_encode64(document.yjs_state_vector)
         ]
       else
-        ydoc = load_ydoc(document)
-        [
-          Base64.strict_encode64(ydoc.full_diff.pack("C*")),
-          Base64.strict_encode64(ydoc.state.pack("C*"))
-        ]
+        encode_ydoc_b64(load_ydoc(document))
       end
     end
 
@@ -446,7 +493,7 @@ class YjsPersistence
       end
     end
 
-    # Interval-gated archive of the pre-merge state, bounding what a future
+    # Interval-gated archive of the pre-fold state, bounding what a future
     # heal can lose to at most one interval of edits. Caller holds both locks.
     def maybe_checkpoint(document)
       return if document.yjs_state.blank?

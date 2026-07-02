@@ -99,7 +99,13 @@ class Document < ApplicationRecord
   # read — once either is set, current_content shadows the seed, so a seed
   # write would be a silent no-op.
   def seed_stage?
-    content_snapshot.nil? && yjs_state.blank? && !yjs_document_updates.exists?
+    content_snapshot.nil? && !live_crdt?
+  end
+
+  # A live CRDT exists once anything durable has landed: a folded snapshot
+  # blob or unfolded rows in the update log.
+  def live_crdt?
+    yjs_state.present? || yjs_document_updates.exists?
   end
 
   def plain_text
@@ -337,7 +343,7 @@ class Document < ApplicationRecord
   # for the WebSocket) and the SyncChannel subscribe handshake (fallback for
   # stale-claim reclaim when an HTTP-granted seeder never applied).
   def try_claim_seed
-    return false if yjs_state.present? || yjs_document_updates.exists? || seed_content.blank?
+    return false if live_crdt? || seed_content.blank?
     # Read-side short-circuit: a fresh claim can't be won, so don't issue
     # a write per page load of a just-claimed doc. The conditional UPDATE
     # below remains the single source of truth under concurrency.

@@ -11,8 +11,13 @@ class YjsStateArchive < ApplicationRecord
   REPLACEMENT = "replacement".freeze
   # Corrupt bytes kept for forensics — never restored.
   QUARANTINE = "quarantine".freeze
+  # An orphaned pending update whose causal dependency never arrived,
+  # evicted from the update log after YjsPersistence::ORPHAN_TTL. Kept
+  # separate from QUARANTINE so orphan churn cannot evict corruption
+  # forensics from the pruned window.
+  ORPHAN = "orphan".freeze
 
-  KINDS = [ CHECKPOINT, REPLACEMENT, QUARANTINE ].freeze
+  KINDS = [ CHECKPOINT, REPLACEMENT, QUARANTINE, ORPHAN ].freeze
 
   # Newest archives kept per document and kind; older ones are pruned on
   # every insert so retention stays bounded.

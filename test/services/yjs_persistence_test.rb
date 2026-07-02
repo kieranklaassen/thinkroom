@@ -36,20 +36,19 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert doc.reload.yjs_state.present?, "the read path folds the tail into the snapshot"
   end
 
-  test "merge appends to the update log without materializing a doc" do
+  test "merge appends to the update log without loading the stored document" do
     doc = Document.create!(title: "Appended")
 
-    original = Y::Doc.method(:new)
-    Y::Doc.define_singleton_method(:new) { |*| raise "merge must not build a Y::Doc" }
+    # The hot path may probe the incoming update (O(update)) but must never
+    # load the stored snapshot (O(document)).
+    original = YjsPersistence.singleton_class.instance_method(:load_ydoc)
+    YjsPersistence.define_singleton_method(:load_ydoc) { |*| raise "merge must not load the document" }
     begin
-      update = Base64.strict_encode64([ 1, 1, 200, 190, 199, 158, 13, 0, 4, 1, 1, 116,
-                                        5, 104, 101, 108, 108, 111, 0 ].pack("C*"))
-      # Use a pre-encoded update so the test itself needs no Y::Doc either.
-      YjsPersistence.merge(doc, update)
+      YjsPersistence.merge(doc, b64_update_for("hello"))
     rescue RuntimeError => e
       flunk(e.message)
     ensure
-      Y::Doc.define_singleton_method(:new, original)
+      YjsPersistence.singleton_class.define_method(:load_ydoc, original)
     end
 
     doc.reload
@@ -209,6 +208,63 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_not doc.yjs_document_updates.exists?
   end
 
+  test "a delete-only update folds, persists, and leaves no retained row" do
+    doc = Document.create!(title: "Backspaced")
+    client = Y::Doc.new
+    YjsPersistence.merge(doc, b64_update_for("keep-me", from_doc: client))
+    YjsPersistence.fold!(doc)
+
+    # A backspace-only frame: zero structs, delete set only. It applies
+    # deletes without advancing the state vector.
+    before_delete = client.state
+    client.get_text("t").slice!(4, 3) # delete "-me"
+    delete_frame = client.diff(before_delete)
+    YjsPersistence.merge(doc, Base64.strict_encode64(delete_frame.pack("C*")))
+
+    event = assert_notification("fold.yjs", outcome: "folded") { YjsPersistence.fold!(doc) }
+
+    assert_equal 1, event.payload[:integrated], "a pure delete-set frame is provably incorporated"
+    assert_equal 0, event.payload[:retained]
+    assert_not doc.reload.yjs_document_updates.exists?
+    assert_equal "keep", text_of(doc), "the deletion must survive the fold and reload"
+  end
+
+  test "a joiner's delete-set echo on a document with deletion history is not retained" do
+    doc = Document.create!(title: "Echoed")
+    client = Y::Doc.new
+    YjsPersistence.merge(doc, b64_update_for("abc", from_doc: client))
+    before_delete = client.state
+    client.get_text("t").slice!(2, 1)
+    YjsPersistence.merge(doc, Base64.strict_encode64(client.diff(before_delete).pack("C*")))
+    YjsPersistence.fold!(doc)
+
+    # A fully-synced rejoining client's sync-reply is not [0,0] once the doc
+    # has deletion history — it echoes the delete set.
+    synced = doc_from(doc)
+    echo = synced.diff(synced.state)
+    assert_not_equal [ 0, 0 ], echo, "precondition: the echo must carry the delete set"
+    YjsPersistence.merge(doc, Base64.strict_encode64(echo.pack("C*")))
+
+    event = assert_notification("fold.yjs", outcome: "folded") { YjsPersistence.fold!(doc) }
+
+    assert_equal 1, event.payload[:integrated], "a delete-set echo must not be retained forever"
+    assert_not doc.reload.yjs_document_updates.exists?
+    assert_equal "ab", text_of(doc)
+  end
+
+  test "an undecodable update is rejected before it becomes durable" do
+    doc = Document.create!(title: "Garbage", seed_markdown: "# Template")
+    garbage = Base64.strict_encode64("yrs-garbage-bytes")
+
+    assert_notification("merge.yjs", outcome: "rejected_undecodable") do
+      assert_raises(ArgumentError) { YjsPersistence.merge(doc, garbage) }
+    end
+
+    doc.reload
+    assert_not doc.yjs_document_updates.exists?, "garbage must never be appended"
+    assert_equal "pending", doc.seed_state, "garbage must not consume the seed claim"
+  end
+
   test "a pending row is retained across folds and quarantined after the TTL" do
     doc = Document.create!(title: "Pending")
     # Build a causally dependent pair and append only the second half.
@@ -229,7 +285,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     end
 
     assert_not doc.reload.yjs_document_updates.exists?, "orphans leave the log after the TTL"
-    orphan = doc.yjs_state_archives.where(kind: "quarantine").sole
+    orphan = doc.yjs_state_archives.where(kind: "orphan").sole
     assert_equal dependent.pack("C*"), orphan.yjs_state, "orphaned bytes are preserved, not dropped"
   end
 
