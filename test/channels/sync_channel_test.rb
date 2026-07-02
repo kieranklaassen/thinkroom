@@ -328,6 +328,33 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     end
   end
 
+  test "a malformed frame emits a frame_dropped event" do
+    doc = Document.create!(title: "Poison metered")
+    subscribe slug: doc.slug
+
+    assert_notification("frame_dropped.yjs", document_id: doc.id, outcome: "dropped_malformed") do
+      perform :receive, { "type" => "update", "update" => "not!!base64!!", "cid" => "x" }
+    end
+  end
+
+  test "an excessive sequence gap emits a frame_dropped event and drops the frame" do
+    doc = Document.create!(title: "Gapped")
+    subscribe slug: doc.slug
+    update = build_update_b64("too far ahead")
+    beyond_gap = SyncChannel::MAX_SEQUENCE_GAP + 2
+
+    assert_notification(
+      "frame_dropped.yjs",
+      outcome: "dropped_gap", sequence: beyond_gap, expected_sequence: 1
+    ) do
+      assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+        perform :receive, { "type" => "update", "update" => update, "cid" => "x", "seq" => beyond_gap }
+      end
+    end
+
+    assert_nil doc.reload.yjs_state
+  end
+
   test "awareness messages relay without persisting" do
     doc = Document.create!(title: "Presence")
     subscribe slug: doc.slug

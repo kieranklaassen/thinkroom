@@ -63,7 +63,9 @@ class SyncChannel < ApplicationCable::Channel
       begin
         Base64.strict_decode64(update)
       rescue ArgumentError
-        Rails.logger.warn("SyncChannel: dropped malformed update frame")
+        ActiveSupport::Notifications.instrument(
+          "frame_dropped.yjs", document_id: @document.id, outcome: "dropped_malformed"
+        )
         return
       end
 
@@ -99,7 +101,11 @@ class SyncChannel < ApplicationCable::Channel
     @sequence_lock.synchronize do
       return if sequence < @next_sequence
       if sequence > @next_sequence + MAX_SEQUENCE_GAP
-        Rails.logger.warn("SyncChannel: dropped update with excessive sequence gap")
+        ActiveSupport::Notifications.instrument(
+          "frame_dropped.yjs",
+          document_id: @document.id, outcome: "dropped_gap",
+          sequence: sequence, expected_sequence: @next_sequence
+        )
         return
       end
 
