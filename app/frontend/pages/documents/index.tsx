@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Head, Link, useForm } from '@inertiajs/react'
-import { NativeNavbar, NativeButton, nativeHaptic } from '@ruby-native/react'
+import { NativeNavbar, NativeButton, NativeMenuItem, nativeHaptic } from '@ruby-native/react'
 import { FeedbackButton } from '../../components/feedback_button'
 import { AccountControl } from '../../components/account_control'
 import { userIdentity } from '../../editor/identity'
@@ -294,9 +294,23 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
     <>
       <Head title="Thinkroom" />
       {/* Ruby Native chrome: hidden signal elements the iOS/Android shell
-          reads. The plus button clicks the web "New document" button so the
-          native action reuses the exact same submission path. */}
+          reads. Menu items and the plus button click or navigate to existing
+          web controls so every native action reuses the web submission path. */}
       <NativeNavbar title="Thinkroom">
+        <NativeButton position="leading" icon="person.crop.circle">
+          {viewer.account ? (
+            <NativeMenuItem title="Sign out" click="#account-signout" />
+          ) : (
+            <NativeMenuItem title="Sign in" href="/login?return_to=%2F" />
+          )}
+        </NativeButton>
+        <NativeButton position="trailing" icon="ellipsis.circle">
+          <NativeMenuItem title="Have an agent start one" click="#agent-start-trigger" />
+          {recent.some((document) => document.slug === 'demo') && (
+            <NativeMenuItem title="Open the demo" href="/d/demo" />
+          )}
+          {isClient && <NativeMenuItem title="Send feedback" click=".feedback-button button" />}
+        </NativeButton>
         <NativeButton icon="plus" click="#new-document-button" />
       </NativeNavbar>
       <div className="landing">

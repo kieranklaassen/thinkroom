@@ -30,6 +30,19 @@ declare module '@ruby-native/react' {
     children?: ReactNode
   }): ReactElement
 
+  /**
+   * Dropdown menu entry inside a NativeButton. `href` navigates; `click`
+   * clicks a DOM element by CSS selector.
+   */
+  export function NativeMenuItem(props: {
+    title: string
+    href?: string
+    click?: string
+    icon?: string
+    icons?: { ios?: string; android?: string }
+    selected?: boolean
+  }): ReactElement
+
   /** Marks the page as a form so native back navigation skips it. */
   export function NativeForm(): ReactElement
 
