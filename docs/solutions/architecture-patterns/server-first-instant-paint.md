@@ -98,3 +98,13 @@ Re-measuring with a torture document (image, two Mermaid diagrams, two sketches,
 - **Raw HTML in markdown**: `Commonmarker` drops raw HTML by default (`unsafe: false`), silently deleting provenance spans from seed-only previews. Render unsafe and let `HtmlDocumentSanitizer` stay the security boundary — the editor shows dropped-tag content as literal text anyway.
 
 The block-by-block parity harness (materialize `content_html` inside the live `.doc-editor-stack`, diff every top-level block's outer height against the editor's) is the fastest way to find the next drift: it reports per-block deltas instead of a single CLS number.
+
+## Round three (2026-07-02): the idle redraw loop
+
+Chasing "still flickering" past pixel parity found a 60fps feedback loop, not a paint bug: **any foreign chrome appended inside a ProseMirror-rendered node makes PM's DOMObserver re-render that node** (deleting the chrome), and if the chrome's owner rebuilds on mutation, the two fight forever. The rich-block width handle inside plain `<pre>` blocks burned a full core at idle (900 DOM mutations/s) on every document with a code block, and each per-frame `updateState` re-imposed the state selection over in-flight native drags — the real cause of the "comment-mode selection stomping" escalation and of caret clicks (review popover) getting eaten.
+
+Rules of thumb:
+- Chrome living inside a PM-rendered node requires a **node view** whose `ignoreMutation` scopes PM's attention to the editable `contentDOM` (see `app/frontend/editor/code_block_view.ts`; sketches and tables were already node views, which is why only code blocks looped).
+- Measure idle: a healthy document page has **zero** editor mutations and zero `updateState` calls per second at rest. A MutationObserver over the editor subtree is a two-minute check and catches this whole bug class.
+- Anything that dispatches per awareness tick (y-prosemirror's cursor plugin) belongs behind a slice-snapshot + rAF gate (`cursor_awareness.ts`, mirroring `read_pointers.ts`).
+- Clamp/measure passes scheduled during a viewport resize read mid-reflow geometry (`window.innerWidth` lags); verify on the next frame (`agent_cursors.ts`).
