@@ -14,7 +14,7 @@ class SessionsController < InertiaController
     password_matches = BCrypt::Password.new(digest).is_password?(params[:password].to_s)
 
     if user&.password_account? && password_matches
-      redirect_to complete_authentication(user), status: :see_other
+      redirect_to complete_authentication(user, remember: params[:remember_me].present?), status: :see_other
     else
       redirect_to auth_path_with_return(login_path),
                   inertia: { errors: { email: "Invalid email or password" } }

@@ -77,6 +77,65 @@ class AuthenticationFlowTest < ActionDispatch::IntegrationTest
     assert_redirected_to document_page_path(document.slug)
   end
 
+  test "remembered login issues a session cookie that persists for 30 days" do
+    user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
+
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase", remember_me: "1" }
+
+    assert_response :see_other
+    assert_equal user.id, session[:user_id]
+    expiry = session_cookie_expiry
+    assert_not_nil expiry, "remembered login must set an expiry on the session cookie"
+    assert_in_delta 30.days.from_now.to_i, expiry.to_i, 1.hour.to_i
+  end
+
+  test "remembered session slides the expiry window on later requests" do
+    user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase", remember_me: "1" }
+
+    get root_path
+
+    assert_not_nil session_cookie_expiry, "later requests must keep re-issuing the persistent cookie"
+  end
+
+  test "plain login keeps a browser-session cookie" do
+    user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
+
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase" }
+
+    assert_response :see_other
+    assert_equal user.id, session[:user_id]
+    assert session_cookie_reissued?, "login must re-issue the session cookie"
+    assert_nil session_cookie_expiry, "login without remember_me must not set a cookie expiry"
+  end
+
+  test "logout clears the remembered session persistence" do
+    user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase", remember_me: "1" }
+
+    delete logout_path
+
+    assert_nil session[:user_id]
+    post identity_path, params: { name: "Guest again" }
+    assert_response :see_other
+    assert session_cookie_reissued?, "identity update must re-issue the session cookie"
+    assert_nil session_cookie_expiry, "session cookies after logout must revert to browser-session"
+  end
+
+  test "remembered session keeps its expiry on rescue_from-handled requests" do
+    user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
+    document = Document.create!(title: "View only", link_access: "view")
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase", remember_me: "1" }
+
+    # CommentingLockedError → rescue_from handler that writes inertia errors
+    # into the session; the reissued cookie must stay persistent.
+    post document_comments_path(document.slug), params: { body: "Hello" }
+
+    assert_response :redirect
+    assert_not_nil session_cookie_expiry,
+                   "a rescued request must not downgrade the remembered session cookie"
+  end
+
   test "logout removes account ownership from the guest session" do
     user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
     document = Document.create!(title: "Private to account", user:, owner_name: user.name)
@@ -133,5 +192,22 @@ class AuthenticationFlowTest < ActionDispatch::IntegrationTest
   def inertia_error(key)
     errors = session[:inertia_errors] || {}
     errors[key] || errors[key.to_s]
+  end
+
+  # The session cookie set by the latest response, or nil if not re-issued.
+  def session_cookie_header
+    key = Rails.application.config.session_options.fetch(:key)
+    header = Array(response.headers["Set-Cookie"]).flat_map { |value| value.split("\n") }
+    header.find { |value| value.start_with?("#{key}=") }
+  end
+
+  def session_cookie_reissued? = session_cookie_header.present?
+
+  # Expiry of the re-issued session cookie; nil for a browser-session cookie.
+  # Callers asserting nil should pair with session_cookie_reissued? so a
+  # missing cookie can't false-pass as "no expiry".
+  def session_cookie_expiry
+    expires = session_cookie_header&.[](/expires=([^;]+)/i, 1)
+    expires && Time.zone.parse(expires)
   end
 end
