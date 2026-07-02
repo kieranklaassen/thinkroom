@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Head, Link, router, usePoll } from '@inertiajs/react'
-import { nativeHaptic } from '@ruby-native/react'
+import {
+  NativeNavbar,
+  NativeButton,
+  NativeMenuItem,
+  NativeShareButton,
+  nativeHaptic,
+} from '@ruby-native/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { TextSelection } from '@milkdown/kit/prose/state'
 import {
@@ -139,6 +145,8 @@ export interface DocumentProps {
   comments: CommentPayload[]
   activities: ActivityPayload[]
   presences: AgentPresencePayload[]
+  // Shared by RubyNative::InertiaSupport on every page.
+  nativeApp: boolean
 }
 
 // Floating chrome stores only its anchor identity; geometry is re-derived
@@ -218,6 +226,7 @@ export default function DocumentShow({
   comments,
   activities,
   presences,
+  nativeApp,
 }: DocumentProps) {
   // SSR/hydration island flag: the live editor and any render-time browser
   // reads are gated on this so the server (and the client's first hydration
@@ -1261,11 +1270,84 @@ export default function DocumentShow({
   return (
     <>
       <Head title={documentTitle} />
+      {/* Ruby Native chrome: the shell reads these hidden signal elements. The
+          nav bar replaces the web doc-header inside the app (hidden below via
+          native-hidden); every action delegates to the bridge strip so targets
+          are always mounted and never display:none. */}
+      <NativeNavbar title={documentTitle}>
+        <NativeButton position="leading" icon="chevron.left" click="#native-doc-back" />
+        <NativeShareButton />
+        <NativeButton position="trailing" icon="ellipsis.circle">
+          {!modeLocked &&
+            availableModes.map((menuMode) => (
+              <NativeMenuItem
+                key={menuMode}
+                title={menuMode.charAt(0).toUpperCase() + menuMode.slice(1)}
+                selected={effectiveMode === menuMode}
+                click={`#native-mode-${menuMode}`}
+              />
+            ))}
+          {!isReading && <NativeMenuItem title="Activity" click="#native-toggle-activity" />}
+          <NativeMenuItem title="Export Markdown" click="#native-export-markdown" />
+          <NativeMenuItem title="Export HTML" click="#native-export-html" />
+          <NativeMenuItem title="Home" href="/" />
+        </NativeButton>
+      </NativeNavbar>
+      {/* Bridge strip: clip-hidden (never display:none — the shell's click
+          dispatch mechanism is unspecified, and coordinate-based synthesis
+          needs a real box). Handlers call the live setters directly. */}
+      <div className="native-bridge" aria-hidden="true">
+        <button
+          id="native-doc-back"
+          type="button"
+          tabIndex={-1}
+          onClick={() => window.RubyNative?.postMessage({ action: 'back' })}
+        >
+          Back
+        </button>
+        {availableModes.map((bridgeMode) => (
+          <button
+            key={bridgeMode}
+            id={`native-mode-${bridgeMode}`}
+            type="button"
+            tabIndex={-1}
+            onClick={() => changeMode(bridgeMode)}
+          >
+            {bridgeMode}
+          </button>
+        ))}
+        <button
+          id="native-toggle-activity"
+          type="button"
+          tabIndex={-1}
+          onClick={() => setActiveSheet((current) => (current === 'activity' ? null : 'activity'))}
+        >
+          Activity
+        </button>
+        <button id="native-export-markdown" type="button" tabIndex={-1} onClick={() => void exportMarkdown()}>
+          Export Markdown
+        </button>
+        <button id="native-export-html" type="button" tabIndex={-1} onClick={() => void exportHtml()}>
+          Export HTML
+        </button>
+      </div>
       <div
         className={`doc-page ${panelOpen ? '' : 'is-panel-hidden'} ${isReading ? 'is-read-mode' : ''}`}
         style={Object.keys(documentStyle).length === 0 ? undefined : documentStyle}
       >
-        <header className="doc-header">
+        {/* The update prompt normally lives in the (native-hidden) header; it
+            is the only trigger for reloading an owner-reset or newly deployed
+            document, so in the app it floats on its own. */}
+        {nativeApp && newVersionAvailable && (
+          <button
+            type="button"
+            className="version-update version-update--native"
+            onClick={() => window.location.reload()}
+          >
+            New version · Update
+          </button>
+        )}
+        <header className="doc-header native-hidden">
           <div className="doc-header-left">
             {/* Only visible inside the Ruby Native shell (body.can-go-back
                 toggles it); asks the shell to pop the native history. */}

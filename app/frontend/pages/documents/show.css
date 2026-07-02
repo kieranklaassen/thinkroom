@@ -40,3 +40,36 @@
 .version-update:hover {
   border-color: var(--accent);
 }
+
+/* ------------------------- Ruby Native shell chrome ---------------------- */
+
+/* Bridge strip: the native nav bar's menu items click these always-mounted
+   controls. Clip-hidden, never display:none — the shell's click dispatch is
+   unspecified and may need a real box to hit. */
+.native-bridge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* With the web header hidden in the app, the page body takes over the
+   safe-area clearance the header's padding used to provide. */
+[data-native-app] .doc-page::before {
+  content: "";
+  display: block;
+  height: var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top));
+}
+
+/* Floating replacement for the header's update prompt inside the app. */
+.version-update--native {
+  position: fixed;
+  top: calc(0.75rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
+  right: 0.75rem;
+  z-index: 60;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.12);
+}
