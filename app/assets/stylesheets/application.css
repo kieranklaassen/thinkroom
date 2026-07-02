@@ -144,8 +144,8 @@
  * Header presence-bar reserved lane (on-load layout stability)
  *
  * The document header's people cluster (.doc-header-people in
- * app/frontend/pages/documents/show.tsx) holds: identity chip · provenance
- * chip · PresenceBar. Human peers join via Yjs awareness over the websocket,
+ * app/frontend/pages/documents/show.tsx) holds: PresenceBar · provenance
+ * chip · identity chip. Human peers join via Yjs awareness over the websocket,
  * so they CANNOT be server-rendered — they fade in a beat after first paint.
  * Before this, the empty bar took zero width, so the first peer (0→N avatars +
  * "N here") widened the cluster and shoved the Edit/Share/⋯ controls left.
@@ -155,6 +155,11 @@
  * paint. Avatars then appear WITHIN the lane (acceptable) instead of pushing
  * the neighbouring controls (a layout shift, not acceptable). The bar always
  * renders now (even empty, data-empty) so the lane exists from the first frame.
+ *
+ * The lane sits on the cluster's open LEFT edge — beside the header's flexible
+ * middle space — so while empty it reads as ordinary whitespace instead of a
+ * dead gap between the viewer's name and Share. Contents right-align so
+ * arriving avatars hug the identity chip.
  *
  * Scoped to .presence-bar in the header; the editor body is untouched. The
  * Vite stylesheet (app/frontend/entrypoints/application.css) styles the bar's
@@ -167,6 +172,7 @@
   min-width: 7.5rem;
   display: inline-flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.45rem;
 }
 
