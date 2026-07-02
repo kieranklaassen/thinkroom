@@ -6,7 +6,7 @@ class OauthCallbacksController < InertiaController
     uid = auth.uid.to_s
     email = auth.info.email.to_s.strip.downcase
     user = User.find_by(google_uid: uid)
-    return redirect_to complete_authentication(user), status: :see_other if user
+    return redirect_to complete_authentication(user, remember: native_oauth_flow?), status: :see_other if user
 
     if User.exists?(email:)
       return redirect_to auth_path_with_return(login_path), inertia: {
@@ -16,7 +16,7 @@ class OauthCallbacksController < InertiaController
 
     name = Document.normalize_display_name(auth.info.name) || email.split("@", 2).first
     user = User.create!(name:, email:, google_uid: uid)
-    redirect_to complete_authentication(user), status: :see_other
+    redirect_to complete_authentication(user, remember: native_oauth_flow?), status: :see_other
   rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
     google_failure
   end
