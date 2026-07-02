@@ -24,39 +24,57 @@ class YjsPersistence
     # rather than persisted.
     def merge(document, base64_update, generation: nil, token: nil, user: nil)
       update = decode(base64_update)
-      lock_for(document.id).synchronize do
-        document.with_lock do
-          document.reload
-          raise Document::EditingLockedError, "This document is read-only." unless document.writable_by?(token, user:)
-          if generation && generation != document.content_generation
-            raise Document::StaleGenerationError,
-                  "Client generation #{generation} is behind document generation #{document.content_generation}."
+      instrument("merge.yjs", document_id: document.id, update_bytes: update.length) do |payload|
+        entered_at = monotonic_ms
+        lock_for(document.id).synchronize do
+          document.with_lock do
+            payload[:lock_wait_ms] = (monotonic_ms - entered_at).round(1)
+            document.reload
+            unless document.writable_by?(token, user:)
+              payload[:outcome] = "rejected_locked"
+              raise Document::EditingLockedError, "This document is read-only."
+            end
+            if generation && generation != document.content_generation
+              payload[:outcome] = "rejected_stale"
+              raise Document::StaleGenerationError,
+                    "Client generation #{generation} is behind document generation #{document.content_generation}."
+            end
+
+            ydoc = load_ydoc(document)
+            before = ydoc.state
+            ydoc.sync(update)
+            # A no-op update (e.g. the empty sync-reply a client joining an
+            # empty doc sends) must not persist — flipping seed_state to
+            # "seeded" without content would permanently block the seed claim.
+            if ydoc.state == before
+              payload[:outcome] = "noop"
+              next
+            end
+
+            payload[:blob_bytes_before] = document.yjs_state&.bytesize || 0
+            blob = ydoc.full_diff.pack("C*")
+            payload[:blob_bytes_after] = blob.bytesize
+            document.update_columns(
+              yjs_state: blob,
+              seed_state: "seeded",
+              updated_at: Time.current
+            )
+            payload[:outcome] = "merged"
           end
-
-          ydoc = load_ydoc(document)
-          before = ydoc.state
-          ydoc.sync(update)
-          # A no-op update (e.g. the empty sync-reply a client joining an
-          # empty doc sends) must not persist — flipping seed_state to
-          # "seeded" without content would permanently block the seed claim.
-          next if ydoc.state == before
-
-          document.update_columns(
-            yjs_state: ydoc.full_diff.pack("C*"),
-            seed_state: "seeded",
-            updated_at: Time.current
-          )
         end
       end
     end
 
     # => [full_state_b64, state_vector_b64] for the sync handshake.
     def state_b64(document)
-      ydoc = load_ydoc(document)
-      [
-        Base64.strict_encode64(ydoc.full_diff.pack("C*")),
-        Base64.strict_encode64(ydoc.state.pack("C*"))
-      ]
+      instrument("state.yjs", document_id: document.id) do |payload|
+        payload[:blob_bytes] = document.yjs_state&.bytesize || 0
+        ydoc = load_ydoc(document)
+        [
+          Base64.strict_encode64(ydoc.full_diff.pack("C*")),
+          Base64.strict_encode64(ydoc.state.pack("C*"))
+        ]
+      end
     end
 
     # Persist a derived source/provenance snapshot only when the submitting
@@ -65,30 +83,54 @@ class YjsPersistence
     # may not overwrite the API read model from behind.
     def persist_snapshot(document, state_vector_b64:, content:, spans:, title: document.title,
                          token: nil, user: nil)
-      client_state = decode_state_vector(decode(state_vector_b64)) if state_vector_b64.present?
+      instrument("snapshot.yjs", document_id: document.id) do |payload|
+        client_state = decode_state_vector(decode(state_vector_b64)) if state_vector_b64.present?
 
-      lock_for(document.id).synchronize do
-        document.with_lock do
-          document.reload
-          raise Document::EditingLockedError, "This document is read-only." unless document.writable_by?(token, user:)
-
-          if client_state && document.yjs_state.present?
-            server_state = decode_state_vector(load_ydoc(document).state)
-            current = server_state.all? do |client_id, clock|
-              client_state.fetch(client_id, 0) >= clock
+        lock_for(document.id).synchronize do
+          document.with_lock do
+            document.reload
+            unless document.writable_by?(token, user:)
+              payload[:outcome] = "rejected_locked"
+              raise Document::EditingLockedError, "This document is read-only."
             end
-            return false unless current
-          end
 
-          document.update!(title:, content_snapshot: content, provenance_spans: spans)
+            if client_state && document.yjs_state.present?
+              server_state = decode_state_vector(load_ydoc(document).state)
+              current = server_state.all? do |client_id, clock|
+                client_state.fetch(client_id, 0) >= clock
+              end
+              unless current
+                payload[:outcome] = "rejected_stale_vector"
+                return false
+              end
+            end
+
+            document.update!(title:, content_snapshot: content, provenance_spans: spans)
+            payload[:outcome] = "persisted"
+          end
         end
+        true
+      rescue ArgumentError => e
+        # A state vector that cannot be decoded is a client bug or corruption,
+        # not ordinary staleness — log it so it is distinguishable, but keep
+        # the false return so callers treat it as "snapshot not accepted".
+        payload[:outcome] = "invalid_state_vector"
+        Rails.logger.warn("YjsPersistence: invalid state vector for document #{document.id}: #{e.message}")
+        false
       end
-      true
-    rescue ArgumentError
-      false
     end
 
     private
+
+    # Instrument wrapper: seeds the payload, defaults the outcome, and lets
+    # exceptions propagate after the event records the rejection outcome.
+    def instrument(event, payload, &)
+      ActiveSupport::Notifications.instrument(event, payload, &)
+    end
+
+    def monotonic_ms
+      Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)
+    end
 
     def load_ydoc(document)
       ydoc = Y::Doc.new

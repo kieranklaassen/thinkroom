@@ -178,7 +178,126 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal "ordered independently", doc.reload.content_snapshot
   end
 
+  test "merge emits a merged event with byte sizes" do
+    doc = Document.create!(title: "Metered")
+    events = capture_yjs_events("merge.yjs") do
+      YjsPersistence.merge(doc, b64_update_for("measured content"))
+    end
+
+    assert_equal 1, events.length
+    payload = events.first.payload
+    assert_equal doc.id, payload[:document_id]
+    assert_equal "merged", payload[:outcome]
+    assert_operator payload[:update_bytes], :>, 0
+    assert_equal 0, payload[:blob_bytes_before]
+    assert_operator payload[:blob_bytes_after], :>, 0
+    assert payload.key?(:lock_wait_ms)
+  end
+
+  test "a no-op merge emits a noop event" do
+    doc = Document.create!(title: "Noop", seed_markdown: "# Template")
+    empty_update = Base64.strict_encode64(Y::Doc.new.full_diff.pack("C*"))
+
+    events = capture_yjs_events("merge.yjs") { YjsPersistence.merge(doc, empty_update) }
+
+    assert_equal "noop", events.first.payload[:outcome]
+  end
+
+  test "a stale-generation rejection emits a rejected_stale event and still raises" do
+    doc = Document.create!(title: "Stale", seed_content: "# Seed")
+    YjsPersistence.merge(doc, b64_update_for("live"))
+    stale_generation = doc.content_generation
+    doc.replace_content!(source: "# Replacement")
+
+    events = capture_yjs_events("merge.yjs") do
+      assert_raises(Document::StaleGenerationError) do
+        YjsPersistence.merge(doc, b64_update_for("stale"), generation: stale_generation)
+      end
+    end
+
+    assert_equal "rejected_stale", events.first.payload[:outcome]
+  end
+
+  test "a locked rejection emits a rejected_locked event and still raises" do
+    doc = Document.create!(title: "Locked", owner_token: "owner", owner_name: "O", link_access: "view")
+
+    events = capture_yjs_events("merge.yjs") do
+      assert_raises(Document::EditingLockedError) do
+        YjsPersistence.merge(doc, b64_update_for("forbidden"))
+      end
+    end
+
+    assert_equal "rejected_locked", events.first.payload[:outcome]
+  end
+
+  test "state_b64 emits a state event with the stored blob size" do
+    doc = Document.create!(title: "Join")
+    YjsPersistence.merge(doc, b64_update_for("content"))
+    doc.reload
+
+    events = capture_yjs_events("state.yjs") { YjsPersistence.state_b64(doc) }
+
+    assert_equal doc.yjs_state.bytesize, events.first.payload[:blob_bytes]
+  end
+
+  test "snapshot outcomes are taxonomized in events" do
+    doc = Document.create!(title: "Snapshot", content_snapshot: "current")
+    YjsPersistence.merge(doc, b64_update_for("server content"))
+    stale_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+
+    events = capture_yjs_events("snapshot.yjs") do
+      YjsPersistence.persist_snapshot(doc, state_vector_b64: stale_vector, content: "stale", spans: [])
+    end
+    assert_equal "rejected_stale_vector", events.first.payload[:outcome]
+
+    events = capture_yjs_events("snapshot.yjs") do
+      YjsPersistence.persist_snapshot(doc, state_vector_b64: nil, content: "fresh", spans: [])
+    end
+    assert_equal "persisted", events.first.payload[:outcome]
+  end
+
+  test "an undecodable state vector emits invalid_state_vector, logs, and returns false" do
+    doc = Document.create!(title: "Snapshot", content_snapshot: "current")
+    YjsPersistence.merge(doc, b64_update_for("server content"))
+    garbage_vector = Base64.strict_encode64([ 0x85, 0xff, 0xff ].pack("C*"))
+
+    logged = capture_rails_log do
+      events = capture_yjs_events("snapshot.yjs") do
+        persisted = YjsPersistence.persist_snapshot(
+          doc, state_vector_b64: garbage_vector, content: "corrupt", spans: []
+        )
+        assert_not persisted
+      end
+      assert_equal "invalid_state_vector", events.first.payload[:outcome]
+    end
+
+    assert_includes logged, "invalid state vector"
+    assert_includes logged, doc.id.to_s
+    assert_equal "current", doc.reload.content_snapshot
+  end
+
   private
+
+  def capture_yjs_events(name)
+    events = []
+    subscription = ActiveSupport::Notifications.subscribe(name) do |event|
+      events << event
+    end
+    yield
+    events
+  ensure
+    ActiveSupport::Notifications.unsubscribe(subscription)
+  end
+
+  def capture_rails_log
+    io = StringIO.new
+    original = Rails.logger
+    Rails.logger = ActiveSupport::TaggedLogging.new(Logger.new(io))
+    yield
+    io.string
+  ensure
+    Rails.logger = original
+  end
 
   def decode_state_vector_for_test(bytes)
     index = 0
