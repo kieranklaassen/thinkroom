@@ -1,5 +1,5 @@
 import { Form, Head, Link } from '@inertiajs/react'
-import { NativeForm, NativeNavbar, nativeHaptic } from '@ruby-native/react'
+import { NativeForm, NativeNavbar, NativeSubmitButton, nativeHaptic } from '@ruby-native/react'
 import './show.css'
 
 interface Props {
@@ -27,9 +27,14 @@ export default function AuthShow({ mode, google_enabled, csrf_token, return_to, 
     <>
       <Head title={`${title} · Thinkroom`} />
       {/* Ruby Native chrome: navbar title plus a form marker so native back
-          navigation skips this page after a successful sign-in. */}
-      <NativeNavbar title={registering ? 'Create account' : 'Sign in'} />
+          navigation skips this page after a successful sign-in. Pull-to-refresh
+          is off so a drag inside the form can't reload and discard input. The
+          navbar submit button clicks #auth-submit — scoped, because the Google
+          OAuth form's submit button appears earlier in the DOM and the default
+          [type='submit'] selector would hit it first. */}
+      <NativeNavbar title={registering ? 'Create account' : 'Sign in'} pullToRefresh={false} />
       <NativeForm />
+      <NativeSubmitButton title={registering ? 'Create account' : 'Sign in'} click="#auth-submit" />
       <main className="auth-page">
         <section className="auth-card" aria-labelledby="auth-heading">
           <Link href="/" className="auth-wordmark" aria-label="Thinkroom home">
@@ -73,10 +78,13 @@ export default function AuthShow({ mode, google_enabled, csrf_token, return_to, 
                 )}
                 <label>
                   <span>Email</span>
+                  {/* "username" on login pairs the field with iOS credential
+                      autofill; register keeps "email" for contact autofill
+                      alongside new-password. */}
                   <input
                     name="email"
                     type="email"
-                    autoComplete="email"
+                    autoComplete={registering ? 'email' : 'username'}
                     required
                     autoFocus={!registering}
                     aria-invalid={Boolean(errors.email)}
@@ -119,6 +127,7 @@ export default function AuthShow({ mode, google_enabled, csrf_token, return_to, 
                   </p>
                 )}
                 <button
+                  id="auth-submit"
                   className="btn btn-primary auth-submit"
                   type="submit"
                   disabled={processing}

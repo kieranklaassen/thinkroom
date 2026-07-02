@@ -55,6 +55,16 @@ declare module '@ruby-native/react' {
     click?: string
   }): ReactElement
 
+  /**
+   * Nav-bar submit button for form pages. `click` clicks a DOM element by
+   * CSS selector (defaults to [type='submit'] — pass an explicit scoped
+   * selector when the page has more than one submit button).
+   */
+  export function NativeSubmitButton(props: {
+    title?: string
+    click?: string
+  }): ReactElement
+
   /** Marks the page as a form so native back navigation skips it. */
   export function NativeForm(): ReactElement
 
