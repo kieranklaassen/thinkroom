@@ -106,6 +106,28 @@ Status values: `Pending`, `Pass`, `Fixed`, `Skipped`, `Blocked (needs human veri
 
 ## What Was Fixed
 
+### Read/Comment-mode copy bypassed the clean clipboard serializer — `de3afac`
+- **Symptom:** Cmd+C in Read mode put ~48KB of raw DOM (provenance spans, sketch internals, width handles) on the clipboard instead of Edit mode's ~1.7KB portable flavors; `script/export_check.mjs` failed on it.
+- **Root cause:** with `editable: false` ProseMirror never owns the selection, so its clipboard serializers never ran and the browser's native copy serialized the live DOM.
+- **Fix:** `bindReadModeCopy` (`app/frontend/editor/clipboard.ts`) maps the native selection to document positions and reuses the same serializer chain; selections outside the document stay native.
+- **Regression test:** `script/export_check.mjs` — 24/24, verified failing before and passing after.
+
+### Awareness-driven read-pointer dispatch: page-killing recursion + selection stomping — `b0e1295`
+- **Symptom (1):** type into a doc, then an agent files a suggestion → the page blanks with `RangeError: Maximum call stack size exceeded`. Reproduced on `main` for markdown and HTML docs.
+- **Symptom (2):** with any second tab on the doc, a read-only collaborator's text selection is repeatedly stomped mid-drag.
+- **Root cause:** the read-pointer plugin dispatched a transaction on **every** awareness `change` (any peer cursor/viewport/presence tick), synchronously — a dispatch whose updateState republished an awareness field recursed to stack overflow, and each dispatch re-imposed PM's state selection over in-flight native selections.
+- **Fix:** coalesce refreshes to one animation frame and dispatch only when the decoration-relevant awareness slice (peers' `readPointer` + identity) actually changed (`app/frontend/editor/read_pointers.ts`).
+- **Regression coverage:** exercised via `script/html_document_check.mjs` (21/21, previously died mid-run) and probe-verified; the residual multi-tab comment-role gesture issue is escalated below.
+
+### /d/:slug/read raw 404 — `e100b80` · UTC dates on home — `d2eed96` · Share dialog access copy — `b76ff5f` · clipboard `.catch` — `c5a5c1a` · provenance-span CLI docs — `03090e2` · stale "Active plans" in prime — `d3ce406` · check-script drift + CI wiring — `9ba783b`, `cc2779d`
+- `/read` now 301s to the canonical bare URL (test in `test/integration/document_mode_routing_test.rb`).
+- Home dates and the THIS WEEK bucket follow a `pruf_tz` cookie (test in `test/integration/document_index_test.rb`).
+- The Share dialog states the actual link capability and points owners at the ⋯ menu.
+- Copy affordances swallow denied-clipboard rejections instead of unhandled-rejecting.
+- `cli/README.md` + SKILL.md document the provenance-span contract (verified behaviorally first).
+- 11 shipped plans flipped to `status: completed`; `prime` output is truthful again.
+- `link_check` (legacy `markdown:` field), `html_document_check` (pre-#82 mode assumptions, removed `.doc-format` badge), and `browser_check` (headless dblclick) were modernized; a `browser_checks` CI job now runs the eight reliable scripts (104 assertions) on every push/PR.
+
 ### Meta events lost during page-load window — `ea2bb99`
 - **Symptom:** an agent chained `thinkroom update` + `thinkroom suggest`; the update's `content_reset` full-reloaded the founder's tab, and the suggestion (committed while the fresh page was booting) never appeared — the margin rail stayed empty until a manual reload. Reproduces for any suggestion/comment/activity landing while a doc page is loading.
 - **Root cause:** the server renders page props before the browser subscribes to `DocumentMetaChannel`; broadcasts in that window reach nobody, and nothing refetched the cable-fed props afterward (`app/frontend/lib/use_meta_channel.ts`).
@@ -124,7 +146,13 @@ Status values: `Pending`, `Pass`, `Fixed`, `Skipped`, `Blocked (needs human veri
 
 ## Decisions for a Human
 
-### Read-mode copy bypasses the clean clipboard serializer
+### Comment-role guests can't reliably select text while another tab is open
+- **What's broken:** with a second tab on the same document, a comment-link guest's text selection (mouse drag, keyboard, synthetic) never survives long enough to place the selection toolbar — awareness-driven dispatches re-impose ProseMirror's state selection over the in-flight native range. `b0e1295` removed the app's own per-tick dispatch, but y-prosemirror's cursor plugin follows the same dispatch-per-awareness-tick pattern and is out of app-code reach.
+- **Why escalated:** fixing it means patching/configuring y-prosemirror's cursor plugin or rethinking how non-editable modes host selections — editor-architecture territory with competing approaches.
+- **Effect on CI:** `script/browser_check.mjs` is excluded from the new CI job until this is resolved (its first 12 checks pass; the comment-role leg blocks).
+- **Recommendation:** reproduce with `script/browser_check.mjs`, then evaluate pinning y-prosemirror's cursor rendering to the same snapshot-gated pattern as `read_pointers.ts`.
+
+### RESOLVED in this branch: read-mode copy bypasses the clean clipboard serializer (fixed, `de3afac`)
 - **What's broken:** in Read mode, select-all + Cmd+C puts the raw live DOM on the clipboard (~48KB of internal markup for a ~600-char doc: provenance spans, sketch scene internals, width-handle buttons) instead of the clean portable serialization Edit mode produces (~1.7KB with rendered sketch SVG). `script/export_check.mjs` fails on exactly this ("copied html contains a rendered sketch SVG" — PM copy handler returns nothing in Read mode; the browser's native copy then serializes the raw DOM).
 - **Why escalated:** the clean serializer is a ProseMirror view option, and PM only handles copy when the selection is a PM selection. Read mode's selection is native (the read-pointer work #95 builds on that). Fixing it means either mapping native selections back to PM positions on copy, or rethinking how Read mode hosts the editor — both touch the mode/pointer architecture; competing approaches with real trade-offs.
 - **Options:** (a) document-level `copy` listener in Read mode that maps the DOM selection to PM positions and reuses `configureCleanClipboard`'s serializers; (b) keep PM focus/selection ownership in Read mode (revisit #82/#95 selection model); (c) mitigate: `user-select: none` on internal widgets + strip `data-*` via CSS/DOM in a copy handler without full PM mapping.
@@ -151,6 +179,12 @@ Status values: `Pending`, `Pass`, `Fixed`, `Skipped`, `Blocked (needs human veri
 2. **Check scripts that aren't in CI rot silently.** `script/export_check.mjs` fails on `main` today (read-mode copy) and nobody noticed because `ci.yml` doesn't run the `script/*_check.mjs` family. Wiring them into CI is cheap insurance on exactly the surfaces this sprint kept fixing.
 3. **The render→subscribe gap is a standing class of bug for cable-fed props.** Anything the server renders once and then maintains via broadcast has a window where events vanish. The `connected`-refresh pattern (ea2bb99) closes it generically; apply it to any future cable-fed prop.
 4. **The test pyramid held.** 495 unit/integration tests were green while two real bugs (meta-gap, read-mode copy) lived exclusively in the browser/CRDT/cable layer — exactly where the check scripts (not run) and dogfooding look.
+
+## Fix round (2026-07-01, same branch)
+
+"Fix all you can" follow-up: 8 of 9 deferred items fixed and committed (`de3afac`, `e100b80`, `d2eed96`, `b76ff5f`, `c5a5c1a`, `03090e2`, `d3ce406`, `b0e1295`, `9ba783b`, `cc2779d`), including both prior escalations (read-mode copy; CI wiring) and two newly-found editor bugs (suggestion-arrival recursion crash; awareness selection stomping). The owner `<title>` paper cut was a misdiagnosis (client Head corrects it post-hydration; the suffixed title is the intentional scraper/share-visitor snapshot). One new escalation remains: comment-role selection under multi-tab awareness traffic (above).
+
+Verification after the fix round: `bin/rails test` 497/0, `bin/rubocop` clean, `npm run check` green, and the eight CI-wired browser checks all exit 0 (104 assertions).
 
 ## Final Status
 
