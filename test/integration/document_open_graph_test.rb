@@ -1,6 +1,8 @@
 require "test_helper"
 
 class DocumentOpenGraphTest < ActionDispatch::IntegrationTest
+  include OpenGraphHelpers
+
   setup do
     @document = Document.create!(
       title: "Stored title",
@@ -51,22 +53,5 @@ class DocumentOpenGraphTest < ActionDispatch::IntegrationTest
     second_url = property(Nokogiri::HTML5(response.body), "og:image")
 
     refute_equal first_url, second_url
-  end
-
-  private
-
-  def browser
-    {
-      "User-Agent" => "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/126 Safari/537.36",
-      "Accept" => "text/html"
-    }
-  end
-
-  def property(page, name)
-    page.at_css(%(meta[property="#{name}"]))&.[]("content")
-  end
-
-  def named(page, name)
-    page.at_css(%(meta[name="#{name}"]))&.[]("content")
   end
 end

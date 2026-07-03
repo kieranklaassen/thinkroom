@@ -17,6 +17,7 @@ class DocumentsController < InertiaController
   inertia_config ssr_enabled: -> { %w[show index].include?(action_name) }
 
   def index
+    @open_graph = site_open_graph
     # Date labels and the THIS WEEK bucket follow the viewer's timezone via
     # the pruf_tz cookie (set client-side from Intl); unknown or absent zones
     # fall back to the app default.
@@ -500,6 +501,21 @@ class DocumentsController < InertiaController
       mode:,
       document_width: document_width&.clamp(MIN_DOCUMENT_WIDTH, MAX_DOCUMENT_WIDTH),
       rich_content_width: rich_content_width&.clamp(MIN_RICH_CONTENT_WIDTH, MAX_RICH_CONTENT_WIDTH)
+    }
+  end
+
+  # The landing page's static site card. page_title stays exactly "Thinkroom"
+  # so the browser tab title is unchanged; copy comes from SiteOgImage so the
+  # meta tags can't drift from the rendered card.
+  def site_open_graph
+    {
+      title: "Thinkroom",
+      page_title: "Thinkroom",
+      description: "#{SiteOgImage::TAGLINE} #{SiteOgImage::BYLINE}",
+      url: root_url,
+      type: "website",
+      image_url: site_og_image_url(v: SiteOgImage.url_version),
+      image_alt: "Thinkroom — #{SiteOgImage::TAGLINE.downcase}"
     }
   end
 

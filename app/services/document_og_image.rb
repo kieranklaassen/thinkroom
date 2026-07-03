@@ -13,6 +13,10 @@ class DocumentOgImage
   RULE_X = 44
 
   HEADER_BASELINE = 96
+  # Wordmark text position: MARGIN_X + the "T." glyph advance at 34px serif
+  # (visual_width("T.") == 1.0 → 34px) + a 14px gap. Shared with SiteOgImage
+  # so both cards keep the same header geometry.
+  WORDMARK_TEXT_X = MARGIN_X + 48
 
   # Title/excerpt live in the band between the header and the footer hairline
   # and are vertically centered within it.
@@ -23,6 +27,9 @@ class DocumentOgImage
   # Widths are in "visual width" units (~1 em per unit), so max line px / size.
   TITLE_SIZE = 72
   TITLE_LINE_HEIGHT = 78
+  # Distance from the title block's top to its first baseline. Shared with
+  # SiteOgImage so both cards center their title blocks identically.
+  TITLE_FIRST_BASELINE_OFFSET = 58
   TITLE_LINE_WIDTH = 13.5
   TITLE_MAX_LINES = 3
 
@@ -89,11 +96,9 @@ class DocumentOgImage
       block_height += DESCRIPTION_GAP + description_lines.length * DESCRIPTION_LINE_HEIGHT if description_lines.any?
       block_top = REGION_CENTER - (block_height / 2.0)
 
-      title_baseline = block_top + 58
+      title_baseline = block_top + TITLE_FIRST_BASELINE_OFFSET
       title_bottom = block_top + title_lines.length * TITLE_LINE_HEIGHT
       description_baseline = title_bottom + DESCRIPTION_GAP + 27
-
-      wordmark_x = MARGIN_X + (visual_width("T.") * 34) + 14
 
       <<~SVG
         <svg xmlns="http://www.w3.org/2000/svg" width="#{WIDTH}" height="#{HEIGHT}" viewBox="0 0 #{WIDTH} #{HEIGHT}">
@@ -101,7 +106,7 @@ class DocumentOgImage
           <line x1="#{RULE_X}" y1="0" x2="#{RULE_X}" y2="#{HEIGHT}" stroke="#{accent}" stroke-width="1" opacity="0.28"/>
 
           <text x="#{MARGIN_X}" y="#{HEADER_BASELINE}" fill="#{accent}" font-family="#{SERIF}" font-size="34" font-weight="600">T.</text>
-          <text x="#{wordmark_x.round(1)}" y="#{HEADER_BASELINE}" fill="#{INK}" font-family="#{SANS}" font-size="21" font-weight="600" letter-spacing="-0.2">Thinkroom</text>
+          <text x="#{WORDMARK_TEXT_X}" y="#{HEADER_BASELINE}" fill="#{INK}" font-family="#{SANS}" font-size="21" font-weight="600" letter-spacing="-0.2">Thinkroom</text>
           <text x="#{CONTENT_RIGHT}" y="#{HEADER_BASELINE}" text-anchor="end" fill="#{EYEBROW_INK}" font-family="#{SANS}" font-size="16" font-weight="500" letter-spacing="2.2">SHARED DOCUMENT</text>
 
           <text x="#{MARGIN_X}" y="#{title_baseline.round(1)}" fill="#{INK}" font-family="#{SERIF}" font-size="#{TITLE_SIZE}" font-weight="500" letter-spacing="-1">

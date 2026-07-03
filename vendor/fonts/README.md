@@ -1,7 +1,7 @@
 # Vendored fonts
 
-These TrueType files are used **only** server-side, when `DocumentOgImage`
-rasterizes the document social-preview SVG through `ruby-vips`/librsvg. librsvg
+These TrueType files are used **only** server-side, when `DocumentOgImage` and
+`SiteOgImage` rasterize the social-preview SVGs through `ruby-vips`/librsvg. librsvg
 resolves fonts through fontconfig, so `config/initializers/og_image_fonts.rb`
 registers this directory with fontconfig at boot (via a generated
 `FONTCONFIG_FILE`). They are not part of the Vite frontend bundle.
