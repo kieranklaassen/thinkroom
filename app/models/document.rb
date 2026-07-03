@@ -367,6 +367,20 @@ class Document < ApplicationRecord
       .update_all(seed_state: "claimed", seed_claimed_at: Time.current) == 1
   end
 
+  # Hand back a seed claim that will never be applied — a client whose local
+  # doc predates an owner replacement discards its session (page reload)
+  # instead of seeding, and releasing the claim lets that reload's page
+  # render re-claim immediately rather than leaving the document blank for
+  # everyone until SEED_CLAIM_TIMEOUT expires. The conditional UPDATE only
+  # releases a still-unconsumed claim at the granted generation: a merge that
+  # already flipped seed_state to "seeded", or a replacement that advanced
+  # the generation, leaves the row untouched.
+  def release_seed_claim(generation:)
+    self.class
+      .where(id: id, seed_state: "claimed", content_generation: generation)
+      .update_all(seed_state: "pending", seed_claimed_at: nil)
+  end
+
   def ownership_props(viewer_token, viewer_user: nil)
     {
       claimed: claimed?,

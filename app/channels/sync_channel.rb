@@ -181,21 +181,14 @@ class SyncChannel < ApplicationCable::Channel
   end
 
   # A subscriber granted the seed claim in its handshake hands it back when
-  # it cannot apply the template — a reconnecting tab whose local doc
-  # predates an owner replacement discards its session (page reload) instead
-  # of seeding. Releasing the claim lets that reload's page render re-claim
-  # immediately instead of leaving the document blank for everyone until
-  # SEED_CLAIM_TIMEOUT expires. The conditional UPDATE only releases a
-  # still-unconsumed claim at the granted generation: a merge that already
-  # flipped seed_state to "seeded", or a replacement that advanced the
-  # generation, leaves the row untouched.
+  # it cannot apply the template (see Document#release_seed_claim). The
+  # decline is best-effort — the client sends it right before reloading, so
+  # SEED_CLAIM_TIMEOUT remains the backstop when the frame never arrives.
   def decline_seed_claim
     generation = @granted_seed_generation
     return unless generation
 
     @granted_seed_generation = nil
-    Document
-      .where(id: @document.id, seed_state: "claimed", content_generation: generation)
-      .update_all(seed_state: "pending", seed_claimed_at: nil)
+    @document.release_seed_claim(generation:)
   end
 end

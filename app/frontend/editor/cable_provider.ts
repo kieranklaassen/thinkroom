@@ -228,59 +228,9 @@ export class CableProvider {
     if (data.cid === this.clientId) return
 
     switch (data.type) {
-      case 'sync': {
-        // A reconnect handshake reporting a different generation means an
-        // owner CLI replacement (Document#replace_content!) reset this
-        // document while this client was disconnected — it missed both the
-        // content_reset broadcast and the merge-time rejection. Its local
-        // doc is stale: adopting the new generation and running sync step 2
-        // would upload the entire pre-replacement doc tagged with the
-        // current generation, resurrecting exactly the content the
-        // replacement wiped (YjsPersistence.merge cannot catch it — the
-        // frame passes the generation guard). Discard the session instead:
-        // same recovery action as a rejected stale frame.
-        if (
-          this.generation !== null &&
-          typeof data.generation === 'number' &&
-          data.generation !== this.generation
-        ) {
-          // Post-replacement the seed is pending again, so this handshake
-          // may have granted it to us — hand it back so the page load that
-          // replaces this discarded session can claim and apply the new
-          // template instead of everyone waiting out SEED_CLAIM_TIMEOUT.
-          if (data.seed) this.send({ type: 'seed-decline' })
-          this.emit('stale')
-          break
-        }
-        // Server's full state, then reply with what it's missing (sync step 2).
-        Y.applyUpdate(this.doc, fromBase64(data.update!), this)
-        const serverVector = fromBase64(data.sv!)
-        this.serverStateVector = serverVector
-        this.updateSequence = 0
-        if (typeof data.generation === 'number') this.generation = data.generation
-        if (this.canWrite) {
-          this.sendUpdate('sync-reply', Y.encodeStateAsUpdate(this.doc, serverVector))
-        }
-        const seedContent = data.seed_content ?? data.seed_markdown
-        if (data.seed && seedContent) {
-          // No one listens to 'seed' by design: the editor reads
-          // provider.seedContent directly inside its bind step, which runs
-          // on the 'synced' emit below — this assignment is ordered before
-          // it on purpose. Handling the seed in a 'seed' listener instead
-          // would double-apply the template.
-          this.seedContent = seedContent
-          this.seedFormat = data.content_format ?? 'markdown'
-          this.seedAuthorKind = data.seed_author_kind ?? null
-          this.seedAuthorName = data.seed_author_name ?? null
-          this.emit('seed')
-        }
-        this.synced = true
-        this.emit('synced')
-        // Announce ourselves and ask existing peers to re-announce.
-        this.broadcastAwareness()
-        this.send({ type: 'awareness-query' })
+      case 'sync':
+        this.handleSync(data)
         break
-      }
       case 'update':
       case 'sync-reply':
         try {
@@ -304,6 +254,63 @@ export class CableProvider {
         this.emit(data.stale ? 'stale' : 'write-denied')
         break
     }
+  }
+
+  // The server's handshake: full state + state vector on (re)subscribe.
+  // Absent generation means a pre-generation server during rollout — trust
+  // it, matching the server's own absent-key convention.
+  private handleSync(data: SyncMessage): void {
+    const serverGeneration = typeof data.generation === 'number' ? data.generation : null
+
+    // A reconnect handshake reporting a different generation means an owner
+    // CLI replacement (Document#replace_content!) reset this document while
+    // this client was disconnected — it missed both the content_reset
+    // broadcast and the merge-time rejection. Its local doc is stale:
+    // adopting the new generation and running sync step 2 would upload the
+    // entire pre-replacement doc tagged with the current generation,
+    // resurrecting exactly the content the replacement wiped
+    // (YjsPersistence.merge cannot catch it — the frame passes the
+    // generation guard). Discard the session instead: same recovery action
+    // as a rejected stale frame.
+    if (this.generation !== null && serverGeneration !== null && serverGeneration !== this.generation) {
+      // Post-replacement the seed is pending again, so this handshake may
+      // have granted it to us — hand it back so the page load that replaces
+      // this discarded session can claim and apply the new template instead
+      // of everyone waiting out SEED_CLAIM_TIMEOUT. Ordered before the
+      // 'stale' emit, whose handler reloads the page; the send is
+      // best-effort and the claim timeout remains the backstop.
+      if (data.seed) this.send({ type: 'seed-decline' })
+      this.emit('stale')
+      return
+    }
+
+    // Server's full state, then reply with what it's missing (sync step 2).
+    Y.applyUpdate(this.doc, fromBase64(data.update!), this)
+    const serverVector = fromBase64(data.sv!)
+    this.serverStateVector = serverVector
+    this.updateSequence = 0
+    if (serverGeneration !== null) this.generation = serverGeneration
+    if (this.canWrite) {
+      this.sendUpdate('sync-reply', Y.encodeStateAsUpdate(this.doc, serverVector))
+    }
+    const seedContent = data.seed_content ?? data.seed_markdown
+    if (data.seed && seedContent) {
+      // No one listens to 'seed' by design: the editor reads
+      // provider.seedContent directly inside its bind step, which runs
+      // on the 'synced' emit below — this assignment is ordered before
+      // it on purpose. Handling the seed in a 'seed' listener instead
+      // would double-apply the template.
+      this.seedContent = seedContent
+      this.seedFormat = data.content_format ?? 'markdown'
+      this.seedAuthorKind = data.seed_author_kind ?? null
+      this.seedAuthorName = data.seed_author_name ?? null
+      this.emit('seed')
+    }
+    this.synced = true
+    this.emit('synced')
+    // Announce ourselves and ask existing peers to re-announce.
+    this.broadcastAwareness()
+    this.send({ type: 'awareness-query' })
   }
 
   private handleDocUpdate = (update: Uint8Array, origin: unknown): void => {
