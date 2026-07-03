@@ -1316,11 +1316,16 @@ export default function DocumentShow({
             {bridgeMode}
           </button>
         ))}
+        {/* Activity is omitted from the native menu in Read mode and its sheet
+            only renders outside Read; a stale-menu tap during Read is a no-op
+            so activeSheet can't be set with nothing visible. */}
         <button
           id="native-toggle-activity"
           type="button"
           tabIndex={-1}
-          onClick={() => setActiveSheet((current) => (current === 'activity' ? null : 'activity'))}
+          onClick={() => {
+            if (!isReading) setActiveSheet((current) => (current === 'activity' ? null : 'activity'))
+          }}
         >
           Activity
         </button>
