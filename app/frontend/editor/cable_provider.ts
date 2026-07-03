@@ -253,6 +253,10 @@ export class CableProvider {
         // each needs a different client recovery action (see show.tsx).
         this.emit(data.stale ? 'stale' : 'write-denied')
         break
+      default:
+        // Compile-time exhaustiveness only. At runtime an unknown type from
+        // a newer server must be ignored, never crash the handler.
+        data.type satisfies never
     }
   }
 
