@@ -292,7 +292,12 @@ class DocumentsController < InertiaController
     return redirect_to root_path, status: :see_other if document.nil?
 
     unless document.owned_by?(owner_token, user: current_user)
-      return redirect_back fallback_location: document_page_path(document.slug), status: :see_other,
+      # No explicit :see_other on error redirects: inertia_rails carries the
+      # session errors bag only through 302 responses (its middleware upgrades
+      # Inertia requests to 303 itself). An explicit 303 makes the middleware
+      # wipe the errors on this same response, so the client's onError never
+      # fires and the failure renders nothing.
+      return redirect_back fallback_location: document_page_path(document.slug),
                            inertia: { errors: { document: "Only the owner can delete this document" } }
     end
 
@@ -300,7 +305,7 @@ class DocumentsController < InertiaController
     DocumentMetaChannel.broadcast_event(document, :document_deleted)
     redirect_to root_path, status: :see_other
   rescue ActiveRecord::RecordNotDestroyed, ActiveRecord::StatementInvalid
-    redirect_back fallback_location: document_page_path(params[:slug]), status: :see_other,
+    redirect_back fallback_location: document_page_path(params[:slug]),
                   inertia: { errors: { document: "Delete failed — please try again" } }
   end
 

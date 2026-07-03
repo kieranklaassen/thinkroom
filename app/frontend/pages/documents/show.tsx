@@ -92,6 +92,7 @@ import { useIsClient } from '../../lib/use_is_client'
 import { useAnchoredPopover } from '../../lib/use_anchored_popover'
 import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
 import { patchJSON } from '../../lib/csrf'
+import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
 import { setCookie, setCookieFlag } from '../../lib/cookies'
 import {
@@ -145,8 +146,7 @@ export interface DocumentProps {
   comments: CommentPayload[]
   activities: ActivityPayload[]
   presences: AgentPresencePayload[]
-  // Shared by RubyNative::InertiaSupport on every page.
-  nativeApp: boolean
+  nativeApp: SharedProps['nativeApp']
 }
 
 // Floating chrome stores only its anchor identity; geometry is re-derived
@@ -1324,10 +1324,27 @@ export default function DocumentShow({
         >
           Activity
         </button>
-        <button id="native-export-markdown" type="button" tabIndex={-1} onClick={() => void exportMarkdown()}>
+        {/* Gated on the live editor handle — the export helpers throw before
+            it exists, and the web UI disables its export buttons the same way
+            (SharePopover's exportReady). A pre-ready tap is a silent no-op. */}
+        <button
+          id="native-export-markdown"
+          type="button"
+          tabIndex={-1}
+          onClick={() => {
+            if (handle) void exportMarkdown()
+          }}
+        >
           Export Markdown
         </button>
-        <button id="native-export-html" type="button" tabIndex={-1} onClick={() => void exportHtml()}>
+        <button
+          id="native-export-html"
+          type="button"
+          tabIndex={-1}
+          onClick={() => {
+            if (handle) void exportHtml()
+          }}
+        >
           Export HTML
         </button>
       </div>
@@ -1349,24 +1366,9 @@ export default function DocumentShow({
         )}
         <header className="doc-header native-hidden">
           <div className="doc-header-left">
-            {/* Only visible inside the Ruby Native shell (body.can-go-back
-                toggles it); asks the shell to pop the native history. */}
-            <button
-              type="button"
-              className="native-back-button doc-back"
-              aria-label="Back"
-              onClick={() => window.RubyNative?.postMessage({ action: 'back' })}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path
-                  d="M15.75 19.5L8.25 12l7.5-7.5"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
+            {/* The nav bar's leading button (-> #native-doc-back) owns back in
+                the native shell now that this header hides there; the old
+                header back button had no other consumer. */}
             <Link href="/" className="doc-home" aria-label="Home">
               T.
             </Link>

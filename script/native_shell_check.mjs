@@ -170,27 +170,48 @@ try {
     (await page.locator('[data-native-menu-item][data-native-click^="#native-mode-"][data-native-selected]').count()) === 1,
     'doc: exactly one mode menu item is marked selected',
   )
+  check(
+    (await page.locator('[data-native-menu-item][data-native-click="#native-toggle-activity"]').count()) === 1,
+    'doc: menu offers Activity outside Read mode',
+  )
   await page.evaluate(() => document.querySelector('#native-mode-read')?.click())
   await page.waitForFunction(() => document.querySelector('.doc-page')?.classList.contains('is-read-mode'))
   ok('doc: mode bridge button switches the editor to Read mode')
+  await page.waitForFunction(
+    () => !document.querySelector('[data-native-menu-item][data-native-click="#native-toggle-activity"]'),
+  )
+  ok('doc: Activity menu item drops out in Read mode')
 
+  // Second throwaway doc for the multi-row swipe scenarios.
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
   await mounted(page)
+  await page.evaluate(() => document.querySelector('#new-document-button')?.click())
+  await page.waitForURL(/\/d\/[A-Za-z0-9]+\/edit/, { timeout: 30000 })
+  const secondSlug = await page.evaluate(() => window.location.pathname.split('/')[2])
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+  await mounted(page)
+
   const row = page.locator(`[data-swipe-row="${throwawaySlug}"]`)
-  check((await row.count()) === 1, 'home: owned row is swipe-enabled in native')
+  const rowB = page.locator(`[data-swipe-row="${secondSlug}"]`)
+  check(
+    (await row.count()) === 1 && (await rowB.count()) === 1,
+    'home: owned rows are swipe-enabled in native',
+  )
   check(
     (await row.locator('button[data-native-haptic="warning"]').count()) === 1,
     'home: swipe row carries a haptic Delete action',
   )
-  const box = await row.boundingBox()
-  if (box) {
+  const swipeOpen = async (target) => {
+    const box = await target.boundingBox()
+    if (!box) return
     const y = box.y + box.height / 2
     await page.mouse.move(box.x + box.width - 40, y)
     await page.mouse.down()
     await page.mouse.move(box.x + box.width - 160, y, { steps: 8 })
     await page.mouse.up()
+    await page.waitForTimeout(280)
   }
-  await page.waitForTimeout(300)
+  await swipeOpen(row)
   check(
     (await page.locator(`[data-swipe-row="${throwawaySlug}"].is-open`).count()) === 1,
     'home: horizontal swipe reveals the Delete action',
@@ -198,6 +219,44 @@ try {
   check(
     new URL(page.url()).pathname === '/',
     'home: releasing a swipe does not navigate into the document',
+  )
+  await swipeOpen(rowB)
+  check(
+    (await page.locator(`[data-swipe-row="${secondSlug}"].is-open`).count()) === 1 &&
+      (await page.locator(`[data-swipe-row="${throwawaySlug}"].is-open`).count()) === 0,
+    'home: opening a second row closes the first',
+  )
+  // Tap the visible body of the open row (left of the revealed Delete
+  // button): the capture-phase handler must close the row, not navigate.
+  const openBox = await rowB.boundingBox()
+  if (openBox) {
+    await page.mouse.click(openBox.x + openBox.width - 140, openBox.y + openBox.height / 2)
+  }
+  await page.waitForTimeout(280)
+  check(
+    (await page.locator(`[data-swipe-row="${secondSlug}"].is-open`).count()) === 0 &&
+      new URL(page.url()).pathname === '/',
+    'home: tapping an open row closes it without navigating',
+  )
+  const vBox = await row.boundingBox()
+  if (vBox) {
+    await page.mouse.move(vBox.x + vBox.width / 2, vBox.y + vBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(vBox.x + vBox.width / 2, vBox.y + vBox.height / 2 + 80, { steps: 8 })
+    await page.mouse.up()
+    await page.waitForTimeout(280)
+  }
+  check(
+    (await page.locator(`[data-swipe-row="${throwawaySlug}"].is-open`).count()) === 0,
+    'home: vertical drag scrolls instead of opening the row',
+  )
+  await swipeOpen(row)
+  page.once('dialog', (dialog) => void dialog.dismiss())
+  await row.locator('button[data-native-haptic="warning"]').click()
+  await page.waitForTimeout(500)
+  check(
+    (await page.locator(`[data-swipe-row="${throwawaySlug}"]`).count()) === 1,
+    'home: declining the confirm keeps the document',
   )
   page.once('dialog', (dialog) => void dialog.accept())
   await row.locator('button[data-native-haptic="warning"]').click()
@@ -207,6 +266,40 @@ try {
     { timeout: 15000 },
   )
   ok('home: confirmed delete removes the document row')
+
+  // Failure path: drop the signed owner_token cookie (context-level API
+  // reaches the httponly cookie) so the server's real owned_by? check fails
+  // on an existing doc — the genuine onError path: error renders, the row
+  // snaps closed, the document stays listed.
+  const savedCookies = (await native.cookies()).filter((cookie) => cookie.name === 'owner_token')
+  await native.clearCookies({ name: 'owner_token' })
+  await swipeOpen(rowB)
+  page.once('dialog', (dialog) => void dialog.accept())
+  await rowB.locator('button[data-native-haptic="warning"]').click()
+  await page.waitForSelector('.document-delete-error[role="alert"]', { timeout: 15000 })
+  ok('home: failed delete surfaces the error message')
+  // The dropped-cookie trigger also re-scopes the yours list on the refused
+  // redirect (the row vanishes as a trigger artifact, not product behavior),
+  // so row persistence/re-close is device-pass territory; the server-side
+  // survival is what this trigger can honestly prove.
+  const survivedDelete = await page.evaluate(
+    async (slug) => (await fetch(`/d/${slug}`, { method: 'HEAD' })).ok,
+    secondSlug,
+  )
+  check(survivedDelete, 'home: failed delete leaves the document alive on the server')
+  if (savedCookies.length > 0) await native.addCookies(savedCookies)
+
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+  await mounted(page)
+  await swipeOpen(rowB)
+  page.once('dialog', (dialog) => void dialog.accept())
+  await rowB.locator('button[data-native-haptic="warning"]').click()
+  await page.waitForFunction(
+    (slug) => !document.querySelector(`[data-swipe-row="${slug}"]`),
+    secondSlug,
+    { timeout: 15000 },
+  )
+  ok('home: second throwaway cleaned up via swipe delete')
 
   await page.goto(`${BASE}/login`, { waitUntil: 'networkidle' })
   await mounted(page)
@@ -278,10 +371,6 @@ try {
   check(await webPage.locator('#auth-submit').isVisible(), 'web login: credentials submit button still visible')
   await webPage.goto(`${BASE}/d/${SLUG}`, { waitUntil: 'networkidle' })
   await mounted(webPage)
-  check(
-    !(await webPage.locator('.native-back-button').isVisible()),
-    'web doc: native back button never visible',
-  )
   check(await webPage.locator('.doc-header').isVisible(), 'web doc: header renders as on main')
   // Clip-hidden by design (1px box, clipped) — Playwright's :visible counts
   // any non-empty box, so measure the footprint instead.

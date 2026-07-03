@@ -9,6 +9,7 @@ import { setCookie } from '../../lib/cookies'
 import { useClaim } from '../../lib/use_claim'
 import { useIsClient } from '../../lib/use_is_client'
 import type { OwnershipPayload } from '../../components/ownership_chip'
+import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
 
 type AgeGroup = 'this_week' | 'earlier'
@@ -24,12 +25,10 @@ type DocLink = {
 
 type RecentDoc = DocLink & OwnershipPayload
 
-type Props = {
+type Props = Pick<SharedProps, 'nativeApp'> & {
   yours: DocLink[]
   recent: RecentDoc[]
   viewer: ViewerPayload
-  // Shared by RubyNative::InertiaSupport on every page.
-  nativeApp: boolean
 }
 
 const EARLIER_PREVIEW_LIMIT = 8
@@ -147,7 +146,7 @@ function DocumentRow({
   document: DocLink | RecentDoc
   editable?: boolean
   claimerName?: string
-  swipe?: { deleting: boolean; onDelete: () => void }
+  swipe?: { deleting: boolean; onDelete: () => void; closeSignal: number }
 }) {
   const [editingTags, setEditingTags] = useState(false)
   const recentDocument = 'claimable' in document ? document : null
@@ -190,7 +189,12 @@ function DocumentRow({
   if (swipe) {
     return (
       <li className="document-row document-row--swipe">
-        <SwipeRow slug={document.slug} deleting={swipe.deleting} onDelete={swipe.onDelete}>
+        <SwipeRow
+          slug={document.slug}
+          deleting={swipe.deleting}
+          onDelete={swipe.onDelete}
+          closeSignal={swipe.closeSignal}
+        >
           <div className="swipe-row-padding">{body}</div>
         </SwipeRow>
       </li>
@@ -206,6 +210,7 @@ function DocumentGroup({
   editable,
   claimerName,
   deletingSlug,
+  swipeCloseSignal,
   onDeleteDocument,
 }: {
   title: string
@@ -213,6 +218,7 @@ function DocumentGroup({
   editable?: boolean
   claimerName?: string
   deletingSlug?: string | null
+  swipeCloseSignal?: number
   onDeleteDocument?: (slug: string) => void
 }) {
   if (documents.length === 0) return null
@@ -236,6 +242,7 @@ function DocumentGroup({
                 ? {
                     deleting: deletingSlug === document.slug,
                     onDelete: () => onDeleteDocument(document.slug),
+                    closeSignal: swipeCloseSignal ?? 0,
                   }
                 : undefined
             }
@@ -324,6 +331,9 @@ export default function DocumentsIndex({ yours, recent, viewer, nativeApp }: Pro
   // this is just the affordance. WKWebView shows confirm() as a native alert.
   const [deletingSlug, setDeletingSlug] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  // Bumped on failure so every SwipeRow snaps closed (per R6, the error
+  // message shouldn't sit next to a still-armed Delete).
+  const [swipeCloseSignal, setSwipeCloseSignal] = useState(0)
   const deleteDocument = useCallback((slug: string) => {
     if (!window.confirm('Delete this document? This can’t be undone.')) return
     setDeleteError(null)
@@ -334,6 +344,7 @@ export default function DocumentsIndex({ yours, recent, viewer, nativeApp }: Pro
       onError: (errors) => {
         const message = typeof errors.document === 'string' ? errors.document : null
         setDeleteError(message ?? 'Delete failed — please try again')
+        setSwipeCloseSignal((signal) => signal + 1)
       },
     })
   }, [])
@@ -463,6 +474,13 @@ export default function DocumentsIndex({ yours, recent, viewer, nativeApp }: Pro
               )}
             </div>
 
+            {/* Above the list branches: a failed delete re-scopes the props,
+                and the message must survive whatever the list becomes. */}
+            {deleteError && (
+              <p className="document-delete-error" role="alert">
+                {deleteError}
+              </p>
+            )}
             {yours.length === 0 ? (
               <p className="document-library-empty">
                 Create a document and it will stay close at hand here.
@@ -471,16 +489,12 @@ export default function DocumentsIndex({ yours, recent, viewer, nativeApp }: Pro
               <p className="document-library-empty">No documents use this tag yet.</p>
             ) : (
               <div className="document-groups">
-                {deleteError && (
-                  <p className="document-delete-error" role="alert">
-                    {deleteError}
-                  </p>
-                )}
                 <DocumentGroup
                   title="This week"
                   documents={thisWeek}
                   editable
                   deletingSlug={deletingSlug}
+                  swipeCloseSignal={swipeCloseSignal}
                   onDeleteDocument={nativeApp ? deleteDocument : undefined}
                 />
                 <DocumentGroup
@@ -488,6 +502,7 @@ export default function DocumentsIndex({ yours, recent, viewer, nativeApp }: Pro
                   documents={visibleEarlier}
                   editable
                   deletingSlug={deletingSlug}
+                  swipeCloseSignal={swipeCloseSignal}
                   onDeleteDocument={nativeApp ? deleteDocument : undefined}
                 />
                 {hiddenEarlierCount > 0 && (

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import { nativeHaptic } from '@ruby-native/react'
+import { useDismissable } from '../lib/use_dismissable'
 
 // Only one row may sit open at a time (the iOS list convention). Opening a
 // row registers its closer here; the next row to open — or a tap anywhere
@@ -23,6 +24,9 @@ interface Props {
   slug: string
   deleting: boolean
   onDelete: () => void
+  // Bump to force the row closed from the parent (e.g. after a failed
+  // delete, so the error message isn't paired with a still-armed action).
+  closeSignal?: number
   children: ReactNode
 }
 
@@ -33,7 +37,7 @@ interface Props {
  * of navigating. Dependency-free pointer-event implementation (the plan's
  * "Silk" library is not installed).
  */
-export function SwipeRow({ slug, deleting, onDelete, children }: Props) {
+export function SwipeRow({ slug, deleting, onDelete, closeSignal = 0, children }: Props) {
   const [offset, setOffset] = useState(0)
   const [open, setOpen] = useState(false)
   // Disables the settle transition while the finger is down so the row
@@ -58,6 +62,16 @@ export function SwipeRow({ slug, deleting, onDelete, children }: Props) {
       if (closeOpenRow === close) closeOpenRow = null
     }
   }, [open, close])
+
+  // Parent-forced close (failed delete).
+  useEffect(() => {
+    if (closeSignal > 0) close()
+  }, [closeSignal, close])
+
+  // Tapping anywhere outside an open row closes it, per the registry
+  // comment's contract (Escape too, via the shared popover hook).
+  const rootRef = useRef<HTMLDivElement>(null)
+  useDismissable(open, close, [rootRef])
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     start.current = { x: event.clientX, y: event.clientY }
@@ -116,7 +130,7 @@ export function SwipeRow({ slug, deleting, onDelete, children }: Props) {
   }
 
   return (
-    <div className={`swipe-row${open ? ' is-open' : ''}`} data-swipe-row={slug}>
+    <div ref={rootRef} className={`swipe-row${open ? ' is-open' : ''}`} data-swipe-row={slug}>
       <div className="swipe-row-action">
         <button
           type="button"
