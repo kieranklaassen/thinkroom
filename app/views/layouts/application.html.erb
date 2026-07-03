@@ -12,7 +12,7 @@
     <% if @open_graph.present? %>
       <%= tag.meta name: "description", content: @open_graph[:description] %>
       <%= tag.link rel: "canonical", href: @open_graph[:url] %>
-      <%= tag.meta property: "og:type", content: "article" %>
+      <%= tag.meta property: "og:type", content: @open_graph[:type] || "article" %>
       <%= tag.meta property: "og:site_name", content: "Thinkroom" %>
       <%= tag.meta property: "og:locale", content: "en_US" %>
       <%= tag.meta property: "og:title", content: @open_graph[:title] %>

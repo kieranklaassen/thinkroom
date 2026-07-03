@@ -21,6 +21,7 @@ Rails.application.routes.draw do
   match "/auth/:provider/callback", to: "oauth_callbacks#create", via: %i[get post]
   get "/auth/failure", to: "oauth_callbacks#failure"
 
+  get "og.png", to: "site_og_images#show", as: :site_og_image
   get "d/:slug/og.png", to: "document_og_images#show", as: :document_og_image
   get "d/:slug/:mode", to: "documents#show", as: :document_mode,
                        constraints: { mode: /edit|suggest|comment|read/ }
