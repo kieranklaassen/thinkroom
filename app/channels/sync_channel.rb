@@ -8,6 +8,7 @@
 #                              { type: "update", update, cid, seq, generation }       # incremental edit
 #                              { type: "awareness", update, cid }    # presence/cursors, relay-only
 #                              { type: "awareness-query", cid }      # ask peers to re-announce
+#                              { type: "seed-decline", cid }         # hand back a seed claim this handshake granted
 # All client messages are broadcast to every subscriber (sender filters its own
 # via cid); update/sync-reply are additionally merged into persistent storage.
 #
@@ -52,6 +53,9 @@ class SyncChannel < ApplicationCable::Channel
     full_state, state_vector = YjsPersistence.state_b64(@document)
     message = { type: "sync", update: full_state, sv: state_vector, generation: @document.content_generation }
     if claim_seed?
+      # Remember the grant so a "seed-decline" from this subscriber can
+      # release exactly this claim (and only at this generation).
+      @granted_seed_generation = @document.content_generation
       message[:seed] = true
       message[:content_format] = @document.content_format
       message[:seed_content] = @document.seed_content
@@ -113,6 +117,8 @@ class SyncChannel < ApplicationCable::Channel
       end
     when "awareness", "awareness-query"
       self.class.broadcast_to(@document, message)
+    when "seed-decline"
+      decline_seed_claim
     end
   end
 
@@ -172,5 +178,24 @@ class SyncChannel < ApplicationCable::Channel
   # documents#show); this channel path remains as the stale-claim fallback.
   def claim_seed?
     @document.try_claim_seed
+  end
+
+  # A subscriber granted the seed claim in its handshake hands it back when
+  # it cannot apply the template — a reconnecting tab whose local doc
+  # predates an owner replacement discards its session (page reload) instead
+  # of seeding. Releasing the claim lets that reload's page render re-claim
+  # immediately instead of leaving the document blank for everyone until
+  # SEED_CLAIM_TIMEOUT expires. The conditional UPDATE only releases a
+  # still-unconsumed claim at the granted generation: a merge that already
+  # flipped seed_state to "seeded", or a replacement that advanced the
+  # generation, leaves the row untouched.
+  def decline_seed_claim
+    generation = @granted_seed_generation
+    return unless generation
+
+    @granted_seed_generation = nil
+    Document
+      .where(id: @document.id, seed_state: "claimed", content_generation: generation)
+      .update_all(seed_state: "pending", seed_claimed_at: nil)
   end
 end

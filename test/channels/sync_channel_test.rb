@@ -400,6 +400,61 @@ class SyncChannelTest < ActionCable::Channel::TestCase
            "the corrupt bytes must be quarantined for forensics"
   end
 
+  test "seed-decline releases a claim granted by this subscription's handshake" do
+    doc = Document.create!(title: "Declined", seed_markdown: "# Template")
+
+    subscribe slug: doc.slug
+    assert_equal true, transmissions.last["seed"]
+    assert_equal "claimed", doc.reload.seed_state
+
+    perform :receive, { "type" => "seed-decline", "cid" => "stale-tab" }
+
+    doc.reload
+    assert_equal "pending", doc.seed_state, "a declined grant must be immediately reclaimable"
+    assert_nil doc.seed_claimed_at
+    assert doc.try_claim_seed, "the next claimant must win without waiting out SEED_CLAIM_TIMEOUT"
+  end
+
+  test "seed-decline without a grant leaves another claimant's seed untouched" do
+    doc = Document.create!(title: "NotMine", seed_markdown: "# Template")
+    assert doc.try_claim_seed, "HTTP path wins the fresh claim"
+
+    subscribe slug: doc.slug
+    assert_nil transmissions.last["seed"]
+
+    perform :receive, { "type" => "seed-decline", "cid" => "other-tab" }
+
+    assert_equal "claimed", doc.reload.seed_state
+  end
+
+  test "seed-decline after the seed was consumed does not re-open seeding" do
+    doc = Document.create!(title: "Consumed", seed_markdown: "# Template")
+
+    subscribe slug: doc.slug
+    assert_equal true, transmissions.last["seed"]
+    perform :receive, { "type" => "update", "update" => build_update_b64("applied template"), "cid" => "x" }
+    assert_equal "seeded", doc.reload.seed_state
+
+    perform :receive, { "type" => "seed-decline", "cid" => "x" }
+
+    assert_equal "seeded", doc.reload.seed_state
+  end
+
+  test "seed-decline from a pre-replacement grant leaves the new generation's claim untouched" do
+    doc = Document.create!(title: "Replaced", seed_markdown: "# Template")
+
+    subscribe slug: doc.slug
+    assert_equal true, transmissions.last["seed"]
+
+    doc.replace_content!(source: "# Replacement")
+    assert doc.reload.try_claim_seed, "a new claimant wins the post-replacement seed"
+
+    perform :receive, { "type" => "seed-decline", "cid" => "stale-tab" }
+
+    assert_equal "claimed", doc.reload.seed_state,
+                 "a stale decline must not release a claim granted at a newer generation"
+  end
+
   test "awareness messages relay without persisting" do
     doc = Document.create!(title: "Presence")
     subscribe slug: doc.slug
