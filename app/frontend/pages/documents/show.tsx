@@ -638,11 +638,12 @@ export default function DocumentShow({
     const provider = handle.provider
     provider.on('rejected', onDocumentGone)
     provider.on('write-denied', recoverDeniedWrite)
-    // A frame this tab sent was rejected for staleness: an owner CLI
-    // replacement reset the document since this tab last synced (its
-    // content_generation is behind). This can fire even when the
-    // content_reset broadcast was missed or raced with the outgoing frame —
-    // same recovery action as content_reset, reached via a second path.
+    // This tab's local doc predates an owner CLI replacement: either a frame
+    // it sent was rejected for staleness (its content_generation is behind),
+    // or a reconnect handshake reported a generation different from the one
+    // it last synced. Both fire when the content_reset broadcast was missed
+    // or raced — same recovery action as content_reset, reached via the
+    // sync channel instead.
     provider.on('stale', reloadAfterContentReset)
     return () => {
       provider.off('rejected', onDocumentGone)

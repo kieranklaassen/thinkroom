@@ -229,6 +229,29 @@ export class CableProvider {
 
     switch (data.type) {
       case 'sync': {
+        // A reconnect handshake reporting a different generation means an
+        // owner CLI replacement (Document#replace_content!) reset this
+        // document while this client was disconnected — it missed both the
+        // content_reset broadcast and the merge-time rejection. Its local
+        // doc is stale: adopting the new generation and running sync step 2
+        // would upload the entire pre-replacement doc tagged with the
+        // current generation, resurrecting exactly the content the
+        // replacement wiped (YjsPersistence.merge cannot catch it — the
+        // frame passes the generation guard). Discard the session instead:
+        // same recovery action as a rejected stale frame.
+        if (
+          this.generation !== null &&
+          typeof data.generation === 'number' &&
+          data.generation !== this.generation
+        ) {
+          // Post-replacement the seed is pending again, so this handshake
+          // may have granted it to us — hand it back so the page load that
+          // replaces this discarded session can claim and apply the new
+          // template instead of everyone waiting out SEED_CLAIM_TIMEOUT.
+          if (data.seed) this.send({ type: 'seed-decline' })
+          this.emit('stale')
+          break
+        }
         // Server's full state, then reply with what it's missing (sync step 2).
         Y.applyUpdate(this.doc, fromBase64(data.update!), this)
         const serverVector = fromBase64(data.sv!)
