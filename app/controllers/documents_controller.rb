@@ -505,16 +505,17 @@ class DocumentsController < InertiaController
   end
 
   # The landing page's static site card. page_title stays exactly "Thinkroom"
-  # so the browser tab title is unchanged; copy mirrors the landing hero.
+  # so the browser tab title is unchanged; copy comes from SiteOgImage so the
+  # meta tags can't drift from the rendered card.
   def site_open_graph
     {
       title: "Thinkroom",
       page_title: "Thinkroom",
-      description: "Where deeper thinking compounds. From the creator of Compound Engineering.",
+      description: "#{SiteOgImage::TAGLINE} #{SiteOgImage::BYLINE}",
       url: root_url,
       type: "website",
-      image_url: site_og_image_url(v: SiteOgImage::VERSION),
-      image_alt: "Thinkroom — where deeper thinking compounds."
+      image_url: site_og_image_url(v: SiteOgImage.url_version),
+      image_alt: "Thinkroom — #{SiteOgImage::TAGLINE.downcase}"
     }
   end
 

@@ -5,13 +5,15 @@ class SiteOgImage
   # og:image URL invalidate.
   VERSION = "1"
 
-  # Same editorial "document cover" language as DocumentOgImage, but fully
-  # static: the landing card carries the product tagline as its title and the
-  # byline in the footer, so no wrapping or per-document projection is needed.
+  # All copy is trusted static product copy (no user input), so the wrapping,
+  # escaping, and truncation machinery in DocumentOgImage is intentionally
+  # omitted. Geometry and palette come from DocumentOgImage so the two cards
+  # stay in the same family.
   MARGIN_X = DocumentOgImage::MARGIN_X
   CONTENT_RIGHT = DocumentOgImage::CONTENT_RIGHT
   RULE_X = DocumentOgImage::RULE_X
   HEADER_BASELINE = DocumentOgImage::HEADER_BASELINE
+  WORDMARK_TEXT_X = DocumentOgImage::WORDMARK_TEXT_X
   HAIRLINE_Y = DocumentOgImage::HAIRLINE_Y
   FOOTER_CENTER = DocumentOgImage::FOOTER_CENTER
 
@@ -23,17 +25,20 @@ class SiteOgImage
   SERIF = DocumentOgImage::SERIF
   SANS = DocumentOgImage::SANS
 
-  # Hand-set split of the tagline: both lines fit the document cards' title
-  # measure (13.5 visual-width units at 72px), verified with
-  # DocumentOgImage.visual_width.
+  TAGLINE = "Where deeper thinking compounds."
+  BYLINE = "From the creator of Compound Engineering."
+
+  # Hand-set split of TAGLINE: both lines fit the document cards' title
+  # measure (13.5 visual-width units at 72px), verified in the service test
+  # with DocumentOgImage.visual_width.
   TITLE_LINES = [ "Where deeper thinking", "compounds." ].freeze
   TITLE_SIZE = DocumentOgImage::TITLE_SIZE
   TITLE_LINE_HEIGHT = DocumentOgImage::TITLE_LINE_HEIGHT
-  # Two title lines centered in the band between header and footer hairline,
-  # using the same block math as DocumentOgImage (region center 306).
-  TITLE_BASELINE = 286
-
-  BYLINE = "From the creator of Compound Engineering."
+  # Title block centered in the band between header and footer hairline,
+  # matching DocumentOgImage's block math.
+  TITLE_BASELINE = DocumentOgImage::REGION_CENTER -
+    (TITLE_LINES.length * TITLE_LINE_HEIGHT / 2) +
+    DocumentOgImage::TITLE_FIRST_BASELINE_OFFSET
 
   class << self
     def call
@@ -44,8 +49,15 @@ class SiteOgImage
       end
     end
 
+    # The card renders from DocumentOgImage's shared geometry/palette, so its
+    # identity chains both versions: a document-template bump that reshapes the
+    # shared constants also invalidates the site card without a manual bump.
     def cache_key
-      [ "site-og-image", VERSION ]
+      [ "site-og-image", url_version ]
+    end
+
+    def url_version
+      "#{VERSION}-#{DocumentOgImage::VERSION}"
     end
 
     private
@@ -57,7 +69,7 @@ class SiteOgImage
           <line x1="#{RULE_X}" y1="0" x2="#{RULE_X}" y2="#{HEIGHT}" stroke="#{ACCENT}" stroke-width="1" opacity="0.28"/>
 
           <text x="#{MARGIN_X}" y="#{HEADER_BASELINE}" fill="#{ACCENT}" font-family="#{SERIF}" font-size="34" font-weight="600">T.</text>
-          <text x="120" y="#{HEADER_BASELINE}" fill="#{INK}" font-family="#{SANS}" font-size="21" font-weight="600" letter-spacing="-0.2">Thinkroom</text>
+          <text x="#{WORDMARK_TEXT_X}" y="#{HEADER_BASELINE}" fill="#{INK}" font-family="#{SANS}" font-size="21" font-weight="600" letter-spacing="-0.2">Thinkroom</text>
 
           <text x="#{MARGIN_X}" y="#{TITLE_BASELINE}" fill="#{INK}" font-family="#{SERIF}" font-size="#{TITLE_SIZE}" font-weight="500" letter-spacing="-1">
             <tspan x="#{MARGIN_X}" dy="0">#{TITLE_LINES.first}</tspan>

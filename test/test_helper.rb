@@ -3,6 +3,7 @@ require_relative "../config/environment"
 require "rails/test_help"
 require "inertia_rails/minitest"
 require_relative "test_helpers/session_cookie_assertions"
+require_relative "test_helpers/open_graph_helpers"
 
 module ActiveSupport
   class TestCase
