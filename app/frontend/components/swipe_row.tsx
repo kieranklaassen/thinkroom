@@ -82,6 +82,16 @@ export function SwipeRow({ slug, deleting, onDelete, closeSignal = 0, children }
     start.current = { x: event.clientX, y: event.clientY }
     axis.current = null
     swiped.current = false
+    // Capture from the start so the whole gesture — including pointerup —
+    // stays on this element even when the pointer wanders off the row or
+    // layout shifts mid-drag. Capture routes events only; it does not block
+    // native vertical scrolling (touch-action: pan-y governs that).
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    } catch {
+      // Synthetic events may carry an unknown pointerId; capture is an
+      // enhancement, not a requirement.
+    }
   }
 
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
@@ -94,12 +104,6 @@ export function SwipeRow({ slug, deleting, onDelete, closeSignal = 0, children }
       if (axis.current === 'horizontal') {
         swiped.current = true
         setDragging(true)
-        try {
-          event.currentTarget.setPointerCapture(event.pointerId)
-        } catch {
-          // Synthetic events may carry an unknown pointerId; capture is an
-          // enhancement, not a requirement.
-        }
       }
     }
     if (axis.current !== 'horizontal') return
