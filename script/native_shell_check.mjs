@@ -251,6 +251,7 @@ try {
     'home: vertical drag scrolls instead of opening the row',
   )
   await swipeOpen(row)
+  await page.waitForSelector(`[data-swipe-row="${throwawaySlug}"].is-open`, { timeout: 10000 })
   page.once('dialog', (dialog) => void dialog.dismiss())
   await row.locator('button[data-native-haptic="warning"]').click()
   await page.waitForTimeout(500)
@@ -274,6 +275,7 @@ try {
   const savedCookies = (await native.cookies()).filter((cookie) => cookie.name === 'owner_token')
   await native.clearCookies({ name: 'owner_token' })
   await swipeOpen(rowB)
+  await page.waitForSelector(`[data-swipe-row="${secondSlug}"].is-open`, { timeout: 10000 })
   page.once('dialog', (dialog) => void dialog.accept())
   await rowB.locator('button[data-native-haptic="warning"]').click()
   await page.waitForSelector('.document-delete-error[role="alert"]', { timeout: 15000 })
@@ -292,6 +294,7 @@ try {
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
   await mounted(page)
   await swipeOpen(rowB)
+  await page.waitForSelector(`[data-swipe-row="${secondSlug}"].is-open`, { timeout: 10000 })
   page.once('dialog', (dialog) => void dialog.accept())
   await rowB.locator('button[data-native-haptic="warning"]').click()
   await page.waitForFunction(

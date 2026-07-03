@@ -43,6 +43,10 @@ export function SwipeRow({ slug, deleting, onDelete, closeSignal = 0, children }
   // Disables the settle transition while the finger is down so the row
   // tracks the drag 1:1.
   const [dragging, setDragging] = useState(false)
+  // Live offset for pointerup: the state value is a render-closure snapshot
+  // and can be stale on a busy main thread (React may not re-render between
+  // the last move and the release), which would snap the row closed.
+  const offsetRef = useRef(0)
   const start = useRef<{ x: number; y: number } | null>(null)
   const axis = useRef<'horizontal' | 'vertical' | null>(null)
   // Sticky "this gesture was a swipe" flag: the click that follows a drag
@@ -52,6 +56,7 @@ export function SwipeRow({ slug, deleting, onDelete, closeSignal = 0, children }
   const close = useCallback(() => {
     setOpen(false)
     setOffset(0)
+    offsetRef.current = 0
   }, [])
 
   useEffect(() => {
@@ -99,14 +104,18 @@ export function SwipeRow({ slug, deleting, onDelete, closeSignal = 0, children }
     }
     if (axis.current !== 'horizontal') return
     const base = open ? -ACTION_WIDTH : 0
-    setOffset(Math.min(0, Math.max(-ACTION_WIDTH, base + dx)))
+    const next = Math.min(0, Math.max(-ACTION_WIDTH, base + dx))
+    offsetRef.current = next
+    setOffset(next)
   }
 
   const endGesture = () => {
     if (axis.current === 'horizontal') {
-      const shouldOpen = offset < -ACTION_WIDTH / 2
+      const shouldOpen = offsetRef.current < -ACTION_WIDTH / 2
       setOpen(shouldOpen)
-      setOffset(shouldOpen ? -ACTION_WIDTH : 0)
+      const settled = shouldOpen ? -ACTION_WIDTH : 0
+      offsetRef.current = settled
+      setOffset(settled)
     }
     start.current = null
     axis.current = null
