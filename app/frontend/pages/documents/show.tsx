@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Head, Link, router, usePoll } from '@inertiajs/react'
-import { nativeHaptic } from '@ruby-native/react'
+import {
+  NativeNavbar,
+  NativeButton,
+  NativeMenuItem,
+  NativeShareButton,
+  nativeHaptic,
+} from '@ruby-native/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { TextSelection } from '@milkdown/kit/prose/state'
 import {
@@ -86,6 +92,7 @@ import { useIsClient } from '../../lib/use_is_client'
 import { useAnchoredPopover } from '../../lib/use_anchored_popover'
 import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
 import { patchJSON } from '../../lib/csrf'
+import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
 import { setCookie, setCookieFlag } from '../../lib/cookies'
 import {
@@ -139,6 +146,7 @@ export interface DocumentProps {
   comments: CommentPayload[]
   activities: ActivityPayload[]
   presences: AgentPresencePayload[]
+  nativeApp: SharedProps['nativeApp']
 }
 
 // Floating chrome stores only its anchor identity; geometry is re-derived
@@ -218,6 +226,7 @@ export default function DocumentShow({
   comments,
   activities,
   presences,
+  nativeApp,
 }: DocumentProps) {
   // SSR/hydration island flag: the live editor and any render-time browser
   // reads are gated on this so the server (and the client's first hydration
@@ -1261,30 +1270,110 @@ export default function DocumentShow({
   return (
     <>
       <Head title={documentTitle} />
+      {/* Ruby Native chrome: the shell reads these hidden signal elements. The
+          nav bar replaces the web doc-header inside the app (hidden below via
+          native-hidden); every action delegates to the bridge strip so targets
+          are always mounted and never display:none. */}
+      <NativeNavbar title={documentTitle}>
+        <NativeButton position="leading" icon="chevron.left" click="#native-doc-back" />
+        <NativeShareButton />
+        <NativeButton position="trailing" icon="ellipsis.circle">
+          {!modeLocked &&
+            availableModes.map((menuMode) => (
+              <NativeMenuItem
+                key={menuMode}
+                title={menuMode.charAt(0).toUpperCase() + menuMode.slice(1)}
+                selected={effectiveMode === menuMode}
+                click={`#native-mode-${menuMode}`}
+              />
+            ))}
+          {!isReading && <NativeMenuItem title="Activity" click="#native-toggle-activity" />}
+          <NativeMenuItem title="Export Markdown" click="#native-export-markdown" />
+          <NativeMenuItem title="Export HTML" click="#native-export-html" />
+          <NativeMenuItem title="Home" href="/" />
+        </NativeButton>
+      </NativeNavbar>
+      {/* Bridge strip: clip-hidden (never display:none — the shell's click
+          dispatch mechanism is unspecified, and coordinate-based synthesis
+          needs a real box). Handlers call the live setters directly. */}
+      <div className="native-bridge" aria-hidden="true">
+        <button
+          id="native-doc-back"
+          type="button"
+          tabIndex={-1}
+          onClick={() => window.RubyNative?.postMessage({ action: 'back' })}
+        >
+          Back
+        </button>
+        {availableModes.map((bridgeMode) => (
+          <button
+            key={bridgeMode}
+            id={`native-mode-${bridgeMode}`}
+            type="button"
+            tabIndex={-1}
+            onClick={() => changeMode(bridgeMode)}
+          >
+            {bridgeMode}
+          </button>
+        ))}
+        {/* Activity is omitted from the native menu in Read mode and its sheet
+            only renders outside Read; a stale-menu tap during Read is a no-op
+            so activeSheet can't be set with nothing visible. */}
+        <button
+          id="native-toggle-activity"
+          type="button"
+          tabIndex={-1}
+          onClick={() => {
+            if (!isReading) setActiveSheet((current) => (current === 'activity' ? null : 'activity'))
+          }}
+        >
+          Activity
+        </button>
+        {/* Gated on the live editor handle — the export helpers throw before
+            it exists, and the web UI disables its export buttons the same way
+            (SharePopover's exportReady). A pre-ready tap is a silent no-op. */}
+        <button
+          id="native-export-markdown"
+          type="button"
+          tabIndex={-1}
+          onClick={() => {
+            if (handle) void exportMarkdown()
+          }}
+        >
+          Export Markdown
+        </button>
+        <button
+          id="native-export-html"
+          type="button"
+          tabIndex={-1}
+          onClick={() => {
+            if (handle) void exportHtml()
+          }}
+        >
+          Export HTML
+        </button>
+      </div>
       <div
         className={`doc-page ${panelOpen ? '' : 'is-panel-hidden'} ${isReading ? 'is-read-mode' : ''}`}
         style={Object.keys(documentStyle).length === 0 ? undefined : documentStyle}
       >
-        <header className="doc-header">
+        {/* The update prompt normally lives in the (native-hidden) header; it
+            is the only trigger for reloading an owner-reset or newly deployed
+            document, so in the app it floats on its own. */}
+        {nativeApp && newVersionAvailable && (
+          <button
+            type="button"
+            className="version-update version-update--native"
+            onClick={() => window.location.reload()}
+          >
+            New version · Update
+          </button>
+        )}
+        <header className="doc-header native-hidden">
           <div className="doc-header-left">
-            {/* Only visible inside the Ruby Native shell (body.can-go-back
-                toggles it); asks the shell to pop the native history. */}
-            <button
-              type="button"
-              className="native-back-button doc-back"
-              aria-label="Back"
-              onClick={() => window.RubyNative?.postMessage({ action: 'back' })}
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                <path
-                  d="M15.75 19.5L8.25 12l7.5-7.5"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
+            {/* The nav bar's leading button (-> #native-doc-back) owns back in
+                the native shell now that this header hides there; the old
+                header back button had no other consumer. */}
             <Link href="/" className="doc-home" aria-label="Home">
               T.
             </Link>

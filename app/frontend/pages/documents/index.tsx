@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { Head, Link, useForm } from '@inertiajs/react'
+import { Head, Link, router, useForm } from '@inertiajs/react'
 import { NativeNavbar, NativeButton, NativeMenuItem, NativeFab, nativeHaptic } from '@ruby-native/react'
 import { FeedbackButton } from '../../components/feedback_button'
 import { AccountControl } from '../../components/account_control'
+import { SwipeRow } from '../../components/swipe_row'
 import { userIdentity } from '../../editor/identity'
 import { setCookie } from '../../lib/cookies'
 import { useClaim } from '../../lib/use_claim'
 import { useIsClient } from '../../lib/use_is_client'
 import type { OwnershipPayload } from '../../components/ownership_chip'
+import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
 
 type AgeGroup = 'this_week' | 'earlier'
@@ -23,7 +25,7 @@ type DocLink = {
 
 type RecentDoc = DocLink & OwnershipPayload
 
-type Props = {
+type Props = Pick<SharedProps, 'nativeApp'> & {
   yours: DocLink[]
   recent: RecentDoc[]
   viewer: ViewerPayload
@@ -139,16 +141,18 @@ function DocumentRow({
   document,
   editable = false,
   claimerName,
+  swipe,
 }: {
   document: DocLink | RecentDoc
   editable?: boolean
   claimerName?: string
+  swipe?: { deleting: boolean; onDelete: () => void; closeSignal: number }
 }) {
   const [editingTags, setEditingTags] = useState(false)
   const recentDocument = 'claimable' in document ? document : null
 
-  return (
-    <li className="document-row">
+  const body = (
+    <>
       <div className="document-row-summary">
         <div className="document-row-copy">
           <Link className="document-row-title" href={`/d/${document.slug}`} prefetch>
@@ -179,8 +183,25 @@ function DocumentRow({
       </div>
       <DocumentTags tags={document.tags} />
       {editingTags && <TagEditor document={document} onClose={() => setEditingTags(false)} />}
-    </li>
+    </>
   )
+
+  if (swipe) {
+    return (
+      <li className="document-row document-row--swipe">
+        <SwipeRow
+          slug={document.slug}
+          deleting={swipe.deleting}
+          onDelete={swipe.onDelete}
+          closeSignal={swipe.closeSignal}
+        >
+          <div className="swipe-row-padding">{body}</div>
+        </SwipeRow>
+      </li>
+    )
+  }
+
+  return <li className="document-row">{body}</li>
 }
 
 function DocumentGroup({
@@ -188,11 +209,17 @@ function DocumentGroup({
   documents,
   editable,
   claimerName,
+  deletingSlug,
+  swipeCloseSignal,
+  onDeleteDocument,
 }: {
   title: string
   documents: Array<DocLink | RecentDoc>
   editable?: boolean
   claimerName?: string
+  deletingSlug?: string | null
+  swipeCloseSignal?: number
+  onDeleteDocument?: (slug: string) => void
 }) {
   if (documents.length === 0) return null
   const headingId = `document-group-${title.toLowerCase().replace(/\s+/g, '-')}`
@@ -210,6 +237,15 @@ function DocumentGroup({
             document={document}
             editable={editable}
             claimerName={claimerName}
+            swipe={
+              onDeleteDocument
+                ? {
+                    deleting: deletingSlug === document.slug,
+                    onDelete: () => onDeleteDocument(document.slug),
+                    closeSignal: swipeCloseSignal ?? 0,
+                  }
+                : undefined
+            }
           />
         ))}
       </ul>
@@ -217,7 +253,7 @@ function DocumentGroup({
   )
 }
 
-export default function DocumentsIndex({ yours, recent, viewer }: Props) {
+export default function DocumentsIndex({ yours, recent, viewer, nativeApp }: Props) {
   const [identityName] = useState(() => userIdentity(viewer.name).name)
   const { post, processing } = useForm(() => ({
     name: identityName,
@@ -291,6 +327,28 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
   const claimerName = identityName
   const hasDemo = recent.some((document) => document.slug === 'demo')
 
+  // Native-only swipe-to-delete on owned rows. The server re-checks ownership;
+  // this is just the affordance. WKWebView shows confirm() as a native alert.
+  const [deletingSlug, setDeletingSlug] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  // Bumped on failure so every SwipeRow snaps closed (per R6, the error
+  // message shouldn't sit next to a still-armed Delete).
+  const [swipeCloseSignal, setSwipeCloseSignal] = useState(0)
+  const deleteDocument = useCallback((slug: string) => {
+    if (!window.confirm('Delete this document? This can’t be undone.')) return
+    setDeleteError(null)
+    router.delete(`/d/${slug}`, {
+      preserveScroll: true,
+      onStart: () => setDeletingSlug(slug),
+      onFinish: () => setDeletingSlug(null),
+      onError: (errors) => {
+        const message = typeof errors.document === 'string' ? errors.document : null
+        setDeleteError(message ?? 'Delete failed — please try again')
+        setSwipeCloseSignal((signal) => signal + 1)
+      },
+    })
+  }, [])
+
   return (
     <>
       <Head title="Thinkroom" />
@@ -324,7 +382,9 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
         </div>
         <main className="landing-main">
           <header className="landing-hero">
-            <h1 className="landing-wordmark">
+            {/* native-hidden: the native nav bar already says Thinkroom, so the
+                hero title would read twice inside the app. */}
+            <h1 className="landing-wordmark native-hidden">
               <Link href="/" className="landing-wordmark-link">
                 Thinkroom
               </Link>
@@ -414,6 +474,13 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
               )}
             </div>
 
+            {/* Above the list branches: a failed delete re-scopes the props,
+                and the message must survive whatever the list becomes. */}
+            {deleteError && (
+              <p className="document-delete-error" role="alert">
+                {deleteError}
+              </p>
+            )}
             {yours.length === 0 ? (
               <p className="document-library-empty">
                 Create a document and it will stay close at hand here.
@@ -422,8 +489,22 @@ export default function DocumentsIndex({ yours, recent, viewer }: Props) {
               <p className="document-library-empty">No documents use this tag yet.</p>
             ) : (
               <div className="document-groups">
-                <DocumentGroup title="This week" documents={thisWeek} editable />
-                <DocumentGroup title="Earlier" documents={visibleEarlier} editable />
+                <DocumentGroup
+                  title="This week"
+                  documents={thisWeek}
+                  editable
+                  deletingSlug={deletingSlug}
+                  swipeCloseSignal={swipeCloseSignal}
+                  onDeleteDocument={nativeApp ? deleteDocument : undefined}
+                />
+                <DocumentGroup
+                  title="Earlier"
+                  documents={visibleEarlier}
+                  editable
+                  deletingSlug={deletingSlug}
+                  swipeCloseSignal={swipeCloseSignal}
+                  onDeleteDocument={nativeApp ? deleteDocument : undefined}
+                />
                 {hiddenEarlierCount > 0 && (
                   <button
                     className="document-reveal"

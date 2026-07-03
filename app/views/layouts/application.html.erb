@@ -1,5 +1,8 @@
 <!DOCTYPE html>
-<html data-theme="<%= cookies[:proof_theme].to_s.presence_in(%w[proof whitey]) || "proof" %>">
+<%# data-native-app enables the gem's `[data-native-app] .native-hidden`
+    utility and the app's native-only CSS forks. Rendered server-side so the
+    fork is correct on first paint for both surfaces (no flash). %>
+<html data-theme="<%= cookies[:proof_theme].to_s.presence_in(%w[proof whitey]) || "proof" %>"<%= " data-native-app".html_safe if native_app? %>>
   <head>
     <title data-inertia><%= @open_graph&.dig(:page_title) || content_for(:title) || "Thinkroom" %></title>
     <%# viewport-fit=cover is required by Ruby Native so env(safe-area-inset-*)

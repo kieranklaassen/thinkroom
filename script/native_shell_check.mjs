@@ -44,25 +44,55 @@ try {
   await page.goto(`${BASE}/d/${SLUG}`, { waitUntil: 'networkidle' })
   await mounted(page)
   check(
-    (await page.locator('.doc-header .native-back-button').count()) === 1,
-    'doc: native back button rendered in the header',
+    (await page.locator('html[data-native-app]').count()) === 1,
+    'native: html carries data-native-app (server-rendered)',
   )
   check(
-    !(await page.locator('.native-back-button').isVisible()),
-    'doc: back button hidden until the shell signals history',
+    (await page.locator('[data-native-navbar]').count()) === 1 &&
+      (await page.locator('[data-native-navbar]').getAttribute('data-native-navbar')) !== '',
+    'doc: native navbar signal present with the document title',
   )
-  await page.evaluate(() => document.body.classList.add('can-go-back'))
   check(
-    await page.locator('.native-back-button').isVisible(),
-    'doc: back button appears once body.can-go-back is set',
+    (await page.locator('[data-native-button][data-native-position="leading"][data-native-click="#native-doc-back"]').count()) === 1,
+    'doc: leading navbar button delegates to the back bridge',
   )
-  const headerClearsNotch = await page.evaluate(() => {
-    document.documentElement.style.setProperty('--ruby-native-safe-area-inset-top', '47px')
-    const paddingTop = parseFloat(getComputedStyle(document.querySelector('.doc-header')).paddingTop)
-    document.documentElement.style.removeProperty('--ruby-native-safe-area-inset-top')
-    return paddingTop >= 47
+  check(
+    (await page.locator('[data-native-button][data-native-share]').count()) === 1,
+    'doc: native share button present (share sheet for the doc URL)',
+  )
+  check(
+    (await page.locator('[data-native-menu-item][data-native-click^="#native-mode-"]').count()) === 0,
+    'doc: demo is mode-locked, so the menu offers no mode items',
+  )
+  check(
+    (await page.locator('[data-native-menu-item][data-native-click^="#native-export-"]').count()) === 2,
+    'doc: menu offers Export Markdown and Export HTML',
+  )
+  check(
+    (await page.locator('[data-native-menu-item][data-native-href="/"]').count()) === 1,
+    'doc: menu offers Home',
+  )
+  const bridgeUsable = await page.evaluate(() => {
+    const back = document.querySelector('#native-doc-back')
+    if (!back) return false
+    const style = getComputedStyle(back)
+    return style.display !== 'none' && style.visibility !== 'hidden'
   })
-  check(headerClearsNotch, 'doc: header padding-top honors the shell safe-area variable at phone width')
+  check(bridgeUsable, 'doc: back bridge control is clip-hidden, never display:none')
+  check(
+    !(await page.locator('.doc-header').isVisible()),
+    'doc: web header hidden inside the native shell',
+  )
+  // The navbar's leading button owns back in native now (the web header is
+  // hidden), so the old header back-button visibility checks are superseded.
+  const bodyClearsNotch = await page.evaluate(() => {
+    document.documentElement.style.setProperty('--ruby-native-safe-area-inset-top', '47px')
+    const before = getComputedStyle(document.querySelector('.doc-page'), '::before')
+    const height = parseFloat(before.height)
+    document.documentElement.style.removeProperty('--ruby-native-safe-area-inset-top')
+    return height >= 47
+  })
+  check(bodyClearsNotch, 'doc: body inset honors the shell safe-area variable with the header hidden')
 
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
   await mounted(page)
@@ -114,6 +144,165 @@ try {
     (await page.locator('#new-document-button[data-native-haptic="impact"]').count()) === 1,
     'home: New document button carries an impact haptic',
   )
+  check(
+    !(await page.locator('.landing-wordmark').isVisible()),
+    'home: hero title hidden in native (the nav bar already says Thinkroom)',
+  )
+  const landingClearsBar = await page.evaluate(() => {
+    document.documentElement.style.setProperty('--ruby-native-safe-area-inset-top', '47px')
+    const paddingTop = parseFloat(getComputedStyle(document.querySelector('.landing')).paddingTop)
+    document.documentElement.style.removeProperty('--ruby-native-safe-area-inset-top')
+    return paddingTop >= 47
+  })
+  check(landingClearsBar, 'home: landing keeps top spacing below the native bar')
+
+  // Behavioral leg on a throwaway doc (the demo is mode-locked): create one,
+  // prove the mode bridge works, then swipe-to-delete it from home.
+  await page.evaluate(() => document.querySelector('#new-document-button')?.click())
+  await page.waitForURL(/\/d\/[A-Za-z0-9]+\/edit/, { timeout: 30000 })
+  await mounted(page)
+  const throwawaySlug = await page.evaluate(() => window.location.pathname.split('/')[2])
+  check(
+    (await page.locator('[data-native-menu-item][data-native-click^="#native-mode-"]').count()) >= 2,
+    'doc: unlocked doc offers mode menu items',
+  )
+  check(
+    (await page.locator('[data-native-menu-item][data-native-click^="#native-mode-"][data-native-selected]').count()) === 1,
+    'doc: exactly one mode menu item is marked selected',
+  )
+  check(
+    (await page.locator('[data-native-menu-item][data-native-click="#native-toggle-activity"]').count()) === 1,
+    'doc: menu offers Activity outside Read mode',
+  )
+  await page.evaluate(() => document.querySelector('#native-mode-read')?.click())
+  await page.waitForFunction(() => document.querySelector('.doc-page')?.classList.contains('is-read-mode'))
+  ok('doc: mode bridge button switches the editor to Read mode')
+  await page.waitForFunction(
+    () => !document.querySelector('[data-native-menu-item][data-native-click="#native-toggle-activity"]'),
+  )
+  ok('doc: Activity menu item drops out in Read mode')
+
+  // Second throwaway doc for the multi-row swipe scenarios.
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+  await mounted(page)
+  await page.evaluate(() => document.querySelector('#new-document-button')?.click())
+  await page.waitForURL(/\/d\/[A-Za-z0-9]+\/edit/, { timeout: 30000 })
+  const secondSlug = await page.evaluate(() => window.location.pathname.split('/')[2])
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+  await mounted(page)
+
+  const row = page.locator(`[data-swipe-row="${throwawaySlug}"]`)
+  const rowB = page.locator(`[data-swipe-row="${secondSlug}"]`)
+  check(
+    (await row.count()) === 1 && (await rowB.count()) === 1,
+    'home: owned rows are swipe-enabled in native',
+  )
+  check(
+    (await row.locator('button[data-native-haptic="warning"]').count()) === 1,
+    'home: swipe row carries a haptic Delete action',
+  )
+  const swipeOpen = async (target) => {
+    const box = await target.boundingBox()
+    if (!box) return
+    const y = box.y + box.height / 2
+    await page.mouse.move(box.x + box.width - 40, y)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width - 160, y, { steps: 8 })
+    await page.mouse.up()
+    await page.waitForTimeout(280)
+  }
+  await swipeOpen(row)
+  check(
+    (await page.locator(`[data-swipe-row="${throwawaySlug}"].is-open`).count()) === 1,
+    'home: horizontal swipe reveals the Delete action',
+  )
+  check(
+    new URL(page.url()).pathname === '/',
+    'home: releasing a swipe does not navigate into the document',
+  )
+  await swipeOpen(rowB)
+  check(
+    (await page.locator(`[data-swipe-row="${secondSlug}"].is-open`).count()) === 1 &&
+      (await page.locator(`[data-swipe-row="${throwawaySlug}"].is-open`).count()) === 0,
+    'home: opening a second row closes the first',
+  )
+  // Tap the visible body of the open row (left of the revealed Delete
+  // button): the capture-phase handler must close the row, not navigate.
+  const openBox = await rowB.boundingBox()
+  if (openBox) {
+    await page.mouse.click(openBox.x + openBox.width - 140, openBox.y + openBox.height / 2)
+  }
+  await page.waitForTimeout(280)
+  check(
+    (await page.locator(`[data-swipe-row="${secondSlug}"].is-open`).count()) === 0 &&
+      new URL(page.url()).pathname === '/',
+    'home: tapping an open row closes it without navigating',
+  )
+  const vBox = await row.boundingBox()
+  if (vBox) {
+    await page.mouse.move(vBox.x + vBox.width / 2, vBox.y + vBox.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(vBox.x + vBox.width / 2, vBox.y + vBox.height / 2 + 80, { steps: 8 })
+    await page.mouse.up()
+    await page.waitForTimeout(280)
+  }
+  check(
+    (await page.locator(`[data-swipe-row="${throwawaySlug}"].is-open`).count()) === 0,
+    'home: vertical drag scrolls instead of opening the row',
+  )
+  await swipeOpen(row)
+  await page.waitForSelector(`[data-swipe-row="${throwawaySlug}"].is-open`, { timeout: 10000 })
+  page.once('dialog', (dialog) => void dialog.dismiss())
+  await row.locator('button[data-native-haptic="warning"]').click()
+  await page.waitForTimeout(500)
+  check(
+    (await page.locator(`[data-swipe-row="${throwawaySlug}"]`).count()) === 1,
+    'home: declining the confirm keeps the document',
+  )
+  page.once('dialog', (dialog) => void dialog.accept())
+  await row.locator('button[data-native-haptic="warning"]').click()
+  await page.waitForFunction(
+    (slug) => !document.querySelector(`[data-swipe-row="${slug}"]`),
+    throwawaySlug,
+    { timeout: 15000 },
+  )
+  ok('home: confirmed delete removes the document row')
+
+  // Failure path: drop the signed owner_token cookie (context-level API
+  // reaches the httponly cookie) so the server's real owned_by? check fails
+  // on an existing doc — the genuine onError path: error renders, the row
+  // snaps closed, the document stays listed.
+  const savedCookies = (await native.cookies()).filter((cookie) => cookie.name === 'owner_token')
+  await native.clearCookies({ name: 'owner_token' })
+  await swipeOpen(rowB)
+  await page.waitForSelector(`[data-swipe-row="${secondSlug}"].is-open`, { timeout: 10000 })
+  page.once('dialog', (dialog) => void dialog.accept())
+  await rowB.locator('button[data-native-haptic="warning"]').click()
+  await page.waitForSelector('.document-delete-error[role="alert"]', { timeout: 15000 })
+  ok('home: failed delete surfaces the error message')
+  // The dropped-cookie trigger also re-scopes the yours list on the refused
+  // redirect (the row vanishes as a trigger artifact, not product behavior),
+  // so row persistence/re-close is device-pass territory; the server-side
+  // survival is what this trigger can honestly prove.
+  const survivedDelete = await page.evaluate(
+    async (slug) => (await fetch(`/d/${slug}`, { method: 'HEAD' })).ok,
+    secondSlug,
+  )
+  check(survivedDelete, 'home: failed delete leaves the document alive on the server')
+  if (savedCookies.length > 0) await native.addCookies(savedCookies)
+
+  await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
+  await mounted(page)
+  await swipeOpen(rowB)
+  await page.waitForSelector(`[data-swipe-row="${secondSlug}"].is-open`, { timeout: 10000 })
+  page.once('dialog', (dialog) => void dialog.accept())
+  await rowB.locator('button[data-native-haptic="warning"]').click()
+  await page.waitForFunction(
+    (slug) => !document.querySelector(`[data-swipe-row="${slug}"]`),
+    secondSlug,
+    { timeout: 15000 },
+  )
+  ok('home: second throwaway cleaned up via swipe delete')
 
   await page.goto(`${BASE}/login`, { waitUntil: 'networkidle' })
   await mounted(page)
@@ -170,6 +359,12 @@ try {
     (await webPage.locator('[data-native-menu-item]:visible').count()) === 0,
     'web home: native menu items never visible',
   )
+  check(
+    (await webPage.locator('html[data-native-app]').count()) === 0,
+    'web: html never carries data-native-app',
+  )
+  check(await webPage.locator('.landing-wordmark').isVisible(), 'web home: hero title still visible')
+  check((await webPage.locator('[data-swipe-row]').count()) === 0, 'web home: no swipe rows in the DOM')
   await webPage.goto(`${BASE}/login`, { waitUntil: 'networkidle' })
   await mounted(webPage)
   check(
@@ -179,10 +374,16 @@ try {
   check(await webPage.locator('#auth-submit').isVisible(), 'web login: credentials submit button still visible')
   await webPage.goto(`${BASE}/d/${SLUG}`, { waitUntil: 'networkidle' })
   await mounted(webPage)
-  check(
-    !(await webPage.locator('.native-back-button').isVisible()),
-    'web doc: native back button never visible',
-  )
+  check(await webPage.locator('.doc-header').isVisible(), 'web doc: header renders as on main')
+  // Clip-hidden by design (1px box, clipped) — Playwright's :visible counts
+  // any non-empty box, so measure the footprint instead.
+  const bridgeFootprint = await webPage.evaluate(() => {
+    const el = document.querySelector('.native-bridge')
+    if (!el) return true
+    const rect = el.getBoundingClientRect()
+    return rect.width <= 1 && rect.height <= 1
+  })
+  check(bridgeFootprint, 'web doc: bridge strip occupies no visible space')
   await web.close()
 } finally {
   await browser.close()

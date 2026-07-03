@@ -57,6 +57,18 @@ declare module '@ruby-native/react' {
   }): ReactElement
 
   /**
+   * Nav-bar share button: opens the platform share sheet. `url` defaults to
+   * the current page on the shell side.
+   */
+  export function NativeShareButton(props: {
+    position?: 'leading' | 'trailing'
+    title?: string
+    icon?: string
+    icons?: { ios?: string; android?: string }
+    url?: string
+  }): ReactElement
+
+  /**
    * Nav-bar submit button for form pages. `click` clicks a DOM element by
    * CSS selector (defaults to [type='submit'] — pass an explicit scoped
    * selector when the page has more than one submit button).

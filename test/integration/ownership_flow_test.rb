@@ -170,7 +170,9 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
 
     delete destroy_document_path(@document.slug)
 
-    assert_response :see_other
+    # Refusals answer 302, not 303: inertia_rails carries the error bag only
+    # through 302 redirects (its middleware upgrades Inertia clients to 303).
+    assert_response :found
     assert_not_nil Document.find_by(slug: @document.slug)
   end
 
@@ -179,7 +181,7 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
 
     delete destroy_document_path(@document.slug)
 
-    assert_response :see_other
+    assert_response :found
     assert_not_nil Document.find_by(slug: @document.slug)
   end
 
@@ -278,7 +280,7 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
     cookies[:owner_token] = old_cookie
     delete destroy_document_path(@document.slug)
 
-    assert_response :see_other
+    assert_response :found
     assert Document.exists?(@document.id)
   end
 

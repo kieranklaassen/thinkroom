@@ -235,6 +235,13 @@ a:focus-visible {
   padding: 2rem;
 }
 
+/* Inside the native shell the web view extends behind the status bar and the
+   native nav bar sits above the page, so the landing needs the shell's
+   safe-area clearance on top. Inert on the open web (attribute absent). */
+[data-native-app] .landing {
+  padding-top: calc(2rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
+}
+
 .account-control {
   display: inline-flex;
   align-items: center;
@@ -439,9 +446,71 @@ a:focus-visible {
 }
 
 .document-row {
-  padding: 0.78rem 0.9rem;
+  --document-row-pad: 0.78rem 0.9rem;
+  padding: var(--document-row-pad);
   border-bottom: 1px solid color-mix(in srgb, var(--ink) 16%, var(--line));
   transition: background 120ms ease;
+}
+
+/* Failed swipe-delete message, mirroring .document-tag-error's treatment. */
+.document-delete-error {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: #9b2f27;
+}
+
+/* Swipe-to-delete (native app only — the SwipeRow wrapper never renders on
+   the web). The row's padding moves into the sliding content so the revealed
+   action fills the full row height. */
+.document-row--swipe {
+  padding: 0;
+}
+
+.swipe-row {
+  position: relative;
+  overflow: hidden;
+}
+
+.swipe-row-action {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 88px;
+  display: flex;
+}
+
+.swipe-row-action button {
+  flex: 1;
+  border: 0;
+  background: var(--sketch-danger);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.swipe-row-action button:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.swipe-row-content {
+  position: relative;
+  background: var(--surface-raised);
+  transition: transform 180ms ease;
+  /* Vertical panning stays native so the list scrolls; horizontal drags
+     reach the pointer handlers. */
+  touch-action: pan-y;
+}
+
+.swipe-row-content.is-dragging {
+  transition: none;
+}
+
+.swipe-row-padding {
+  padding: var(--document-row-pad);
 }
 
 .document-row:last-child {
@@ -959,26 +1028,6 @@ a:focus-visible {
 
 .doc-home:hover {
   opacity: 1;
-}
-
-/* Native back affordance for the Ruby Native shell. Hidden by default here
- * AND by the gem stylesheet; only the gem's body.can-go-back rule (higher
- * specificity) reveals it, so web users never see it even if the gem
- * stylesheet fails to load. */
-.doc-back {
-  display: none;
-  border: none;
-  background: none;
-  padding: 0 0.25rem 0 0;
-  color: var(--ink);
-  opacity: 0.85;
-  cursor: pointer;
-  line-height: 0;
-}
-
-.doc-back svg {
-  display: inline-block;
-  vertical-align: middle;
 }
 
 .doc-title {
