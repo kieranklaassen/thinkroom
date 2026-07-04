@@ -15,6 +15,20 @@ identity: pass `--agent NAME` (or set `THINKROOM_AGENT`) so edits are attributed
 to you. Without one the CLI stops with an error rather than misattributing the
 write to a generic identity.
 
+## Editing a document you own
+
+Prefer a targeted replacement over resending the whole document:
+
+```bash
+thinkroom update SHARE_URL --replaces "Exact current text" --with "New text" --agent "Codex"
+```
+
+Quote `--replaces` verbatim from the `content` field of `thinkroom show --json`
+(the canonical source); it must match exactly once, and `--with ""` deletes the
+target. A missing or ambiguous target fails without changing anything. Use the
+full-file form (`thinkroom update SHARE_URL revision.md`) only when rewriting
+most of the document.
+
 ## Provenance spans
 
 `thinkroom show` prints the canonical Markdown source, which may embed

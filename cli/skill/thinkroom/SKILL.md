@@ -49,13 +49,28 @@ your own span (`data-author` = your `--agent` name) so provenance stays
 truthful; unwrapped text reads as unattributed. Never build an update from
 `plain_markdown` — that erases all existing attribution.
 
-For a document that is still an untouched seed, revise it in place:
+For a document you can update — one that is still an untouched seed, or one you own while logged in (`thinkroom login`), even after it is claimed or live editing has started — **prefer a targeted replacement**. It applies immediately, edits only the span you name, and avoids resending a large document (and the accidental-diff risk of a big paste):
+
+```bash
+thinkroom update SHARE_URL \
+  --replaces "Exact current text" \
+  --with "New text" \
+  --agent "Codex"
+```
+
+Rules for `--replaces`:
+
+- Quote the target verbatim from the `content` field of `thinkroom show --json` (the canonical source, including any markup) — not from `plain_text`/`plain_markdown`.
+- It must match exactly once. A missing or ambiguous target fails with an error and changes nothing; include more surrounding text and retry.
+- `--with ""` deletes the target text. Make several targeted updates for several edits.
+
+Fall back to a full replacement only when that is genuinely the better tool — you are rewriting most of the document, not patching parts of it:
 
 ```bash
 thinkroom update SHARE_URL revision.md --title "Updated title" --agent "Codex"
 ```
 
-If you are logged in (`thinkroom login`) and own the document, you can update it in place this way even after it is claimed or after a live editing session exists. Owner updates are full replacements of the document source at the same share URL. Replacing a live document auto-rejects any pending suggestions whose targeted text no longer exists in the new content — `thinkroom update` warns when this happens; check `thinkroom show --json` afterward if you or others have pending suggestions on that document.
+Owner updates (targeted or full) revise the document source at the same share URL. Revising a live document auto-rejects any pending suggestions whose targeted text no longer exists in the new content — `thinkroom update` warns when this happens; check `thinkroom show --json` afterward if you or others have pending suggestions on that document.
 
 If you do not own the document, do not try to overwrite a claimed or live document from the CLI. Propose the smallest exact replacement and include intent:
 

@@ -70,7 +70,7 @@ test('help, version, and prime work without a network or login', async () => {
 
   const version = await runCli(['--version'], { cwd: root, configHome })
   assert.equal(version.code, 0)
-  assert.match(version.stdout, /^0\.1\.0/)
+  assert.match(version.stdout, /^0\.2\.0/)
 
   const primed = await runCli(['prime'], { cwd: path.join(root, 'docs'), configHome })
   assert.equal(primed.code, 0, primed.stderr)
@@ -227,6 +227,91 @@ test('document commands normalize share URLs and surface API failures', async (t
   assert.equal(seen[3].agent, 'Codex')
   assert.deepEqual(seen[4].body, { body: 'Check this', anchor_text: 'Current' })
   assert.equal(seen[4].agent, 'Scout')
+})
+
+test('update --replaces/--with sends a targeted replacement without reading a file or stdin', async (t) => {
+  const root = await temporaryDirectory('targeted')
+  const configHome = path.join(root, 'config')
+  const seen = []
+  const server = await startServer(async (request, response) => {
+    if (request.method === 'PATCH' && request.url === '/api/docs/owned123') {
+      seen.push({ body: await jsonRequest(request), agent: request.headers['x-agent-name'] })
+      return sendJson(response, 200, {
+        share_url: `${server.url}/d/owned123`,
+        auto_rejected_suggestions: 1,
+      })
+    }
+    if (request.method === 'PATCH' && request.url === '/api/docs/missing123') {
+      await jsonRequest(request)
+      return sendJson(response, 422, {
+        error: 'The replaces text was not found in the document\u2019s canonical source.',
+        next_action: 'GET the state and quote the target verbatim from its content field.',
+      })
+    }
+    return sendJson(response, 404, { error: 'Unexpected request' })
+  })
+  t.after(() => server.close())
+  const env = { THINKROOM_URL: server.url }
+
+  // Piped stdin must be ignored in targeted mode — only the flags are sent.
+  const replaced = await runCli(
+    ['update', 'owned123', '--replaces', 'Old fact.', '--with', 'New fact.', '--agent', 'Codex'],
+    { cwd: root, configHome, env, input: '# Stray piped content that must not be read\n' },
+  )
+  assert.equal(replaced.code, 0, replaced.stderr)
+  assert.equal(replaced.stdout.trim(), `${server.url}/d/owned123`)
+  assert.match(replaced.stderr, /auto-rejected 1 pending suggestion\b/,
+    'a targeted live replacement keeps the auto-rejected warning contract')
+  assert.deepEqual(seen[0].body, { replaces: 'Old fact.', with: 'New fact.' })
+  assert.equal(seen[0].agent, 'Codex')
+
+  // Deleting a span: --with "" is valid and must be sent as an empty string.
+  const deleted = await runCli(
+    ['update', 'owned123', '--replaces', 'Old fact.', '--with', '', '--agent', 'Codex'],
+    { cwd: root, configHome, env },
+  )
+  assert.equal(deleted.code, 0, deleted.stderr)
+  assert.deepEqual(seen[1].body, { replaces: 'Old fact.', with: '' })
+
+  // A server 422 (missing/ambiguous target) surfaces the error and hint.
+  const missing = await runCli(
+    ['update', 'missing123', '--replaces', 'Gone.', '--with', 'x', '--agent', 'Codex'],
+    { cwd: root, configHome, env },
+  )
+  assert.equal(missing.code, 1)
+  assert.match(missing.stderr, /was not found/)
+  assert.match(missing.stderr, /quote the target verbatim/)
+})
+
+test('update refuses half a targeted pair or a targeted pair combined with a file', async (t) => {
+  const root = await temporaryDirectory('targeted-validation')
+  const configHome = path.join(root, 'config')
+  await writeFile(path.join(root, 'revision.md'), '# Full replacement\n')
+  const server = await startServer(async (request, response) =>
+    sendJson(response, 500, { error: 'The CLI must reject these before any request is sent.' }))
+  t.after(() => server.close())
+  const env = { THINKROOM_URL: server.url }
+
+  const missingWith = await runCli(
+    ['update', 'owned123', '--replaces', 'Old', '--agent', 'Codex'],
+    { cwd: root, configHome, env },
+  )
+  assert.equal(missingWith.code, 1)
+  assert.match(missingWith.stderr, /--replaces.*--with/s)
+
+  const missingReplaces = await runCli(
+    ['update', 'owned123', '--with', 'New', '--agent', 'Codex'],
+    { cwd: root, configHome, env },
+  )
+  assert.equal(missingReplaces.code, 1)
+  assert.match(missingReplaces.stderr, /--replaces.*--with/s)
+
+  const combined = await runCli(
+    ['update', 'owned123', 'revision.md', '--replaces', 'Old', '--with', 'New', '--agent', 'Codex'],
+    { cwd: root, configHome, env },
+  )
+  assert.equal(combined.code, 1)
+  assert.match(combined.stderr, /not both/)
 })
 
 test('update warns in default mode when a live replacement auto-rejected suggestions', async (t) => {
