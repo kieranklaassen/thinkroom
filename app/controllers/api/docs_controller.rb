@@ -64,6 +64,15 @@ module Api
     # the new source. Non-owners on claimed/live documents keep the suggestion
     # workflow so a full replacement never bypasses ownership.
     #
+    # Two ways to supply the new source, sharing one authorization gate and one
+    # downstream pipeline: `content` replaces the whole document, while
+    # `replaces` + `with` perform a targeted replacement — the server swaps the
+    # single verbatim occurrence of `replaces` in the current canonical source
+    # for `with` and treats the result exactly like a full-content update. The
+    # unique-match requirement doubles as a weak precondition: if the target
+    # text changed since the caller read the document, the request fails 422
+    # instead of applying against unexpected content.
+    #
     # A live replacement also advances Document#content_generation, which
     # SyncChannel/YjsPersistence use to reject (not merge) any frame a still-
     # connected stale browser tab sends afterward — without that guard, the
@@ -71,6 +80,8 @@ module Api
     # after this request returns 200. See
     # docs/plans/2026-06-30-001-fix-cli-replacement-stale-crdt-race-plan.md.
     def update
+      return if reject_malformed_targeted_replace
+
       live_owner_replacement = !document.seed_stage? && owner_via_cli_token?
       return render_update_conflict unless live_owner_replacement || (document.seed_stage? && updatable_in_place?)
 
@@ -83,6 +94,10 @@ module Api
       end
 
       content = params[:content].presence
+      if targeted_replace?
+        content = targeted_replacement_source
+        return if content.nil?
+      end
       new_title = params[:title].presence
       if content.blank? && new_title.blank?
         return render json: { error: "Send a title or content to update." },
@@ -179,6 +194,87 @@ module Api
     def owner_via_cli_token?
       current_api_user.present? && !document.unclaimable? &&
         document.owned_by?(nil, user: current_api_user)
+    end
+
+    # A targeted replacement is any request that mentions replaces or with.
+    # Presence is checked on the raw request parameters, not params[...].present?,
+    # because an explicitly empty `with` ("delete the target") is a valid value
+    # that must still count as targeting.
+    def targeted_replace?
+      request.request_parameters.key?("replaces") || request.request_parameters.key?("with")
+    end
+
+    # Parameter-shape validation for replaces/with, checked before the
+    # ownership gate: a malformed request is malformed regardless of document
+    # state, and answering 422 here leaks nothing about the document that the
+    # conflict path would hide. Renders and returns true when it fires.
+    def reject_malformed_targeted_replace
+      return false unless targeted_replace?
+
+      error =
+        if params[:content].present?
+          "Send either content (a full replacement) or replaces/with (a targeted replacement), not both."
+        elsif params[:replaces].blank?
+          "replaces is required for a targeted replacement: quote the exact text to change, verbatim from the document's content field."
+        elsif !request.request_parameters.key?("with")
+          "with is required alongside replaces — send the replacement text, or an empty string to delete the target."
+        end
+      return false unless error
+
+      render json: { error: }, status: :unprocessable_entity
+      true
+    end
+
+    # Computes the full replacement source for a replaces/with update, or
+    # renders a 422 and returns nil when the target does not match exactly
+    # once (or the swap would empty the document). Matching is verbatim
+    # against the canonical source — the same text `show`/GET return in
+    # `content` — never against rendered plain_text, which cannot be mapped
+    # back to source positions server-side.
+    def targeted_replacement_source
+      replaces = params[:replaces].to_s
+      source = document.current_content.to_s
+      occurrences = substring_occurrences(source, replaces)
+      if occurrences.zero?
+        render json: {
+          error: "The replaces text was not found in the document's canonical source.",
+          next_action: "GET #{api_doc_url(document.slug)} and quote the target verbatim from its content field " \
+                       "(the canonical source, including any markup) — a plain_text quote may not match the source.",
+          read_state: api_doc_url(document.slug)
+        }, status: :unprocessable_entity
+        return nil
+      end
+      if occurrences > 1
+        render json: {
+          error: "The replaces text appears #{occurrences} times in the document. " \
+                 "Include more surrounding text so it matches exactly once.",
+          occurrences: occurrences
+        }, status: :unprocessable_entity
+        return nil
+      end
+
+      # Block form so backreference sequences (\1, \&) in `with` stay literal.
+      replaced = source.sub(replaces) { params[:with].to_s }
+      if replaced.blank?
+        render json: {
+          error: "This replacement would leave the document empty. Send full content to rewrite the document instead."
+        }, status: :unprocessable_entity
+        return nil
+      end
+      replaced
+    end
+
+    # Counts occurrences (including overlapping ones) without regex semantics,
+    # so a target containing regex metacharacters is matched literally and an
+    # overlapping self-similar target still reads as ambiguous.
+    def substring_occurrences(source, target)
+      count = 0
+      index = 0
+      while (index = source.index(target, index))
+        count += 1
+        index += 1
+      end
+      count
     end
 
     # A well-formed request that conflicts with the document's current state.

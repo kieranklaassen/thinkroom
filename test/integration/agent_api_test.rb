@@ -1003,6 +1003,224 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_nil doc.seed_author_kind, "no X-Agent-Name means no agent seed attribution"
   end
 
+  # --- targeted replacement (replaces/with) on PATCH /api/docs/:slug ---
+
+  test "agent targeted-replaces text in an unclaimed seed-stage document" do
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "A paragraph about provenance.", with: "A tighter paragraph." },
+          headers: AGENT, as: :json
+
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal @document.slug, body["slug"], "slug must stay stable — same contract as full update"
+    assert_equal "# Hello\n\nA tighter paragraph.", body["content"]
+
+    @document.reload
+    assert_equal "# Hello\n\nA tighter paragraph.", @document.current_content
+    assert_equal "updated_document", @document.activities.last.action
+    assert_equal "Scout", @document.activities.last.actor_name
+  end
+
+  test "owner targeted replacement on a live document swaps one span and resets live state" do
+    user = cli_user(email: "owner-targeted@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(
+      title: "Live", user:, owner_name: user.name,
+      seed_content: "# Seed",
+      content_snapshot: "# Title\n\nKeep this intro.\n\nFix this fact.\n\nKeep this outro.",
+      yjs_state: "binary-crdt-state",
+      seed_state: "seeded",
+      seed_claimed_at: Time.current
+    )
+
+    assert_broadcast_on(DocumentMetaChannel.broadcasting_for(doc), event: "content_reset") do
+      patch "/api/docs/#{doc.slug}",
+            params: { replaces: "Fix this fact.", with: "The corrected fact." },
+            headers: bearer(raw_token), as: :json
+    end
+
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal "# Title\n\nKeep this intro.\n\nThe corrected fact.\n\nKeep this outro.", body["content"],
+                 "everything outside the matched span must be byte-identical"
+    assert_equal 0, body["auto_rejected_suggestions"],
+                 "a live targeted replacement is a content reset and reports the count"
+
+    doc.reload
+    assert_equal "# Title\n\nKeep this intro.\n\nThe corrected fact.\n\nKeep this outro.", doc.current_content
+    assert_nil doc.content_snapshot
+    assert_nil doc.yjs_state, "a live targeted replacement resets CRDT state like a full owner replacement"
+  end
+
+  test "targeted replacement auto-rejects pending suggestions whose target it removed" do
+    user = cli_user(email: "owner-targeted-suggestions@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(
+      title: "Live", user:, owner_name: user.name,
+      seed_content: "# Seed\n\nThis sentence will go away.",
+      content_snapshot: "# Seed\n\nThis sentence will go away.",
+      yjs_state: "binary-crdt-state"
+    )
+    stale = Suggestion.propose!(
+      document: doc, author_name: "Scout", author_kind: "agent",
+      body: "tightened wording", replaces: "This sentence will go away."
+    )
+
+    patch "/api/docs/#{doc.slug}",
+          params: { replaces: "This sentence will go away.", with: "Something entirely new." },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :ok
+    assert_equal 1, response.parsed_body["auto_rejected_suggestions"]
+    assert_equal "rejected", stale.reload.status
+  end
+
+  test "targeted replacement with a missing target changes nothing and teaches the fix" do
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "Text that is not in the document.", with: "irrelevant" },
+          headers: AGENT, as: :json
+
+    assert_response :unprocessable_entity
+    body = response.parsed_body
+    assert_includes body["error"], "not found"
+    assert_includes body["next_action"], "content field"
+    assert_equal "/api/docs/#{@document.slug}", URI(body["read_state"]).path
+    assert_equal "# Hello\n\nA paragraph about provenance.", @document.reload.current_content
+  end
+
+  test "targeted replacement with an ambiguous target changes nothing and reports the count" do
+    @document.update!(seed_content: "repeat\n\nmiddle\n\nrepeat")
+
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "repeat", with: "only once" },
+          headers: AGENT, as: :json
+
+    assert_response :unprocessable_entity
+    body = response.parsed_body
+    assert_includes body["error"], "2 times"
+    assert_equal 2, body["occurrences"]
+    assert_equal "repeat\n\nmiddle\n\nrepeat", @document.reload.current_content
+  end
+
+  test "regex metacharacters in a targeted replacement are matched and inserted literally" do
+    @document.update!(seed_content: "# Hello\n\nCosts $10 (net).")
+
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "$10 (net)", with: '\\0 dollars & 10\\& cents' },
+          headers: AGENT, as: :json
+
+    assert_response :ok
+    assert_equal "# Hello\n\nCosts \\0 dollars & 10\\& cents.", @document.reload.current_content,
+                 "neither the target nor the replacement may gain regex/backreference semantics"
+  end
+
+  test "targeted replacement parameter shape is validated before anything else" do
+    original = @document.current_content
+
+    patch "/api/docs/#{@document.slug}",
+          params: { content: "# full", replaces: "Hello", with: "Hi" },
+          headers: AGENT, as: :json
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "not both"
+
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "Hello" },
+          headers: AGENT, as: :json
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "with is required"
+
+    patch "/api/docs/#{@document.slug}",
+          params: { with: "Hi" },
+          headers: AGENT, as: :json
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "replaces is required"
+
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "", with: "Hi" },
+          headers: AGENT, as: :json
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "replaces is required"
+
+    assert_equal original, @document.reload.current_content
+  end
+
+  test "a malformed targeted replacement on a claimed document is a 422, not a 409" do
+    # Parameter-shape errors do not depend on document state; only a
+    # well-formed write hits the ownership gate.
+    @document.update!(owner_token: SecureRandom.hex(8), owner_name: "Owner")
+
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "Hello" },
+          headers: AGENT, as: :json
+
+    assert_response :unprocessable_entity
+  end
+
+  test "an empty with deletes the targeted text" do
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "\n\nA paragraph about provenance.", with: "" },
+          headers: AGENT, as: :json
+
+    assert_response :ok
+    assert_equal "# Hello", @document.reload.current_content
+  end
+
+  test "a targeted replacement that would empty the document is refused" do
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "# Hello\n\nA paragraph about provenance.", with: "" },
+          headers: AGENT, as: :json
+
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "empty"
+    assert_equal "# Hello\n\nA paragraph about provenance.", @document.reload.current_content
+  end
+
+  test "a targeted replacement that would exceed the byte cap is refused" do
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "A paragraph about provenance.", with: "x" * (Document::MAX_CONTENT_BYTES + 1) },
+          headers: AGENT, as: :json
+
+    assert_response :content_too_large
+    assert_equal "# Hello\n\nA paragraph about provenance.", @document.reload.current_content
+  end
+
+  test "a non-owner cannot targeted-replace a claimed document even with a valid target" do
+    @document.update!(owner_token: SecureRandom.hex(8), owner_name: "Owner")
+
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "A paragraph about provenance.", with: "hijacked" },
+          headers: AGENT, as: :json
+
+    assert_response :conflict
+    assert_includes response.parsed_body["error"], "no longer an unclaimed draft"
+    assert_equal "# Hello\n\nA paragraph about provenance.", @document.reload.current_content
+  end
+
+  test "targeted replacement combined with a title updates both" do
+    patch "/api/docs/#{@document.slug}",
+          params: { title: "Renamed", replaces: "provenance", with: "attribution" },
+          headers: AGENT, as: :json
+
+    assert_response :ok
+    @document.reload
+    assert_equal "Renamed", @document.title
+    assert_equal "# Hello\n\nA paragraph about attribution.", @document.current_content
+  end
+
+  test "targeted replacement on an html document re-sanitizes the result and reports normalization" do
+    doc = Document.create!(title: "Html", content_format: "html", seed_content: "<h1>Hello</h1><p>Fine text</p>")
+
+    patch "/api/docs/#{doc.slug}",
+          params: { replaces: "<p>Fine text</p>", with: "<p>Fine <script>alert(1)</script>text</p>" },
+          headers: AGENT, as: :json
+
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal true, body["normalized"]
+    assert_includes body["warning"], "Unsupported HTML"
+    refute_includes doc.reload.current_content, "<script>"
+  end
+
   test "title-only update leaves content and seed authorship untouched" do
     post "/api/docs", params: { title: "Draft", content: "# Body stays" }, headers: AGENT, as: :json
     slug = response.parsed_body["slug"]
@@ -1153,7 +1371,10 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal "PATCH", update["method"]
     assert_equal 409, update["conflict_status"]
     assert_includes update["url"], "/api/docs/#{response.parsed_body['slug']}"
-    assert_includes update["purpose"], "replace their own document"
+    assert_includes update["purpose"], "revise their own document"
+    assert_includes update["purpose"], "targeted replacement"
+    assert_includes update.dig("body", "replaces"), "exactly once"
+    assert_includes update.dig("body", "with"), "empty string deletes"
   end
 
   test "state payload advertises the update endpoint and explains it in notes" do
@@ -1171,6 +1392,9 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal "text/plain", response.media_type
     assert_includes response.body, "Revise a document you created"
     assert_includes response.body, "-X PATCH"
+    assert_includes response.body, "targeted replacement",
+                    "the plain-text guide must teach the preferred replaces/with form"
+    assert_includes response.body, %("replaces")
   end
 
   test "update of an unknown slug returns a clean 404" do
