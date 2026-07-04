@@ -8,6 +8,7 @@
 //   BASE_URL=http://localhost:3000 SLUG=demo node script/native_shell_check.mjs
 //
 import { chromium } from 'playwright'
+import { waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 const SLUG = process.env.SLUG ?? 'demo'
@@ -304,6 +305,55 @@ try {
   )
   ok('home: second throwaway cleaned up via swipe delete')
 
+  // Editor link routing inside the shell: same-origin page links must
+  // navigate the webview itself (the external browser context has none of
+  // the app's cookies — a signed-in user would land on a logged-out
+  // session), while cross-origin links and signed Active Storage file URLs
+  // keep opening in a new browsing context (files self-authenticate via
+  // their signature; external pages need the user's own browser sessions).
+  const linkDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'native-shell-check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Native link routing check',
+        content:
+          '# Native link routing\n\n' +
+          `[Same-origin page](${BASE}/d/${SLUG})\n\n` +
+          '[External page](https://example.com/native-link-check)\n\n' +
+          `[Stored file](${BASE}/rails/active_storage/blobs/redirect/native-check/file.pdf)\n`,
+      }),
+    })
+  ).json()
+  await page.goto(`${BASE}/d/${linkDoc.slug}`, { waitUntil: 'networkidle' })
+  await waitForLive(page)
+
+  await page.locator('.milkdown .ProseMirror a', { hasText: 'Same-origin page' }).click()
+  await page.waitForURL(`${BASE}/d/${SLUG}`, { timeout: 10000 })
+  ok('doc: same-origin page link navigates the webview (session carries)')
+
+  await page.goto(`${BASE}/d/${linkDoc.slug}`, { waitUntil: 'networkidle' })
+  await waitForLive(page)
+  const externalPopup = native.waitForEvent('page', { timeout: 10000 })
+  await page.locator('.milkdown .ProseMirror a', { hasText: 'External page' }).click()
+  const externalPage = await externalPopup
+  check(
+    externalPage.url().startsWith('https://example.com/native-link-check') &&
+      new URL(page.url()).pathname === `/d/${linkDoc.slug}`,
+    'doc: cross-origin link still opens in a new browsing context',
+  )
+  await externalPage.close()
+
+  const filePopup = native.waitForEvent('page', { timeout: 10000 })
+  await page.locator('.milkdown .ProseMirror a', { hasText: 'Stored file' }).click()
+  const filePage = await filePopup
+  check(
+    new URL(filePage.url()).pathname.startsWith('/rails/active_storage/') &&
+      new URL(page.url()).pathname === `/d/${linkDoc.slug}`,
+    'doc: signed file URL still opens in a new browsing context (self-authenticating)',
+  )
+  await filePage.close()
+
   await page.goto(`${BASE}/login`, { waitUntil: 'networkidle' })
   await mounted(page)
   check(
@@ -384,6 +434,20 @@ try {
     return rect.width <= 1 && rect.height <= 1
   })
   check(bridgeFootprint, 'web doc: bridge strip occupies no visible space')
+
+  // Web link routing is unchanged: same-origin page links keep opening in a
+  // new tab outside the native shell.
+  await webPage.goto(`${BASE}/d/${linkDoc.slug}`, { waitUntil: 'networkidle' })
+  await waitForLive(webPage)
+  const webPopup = web.waitForEvent('page', { timeout: 10000 })
+  await webPage.locator('.milkdown .ProseMirror a', { hasText: 'Same-origin page' }).click()
+  const webPopupPage = await webPopup
+  check(
+    new URL(webPopupPage.url()).pathname === `/d/${SLUG}` &&
+      new URL(webPage.url()).pathname === `/d/${linkDoc.slug}`,
+    'web doc: same-origin page link still opens a new tab',
+  )
+  await webPopupPage.close()
   await web.close()
 } finally {
   await browser.close()
