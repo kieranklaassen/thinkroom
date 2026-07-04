@@ -1,7 +1,7 @@
 # Ruby Native shell request: session-aware link handling in Normal Mode
 
-Ready-to-file issue for [`ruby-native/gem`](https://github.com/ruby-native/gem) (Joe Masilotti).
-Copy everything below the rule into a new GitHub issue.
+Filed as [ruby-native/gem#75](https://github.com/ruby-native/gem/issues/75)
+(Joe Masilotti's repo). The text below the rule is the issue body as filed.
 
 Origin: Thinkroom feedback ts `1783097011` — on iOS, tapping a PDF link inside a
 document punted to an external browser with no session and hit a login wall
