@@ -1088,7 +1088,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal "# Hello\n\nA paragraph about provenance.", @document.reload.current_content
   end
 
-  test "targeted replacement with an ambiguous target changes nothing and reports the count" do
+  test "targeted replacement with an ambiguous target changes nothing" do
     @document.update!(seed_content: "repeat\n\nmiddle\n\nrepeat")
 
     patch "/api/docs/#{@document.slug}",
@@ -1097,9 +1097,20 @@ class AgentApiTest < ActionDispatch::IntegrationTest
 
     assert_response :unprocessable_entity
     body = response.parsed_body
-    assert_includes body["error"], "2 times"
-    assert_equal 2, body["occurrences"]
+    assert_includes body["error"], "more than once"
+    assert_includes body["error"], "more surrounding text"
     assert_equal "repeat\n\nmiddle\n\nrepeat", @document.reload.current_content
+  end
+
+  test "an overlapping self-similar target reads as ambiguous" do
+    @document.update!(seed_content: "# aaaa")
+
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "aa", with: "b" },
+          headers: AGENT, as: :json
+
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "more than once"
   end
 
   test "regex metacharacters in a targeted replacement are matched and inserted literally" do
@@ -1290,7 +1301,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     patch "/api/docs/#{@document.slug}", params: {}, headers: AGENT, as: :json
 
     assert_response :unprocessable_entity
-    assert_includes response.parsed_body["error"], "title or content"
+    assert_includes response.parsed_body["error"], "title, content, or a replaces/with pair"
   end
 
   test "update rejects content larger than the byte cap" do

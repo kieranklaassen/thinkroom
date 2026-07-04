@@ -100,7 +100,7 @@ module Api
       end
       new_title = params[:title].presence
       if content.blank? && new_title.blank?
-        return render json: { error: "Send a title or content to update." },
+        return render json: { error: "Send a title, content, or a replaces/with pair to update." },
                       status: :unprocessable_entity
       end
       return if reject_oversized_content(content)
@@ -211,6 +211,9 @@ module Api
     def reject_malformed_targeted_replace
       return false unless targeted_replace?
 
+      # `content` uses present? (a blank content never was a full replacement)
+      # while `with` uses key? — an explicitly empty `with` is the documented
+      # way to delete the target and must not read as missing.
       error =
         if params[:content].present?
           "Send either content (a full replacement) or replaces/with (a targeted replacement), not both."
@@ -230,25 +233,28 @@ module Api
     # once (or the swap would empty the document). Matching is verbatim
     # against the canonical source — the same text `show`/GET return in
     # `content` — never against rendered plain_text, which cannot be mapped
-    # back to source positions server-side.
+    # back to source positions server-side. String#index (not a Regexp) keeps
+    # metacharacters in the target literal, and probing from first + 1 makes
+    # an overlapping self-similar target read as ambiguous while stopping at
+    # the second hit instead of counting every match in a large document.
     def targeted_replacement_source
       replaces = params[:replaces].to_s
       source = document.current_content.to_s
-      occurrences = substring_occurrences(source, replaces)
-      if occurrences.zero?
+      first = source.index(replaces)
+      if first.nil?
+        read_state = api_doc_url(document.slug)
         render json: {
           error: "The replaces text was not found in the document's canonical source.",
-          next_action: "GET #{api_doc_url(document.slug)} and quote the target verbatim from its content field " \
+          next_action: "GET #{read_state} and quote the target verbatim from its content field " \
                        "(the canonical source, including any markup) — a plain_text quote may not match the source.",
-          read_state: api_doc_url(document.slug)
+          read_state: read_state
         }, status: :unprocessable_entity
         return nil
       end
-      if occurrences > 1
+      if source.index(replaces, first + 1)
         render json: {
-          error: "The replaces text appears #{occurrences} times in the document. " \
-                 "Include more surrounding text so it matches exactly once.",
-          occurrences: occurrences
+          error: "The replaces text appears more than once in the document. " \
+                 "Include more surrounding text so it matches exactly once."
         }, status: :unprocessable_entity
         return nil
       end
@@ -262,19 +268,6 @@ module Api
         return nil
       end
       replaced
-    end
-
-    # Counts occurrences (including overlapping ones) without regex semantics,
-    # so a target containing regex metacharacters is matched literally and an
-    # overlapping self-similar target still reads as ambiguous.
-    def substring_occurrences(source, target)
-      count = 0
-      index = 0
-      while (index = source.index(target, index))
-        count += 1
-        index += 1
-      end
-      count
     end
 
     # A well-formed request that conflicts with the document's current state.

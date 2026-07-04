@@ -151,7 +151,7 @@ class AgentGuide
                                    format: "(optional) must equal this document's immutable content_format",
                                    replaces: "(preferred for small edits) exact text to change, quoted verbatim from this document's content field (the canonical source, not plain_text); must occur exactly once. Mutually exclusive with content; requires with.",
                                    with: "(required with replaces) replacement #{source_name} source for the replaces target; an empty string deletes it",
-                                   content: "(optional) replacement canonical #{source_name} source for a full rewrite; send replaces/with, content, and/or title" },
+                                   content: "(optional) replacement canonical #{source_name} source for a full rewrite; mutually exclusive with replaces/with" },
                            limits: { content_max_bytes: Document::MAX_CONTENT_BYTES },
                            returns: { slug: "Unchanged identifier", share_url: "Unchanged share URL",
                                       content: "Updated canonical source", plain_text: "Updated rendered text",
