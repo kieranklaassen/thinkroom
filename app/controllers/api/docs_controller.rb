@@ -211,16 +211,20 @@ module Api
     def reject_malformed_targeted_replace
       return false unless targeted_replace?
 
-      # `content` uses present? (a blank content never was a full replacement)
-      # while `with` uses key? — an explicitly empty `with` is the documented
-      # way to delete the target and must not read as missing.
+      # Both fields must be actual strings. A JSON null or structured value
+      # for `with` would otherwise coerce through to_s — null silently deletes
+      # the target and a hash injects its inspect output into the document.
+      # An explicitly empty `with` string is the documented way to delete the
+      # target, so the check is is_a?(String), never present?.
       error =
         if params[:content].present?
           "Send either content (a full replacement) or replaces/with (a targeted replacement), not both."
-        elsif params[:replaces].blank?
-          "replaces is required for a targeted replacement: quote the exact text to change, verbatim from the document's content field."
-        elsif !request.request_parameters.key?("with")
-          "with is required alongside replaces — send the replacement text, or an empty string to delete the target."
+        elsif !params[:replaces].is_a?(String) || params[:replaces].blank?
+          "replaces is required for a targeted replacement and must be a non-empty string: " \
+            "quote the exact text to change, verbatim from the document's content field."
+        elsif !params[:with].is_a?(String)
+          "with is required alongside replaces and must be a string — " \
+            "send the replacement text, or an empty string to delete the target."
         end
       return false unless error
 
@@ -238,7 +242,7 @@ module Api
     # an overlapping self-similar target read as ambiguous while stopping at
     # the second hit instead of counting every match in a large document.
     def targeted_replacement_source
-      replaces = params[:replaces].to_s
+      replaces = params[:replaces]
       source = document.current_content.to_s
       first = source.index(replaces)
       if first.nil?
@@ -260,7 +264,7 @@ module Api
       end
 
       # Block form so backreference sequences (\1, \&) in `with` stay literal.
-      replaced = source.sub(replaces) { params[:with].to_s }
+      replaced = source.sub(replaces) { params[:with] }
       if replaced.blank?
         render json: {
           error: "This replacement would leave the document empty. Send full content to rewrite the document instead."

@@ -534,7 +534,7 @@ function help() {
   process.stdout.write('Account\n  login [--url URL] [--no-open]\n  whoami [--json]\n  logout\n\n')
   process.stdout.write('Documents\n  new [FILE|-] [--title TITLE] [--format markdown|html] --agent NAME [--json]\n  show SLUG|URL [--json]\n  update SLUG|URL --replaces TEXT --with TEXT [--title TITLE] --agent NAME [--json]\n  update SLUG|URL [FILE|-] [--title TITLE] --agent NAME [--json]\n  suggest SLUG|URL [FILE|-] --body TEXT --replaces TEXT --intent TEXT --agent NAME\n  comment SLUG|URL [FILE|-] --body TEXT [--anchor TEXT] --agent NAME\n  open SLUG|URL\n\n')
   process.stdout.write('Writes require an agent identity: pass --agent NAME or set THINKROOM_AGENT.\n')
-  process.stdout.write('Prefer update --replaces/--with for edits to a document you own: it swaps one exact\nspan of the canonical source (quote it verbatim from `show`; it must match exactly\nonce). Send a full FILE only when rewriting most of the document.\n\n')
+  process.stdout.write('Prefer update --replaces/--with for edits to a document you own: it swaps one exact\nspan of the canonical source (quote it verbatim from the `content` field of\n`show --json`, not plain_text; it must match exactly once). Send a full FILE only\nwhen rewriting most of the document.\n\n')
   process.stdout.write('Agent setup\n  init [--agent agents|claude|codex|all]\n  skill install [--agent agents|claude|codex|all]\n  prime [--json]\n\n')
   process.stdout.write('Environment: THINKROOM_URL, THINKROOM_TOKEN, THINKROOM_AGENT, XDG_CONFIG_HOME\n')
 }

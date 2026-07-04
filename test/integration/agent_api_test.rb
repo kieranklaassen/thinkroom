@@ -1019,6 +1019,24 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal "# Hello\n\nA tighter paragraph.", @document.current_content
     assert_equal "updated_document", @document.activities.last.action
     assert_equal "Scout", @document.activities.last.actor_name
+    assert_not body.key?("auto_rejected_suggestions"),
+               "a seed-stage targeted update is not a content reset and must not report this field"
+  end
+
+  test "authenticated owner targeted-replaces text in their claimed seed-stage document" do
+    user = cli_user(email: "owner-targeted-seed@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    doc = Document.create!(title: "Draft", user:, owner_name: user.name, seed_content: "# Draft\n\nRough sentence.")
+
+    patch "/api/docs/#{doc.slug}",
+          params: { replaces: "Rough sentence.", with: "Polished sentence." },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :ok
+    assert_equal doc.slug, response.parsed_body["slug"]
+    doc.reload
+    assert_equal "# Draft\n\nPolished sentence.", doc.current_content
+    assert_equal "updated_document", doc.activities.last.action
   end
 
   test "owner targeted replacement on a live document swaps one span and resets live state" do
@@ -1165,6 +1183,59 @@ class AgentApiTest < ActionDispatch::IntegrationTest
           headers: AGENT, as: :json
 
     assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "with is required"
+    assert_equal "# Hello\n\nA paragraph about provenance.", @document.reload.current_content
+  end
+
+  test "non-string replaces or with values are rejected, never coerced" do
+    original = @document.current_content
+
+    # JSON null for `with` must not read as an empty-string delete.
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "provenance", with: nil },
+          headers: AGENT, as: :json
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "must be a string"
+
+    # A structured value would otherwise inject its inspect output.
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "provenance", with: { nested: 1 } },
+          headers: AGENT, as: :json
+    assert_response :unprocessable_entity
+
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: [ "provenance" ], with: "x" },
+          headers: AGENT, as: :json
+    assert_response :unprocessable_entity
+
+    assert_equal original, @document.reload.current_content
+  end
+
+  test "a well-formed targeted replacement on a claimed document is a 409 even when the target is absent" do
+    # The ownership gate must run before matching so a non-owner cannot use
+    # 422-vs-409 differences to probe whether text exists in a claimed doc.
+    @document.update!(owner_token: SecureRandom.hex(8), owner_name: "Owner")
+
+    patch "/api/docs/#{@document.slug}",
+          params: { replaces: "Text that is not in the document.", with: "probe" },
+          headers: AGENT, as: :json
+
+    assert_response :conflict
+    assert_equal "# Hello\n\nA paragraph about provenance.", @document.reload.current_content
+  end
+
+  test "another account's bearer token cannot targeted-replace a claimed document" do
+    owner = cli_user(email: "targeted-owner@example.com")
+    other = cli_user(email: "targeted-impostor@example.com", name: "Other")
+    _record, raw_token = CliAccessToken.issue!(user: other)
+    doc = Document.create!(title: "Theirs", user: owner, owner_name: owner.name, seed_content: "# Owner content")
+
+    patch "/api/docs/#{doc.slug}",
+          params: { replaces: "Owner content", with: "hijacked" },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :conflict
+    assert_equal "# Owner content", doc.reload.seed_content
   end
 
   test "an empty with deletes the targeted text" do
