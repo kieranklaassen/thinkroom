@@ -196,12 +196,13 @@ module Api
         document.owned_by?(nil, user: current_api_user)
     end
 
-    # A targeted replacement is any request that mentions replaces or with.
-    # Presence is checked on the raw request parameters, not params[...].present?,
-    # because an explicitly empty `with` ("delete the target") is a valid value
-    # that must still count as targeting.
+    # A targeted replacement supplies at least one string-typed replaces or with
+    # parameter. Key presence alone is not enough — JSON null or omitted optional
+    # fields serialized as null must not trigger targeted validation on an
+    # ordinary content or title update. An explicitly empty `with` string still
+    # counts because it is a valid deletion.
     def targeted_replace?
-      request.request_parameters.key?("replaces") || request.request_parameters.key?("with")
+      params[:replaces].is_a?(String) || params[:with].is_a?(String)
     end
 
     # Parameter-shape validation for replaces/with, checked before the
