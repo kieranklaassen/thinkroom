@@ -58,7 +58,7 @@ export function MarginSuggestions({ items, handle, focusMode, onMarkerSelect }: 
         const dom = domRange(view, Math.min(range.from, docSize), Math.min(range.to, docSize))
         if (dom) rangesRef.current.set(item.key, dom)
       }
-      let top = 0
+      let top: number
       try {
         top = view.coordsAtPos(range ? Math.min(range.from, docSize) : docEnd).top - containerTop
       } catch {

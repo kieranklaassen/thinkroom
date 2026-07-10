@@ -154,7 +154,7 @@ const parseQuote = (parser: SourceParser, cacheScope: string, search: string): N
   const cacheKey = `${cacheScope}\u0000${search}`
   const cached = parseCache.get(cacheKey)
   if (cached !== undefined) return cached
-  let parsed: Node | null = null
+  let parsed: Node | null
   try {
     parsed = parser(search) ?? null
   } catch {

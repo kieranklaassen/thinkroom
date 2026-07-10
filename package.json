@@ -2,8 +2,12 @@
   "private": true,
   "type": "module",
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/rails__actioncable": "^8.0.3",
+    "eslint": "^10.6.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "playwright": "^1.61.1",
+    "typescript-eslint": "^8.63.0",
     "vite": "^8.1.0",
     "vite-plugin-ruby": "^5.2.2"
   },
@@ -39,7 +43,8 @@
     "yjs": "^13.6.31"
   },
   "scripts": {
-    "check": "tsc -p tsconfig.app.json && tsc -p tsconfig.node.json && npm run check:cli",
+    "check": "tsc -p tsconfig.app.json && tsc -p tsconfig.node.json && npm run check:lint && npm run check:cli",
+    "check:lint": "eslint app/frontend",
     "check:cli": "node --test cli/test/*.test.js",
     "check:exports": "node script/export_check.mjs",
     "check:html": "node script/html_document_check.mjs",

@@ -14,7 +14,7 @@ interface PortableSketch {
 
 const placeholderPrefix = (document: Node): string => {
   let attempt = 0
-  let prefix = ''
+  let prefix: string
   do {
     const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${attempt}`
     prefix = `THINKROOM-SKETCH-${random.toUpperCase()}-`

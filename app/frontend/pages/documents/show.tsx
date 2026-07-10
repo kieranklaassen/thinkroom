@@ -114,9 +114,9 @@ export interface DocumentProps {
 const documentModePath = (slug: string, mode: EditorMode) =>
   `/d/${encodeURIComponent(slug)}${mode === 'read' ? '' : `/${mode}`}`
 
-const availableDocumentModes = (ownership: OwnershipPayload): EditorMode[] => {
-  if (ownership.can_write) return ['edit', 'suggest', 'comment', 'read']
-  if (ownership.can_comment) return ['comment', 'read']
+const availableDocumentModes = (canWrite: boolean, canComment: boolean): EditorMode[] => {
+  if (canWrite) return ['edit', 'suggest', 'comment', 'read']
+  if (canComment) return ['comment', 'read']
   return ['read']
 }
 
@@ -186,7 +186,7 @@ export default function DocumentShow({
   const demoModeLocked = doc.slug === 'demo'
   const mode = demoModeLocked ? 'edit' : ui.mode
   const availableModes = useMemo(
-    () => availableDocumentModes(ownership),
+    () => availableDocumentModes(ownership.can_write, ownership.can_comment),
     [ownership.can_comment, ownership.can_write],
   )
   const modeAvailable = availableModes.includes(mode)
