@@ -1,43 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Head, Link, router, usePoll } from '@inertiajs/react'
-import {
-  NativeNavbar,
-  NativeButton,
-  NativeMenuItem,
-  NativeShareButton,
-  nativeHaptic,
-} from '@ruby-native/react'
+import { nativeHaptic } from '@ruby-native/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import { TextSelection } from '@milkdown/kit/prose/state'
-import {
-  DocumentEditor,
-  type ConnectionStatus,
-  type EditorHandle,
-} from '../../editor/milkdown_editor'
+import type { ConnectionStatus, EditorHandle } from '../../editor/milkdown_editor'
 import type { DocumentFormat } from '../../editor/document_format'
-import {
-  userIdentity,
-  serverIdentity,
-  serverKnewGuest,
-  persistGuestIdentity,
-  reconcileGuestCookie,
-  storedGuestIdentity,
-  type UserIdentity,
-} from '../../editor/identity'
 import { provenanceIdentityCtx } from '../../editor/provenance'
 import {
   aiSpanAt,
   applyReviewState,
-  type AiSpan,
   type ProvenanceSpan,
   type ReviewState,
 } from '../../editor/provenance'
-import { findTextRange } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
 import type { RenderHints } from '../../editor/cable_provider'
 import { bindReadModeCopy } from '../../editor/clipboard'
 import { bindReadPointerBroadcast } from '../../editor/read_pointers'
-import { bindViewportBroadcast, bindViewportFollow } from '../../editor/viewport_follow'
 import {
   downloadDocumentHtml,
   downloadDocumentMarkdown,
@@ -49,7 +26,7 @@ import { MarginSuggestions } from '../../components/margin_suggestions'
 import { CommentsPanel } from '../../components/comments_panel'
 import { AnchoredComposer } from '../../components/anchored_composer'
 import { SelectionToolbar } from '../../components/selection_toolbar'
-import { PresenceBar, type HumanPresence } from '../../components/presence_bar'
+import { PresenceBar } from '../../components/presence_bar'
 import { ActivityPanel } from '../../components/activity_panel'
 import { IdentityChip } from '../../components/identity_chip'
 import { ClaimBanner } from '../../components/claim_banner'
@@ -68,12 +45,16 @@ import {
   type SheetKind,
 } from '../../components/mobile_dock'
 import { useSuggestionReview } from './use_suggestion_review'
+import { useDocumentIdentity } from './use_document_identity'
+import { useFollowPresence } from './use_follow_presence'
+import { useComments } from './use_comments'
+import { useFloatingChrome, type TextTarget } from './use_floating_chrome'
+import { NativeDocBridge } from './native_doc_bridge'
+import { StagedDocumentEditor } from './staged_document_editor'
 import type { ReviewableSuggestion } from '../../components/suggestion_card'
 import { useMetaChannel } from '../../lib/use_meta_channel'
 import { useMediaQuery } from '../../lib/use_media_query'
 import { useIsClient } from '../../lib/use_is_client'
-import { useAnchoredPopover } from '../../lib/use_anchored_popover'
-import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
 import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
 import type {
@@ -130,24 +111,6 @@ export interface DocumentProps {
   nativeApp: SharedProps['nativeApp']
 }
 
-// Floating chrome stores only its anchor identity; geometry is re-derived
-// from the live editor state on scroll / resize / doc updates, so popovers
-// track their text instead of freezing at birth coordinates.
-interface ReviewTarget {
-  span: AiSpan
-}
-
-interface SelectionTarget {
-  text: string
-}
-
-// Click-to-comment (Comment mode): the clicked block's text, anchored at
-// the click's collapsed selection — geometry re-derived live like the
-// other floating chrome.
-interface CommentTarget {
-  text: string
-}
-
 const documentModePath = (slug: string, mode: EditorMode) =>
   `/d/${encodeURIComponent(slug)}${mode === 'read' ? '' : `/${mode}`}`
 
@@ -168,33 +131,6 @@ const capAnchor = (text: string): string => {
   return new TextDecoder().decode(bytes.slice(0, ANCHOR_BYTE_CAP)).replace(/�+$/, '')
 }
 
-// Resolves once every image in the live editor has finished loading (or
-// errored — a broken image settles at its broken-glyph size either way), or
-// after `capMs` so nothing can pin the preview layer forever. The separator
-// imgs ProseMirror inserts have no src and are excluded.
-const waitForEditorImages = (capMs: number): Promise<void> => {
-  const pending = Array.from(
-    document.querySelectorAll<HTMLImageElement>('.doc-live-editor .ProseMirror img[src]'),
-  ).filter((img) => !img.complete)
-  if (pending.length === 0) return Promise.resolve()
-
-  return new Promise((resolve) => {
-    let remaining = pending.length
-    const timer = setTimeout(() => resolve(), capMs)
-    const settle = () => {
-      remaining -= 1
-      if (remaining === 0) {
-        clearTimeout(timer)
-        resolve()
-      }
-    }
-    pending.forEach((img) => {
-      img.addEventListener('load', settle, { once: true })
-      img.addEventListener('error', settle, { once: true })
-    })
-  })
-}
-
 export default function DocumentShow({
   document: doc,
   viewer,
@@ -211,48 +147,7 @@ export default function DocumentShow({
   // render) produce identical markup. It flips true on the next client commit.
   const isClient = useIsClient()
 
-  // Initializer-only state plus an explicit rename handler — NOT a
-  // sync-on-prop-change effect, which a future reload batch listing
-  // `viewer` would silently clobber mid-rename.
-  //
-  // Hydration-safe init: server and the first client render BOTH derive
-  // identity from the viewer prop alone — the chosen session name, else the
-  // guest name + color the server read from the `pruf_guest` cookie, else
-  // Anonymous. No localStorage read during render, so the markup is
-  // byte-identical (zero hydration mismatch).
-  //
-  // When the cookie was present (the common returning-user case) the server
-  // already rendered the real guest identity → NOTHING changes post-hydration.
-  // Only when the cookie was absent (first-ever load, or a user whose identity
-  // predates the cookie) does the post-hydration effect reconcile from
-  // localStorage and write the cookie so the NEXT load is server-correct.
-  const [identity, setIdentity] = useState<UserIdentity>(() =>
-    serverIdentity(viewer.name, viewer),
-  )
-  useEffect(() => {
-    // A chosen session name always wins and is server-known — never overridden
-    // by the guest identity.
-    if (viewer.name) return
-    if (serverKnewGuest(viewer)) {
-      // Server already rendered the cookie-backed guest identity. Re-seed
-      // localStorage from it when storage is empty (cookie present but storage
-      // cleared) so the cookie stays authoritative — never regenerate a fresh
-      // identity here, which would silently rename the user on the next load.
-      // Do NOT change React state: that would be the post-hydration flip we
-      // just worked to avoid.
-      if (!storedGuestIdentity()) persistGuestIdentity(identity)
-      return
-    }
-    // Cookie absent: reconcile from localStorage (one-time migration) and write
-    // the cookie. If there's no stored identity yet, generate + persist one.
-    const stored = storedGuestIdentity()
-    setIdentity(stored ?? reconcileGuestCookie())
-    if (stored) persistGuestIdentity(stored)
-    // viewer is stable for the life of the page; the rename handler owns
-    // subsequent identity changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  const [guest, setGuest] = useState(viewer.guest)
+  const { identity, guest, handleRenamed } = useDocumentIdentity(viewer)
   // Optimistic: a hydrated or freshly-seeded doc is functionally live the
   // moment it paints — the websocket only confirms it. Starting at 'live'
   // avoids the connecting→live dot flash on every load.
@@ -263,18 +158,12 @@ export default function DocumentShow({
   // the editor keeps it live via onTitleChange once it mounts.
   const [documentTitle, setDocumentTitle] = useState(doc.display_title || doc.title)
   const [newVersionAvailable, setNewVersionAvailable] = useState(false)
-  const [readyEditor, setReadyEditor] = useState<{
-    key: string
-    handle: EditorHandle
-  } | null>(null)
-  const [swappedEditorKey, setSwappedEditorKey] = useState<string | null>(null)
+  // The staged (image-settled) editor handle, reported by StagedDocumentEditor.
+  const [handle, setHandle] = useState<EditorHandle | null>(null)
   const [spans, setSpans] = useState<ProvenanceSpan[]>([])
-  const [peers, setPeers] = useState<HumanPresence[]>([])
-  const [followingClientId, setFollowingClientId] = useState<number | null>(null)
-  const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
-  const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null)
-  const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null)
-  const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
+  // Whichever text-anchored floating affordance is open (selection toolbar,
+  // click-to-comment, AI review) — one cell, structurally mutually exclusive.
+  const [textTarget, setTextTarget] = useState<TextTarget | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   // Hydration-safe init from server-rendered prefs: cookies supply panel/focus/
   // width while the URL supplies mode, so SSR and the first client render agree.
@@ -322,10 +211,6 @@ export default function DocumentShow({
   const isReading = effectiveMode === 'read'
   const connectionIdentity = viewer.account ? `account:${viewer.account.id}` : 'guest'
   const editorSessionKey = `${doc.slug}:${ownership.can_write ? 'write' : 'read'}`
-  const handle = readyEditor?.key === editorSessionKey ? readyEditor.handle : null
-  // Tie the instant-paint swap to the exact permission-keyed editor. A delayed
-  // callback from the old editor can never hide the preview for a new remount.
-  const editorSwapped = swappedEditorKey === editorSessionKey
   // Live handle for code that runs after awaits or inside stable callbacks —
   // a closure-captured handle goes stale when the editor remounts mid-flight.
   const handleRef = useRef<EditorHandle | null>(null)
@@ -389,7 +274,9 @@ export default function DocumentShow({
   modeRef.current = effectiveMode
   // Leaving Comment mode dismisses any pending click-to-comment affordance.
   useEffect(() => {
-    if (effectiveMode !== 'comment') setCommentTarget(null)
+    if (effectiveMode !== 'comment') {
+      setTextTarget((target) => (target?.kind === 'comment' ? null : target))
+    }
   }, [effectiveMode])
 
   // Compact or coarse-pointer screens: rail and margin cards give way to
@@ -411,15 +298,13 @@ export default function DocumentShow({
 
   // Read mode has no text-targeted or review actions. Clear anything opened
   // in another mode so switching always lands on a clean document view.
+  // (The composer clears itself on any mode switch — see useComments.)
   useEffect(() => {
     if (!isReading) return
-    setReviewTarget(null)
-    setSelectionTarget(null)
-    setCommentTarget(null)
-    setComposerAnchor(null)
+    setTextTarget(null)
     setSuggestionNotice(null)
     setActiveSheet(null)
-  }, [isReading])
+  }, [isReading, setSuggestionNotice])
 
   useEffect(() => {
     if (!handle || !isReading) return
@@ -436,55 +321,7 @@ export default function DocumentShow({
     return bindReadModeCopy(handle.editor)
   }, [handle])
 
-  useEffect(() => {
-    if (!handle) return
-
-    return bindViewportBroadcast(handle.editor, handle.provider.awareness)
-  }, [handle])
-
-  useEffect(() => {
-    if (!handle || followingClientId === null) return
-    const targetId = followingClientId
-
-    return bindViewportFollow(
-      handle.editor,
-      handle.provider.awareness,
-      targetId,
-      () => setFollowingClientId((current) => current === targetId ? null : current),
-    )
-  }, [followingClientId, handle])
-
-  useEffect(() => {
-    if (followingClientId === null) return
-    const release = () => setFollowingClientId(null)
-    const releaseOutsidePresence = (event: PointerEvent | TouchEvent) => {
-      const target = event.target as Element | null
-      if (target?.closest('.presence-avatar--human')) return
-      release()
-    }
-    const releaseOnNavigationKey = (event: KeyboardEvent) => {
-      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) {
-        release()
-      }
-    }
-
-    window.addEventListener('wheel', release, { passive: true })
-    window.addEventListener('touchstart', releaseOutsidePresence, { passive: true })
-    window.addEventListener('pointerdown', releaseOutsidePresence, { passive: true })
-    window.addEventListener('keydown', releaseOnNavigationKey)
-    return () => {
-      window.removeEventListener('wheel', release)
-      window.removeEventListener('touchstart', releaseOutsidePresence)
-      window.removeEventListener('pointerdown', releaseOutsidePresence)
-      window.removeEventListener('keydown', releaseOnNavigationKey)
-    }
-  }, [followingClientId])
-
-  // The comment composer lives in the comments panel — on mobile that means
-  // opening its sheet when a selection chooses "Comment".
-  useEffect(() => {
-    if (isMobile && composerAnchor !== null) setActiveSheet('comments')
-  }, [isMobile, composerAnchor])
+  const { peers, followingClientId, toggleFollow } = useFollowPresence(handle)
 
   // Persist cookie-backed prefs on change so their next SSR paint matches.
   // Mode is intentionally absent: its shareable URL and Inertia history entry
@@ -538,58 +375,6 @@ export default function DocumentShow({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [availableModes, changeMode, modeLocked])
-
-  // Human presence from Yjs awareness. Self is filtered out — the
-  // IdentityChip represents you; a duplicate avatar next to it is noise.
-  useEffect(() => {
-    if (!handle) return
-    const { awareness } = handle.provider
-    const selfId = handle.provider.doc.clientID
-    const update = () => {
-      const states = Array.from(awareness.getStates().entries())
-      const nextPeers = states
-        .filter(([clientId]) => clientId !== selfId)
-        .map(([clientId, state]) => {
-          const user = (state as { user?: UserIdentity }).user
-          return user ? { ...user, clientId } : null
-        })
-        .filter((user): user is HumanPresence => Boolean(user))
-      setPeers((current) =>
-        current.length === nextPeers.length && current.every((peer, index) => {
-          const next = nextPeers[index]
-          return next &&
-            peer.clientId === next.clientId &&
-            peer.name === next.name &&
-            peer.color === next.color
-        })
-          ? current
-          : nextPeers,
-      )
-    }
-    update()
-    awareness.on('change', update)
-    return () => awareness.off('change', update)
-  }, [handle])
-
-  useEffect(() => {
-    if (
-      followingClientId !== null &&
-      !peers.some((peer) => peer.clientId === followingClientId)
-    ) {
-      setFollowingClientId(null)
-    }
-  }, [followingClientId, peers])
-
-  // Rename applies here AFTER the server confirms the session write (the
-  // chip's POST onSuccess). The handler only moves React state — the live
-  // side effects ride the effect below, so a rename that completes while
-  // the editor is still connecting (handle null) heals the moment the
-  // handle arrives, and an in-flight POST can never act through a stale
-  // null-handle closure.
-  const handleRenamed = useCallback((name: string | null) => {
-    setIdentity(userIdentity(name))
-    setGuest(name === null)
-  }, [])
 
   // Identity state is the source of truth for the live editor surfaces:
   // re-applied whenever the handle arrives or the identity changes.
@@ -671,6 +456,9 @@ export default function DocumentShow({
     }
   }, [handle, onDocumentGone, recoverDeniedWrite, reloadAfterContentReset])
 
+  // Priority-ordered dispatch: text selection → mobile suggestion tap →
+  // click-to-comment → AI review span. Exactly one target (or none) comes
+  // out — the single textTarget cell makes that mutual exclusion structural.
   const handleSelection = useCallback((view: EditorView) => {
     viewRef.current = view
     const { from, to, empty } = view.state.selection
@@ -680,21 +468,17 @@ export default function DocumentShow({
     // hasFocus() is always false and the focus gate would make the selection
     // toolbar unreachable in the read-only mode.
     if (view.editable && !view.hasFocus()) {
-      setReviewTarget(null)
-      setSelectionTarget(null)
+      setTextTarget(null)
       return
     }
 
     if (!empty) {
       const text = view.state.doc.textBetween(from, to, '\n')
       if (text.trim().length > 0) {
-        setSelectionTarget({ text })
-        setCommentTarget(null)
-        setReviewTarget(null)
+        setTextTarget({ kind: 'selection', text })
         return
       }
     }
-    setSelectionTarget(null)
 
     // Mobile: tapping inside a pending suggestion's tinted anchor opens its
     // sheet card — the touch equivalent of glancing at the margin. The
@@ -710,8 +494,7 @@ export default function DocumentShow({
       if (hit) {
         setSheetFocusKey(hit.key)
         setActiveSheet('suggestions')
-        setCommentTarget(null)
-        setReviewTarget(null)
+        setTextTarget(null)
         return
       }
     }
@@ -724,15 +507,13 @@ export default function DocumentShow({
       const block = view.state.selection.$head.parent
       const text = block.isTextblock ? block.textContent : ''
       if (text.trim().length > 0) {
-        setCommentTarget({ text: capAnchor(text) })
-        setReviewTarget(null)
+        setTextTarget({ kind: 'comment', text: capAnchor(text) })
         return
       }
     }
-    setCommentTarget(null)
 
     const span = aiSpanAt(view.state)
-    setReviewTarget(span ? { span } : null)
+    setTextTarget(span ? { kind: 'review', span } : null)
   }, [])
 
   // Review/selection chrome belongs to the text that opened it. ProseMirror
@@ -764,9 +545,7 @@ export default function DocumentShow({
         return
       }
 
-      setReviewTarget(null)
-      setSelectionTarget(null)
-      setCommentTarget(null)
+      setTextTarget(null)
     }
 
     window.addEventListener('pointerdown', clearTextTarget, true)
@@ -776,33 +555,6 @@ export default function DocumentShow({
     }
   }, [handleSelection])
 
-  // While a popover is open, any scroll or resize schedules one rAF-throttled
-  // reposition pass (coordsAtPos for a single anchor is cheap).
-  const [popoverTick, setPopoverTick] = useState(0)
-  const popoverOpen =
-    Boolean(reviewTarget) ||
-    Boolean(selectionTarget) ||
-    Boolean(commentTarget) ||
-    composerAnchor !== null
-  useEffect(() => {
-    if (!popoverOpen) return
-    let raf = 0
-    const schedule = () => {
-      if (raf) return
-      raf = requestAnimationFrame(() => {
-        raf = 0
-        setPopoverTick((tick) => tick + 1)
-      })
-    }
-    window.addEventListener('scroll', schedule, { passive: true, capture: true })
-    window.addEventListener('resize', schedule)
-    return () => {
-      if (raf) cancelAnimationFrame(raf)
-      window.removeEventListener('scroll', schedule, true)
-      window.removeEventListener('resize', schedule)
-    }
-  }, [popoverOpen])
-
   const handleAdvance = useCallback((state: ReviewState) => {
     const view = viewRef.current
     if (!view) return
@@ -811,201 +563,54 @@ export default function DocumentShow({
     applyReviewState(view, span, state)
   }, [])
 
-  const submitComment = useCallback(
-    (body: string, anchorText: string | null) => {
-      setComposerAnchor(null)
-      const optimisticComment: CommentPayload = {
-        id: -Date.now(),
-        author_name: identity.name,
-        author_kind: 'human',
-        body,
-        anchor_text: anchorText,
-        resolved: false,
-        created_at: new Date().toISOString(),
-      }
-      router
-        .optimistic((props: Partial<DocumentProps>) => ({
-          comments: [...(props.comments ?? []), optimisticComment],
-        }))
-        .post(
-          `/d/${doc.slug}/comments`,
-          { body, anchor_text: anchorText, author_name: identity.name },
-          { preserveScroll: true, only: ['comments', 'activities'], async: true },
-        )
-    },
-    [doc.slug, identity.name],
-  )
+  const {
+    composerAnchor,
+    composerOpen,
+    openComposer,
+    closeComposer,
+    cancelComposer,
+    submitComment,
+    submitAnchoredComment,
+    resolveComment,
+    jumpToAnchor,
+  } = useComments({
+    slug: doc.slug,
+    identityName: identity.name,
+    viewRef,
+    effectiveMode,
+    isMobile,
+    docTick,
+  })
 
-  const resolveComment = useCallback(
-    (comment: CommentPayload) => {
-      // Optimistic placeholders (negative id) have no server row yet — a
-      // PATCH against them would 404 (the panel also hides the button).
-      if (comment.id < 0) return
-      router
-        .optimistic((props: Partial<DocumentProps>) => ({
-          comments: (props.comments ?? []).map((c) =>
-            c.id === comment.id ? { ...c, resolved: true } : c,
-          ),
-        }))
-        .patch(
-          `/comments/${comment.id}/resolve`,
-          { by: identity.name },
-          { preserveScroll: true, only: ['comments', 'activities'], async: true },
-        )
-    },
-    [identity.name],
-  )
-
-  // ---- Floating chrome placement (measured, selection-centered) ----
-
-  // Mouse-drag gating: selection chrome stays hidden while the primary
-  // button is down so the toolbar doesn't chase the cursor mid-drag; it
-  // reveals once on release at the settled position. Keyboard selections
-  // reveal immediately (no pointer down). Pointerdowns on the chrome itself
-  // are exempt so pressing a toolbar button doesn't hide it mid-click.
-  const [pointerHeld, setPointerHeld] = useState(false)
+  // The comment composer lives in the comments panel — on mobile that means
+  // opening its sheet when a selection chooses "Comment".
   useEffect(() => {
-    const onChrome = (target: EventTarget | null) =>
-      target instanceof Element &&
-      Boolean(target.closest('.selection-toolbar, .review-popover, .comment-composer--anchored'))
-    const down = (event: PointerEvent) => {
-      if (event.button !== 0 || onChrome(event.target)) return
-      setPointerHeld(true)
-    }
-    const up = () => setPointerHeld(false)
-    window.addEventListener('pointerdown', down, true)
-    window.addEventListener('pointerup', up, true)
-    window.addEventListener('pointercancel', up, true)
-    window.addEventListener('blur', up)
-    return () => {
-      window.removeEventListener('pointerdown', down, true)
-      window.removeEventListener('pointerup', up, true)
-      window.removeEventListener('pointercancel', up, true)
-      window.removeEventListener('blur', up)
-    }
-  }, [])
+    if (isMobile && composerAnchor !== null) setActiveSheet('comments')
+  }, [isMobile, composerAnchor])
 
   // One floating form at a time: an open composer suppresses the selection
   // chrome, and so does the share popover (z-60, above the chrome's z-50).
   const [shareOpen, setShareOpen] = useState(false)
-  const composerOpen = !isMobile && composerAnchor !== null
-  const chromeSuppressed = composerOpen || shareOpen
 
-  const popoverGap = isMobile ? 20 : 8
-
-  const selectionToolbarActive =
-    Boolean(selectionTarget) && !pointerHeld && !chromeSuppressed
-  const selectionPopover = useAnchoredPopover<HTMLDivElement>({
-    active: selectionToolbarActive,
-    getView: () => viewRef.current,
-    getRange: () => {
-      const view = viewRef.current
-      if (!view || view.state.selection.empty) return null
-      return { from: view.state.selection.from, to: view.state.selection.to }
-    },
-    gap: popoverGap,
-    deps: [selectionTarget, spans, popoverTick],
+  const {
+    selectionToolbarActive,
+    selectionPopover,
+    commentAffordanceActive,
+    commentAffordance,
+    liveReviewSpan,
+    reviewActive,
+    reviewPopover,
+    composerPopover,
+  } = useFloatingChrome({
+    viewRef,
+    textTarget,
+    composerAnchor,
+    composerOpen,
+    chromeSuppressed: composerOpen || shareOpen,
+    spans,
+    docTick,
+    isMobile,
   })
-
-  const commentAffordanceActive =
-    Boolean(commentTarget) && !selectionTarget && !pointerHeld && !chromeSuppressed
-  const commentAffordance = useAnchoredPopover<HTMLDivElement>({
-    active: commentAffordanceActive,
-    getView: () => viewRef.current,
-    getRange: () => {
-      const view = viewRef.current
-      if (!view) return null
-      const head = view.state.selection.head
-      return { from: head, to: head }
-    },
-    gap: popoverGap,
-    deps: [commentTarget, spans, popoverTick],
-  })
-
-  // Re-derive the span from current state: edits shift positions, and
-  // advancing the review state changes the attrs the popover renders.
-  const liveReviewSpan = useMemo(() => {
-    if (!reviewTarget) return null
-    const view = viewRef.current
-    if (!view) return null
-    return aiSpanAt(view.state)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reviewTarget, spans, popoverTick])
-  const reviewActive = Boolean(liveReviewSpan) && !pointerHeld && !chromeSuppressed
-  const reviewPopover = useAnchoredPopover<HTMLDivElement>({
-    active: reviewActive,
-    getView: () => viewRef.current,
-    getRange: () => {
-      const view = viewRef.current
-      if (!view) return null
-      const span = aiSpanAt(view.state)
-      return span ? { from: span.from, to: span.to } : null
-    },
-    gap: popoverGap,
-    deps: [reviewTarget, spans, popoverTick],
-  })
-
-  // The composer anchors below the selection's last line and never overlaps
-  // the anchored text; if a remote edit removes the anchor it freezes in
-  // place (detached) instead of vanishing mid-draft.
-  const composerPopover = useAnchoredPopover<HTMLFormElement>({
-    active: composerOpen,
-    getView: () => viewRef.current,
-    getRange: () => {
-      const view = viewRef.current
-      if (!view || composerAnchor === null) return null
-      return findTextRange(view.state.doc, composerAnchor)
-    },
-    preferBelow: true,
-    persistent: true,
-    gap: popoverGap,
-    deps: [composerAnchor, spans, popoverTick, docTick],
-  })
-
-  // Mode switches close the composer without posting (same as Cancel).
-  useEffect(() => {
-    setComposerAnchor(null)
-  }, [effectiveMode])
-
-  // The anchored text stays visibly marked while the composer is open —
-  // the editor selection itself collapses when focus moves to the textarea.
-  useEffect(() => {
-    if (!composerOpen || composerAnchor === null) return
-    const view = viewRef.current
-    if (!view) return
-    const range = findTextRange(view.state.doc, composerAnchor)
-    const dom = range ? domRange(view, range.from, range.to) : null
-    setHighlight('comment-anchor', dom ? [dom] : [])
-    return () => clearHighlight('comment-anchor')
-    // docTick keeps the highlight tracking edits around the anchor.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [composerOpen, composerAnchor, docTick])
-
-  const closeComposer = useCallback(() => {
-    setComposerAnchor(null)
-    viewRef.current?.focus()
-  }, [])
-
-  const submitAnchoredComment = useCallback(
-    (body: string) => {
-      submitComment(body, composerAnchor)
-      viewRef.current?.focus()
-    },
-    [submitComment, composerAnchor],
-  )
-
-  const jumpToAnchor = useCallback((anchorText: string) => {
-    const view = viewRef.current
-    if (!view) return
-    const range = findTextRange(view.state.doc, anchorText)
-    if (!range) return
-    const tr = view.state.tr.setSelection(
-      TextSelection.create(view.state.doc, range.from, range.to),
-    )
-    tr.scrollIntoView()
-    view.dispatch(tr)
-    view.focus()
-  }, [])
 
   const documentStyle = {
     ...(documentWidth === null ? {} : { '--document-width': `${documentWidth}px` }),
@@ -1015,89 +620,20 @@ export default function DocumentShow({
   return (
     <>
       <Head title={documentTitle} />
-      {/* Ruby Native chrome: the shell reads these hidden signal elements. The
-          nav bar replaces the web doc-header inside the app (hidden below via
-          native-hidden); every action delegates to the bridge strip so targets
-          are always mounted and never display:none. */}
-      <NativeNavbar title={documentTitle}>
-        <NativeButton position="leading" icon="chevron.left" click="#native-doc-back" />
-        <NativeShareButton />
-        <NativeButton position="trailing" icon="ellipsis.circle">
-          {!modeLocked &&
-            availableModes.map((menuMode) => (
-              <NativeMenuItem
-                key={menuMode}
-                title={menuMode.charAt(0).toUpperCase() + menuMode.slice(1)}
-                selected={effectiveMode === menuMode}
-                click={`#native-mode-${menuMode}`}
-              />
-            ))}
-          {!isReading && <NativeMenuItem title="Activity" click="#native-toggle-activity" />}
-          <NativeMenuItem title="Export Markdown" click="#native-export-markdown" />
-          <NativeMenuItem title="Export HTML" click="#native-export-html" />
-          <NativeMenuItem title="Home" href="/" />
-        </NativeButton>
-      </NativeNavbar>
-      {/* Bridge strip: clip-hidden (never display:none — the shell's click
-          dispatch mechanism is unspecified, and coordinate-based synthesis
-          needs a real box). Handlers call the live setters directly. */}
-      <div className="native-bridge" aria-hidden="true">
-        <button
-          id="native-doc-back"
-          type="button"
-          tabIndex={-1}
-          onClick={() => window.RubyNative?.postMessage({ action: 'back' })}
-        >
-          Back
-        </button>
-        {availableModes.map((bridgeMode) => (
-          <button
-            key={bridgeMode}
-            id={`native-mode-${bridgeMode}`}
-            type="button"
-            tabIndex={-1}
-            onClick={() => changeMode(bridgeMode)}
-          >
-            {bridgeMode}
-          </button>
-        ))}
-        {/* Activity is omitted from the native menu in Read mode and its sheet
-            only renders outside Read; a stale-menu tap during Read is a no-op
-            so activeSheet can't be set with nothing visible. */}
-        <button
-          id="native-toggle-activity"
-          type="button"
-          tabIndex={-1}
-          onClick={() => {
-            if (!isReading) setActiveSheet((current) => (current === 'activity' ? null : 'activity'))
-          }}
-        >
-          Activity
-        </button>
-        {/* Gated on the live editor handle — the export helpers throw before
-            it exists, and the web UI disables its export buttons the same way
-            (SharePopover's exportReady). A pre-ready tap is a silent no-op. */}
-        <button
-          id="native-export-markdown"
-          type="button"
-          tabIndex={-1}
-          onClick={() => {
-            if (handle) void exportMarkdown()
-          }}
-        >
-          Export Markdown
-        </button>
-        <button
-          id="native-export-html"
-          type="button"
-          tabIndex={-1}
-          onClick={() => {
-            if (handle) void exportHtml()
-          }}
-        >
-          Export HTML
-        </button>
-      </div>
+      <NativeDocBridge
+        documentTitle={documentTitle}
+        availableModes={availableModes}
+        effectiveMode={effectiveMode}
+        modeLocked={modeLocked}
+        isReading={isReading}
+        changeMode={changeMode}
+        onToggleActivity={() =>
+          setActiveSheet((current) => (current === 'activity' ? null : 'activity'))
+        }
+        exportReady={Boolean(handle)}
+        onExportMarkdown={exportMarkdown}
+        onExportHtml={exportHtml}
+      />
       <div
         className={`doc-page ${panelOpen ? '' : 'is-panel-hidden'} ${isReading ? 'is-read-mode' : ''}`}
         style={Object.keys(documentStyle).length === 0 ? undefined : documentStyle}
@@ -1159,9 +695,7 @@ export default function DocumentShow({
                 agents={presences}
                 compact={isMobile}
                 followingClientId={followingClientId}
-                onFollow={(clientId) => {
-                  setFollowingClientId((current) => current === clientId ? null : clientId)
-                }}
+                onFollow={toggleFollow}
               />
               {!isReading && <ProvenanceSummaryChip spans={spans} />}
               <IdentityChip
@@ -1222,79 +756,34 @@ export default function DocumentShow({
         <main className="doc-body">
           <div className={`doc-canvas ${focusMode ? 'is-focus' : ''}`}>
             <article className="doc-main">
-              {/* Instant first paint: server-rendered prose fills the reserved
-                  editor frame and holds the layout height. The live editor sits
-                  on top of it (transparent) while Milkdown boots, so its synced
-                  content paints over the identical preview — then the preview is
-                  dropped a couple frames later. The preview is always behind the
-                  editor until then, so content is never momentarily blank. */}
-              <div
-                className="doc-editor-stack"
-                data-phase={editorSwapped ? 'live' : handle ? 'revealing' : 'booting'}
-              >
-                {!editorSwapped && doc.content_html && (
-                  <div className="doc-static-preview milkdown" aria-hidden="true">
-                    <div
-                      className="ProseMirror"
-                      dangerouslySetInnerHTML={{ __html: doc.content_html }}
-                    />
-                  </div>
-                )}
-                {/* The editor is a client-only island: Milkdown/ProseMirror,
-                    Yjs, the ActionCable provider, and Excalidraw never render
-                    on the server. The server emits an empty doc-live-editor
-                    shell (identical on the client's first hydration render) and
-                    the static preview above carries first paint until the
-                    editor mounts post-hydration and the swap takes over. */}
-                <div className="doc-live-editor">
-                  {isClient && (
-                    <DocumentEditor
-                      key={editorSessionKey}
-                      slug={doc.slug}
-                      identity={identity}
-                      canWrite={ownership.can_write}
-                      connectionIdentity={connectionIdentity}
-                      contentFormat={doc.content_format}
-                      initialStateB64={doc.yjs_state_b64}
-                      renderHints={doc.render_hints}
-                      seedContent={doc.seed_content}
-                      seedVersion={doc.seed_version}
-                      seedGranted={doc.seed_granted}
-                      seedAuthorKind={doc.seed_author_kind}
-                      seedAuthorName={doc.seed_author_name}
-                      editable={ownership.can_write && (effectiveMode === 'edit' || effectiveMode === 'suggest')}
-                      suggesting={ownership.can_write && effectiveMode === 'suggest'}
-                      taskInteractive={ownership.can_write && effectiveMode !== 'comment'}
-                      onReady={(h) => {
-                        // The preview's images carry server-known width/height
-                        // attributes; the editor's ProseMirror image nodes
-                        // don't, so an editor image that hasn't decoded yet
-                        // holds ZERO height and everything below it sits 320px
-                        // high until the bytes arrive — a visible double-jump
-                        // right after the swap on real-latency connections.
-                        // The visible layer flips at booting→revealing (the
-                        // moment `handle` is set), so hold BOTH phase changes
-                        // until the editor's images have pixels (capped so a
-                        // broken image can't pin the preview), then give
-                        // ProseMirror two frames to paint before the preview
-                        // is dropped.
-                        void waitForEditorImages(1500).then(() => {
-                          setReadyEditor({ key: editorSessionKey, handle: h })
-                          requestAnimationFrame(() =>
-                            requestAnimationFrame(() =>
-                              setSwappedEditorKey(editorSessionKey),
-                            ),
-                          )
-                        })
-                      }}
-                      onStatus={setStatus}
-                      onSpans={setSpans}
-                      onSelection={isReading ? undefined : handleSelection}
-                      onTitleChange={setDocumentTitle}
-                    />
-                  )}
-                </div>
-              </div>
+              {/* Keyed on the permission-scoped session: a permission flip
+                  remounts the whole stage, so a delayed callback from the old
+                  editor can never hide the preview for a new remount. */}
+              <StagedDocumentEditor
+                key={editorSessionKey}
+                contentHtml={doc.content_html}
+                isClient={isClient}
+                onHandle={setHandle}
+                slug={doc.slug}
+                identity={identity}
+                canWrite={ownership.can_write}
+                connectionIdentity={connectionIdentity}
+                contentFormat={doc.content_format}
+                initialStateB64={doc.yjs_state_b64}
+                renderHints={doc.render_hints}
+                seedContent={doc.seed_content}
+                seedVersion={doc.seed_version}
+                seedGranted={doc.seed_granted}
+                seedAuthorKind={doc.seed_author_kind}
+                seedAuthorName={doc.seed_author_name}
+                editable={ownership.can_write && (effectiveMode === 'edit' || effectiveMode === 'suggest')}
+                suggesting={ownership.can_write && effectiveMode === 'suggest'}
+                taskInteractive={ownership.can_write && effectiveMode !== 'comment'}
+                onStatus={setStatus}
+                onSpans={setSpans}
+                onSelection={isReading ? undefined : handleSelection}
+                onTitleChange={setDocumentTitle}
+              />
             </article>
             <DocumentWidthHandle
               width={documentWidth}
@@ -1339,7 +828,7 @@ export default function DocumentShow({
             </aside>
           )}
         </main>
-        {!isReading && selectionTarget && selectionToolbarActive && (
+        {!isReading && textTarget?.kind === 'selection' && selectionToolbarActive && (
           <SelectionToolbar
             rootRef={selectionPopover.ref}
             position={selectionPopover.position}
@@ -1347,14 +836,14 @@ export default function DocumentShow({
               {
                 label: 'Comment',
                 onClick: () => {
-                  setComposerAnchor(selectionTarget.text)
-                  setSelectionTarget(null)
+                  openComposer(textTarget.text)
+                  setTextTarget(null)
                 },
               },
             ]}
           />
         )}
-        {!isReading && commentTarget && commentAffordanceActive && (
+        {!isReading && textTarget?.kind === 'comment' && commentAffordanceActive && (
           <SelectionToolbar
             rootRef={commentAffordance.ref}
             position={commentAffordance.position}
@@ -1362,8 +851,8 @@ export default function DocumentShow({
               {
                 label: 'Comment on this paragraph',
                 onClick: () => {
-                  setComposerAnchor(commentTarget.text)
-                  setCommentTarget(null)
+                  openComposer(textTarget.text)
+                  setTextTarget(null)
                 },
               },
             ]}
@@ -1417,7 +906,7 @@ export default function DocumentShow({
               comments={comments}
               composerAnchor={composerAnchor}
               onSubmit={submitComment}
-              onCancelComposer={() => setComposerAnchor(null)}
+              onCancelComposer={cancelComposer}
               onResolve={resolveComment}
               onJumpTo={(anchorText) => {
                 jumpToAnchor(anchorText)

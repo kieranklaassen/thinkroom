@@ -104,7 +104,7 @@ export interface EditorHandle {
 
 export type ConnectionStatus = 'connecting' | 'live'
 
-interface EditorProps {
+export interface EditorProps {
   slug: string
   identity: UserIdentity
   contentFormat: DocumentFormat
