@@ -3,11 +3,8 @@ import { createPortal } from 'react-dom'
 import { Link, router } from '@inertiajs/react'
 import { useMediaQuery } from '../lib/use_media_query'
 import { useDismissable } from '../lib/use_dismissable'
-import {
-  OwnershipChip,
-  type LinkAccess,
-  type OwnershipPayload,
-} from './ownership_chip'
+import { OwnershipChip } from './ownership_chip'
+import type { LinkAccess, OwnershipPayload } from '../types/payloads'
 import { FeedbackButton } from './feedback_button'
 import { ThemePicker } from './theme_picker'
 import type { AccountPayload } from '../types/viewer'

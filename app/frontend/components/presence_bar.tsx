@@ -1,12 +1,5 @@
 import type { UserIdentity } from '../editor/identity'
-
-export interface AgentPresencePayload {
-  id: number
-  agent_name: string
-  status: string
-  location_text: string | null
-  last_seen_at: string
-}
+import type { AgentPresencePayload } from '../types/payloads'
 
 export interface HumanPresence extends UserIdentity {
   clientId: number

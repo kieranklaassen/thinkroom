@@ -38,7 +38,6 @@ import {
   findTextRange,
   flashMergedRange,
   suggestionApplicability,
-  type SuggestionPayload,
 } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
 import type { RenderHints } from '../../editor/cable_provider'
@@ -60,17 +59,12 @@ import {
 import { ProvenanceSummaryChip } from '../../components/provenance_summary'
 import { ReviewPopover } from '../../components/review_popover'
 import { MarginSuggestions } from '../../components/margin_suggestions'
-import { CommentsPanel, type CommentPayload } from '../../components/comments_panel'
+import { CommentsPanel } from '../../components/comments_panel'
 import { AnchoredComposer } from '../../components/anchored_composer'
 import { SelectionToolbar } from '../../components/selection_toolbar'
-import {
-  PresenceBar,
-  type AgentPresencePayload,
-  type HumanPresence,
-} from '../../components/presence_bar'
+import { PresenceBar, type HumanPresence } from '../../components/presence_bar'
 import { ActivityPanel } from '../../components/activity_panel'
 import { IdentityChip } from '../../components/identity_chip'
-import { type OwnershipPayload } from '../../components/ownership_chip'
 import { ClaimBanner } from '../../components/claim_banner'
 import { HeaderMenu } from '../../components/header_menu'
 import { DocumentWidthHandle } from '../../components/document_width_handle'
@@ -94,21 +88,20 @@ import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
 import { patchJSON } from '../../lib/csrf'
 import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
+import type {
+  ActivityPayload,
+  AgentPresencePayload,
+  CollaboratorKind,
+  CommentPayload,
+  OwnershipPayload,
+  SuggestionPayload,
+} from '../../types/payloads'
 import { setCookie, setCookieFlag } from '../../lib/cookies'
 import {
   RICH_BLOCK_WIDTH_EVENT,
   type RichBlockWidthEventDetail,
 } from '../../editor/rich_block_width'
 import './show.css'
-
-export interface ActivityPayload {
-  id: number
-  actor_name: string
-  actor_kind: string
-  action: string
-  detail: string | null
-  created_at: string
-}
 
 export interface DocumentProps {
   document: {
@@ -119,7 +112,7 @@ export interface DocumentProps {
     seed_content: string | null
     seed_version: string
     seed_granted: boolean
-    seed_author_kind: string | null
+    seed_author_kind: CollaboratorKind | null
     seed_author_name: string | null
     has_state: boolean
     yjs_state_b64: string | null

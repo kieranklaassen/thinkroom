@@ -13,18 +13,7 @@ import {
   type DocumentFormat,
   type SourceParser,
 } from './document_format'
-
-export interface SuggestionPayload {
-  id: number
-  author_name: string
-  author_kind: string
-  intent: string | null
-  body: string
-  anchor_text: string | null
-  replaces: string | null
-  status: string
-  created_at: string
-}
+import type { SuggestionPayload } from '../types/payloads'
 
 /**
  * First within-block occurrence of `search` as a doc position range.

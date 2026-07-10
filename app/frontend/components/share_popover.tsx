@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useMediaQuery } from '../lib/use_media_query'
 import { useDismissable } from '../lib/use_dismissable'
-import type { LinkAccess } from './ownership_chip'
+import type { LinkAccess } from '../types/payloads'
 
 const LINK_ACCESS_HINTS: Record<LinkAccess, string> = {
   edit: 'Anyone with the link can open and edit this live document.',

@@ -2,6 +2,7 @@ import type { Consumer, Subscription } from '@rails/actioncable'
 import { getConsumer } from '../lib/cable'
 import { csrfToken } from '../lib/csrf'
 import type { MermaidRenderHints } from './mermaid'
+import type { CollaboratorKind } from '../types/payloads'
 import * as Y from 'yjs'
 
 /** Wire shape of Document#render_hints — client-measured render geometry
@@ -25,7 +26,7 @@ type SyncMessage = {
   content_format?: 'markdown' | 'html'
   seed_content?: string
   seed_markdown?: string
-  seed_author_kind?: string | null
+  seed_author_kind?: CollaboratorKind | null
   seed_author_name?: string | null
   cid?: string
   seq?: number
@@ -73,7 +74,7 @@ export class CableProvider {
   // Seed authorship rides alongside seedContent with the same one-shot
   // consume semantics: the editor reads and nulls all three together so a
   // remount can never re-attribute.
-  seedAuthorKind: string | null = null
+  seedAuthorKind: CollaboratorKind | null = null
   seedAuthorName: string | null = null
 
   private subscription: Subscription

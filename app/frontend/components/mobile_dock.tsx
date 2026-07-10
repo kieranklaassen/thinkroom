@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { SuggestionPayload } from '../editor/suggestions'
+import type { SuggestionPayload } from '../types/payloads'
 import { truncate } from '../lib/truncate'
 
 export type SheetKind = 'suggestions' | 'comments' | 'activity'

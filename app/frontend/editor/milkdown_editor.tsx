@@ -78,6 +78,7 @@ import { renderSoftBreaks } from './line_breaks'
 import { interactiveTaskListItems, taskPersistenceCtx } from './task_list_items'
 import { selectionCallbackCtx, selectionWatcher } from './selection_watcher'
 import { postJSON } from '../lib/csrf'
+import type { CollaboratorKind } from '../types/payloads'
 import {
   htmlDefaultValue,
   sanitizeHtml,
@@ -117,11 +118,11 @@ interface EditorProps {
   /** True when documents#show atomically claimed the seed for this page
    *  load — the props-first path that skips the WebSocket round-trip. */
   seedGranted?: boolean
-  /** Who authored the seed source ('human' | 'agent' | null). Non-human
-   *  seeds get their text explicitly AI-attributed after the collab
-   *  connection renders them — otherwise seeded text is unmarked and
-   *  counts as human in the provenance summary. */
-  seedAuthorKind?: string | null
+  /** Who authored the seed source. Non-human seeds get their text
+   *  explicitly AI-attributed after the collab connection renders them —
+   *  otherwise seeded text is unmarked and counts as human in the
+   *  provenance summary. */
+  seedAuthorKind?: CollaboratorKind | null
   seedAuthorName?: string | null
   /** Read-only gate for Comment mode. Implemented EXCLUSIVELY as
    *  ProseMirror `editable: () => false` — provider connection, Yjs sync,
