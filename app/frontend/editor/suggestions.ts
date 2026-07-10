@@ -27,41 +27,7 @@ export function findTextRange(
   doc: Node,
   search: string | null,
 ): { from: number; to: number } | null {
-  if (!search) return null
-  let result: { from: number; to: number } | null = null
-
-  doc.descendants((node, pos) => {
-    if (result) return false
-    if (!node.isTextblock) return true
-
-    let text = ''
-    const segments: { strFrom: number; strTo: number; docFrom: number }[] = []
-    node.forEach((child, offset) => {
-      if (child.isText && child.text) {
-        segments.push({
-          strFrom: text.length,
-          strTo: text.length + child.text.length,
-          docFrom: pos + 1 + offset,
-        })
-        text += child.text
-      }
-    })
-
-    const index = text.indexOf(search)
-    if (index === -1) return true
-
-    const endIndex = index + search.length
-    const startSeg = segments.find((s) => index >= s.strFrom && index < s.strTo)
-    const endSeg = segments.find((s) => endIndex > s.strFrom && endIndex <= s.strTo)
-    if (!startSeg || !endSeg) return true
-
-    result = {
-      from: startSeg.docFrom + (index - startSeg.strFrom),
-      to: endSeg.docFrom + (endIndex - endSeg.strFrom),
-    }
-    return false
-  })
-  return result
+  return findTextRanges(doc, search)[0] ?? null
 }
 
 function findTextRanges(doc: Node, search: string | null): { from: number; to: number }[] {
