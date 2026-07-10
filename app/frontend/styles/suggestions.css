@@ -1,0 +1,249 @@
+/* --------------------------- Suggestion cards ----------------------------- */
+.suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.suggestion-card {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  animation: card-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.suggestion-card.is-leaving {
+  opacity: 0;
+  transform: translateX(8px);
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.suggestion-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.author-chip {
+  font-size: 0.68rem;
+  font-weight: 650;
+  padding: 0.1rem 0.45rem;
+  border-radius: 99px;
+  white-space: nowrap;
+}
+
+.author-chip--ai,
+.author-chip--agent {
+  background: var(--prov-pending-bg);
+  color: color-mix(in srgb, var(--prov-pending-line) 80%, var(--ink));
+}
+
+.author-chip--human {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.suggestion-intent {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+
+.suggestion-replaces {
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  font-style: italic;
+}
+
+.suggestion-body {
+  font-family: var(--font-doc);
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: pre-wrap;
+  max-height: 9rem;
+  overflow-y: auto;
+}
+
+.suggestion-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-accept {
+  border: none;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.74rem;
+  font-weight: 550;
+  border-radius: 6px;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.btn-accept:hover {
+  background: #000;
+}
+
+.btn-reject {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+  font-weight: 500;
+  border-radius: 6px;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.btn-reject:hover {
+  border-color: var(--ink-faint);
+  color: var(--ink);
+}
+
+/* In suggestion cards, Accept wears the provenance tint — clearly primary
+ * next to ghost Reject without reading as a black slab. */
+.margin-card .btn-accept,
+.sheet-card .btn-accept {
+  background: color-mix(in srgb, var(--prov-pending-line) 14%, var(--surface-raised));
+  color: color-mix(in srgb, var(--prov-pending-line) 70%, var(--ink));
+  border: 1px solid color-mix(in srgb, var(--prov-pending-line) 45%, var(--line));
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.margin-card .btn-accept:hover,
+.sheet-card .btn-accept:hover {
+  background: color-mix(in srgb, var(--prov-pending-line) 24%, var(--surface-raised));
+  border-color: color-mix(in srgb, var(--prov-pending-line) 65%, var(--line));
+}
+
+/* --------------------------- Margin suggestions --------------------------- */
+.margin-suggestions {
+  position: absolute;
+  inset: 0;
+  /* Two card stacks (server-row + inline tracked edits) share the gutter;
+   * the containers must not shadow each other's cards from clicks. */
+  pointer-events: none;
+}
+
+.margin-card {
+  position: absolute;
+  pointer-events: auto;
+  left: 0.9rem;
+  right: 0.4rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  cursor: pointer;
+  animation: card-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+/* `top` animates only after the first placement painted — restacks glide,
+ * initial layout and freshly arrived cards don't fly in from 0. */
+.margin-card.is-placed {
+  transition: top 160ms ease, border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.margin-card:hover {
+  border-color: var(--prov-pending-line);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.06);
+}
+
+.margin-old {
+  font-family: var(--font-doc);
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: var(--ink-faint);
+  text-decoration: line-through;
+}
+
+.margin-new {
+  font-family: var(--font-doc);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--prov-pending-bg);
+  border-radius: 4px;
+  padding: 0.15rem 0.3rem;
+  white-space: pre-wrap;
+  max-height: 8.5rem;
+  overflow: hidden;
+}
+
+/* Focus mode: a quiet dot per suggestion instead of a card. */
+.margin-marker {
+  position: absolute;
+  pointer-events: auto;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--prov-pending-line);
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.margin-marker.is-placed {
+  transition: top 160ms ease, transform 120ms ease;
+}
+
+.margin-marker:hover {
+  transform: scale(1.4);
+}
+
+/* Anchor tint via the CSS Custom Highlight API — same hue family as the
+ * AI-provenance marks (purple on proof, blue on whitey). */
+::highlight(sug-anchor) {
+  background-color: rgb(157 78 221 / 0.12);
+}
+
+::highlight(sug-anchor-hot) {
+  background-color: rgb(157 78 221 / 0.3);
+}
+
+[data-theme='whitey'] ::highlight(sug-anchor) {
+  background-color: rgb(65 131 196 / 0.12);
+}
+
+[data-theme='whitey'] ::highlight(sug-anchor-hot) {
+  background-color: rgb(65 131 196 / 0.3);
+}
+
+/* Merge pulse: a freshly accepted suggestion flashes strong, steps down,
+ * then clears — registered transiently from flashMergedRange. */
+::highlight(sug-merged) {
+  background-color: rgb(157 78 221 / 0.38);
+}
+
+::highlight(sug-merged-soft) {
+  background-color: rgb(157 78 221 / 0.16);
+}
+
+[data-theme='whitey'] ::highlight(sug-merged) {
+  background-color: rgb(65 131 196 / 0.38);
+}
+
+[data-theme='whitey'] ::highlight(sug-merged-soft) {
+  background-color: rgb(65 131 196 / 0.16);
+}

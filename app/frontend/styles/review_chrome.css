@@ -1,0 +1,223 @@
+/* --------------------------- Selection toolbar ---------------------------- */
+/* Fixed-chrome z-index ladder: header 30 · selection chrome (toolbar,
+ * review popover, anchored composer) 50 · share popover / mobile dock 60 ·
+ * sheets 70+. Selection chrome is also suppressed in React while the share
+ * popover or the anchored composer is open — one floating form at a time. */
+/* Floating chrome renders hidden for one measuring pass, then `is-placed`
+ * reveals it at its final measured position — the entrance animation plays
+ * on reveal, never at an unmeasured spot. */
+.selection-toolbar {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  background: var(--ink);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.18);
+  padding: 0.2rem 0.25rem;
+  visibility: hidden;
+}
+
+.selection-toolbar.is-placed {
+  visibility: visible;
+  animation: popover-in 140ms ease;
+}
+
+.selection-toolbar button {
+  border: none;
+  background: none;
+  color: var(--surface);
+  font-size: 0.74rem;
+  font-weight: 550;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 120ms ease;
+}
+
+.selection-toolbar button:hover {
+  background: rgb(255 255 255 / 0.14);
+}
+
+.selection-toolbar-sep {
+  width: 1px;
+  height: 0.9rem;
+  background: rgb(255 255 255 / 0.2);
+}
+
+/* ----------------------------- Provenance tints -------------------------- */
+/* Human text renders plain — the absence of decoration IS the design.
+ * Each rule also targets the static preview, which carries the sanitized
+ * data attributes instead of the editor's mark-derived classes; grouping
+ * them keeps the tints identical so the swap never flashes color. */
+.milkdown .prov--ai,
+.doc-static-preview span[data-provenance][data-kind='ai'] {
+  border-radius: 2px;
+  transition: background 240ms ease, border-color 240ms ease;
+}
+
+.milkdown .prov--ai.prov--pending,
+.doc-static-preview span[data-provenance][data-kind='ai'][data-state='pending'] {
+  background: var(--prov-pending-bg);
+  box-shadow: inset 0 -2px 0 var(--prov-pending-line);
+}
+
+.milkdown .prov--ai.prov--reviewed,
+.doc-static-preview span[data-provenance][data-kind='ai'][data-state='reviewed'] {
+  background: var(--prov-reviewed-bg);
+  box-shadow: inset 0 -2px 0 var(--prov-reviewed-line);
+}
+
+.milkdown .prov--ai.prov--endorsed,
+.doc-static-preview span[data-provenance][data-kind='ai'][data-state='endorsed'] {
+  background: transparent;
+  box-shadow: inset 0 -2px 0 var(--prov-endorsed-line);
+}
+
+/* --------------------------- Suggestion tracking -------------------------- */
+/* Pending track-changes marks (Suggest mode). Green = proposed insertion,
+ * red strikethrough = proposed deletion (text stays until accepted). The
+ * suggestion tint deliberately dominates provenance tints while pending. */
+.milkdown ins.sug-ins,
+.doc-static-preview ins[data-suggestion-id] {
+  text-decoration: none;
+  background: var(--sug-ins-bg);
+  box-shadow: inset 0 -2px 0 var(--sug-ins-line);
+  border-radius: 2px;
+}
+
+.milkdown del.sug-del,
+.doc-static-preview del[data-suggestion-id] {
+  text-decoration: line-through;
+  text-decoration-color: var(--sug-del-line);
+  text-decoration-thickness: 2px;
+  background: var(--sug-del-bg);
+  border-radius: 2px;
+  color: color-mix(in srgb, var(--ink) 72%, transparent);
+}
+
+/* Tracked-edit cards: distinct from agent/AI proposal cards — a green
+ * accent edge ties the card to the inline insertion tint. */
+.margin-card--inline,
+.sheet-card--inline {
+  border-left: 3px solid var(--sug-ins-line);
+}
+
+.margin-marker--inline {
+  background: var(--sug-ins-line);
+}
+
+/* Container modifiers — structural discriminators for the tracked-edit
+ * stacks; no extra styles beyond the base classes today. */
+.margin-suggestions--inline,
+.sheet-suggestions--inline {
+  /* intentionally empty */
+}
+
+/* Tracked-edit cards speak the insertion (green) family end-to-end —
+ * the purple/lavender family stays reserved for AI text under review. */
+.margin-card--inline .margin-new,
+.sheet-card--inline .margin-new {
+  background: var(--sug-ins-bg);
+}
+
+.margin-card--inline .btn-accept,
+.sheet-card--inline .btn-accept {
+  background: color-mix(in srgb, var(--sug-ins-line) 14%, var(--surface-raised));
+  color: color-mix(in srgb, var(--sug-ins-line) 80%, var(--ink));
+  border: 1px solid color-mix(in srgb, var(--sug-ins-line) 45%, var(--line));
+}
+
+.margin-card--inline .btn-accept:hover,
+.sheet-card--inline .btn-accept:hover {
+  background: color-mix(in srgb, var(--sug-ins-line) 24%, var(--surface-raised));
+  border-color: color-mix(in srgb, var(--sug-ins-line) 65%, var(--line));
+}
+
+/* ----------------------------- Provenance summary ------------------------ */
+.prov-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.prov-summary-sep {
+  color: var(--ink-faint);
+}
+
+.prov-summary-part--unreviewed {
+  color: var(--accent);
+}
+
+/* ------------------------------ Review popover --------------------------- */
+.review-popover {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.08);
+  padding: 0.3rem 0.6rem;
+  font-size: 0.72rem;
+  visibility: hidden;
+}
+
+.review-popover.is-placed {
+  visibility: visible;
+  animation: popover-in 140ms ease;
+}
+
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+.review-popover-author {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.review-popover-states {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.review-popover-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.review-popover-dot.is-active {
+  background: var(--prov-pending-line);
+}
+
+.review-popover-state {
+  color: var(--ink-soft);
+}
+
+.review-popover-action {
+  border: none;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.72rem;
+  font-weight: 550;
+  border-radius: 6px;
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.review-popover-action:hover {
+  background: #000;
+}

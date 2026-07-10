@@ -1,0 +1,161 @@
+/* ---------------------------- Feedback (Riffrec) ------------------------- */
+/* RiffrecRecorder puts our className on a wrapping <span> and inline-styles
+ * the <button> inside it (dark slab by default) — descendant !important
+ * rules are the supported way to reskin it. The wrapper itself stays
+ * unstyled: styling it as a pill drew empty outlines around the button. */
+
+.feedback-button {
+  display: inline-flex;
+  align-items: center;
+}
+
+.feedback-flow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  position: relative;
+}
+
+.feedback-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--ink-soft);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+}
+
+.feedback-status.is-error {
+  color: #b3261e;
+}
+
+.feedback-status-actions {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+
+.feedback-status-actions button,
+.feedback-status-actions a {
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.header-menu-popover .feedback-flow,
+.header-menu-popover .feedback-status {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.feedback-button > button {
+  border: 1px solid var(--line) !important;
+  background: var(--surface-raised) !important;
+  color: var(--ink-faint) !important;
+  font-family: var(--font-ui) !important;
+  font-size: 0.74rem !important;
+  font-weight: 550 !important;
+  border-radius: 7px !important;
+  padding: 0.28rem 0.7rem !important;
+  box-shadow: none !important;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.feedback-button > button:hover {
+  border-color: var(--ink-faint) !important;
+  color: var(--ink-soft) !important;
+}
+
+/* Recording — red dot + red text, still quiet (the [aria-live] indicator
+ * only exists while recording). */
+.feedback-button:has(> [aria-live]) > button {
+  background: var(--surface-raised) !important;
+  color: #b3261e !important;
+  border-color: color-mix(in srgb, #b3261e 45%, var(--line)) !important;
+}
+
+.feedback-button > [aria-live] {
+  margin-left: 0.45rem !important;
+  gap: 0.3rem !important;
+  font-size: 0.7rem !important;
+  font-weight: 550 !important;
+  color: #b3261e !important;
+}
+
+/* Consent dialog, re-dressed to the app's idiom. */
+.feedback-button [role='dialog'] {
+  background: var(--surface-raised) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 10px !important;
+  box-shadow: 0 12px 48px rgb(0 0 0 / 0.16) !important;
+  font-family: var(--font-ui) !important;
+  padding: 1.4rem 1.5rem !important;
+}
+
+.feedback-button [role='dialog'] h2 {
+  font-size: 1.05rem !important;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.feedback-button [role='dialog'] button {
+  border-radius: 8px !important;
+  font-family: var(--font-ui) !important;
+  font-size: 0.8rem !important;
+  font-weight: 550 !important;
+  padding: 0.45rem 0.95rem !important;
+}
+
+.feedback-button [role='dialog'] > div:last-of-type > button:first-child {
+  background: var(--surface-raised) !important;
+  color: var(--ink-soft) !important;
+  border: 1px solid var(--line) !important;
+}
+
+.feedback-button [role='dialog'] > div:last-of-type > button:last-child {
+  background: var(--ink) !important;
+  color: var(--surface) !important;
+  border: 1px solid var(--ink) !important;
+}
+
+/* The header's backdrop-filter is a containing block for position:fixed —
+ * it would trap the consent overlay inside a 44px strip. Release it while
+ * the dialog is open (everything is dimmed behind the overlay anyway). */
+.doc-header:has(.feedback-button [role='dialog']) {
+  backdrop-filter: none;
+  background: var(--surface);
+}
+
+.landing-corner {
+  position: absolute;
+  /* Extra offset only inside the Ruby Native shell / installed PWAs. */
+  top: calc(1rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
+  right: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.landing {
+  position: relative;
+}
+
+@media (max-width: 30rem) {
+  .doc-header .feedback-button > button {
+    padding: 0.28rem 0.5rem !important;
+  }
+
+  .landing-corner {
+    top: calc(0.75rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
+    right: 0.75rem;
+  }
+
+  .landing-corner .feedback-button {
+    display: none;
+  }
+}

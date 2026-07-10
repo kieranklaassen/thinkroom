@@ -1,0 +1,104 @@
+/* --------------------------------- Landing ------------------------------- */
+.landing {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem;
+}
+
+/* Inside the native shell the web view extends behind the status bar and the
+   native nav bar sits above the page, so the landing needs the shell's
+   safe-area clearance on top. Inert on the open web (attribute absent). */
+[data-native-app] .landing {
+  padding-top: calc(2rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
+}
+
+.account-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink-soft);
+  padding: 0.35rem 0.65rem;
+  font-size: 0.74rem;
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.account-control--guest:hover {
+  border-color: var(--ink-faint);
+  color: var(--ink);
+}
+
+.account-control--signed-in > span {
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-control--signed-in button {
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-faint);
+  padding: 0 0 0 0.5rem;
+  cursor: pointer;
+}
+
+.account-control--signed-in button:hover {
+  color: var(--ink);
+}
+
+.landing-main {
+  width: 100%;
+  max-width: 44rem;
+  margin-block: auto;
+  text-align: center;
+}
+
+.landing-hero {
+  max-width: 28rem;
+  margin-inline: auto;
+}
+
+.landing-wordmark {
+  font-family: var(--font-doc);
+  font-size: 2.75rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.landing-wordmark-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.landing-tagline {
+  margin-top: 0.75rem;
+  color: var(--ink-soft);
+  line-height: 1.55;
+  font-size: 0.95rem;
+}
+
+.landing-byline {
+  margin-top: 0.4rem;
+  color: var(--ink-faint);
+  font-size: 0.76rem;
+}
+
+.landing-actions {
+  margin-top: 1.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.landing-actions .btn {
+  min-height: 2.75rem;
+}
