@@ -32,30 +32,17 @@ import {
   type ProvenanceSpan,
   type ReviewState,
 } from '../../editor/provenance'
-import {
-  applySuggestion,
-  findSuggestionTarget,
-  findTextRange,
-  flashMergedRange,
-  suggestionApplicability,
-} from '../../editor/suggestions'
+import { findTextRange } from '../../editor/suggestions'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
 import type { RenderHints } from '../../editor/cable_provider'
 import { bindReadModeCopy } from '../../editor/clipboard'
 import { bindReadPointerBroadcast } from '../../editor/read_pointers'
 import { bindViewportBroadcast, bindViewportFollow } from '../../editor/viewport_follow'
-import { editorViewCtx, parserCtx, schemaCtx } from '@milkdown/kit/core'
-import { sourceParser } from '../../editor/document_format'
 import {
   downloadDocumentHtml,
   downloadDocumentMarkdown,
   printDocument,
 } from '../../editor/document_export'
-import { collectInlineSuggestions } from '../../editor/suggest_changes'
-import {
-  MarginInlineSuggestions,
-  InlineSuggestionSheetList,
-} from '../../components/margin_inline_suggestions'
 import { ProvenanceSummaryChip } from '../../components/provenance_summary'
 import { ReviewPopover } from '../../components/review_popover'
 import { MarginSuggestions } from '../../components/margin_suggestions'
@@ -80,12 +67,13 @@ import {
   SuggestionSheetList,
   type SheetKind,
 } from '../../components/mobile_dock'
+import { useSuggestionReview } from './use_suggestion_review'
+import type { ReviewableSuggestion } from '../../components/suggestion_card'
 import { useMetaChannel } from '../../lib/use_meta_channel'
 import { useMediaQuery } from '../../lib/use_media_query'
 import { useIsClient } from '../../lib/use_is_client'
 import { useAnchoredPopover } from '../../lib/use_anchored_popover'
 import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
-import { patchJSON } from '../../lib/csrf'
 import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
 import type {
@@ -179,9 +167,6 @@ const capAnchor = (text: string): string => {
   if (bytes.length <= ANCHOR_BYTE_CAP) return text
   return new TextDecoder().decode(bytes.slice(0, ANCHOR_BYTE_CAP)).replace(/�+$/, '')
 }
-
-const skippedSuggestionNotice = (count: number): string =>
-  `${count} suggestion${count === 1 ? '' : 's'} skipped because the target is missing, ambiguous, or empty; ${count === 1 ? 'it remains' : 'they remain'} pending for individual review.`
 
 // Resolves once every image in the live editor has finished loading (or
 // errored — a broken image settles at its broken-glyph size either way), or
@@ -289,7 +274,6 @@ export default function DocumentShow({
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
   const [selectionTarget, setSelectionTarget] = useState<SelectionTarget | null>(null)
   const [commentTarget, setCommentTarget] = useState<CommentTarget | null>(null)
-  const [suggestionNotice, setSuggestionNotice] = useState<string | null>(null)
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   // Hydration-safe init from server-rendered prefs: cookies supply panel/focus/
@@ -346,6 +330,50 @@ export default function DocumentShow({
   // a closure-captured handle goes stale when the editor remounts mid-flight.
   const handleRef = useRef<EditorHandle | null>(null)
   handleRef.current = handle
+
+  // Review-surface recompute signal, re-derived whenever the Yjs doc
+  // changes. The Yjs 'update' event is the signal — NOT the Milkdown
+  // listener, which skips addToHistory:false transactions and therefore
+  // never fires for remote collaborators' changes (a passive window would
+  // never see new cards). rAF-coalesced so a burst of keystrokes triggers
+  // one recompute.
+  const [docTick, setDocTick] = useState(0)
+  useEffect(() => {
+    if (!handle) return
+    let raf = 0
+    const bump = () => {
+      if (raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        setDocTick((tick) => tick + 1)
+      })
+    }
+    handle.ydoc.on('update', bump)
+    return () => {
+      if (raf) cancelAnimationFrame(raf)
+      handle.ydoc.off('update', bump)
+    }
+  }, [handle])
+
+  const {
+    items: reviewItems,
+    pendingSuggestionCount,
+    acceptAllSuggestions,
+    acceptingAll,
+    suggestionNotice,
+    setSuggestionNotice,
+  } = useSuggestionReview({
+    handle,
+    handleRef,
+    suggestions,
+    slug: doc.slug,
+    contentFormat: doc.content_format,
+    identityName: identity.name,
+    docTick,
+  })
+  const reviewItemsRef = useRef(reviewItems)
+  reviewItemsRef.current = reviewItems
+
   const exportMarkdown = useCallback(async () => {
     const live = handleRef.current
     if (!live) throw new Error('Document editor is not ready')
@@ -373,9 +401,7 @@ export default function DocumentShow({
   const rawIsMobile = useMediaQuery('(max-width: 72rem), (hover: none) and (pointer: coarse)')
   const isMobile = isClient && rawIsMobile
   const [activeSheet, setActiveSheet] = useState<SheetKind | null>(null)
-  const [sheetFocusId, setSheetFocusId] = useState<number | null>(null)
-  const suggestionsRef = useRef(suggestions)
-  suggestionsRef.current = suggestions
+  const [sheetFocusKey, setSheetFocusKey] = useState<string | null>(null)
   const isMobileRef = useRef(isMobile)
   isMobileRef.current = isMobile
 
@@ -671,29 +697,18 @@ export default function DocumentShow({
     setSelectionTarget(null)
 
     // Mobile: tapping inside a pending suggestion's tinted anchor opens its
-    // sheet card — the touch equivalent of glancing at the margin. Same
-    // parser-aware matcher the cards anchor with, so markdown-quoting
-    // suggestions hit-test at their real ranges.
+    // sheet card — the touch equivalent of glancing at the margin. The
+    // review items carry ranges from the same parser-aware matcher the
+    // cards anchor with, resolved once per doc version, so this is a plain
+    // containment check instead of per-suggestion document scans.
     if (isMobileRef.current && empty) {
       const pos = view.state.selection.head
-      const parser = handleRef.current
-        ? handleRef.current.editor.action((ctx) =>
-            sourceParser(doc.content_format, ctx.get(parserCtx), ctx.get(schemaCtx)),
-          )
-        : null
-      const hit = parser
-        ? suggestionsRef.current.find((s) => {
-            const range = findSuggestionTarget(
-              view.state.doc,
-              parser,
-              s.replaces ?? s.anchor_text,
-              doc.content_format,
-            )
-            return range !== null && pos >= range.from && pos <= range.to
-          })
-        : undefined
+      const hit = reviewItemsRef.current.find(
+        (item) =>
+          !item.inline && item.range && pos >= item.range.from && pos <= item.range.to,
+      )
       if (hit) {
-        setSheetFocusId(hit.id)
+        setSheetFocusKey(hit.key)
         setActiveSheet('suggestions')
         setCommentTarget(null)
         setReviewTarget(null)
@@ -718,7 +733,7 @@ export default function DocumentShow({
 
     const span = aiSpanAt(view.state)
     setReviewTarget(span ? { span } : null)
-  }, [doc.content_format])
+  }, [])
 
   // Review/selection chrome belongs to the text that opened it. ProseMirror
   // does not dispatch a selection transaction when focus moves to page
@@ -796,230 +811,6 @@ export default function DocumentShow({
     applyReviewState(view, span, state)
   }, [])
 
-  const reopenSuggestion = useCallback(
-    async (suggestionId: number): Promise<boolean> => {
-      try {
-        const response = await patchJSON(`/suggestions/${suggestionId}/reopen`, {
-          by: identity.name,
-        })
-        if (response.ok) return true
-        console.warn('pruf: suggestion reopen rejected', suggestionId, response.status)
-      } catch (error) {
-        console.warn('pruf: suggestion reopen failed', suggestionId, error)
-      }
-      return false
-    },
-    [identity.name],
-  )
-
-  // Promise-based single accept, shared by the per-card button and Accept
-  // all. The card clears optimistically, but the CRDT insert waits for the
-  // server to confirm THIS client won the accept — otherwise two windows
-  // accepting concurrently would each insert the text (the loser's PATCH
-  // 422s, but a local-first insert could not be rolled back). The promise
-  // settles on finish regardless of outcome so a bulk loop never stalls on
-  // a suggestion someone else resolved first.
-  const acceptOne = useCallback(
-    (suggestion: SuggestionPayload) =>
-      new Promise<void>((resolve) => {
-        // Optimistic placeholders (negative id) have no server row yet —
-        // a PATCH against them would 404.
-        if (!handle || suggestion.id < 0) {
-          resolve()
-          return
-        }
-        const applicability = suggestionApplicability(
-          handle.editor,
-          suggestion,
-          doc.content_format,
-        )
-        if (!applicability.ok) {
-          setSuggestionNotice(
-            applicability.reason === 'ambiguous'
-              ? 'This quoted text appears more than once. The suggestion is still pending so no content was changed.'
-              : applicability.reason === 'missing'
-                ? 'The quoted text has changed or was removed. The suggestion is still pending so no content was changed.'
-                : 'This suggestion has no editable content and was left pending.',
-          )
-          resolve()
-          return
-        }
-        router
-          .optimistic((props: Partial<DocumentProps>) => ({
-            suggestions: (props.suggestions ?? []).filter((s) => s.id !== suggestion.id),
-          }))
-          .patch(
-            `/suggestions/${suggestion.id}/accept`,
-            { by: identity.name },
-            {
-              preserveScroll: true,
-              only: ['suggestions', 'activities'],
-              async: true,
-              onSuccess: () => {
-                const merged = applySuggestion(handle.editor, suggestion, doc.content_format)
-                // A one-beat pulse on the merged text — the reward for review.
-                if (merged) {
-                  flashMergedRange(handle.editor, merged)
-                } else {
-                  void reopenSuggestion(suggestion.id).then((reopened) => {
-                    setSuggestionNotice(
-                      reopened
-                        ? 'The document changed before this suggestion could be merged. It was returned to pending.'
-                        : 'The document changed before this suggestion could be merged, and Thinkroom could not restore it to pending. Refresh before reviewing it again.',
-                    )
-                    router.reload({ only: ['suggestions', 'activities'], async: true })
-                  })
-                }
-              },
-              onFinish: () => resolve(),
-            },
-          )
-      }),
-    [handle, identity.name, doc.content_format, reopenSuggestion],
-  )
-
-  const acceptSuggestion = useCallback(
-    (suggestion: SuggestionPayload) => {
-      void acceptOne(suggestion)
-    },
-    [acceptOne],
-  )
-
-  // Accept all applicable suggestions in ONE round trip: the server flips
-  // the selected rows atomically and returns the winners, then the bodies
-  // merge into the CRDT locally in id order — each merge re-anchors against the
-  // post-merge document, exactly as if the cards were clicked one by one,
-  // minus the per-card network wait. Cards hide optimistically while the
-  // request is in flight; the broadcast-driven props reload makes the
-  // clearing durable, and a failed request lets the cards reappear.
-  const [acceptingSuggestionIds, setAcceptingSuggestionIds] = useState<Set<number>>(
-    () => new Set(),
-  )
-  const acceptingAll = acceptingSuggestionIds.size > 0
-  const acceptAllSuggestions = useCallback(async () => {
-    if (acceptingAll || !handleRef.current) return
-    const pending = suggestionsRef.current.filter((s) => s.id > 0)
-    if (pending.length === 0) return
-    const applicable: SuggestionPayload[] = []
-    const blocked: SuggestionPayload[] = []
-    for (const suggestion of pending) {
-      const result = suggestionApplicability(
-        handleRef.current.editor,
-        suggestion,
-        doc.content_format,
-      )
-      if (result.ok) {
-        applicable.push(suggestion)
-      } else {
-        blocked.push(suggestion)
-      }
-    }
-    if (applicable.length === 0) {
-      setSuggestionNotice(skippedSuggestionNotice(blocked.length))
-      return
-    }
-    setSuggestionNotice(null)
-    setAcceptingSuggestionIds(new Set(applicable.map((suggestion) => suggestion.id)))
-    let succeeded = false
-    try {
-      const response = await patchJSON(`/d/${doc.slug}/suggestions/accept_all`, {
-        by: identity.name,
-        ids: applicable.map((suggestion) => suggestion.id),
-      })
-      if (response.ok) {
-        const { accepted } = (await response.json()) as { accepted: SuggestionPayload[] }
-        let reopened = 0
-        let reopenFailed = 0
-        for (const suggestion of accepted) {
-          // Live handle: the editor can remount during the awaits above.
-          const live = handleRef.current
-          if (!live) {
-            if (await reopenSuggestion(suggestion.id)) {
-              reopened += 1
-            } else {
-              reopenFailed += 1
-            }
-            continue
-          }
-          try {
-            const merged = applySuggestion(live.editor, suggestion, doc.content_format)
-            if (merged) {
-              flashMergedRange(live.editor, merged)
-            } else if (await reopenSuggestion(suggestion.id)) {
-              reopened += 1
-            } else {
-              reopenFailed += 1
-            }
-          } catch (error) {
-            console.warn('pruf: bulk merge failed for suggestion', suggestion.id, error)
-            if (await reopenSuggestion(suggestion.id)) {
-              reopened += 1
-            } else {
-              reopenFailed += 1
-            }
-          }
-        }
-        const notices: string[] = []
-        if (blocked.length > 0) {
-          notices.push(skippedSuggestionNotice(blocked.length))
-        }
-        if (reopenFailed > 0) {
-          notices.push(
-            `${reopenFailed} suggestion${reopenFailed === 1 ? '' : 's'} could not be restored to pending after the document changed. Refresh before reviewing again.`,
-          )
-        } else if (reopened > 0) {
-          notices.push(
-            `${reopened} suggestion${reopened === 1 ? '' : 's'} changed before merging and returned to pending.`,
-          )
-        }
-        setSuggestionNotice(notices.length > 0 ? notices.join(' ') : null)
-        succeeded = true
-      } else {
-        console.warn('pruf: accept all rejected', response.status)
-      }
-    } catch (error) {
-      console.warn('pruf: accept all failed', error)
-    } finally {
-      if (succeeded) {
-        // Hold the optimistic clearing until fresh props land — releasing
-        // before the reload finishes flashes the accepted cards (and the
-        // header button) back for a full round trip. The broadcast-driven
-        // debounced reload still covers every other client.
-        router.reload({
-          only: ['suggestions', 'activities'],
-          async: true,
-          onFinish: () => setAcceptingSuggestionIds(new Set()),
-        })
-      } else {
-        // Failure: release immediately so the cards reappear (rollback).
-        setAcceptingSuggestionIds(new Set())
-      }
-    }
-  }, [acceptingAll, doc.slug, doc.content_format, identity.name, reopenSuggestion])
-
-  // Optimistic clearing for the bulk path: server-backed cards vanish the
-  // moment Accept all is clicked; optimistic placeholders (negative ids,
-  // not part of the batch) and blocked suggestions stay visible.
-  const visibleSuggestions = acceptingAll
-    ? suggestions.filter((s) => !acceptingSuggestionIds.has(s.id))
-    : suggestions
-
-  const rejectSuggestion = useCallback(
-    (suggestion: SuggestionPayload) => {
-      if (suggestion.id < 0) return
-      router
-        .optimistic((props: Partial<DocumentProps>) => ({
-          suggestions: (props.suggestions ?? []).filter((s) => s.id !== suggestion.id),
-        }))
-        .patch(
-          `/suggestions/${suggestion.id}/reject`,
-          { by: identity.name },
-          { preserveScroll: true, only: ['suggestions', 'activities'], async: true },
-        )
-    },
-    [identity.name],
-  )
-
   const submitComment = useCallback(
     (body: string, anchorText: string | null) => {
       setComposerAnchor(null)
@@ -1064,43 +855,6 @@ export default function DocumentShow({
     },
     [identity.name],
   )
-
-  // Doc-native tracked edits (Suggest-mode typing), re-derived from the
-  // marks whenever the Yjs doc changes. The Yjs 'update' event is the
-  // recompute signal — NOT the Milkdown listener, which skips
-  // addToHistory:false transactions and therefore never fires for remote
-  // collaborators' changes (a passive window would never see new cards).
-  // rAF-coalesced so a burst of keystrokes triggers one recompute.
-  const [docTick, setDocTick] = useState(0)
-  useEffect(() => {
-    if (!handle) return
-    let raf = 0
-    const bump = () => {
-      if (raf) return
-      raf = requestAnimationFrame(() => {
-        raf = 0
-        setDocTick((tick) => tick + 1)
-      })
-    }
-    handle.ydoc.on('update', bump)
-    return () => {
-      if (raf) cancelAnimationFrame(raf)
-      handle.ydoc.off('update', bump)
-    }
-  }, [handle])
-
-  const inlineSuggestions = useMemo(() => {
-    if (!handle) return []
-    try {
-      return handle.editor.action((ctx) =>
-        collectInlineSuggestions(ctx.get(editorViewCtx).state.doc),
-      )
-    } catch {
-      return []
-    }
-    // docTick (local + remote Yjs updates) drives the re-derivation.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [handle, docTick])
 
   // ---- Floating chrome placement (measured, selection-centered) ----
 
@@ -1239,9 +993,6 @@ export default function DocumentShow({
     },
     [submitComment, composerAnchor],
   )
-
-  // Server-backed pending suggestions — the population Accept all covers.
-  const pendingSuggestionCount = visibleSuggestions.filter((s) => s.id > 0).length
 
   const jumpToAnchor = useCallback((anchorText: string) => {
     const view = viewRef.current
@@ -1556,24 +1307,14 @@ export default function DocumentShow({
             />
             {!isReading && (
               <div className="margin-gutter">
-                <MarginInlineSuggestions
-                  inline={inlineSuggestions}
-                  handle={handle}
-                  spans={spans}
-                  focusMode={focusMode || isMobile}
-                />
                 <MarginSuggestions
-                  suggestions={visibleSuggestions}
+                  items={reviewItems}
                   handle={handle}
-                  spans={spans}
                   focusMode={focusMode || isMobile}
-                  contentFormat={doc.content_format}
-                  onAccept={acceptSuggestion}
-                  onReject={rejectSuggestion}
                   onMarkerSelect={
                     isMobile
-                      ? (suggestion) => {
-                          setSheetFocusId(suggestion.id)
+                      ? (item: ReviewableSuggestion) => {
+                          setSheetFocusKey(item.key)
                           setActiveSheet('suggestions')
                         }
                       : undefined
@@ -1648,7 +1389,7 @@ export default function DocumentShow({
         )}
         {!isReading && isMobile && (
           <MobileDock
-            suggestionCount={visibleSuggestions.length + inlineSuggestions.length}
+            suggestionCount={reviewItems.length}
             commentCount={comments.filter((c) => !c.resolved).length}
             active={activeSheet}
             onOpen={(kind) => setActiveSheet((current) => (current === kind ? null : kind))}
@@ -1656,18 +1397,15 @@ export default function DocumentShow({
         )}
         {!isReading && isMobile && activeSheet === 'suggestions' && (
           <MobileSheet
-            title={`Suggestions${visibleSuggestions.length + inlineSuggestions.length > 0 ? ` · ${visibleSuggestions.length + inlineSuggestions.length}` : ''}`}
+            title={`Suggestions${reviewItems.length > 0 ? ` · ${reviewItems.length}` : ''}`}
             onClose={() => {
               setActiveSheet(null)
-              setSheetFocusId(null)
+              setSheetFocusKey(null)
             }}
           >
-            <InlineSuggestionSheetList inline={inlineSuggestions} handle={handle} />
             <SuggestionSheetList
-              suggestions={visibleSuggestions}
-              focusId={sheetFocusId}
-              onAccept={acceptSuggestion}
-              onReject={rejectSuggestion}
+              items={reviewItems}
+              focusKey={sheetFocusKey}
               onAcceptAll={pendingSuggestionCount > 1 ? acceptAllSuggestions : undefined}
               acceptingAll={acceptingAll}
             />

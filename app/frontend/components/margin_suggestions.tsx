@@ -1,159 +1,75 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { nativeHaptic } from '@ruby-native/react'
-import { editorViewCtx, parserCtx, schemaCtx } from '@milkdown/kit/core'
+import { useCallback, useEffect, useRef } from 'react'
+import { editorViewCtx } from '@milkdown/kit/core'
 import { TextSelection } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import type { EditorHandle } from '../editor/milkdown_editor'
-import type { ProvenanceSpan } from '../editor/provenance'
-import { findSuggestionTarget } from '../editor/suggestions'
-import type { SuggestionPayload } from '../types/payloads'
-import { truncate } from '../lib/truncate'
 import { clearHighlight, domRange, setHighlight, supportsHighlights } from '../lib/highlights'
-import { sourceParser, type DocumentFormat } from '../editor/document_format'
+import { useMarginStack } from '../lib/use_margin_stack'
+import {
+  SuggestionCardBody,
+  useResolveGuard,
+  type ReviewableSuggestion,
+} from './suggestion_card'
 
 interface Props {
-  suggestions: SuggestionPayload[]
+  /** Server rows and doc-native tracked edits, ranges pre-resolved per doc
+   *  version (useSuggestionReview) — new array identity is the remeasure
+   *  signal for local AND remote document changes. */
+  items: ReviewableSuggestion[]
   handle: EditorHandle | null
-  /** Remeasure signal — updates on every document change. */
-  spans: ProvenanceSpan[]
   focusMode: boolean
-  contentFormat: DocumentFormat
-  onAccept: (suggestion: SuggestionPayload) => void
-  onReject: (suggestion: SuggestionPayload) => void
-  /** When set, marker taps open this instead of jumping to the anchor —
-   *  mobile routes markers into the suggestion sheet. */
-  onMarkerSelect?: (suggestion: SuggestionPayload) => void
+  /** When set, marker taps on server rows open this instead of jumping to
+   *  the anchor — mobile routes markers into the suggestion sheet. Tracked
+   *  edits always jump (their marks are visible in the copy). */
+  onMarkerSelect?: (item: ReviewableSuggestion) => void
 }
 
-const CARD_GAP = 10
-
-const anchorOf = (s: SuggestionPayload) => s.replaces ?? s.anchor_text
-
 /**
- * Pending suggestions as cards in the document's right margin, Google-Docs
+ * Pending review items as cards in the document's right margin, Google-Docs
  * style: each card sits at its anchor's vertical position (same scroll
- * context as the copy, so positions are scroll-stable), stacked downward so
- * cards never overlap. Anchored text is tinted via the CSS Custom Highlight
- * API where available.
+ * context as the copy, so positions are scroll-stable), stacked downward in
+ * one shared stack so cards never overlap. Server-row anchors are tinted via
+ * the CSS Custom Highlight API where available; tracked edits are already
+ * tinted by their marks.
  */
-export function MarginSuggestions({
-  suggestions,
-  handle,
-  spans,
-  focusMode,
-  contentFormat,
-  onAccept,
-  onReject,
-  onMarkerSelect,
-}: Props) {
+export function MarginSuggestions({ items, handle, focusMode, onMarkerSelect }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const cardRefs = useRef(new Map<number, HTMLElement>())
-  const rangesRef = useRef(new Map<number, Range>())
-  const [tops, setTops] = useState(new Map<number, number>())
-  // A card animates `top` only once "placed" — flagged a frame after its
-  // first measured position paints — so neither initial layout nor a newly
-  // arrived card slides in from 0.
-  const [placed, setPlaced] = useState<Set<number>>(new Set())
-  const [resolving, setResolving] = useState<Set<number>>(new Set())
-  const [resizeTick, setResizeTick] = useState(0)
+  const rangesRef = useRef(new Map<string, Range>())
 
-  // Forget per-card flags for suggestions that left the props.
-  useEffect(() => {
-    const ids = new Set(suggestions.map((s) => s.id))
-    const prune = (prev: Set<number>) => {
-      const next = new Set([...prev].filter((id) => ids.has(id)))
-      return next.size === prev.size ? prev : next
-    }
-    setResolving(prune)
-    setPlaced(prune)
-  }, [suggestions])
-
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | null = null
-    const remeasure = () => {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(() => setResizeTick((t) => t + 1), 150)
-    }
-    // Images loading into the copy reflow everything below them — anchors
-    // move, so positions must be recomputed (load doesn't bubble; capture).
-    const onLoad = (event: Event) => {
-      if ((event.target as HTMLElement | null)?.tagName === 'IMG') remeasure()
-    }
-    window.addEventListener('resize', remeasure)
-    document.addEventListener('load', onLoad, true)
-    return () => {
-      if (timer) clearTimeout(timer)
-      window.removeEventListener('resize', remeasure)
-      document.removeEventListener('load', onLoad, true)
-    }
-  }, [])
-
-  // Two-pass measure: cards render, then tops are assigned before paint —
-  // desired top is the anchor's y in the shared scroll context, pushed down
-  // past the previous card so the stack never overlaps.
-  useLayoutEffect(() => {
+  const { tops, placed, setCardRef } = useMarginStack<string>(() => {
     const container = containerRef.current
-    if (!container || !handle) return
+    if (!container || !handle) return null
 
     let view: EditorView
-    let parser: Parameters<typeof findSuggestionTarget>[1]
     try {
-      ;({ view, parser } = handle.editor.action((ctx) => ({
-        view: ctx.get(editorViewCtx),
-        parser: sourceParser(contentFormat, ctx.get(parserCtx), ctx.get(schemaCtx)),
-      })))
+      view = handle.editor.action((ctx) => ctx.get(editorViewCtx))
     } catch {
-      return // editor torn down mid-navigation
+      return null // editor torn down mid-navigation
     }
 
     const containerTop = container.getBoundingClientRect().top
-    const docEnd = Math.max(0, view.state.doc.content.size - 1)
+    const docSize = view.state.doc.content.size
+    const docEnd = Math.max(0, docSize - 1)
     rangesRef.current = new Map()
 
-    const entries = suggestions.map((s) => {
-      const range = findSuggestionTarget(view.state.doc, parser, anchorOf(s), contentFormat)
-      if (range) {
-        const dom = domRange(view, range.from, range.to)
-        if (dom) rangesRef.current.set(s.id, dom)
+    const entries = items.map((item) => {
+      const range = item.range
+      if (range && !item.inline) {
+        const dom = domRange(view, Math.min(range.from, docSize), Math.min(range.to, docSize))
+        if (dom) rangesRef.current.set(item.key, dom)
       }
       let top = 0
       try {
-        top = view.coordsAtPos(range ? range.from : docEnd).top - containerTop
+        top = view.coordsAtPos(range ? Math.min(range.from, docSize) : docEnd).top - containerTop
       } catch {
         top = 0
       }
-      return { id: s.id, top: Math.max(0, top) }
-    })
-
-    entries.sort((a, b) => a.top - b.top)
-    const next = new Map<number, number>()
-    let prevBottom = -CARD_GAP
-    for (const entry of entries) {
-      const height = cardRefs.current.get(entry.id)?.offsetHeight ?? 0
-      const top = Math.max(entry.top, prevBottom + CARD_GAP)
-      next.set(entry.id, top)
-      prevBottom = top + height
-    }
-    setTops((prev) => {
-      if (prev.size === next.size && [...next].every(([id, top]) => prev.get(id) === top)) {
-        return prev
-      }
-      return next
-    })
-
-    // Flag fresh cards as placed on the next frame (first top paints first).
-    const raf = requestAnimationFrame(() => {
-      setPlaced((prev) => {
-        if (entries.every((entry) => prev.has(entry.id))) return prev
-        const grown = new Set(prev)
-        entries.forEach((entry) => grown.add(entry.id))
-        return grown
-      })
+      return { key: item.key, top: Math.max(0, top) }
     })
 
     setHighlight('sug-anchor', [...rangesRef.current.values()])
-    return () => cancelAnimationFrame(raf)
-  }, [suggestions, spans, handle, focusMode, resizeTick, contentFormat])
+    return entries
+  }, [items, handle, focusMode])
 
   useEffect(() => {
     if (!supportsHighlights) return
@@ -163,28 +79,22 @@ export function MarginSuggestions({
     }
   }, [])
 
-  const hover = useCallback((id: number | null) => {
-    const range = id === null ? null : rangesRef.current.get(id)
+  const hover = useCallback((key: string | null) => {
+    const range = key === null ? null : rangesRef.current.get(key)
     if (range) setHighlight('sug-anchor-hot', [range])
     else clearHighlight('sug-anchor-hot')
   }, [])
 
-  const jumpToSuggestion = useCallback(
-    (suggestion: SuggestionPayload) => {
-      if (!handle) return
+  const jumpTo = useCallback(
+    (item: ReviewableSuggestion) => {
+      if (!handle || !item.range) return
+      const { from, to } = item.range
       try {
         handle.editor.action((ctx) => {
           const view = ctx.get(editorViewCtx)
-          const parser = sourceParser(contentFormat, ctx.get(parserCtx), ctx.get(schemaCtx))
-          const range = findSuggestionTarget(
-            view.state.doc,
-            parser,
-            anchorOf(suggestion),
-            contentFormat,
-          )
-          if (!range) return
+          const max = view.state.doc.content.size
           const tr = view.state.tr.setSelection(
-            TextSelection.create(view.state.doc, range.from, range.to),
+            TextSelection.create(view.state.doc, Math.min(from, max), Math.min(to, max)),
           )
           tr.scrollIntoView()
           view.dispatch(tr)
@@ -193,93 +103,48 @@ export function MarginSuggestions({
         // editor torn down mid-navigation
       }
     },
-    [handle, contentFormat],
+    [handle],
   )
 
-  const resolve = (suggestion: SuggestionPayload, action: (s: SuggestionPayload) => void) => {
-    // Guard repeat clicks — a second accept would insert the text twice.
-    if (resolving.has(suggestion.id)) return
-    setResolving((prev) => new Set(prev).add(suggestion.id))
-    action(suggestion)
-  }
-
-  const setCardRef = (id: number) => (el: HTMLElement | null) => {
-    if (el) cardRefs.current.set(id, el)
-    else cardRefs.current.delete(id)
-  }
+  const { resolving, resolve } = useResolveGuard(items)
 
   return (
     <div className="margin-suggestions" ref={containerRef} aria-label="Pending suggestions">
-      {suggestions.map((suggestion) => {
-        const machine = suggestion.author_kind !== 'human'
+      {items.map((item) => {
         if (focusMode) {
           return (
             <button
-              key={suggestion.id}
-              ref={setCardRef(suggestion.id)}
-              className={`margin-marker ${placed.has(suggestion.id) ? 'is-placed' : ''}`}
-              style={{ top: tops.get(suggestion.id) ?? 0 }}
-              title={`${machine ? '✦ ' : ''}${suggestion.author_name}${suggestion.intent ? ` — ${suggestion.intent}` : ''}`}
-              onMouseEnter={() => hover(suggestion.id)}
+              key={item.key}
+              ref={setCardRef(item.key)}
+              className={`margin-marker ${item.inline ? 'margin-marker--inline ' : ''}${placed.has(item.key) ? 'is-placed' : ''}`}
+              style={{ top: tops.get(item.key) ?? 0 }}
+              title={item.markerTitle}
+              onMouseEnter={() => hover(item.key)}
               onMouseLeave={() => hover(null)}
               onClick={() =>
-                onMarkerSelect ? onMarkerSelect(suggestion) : jumpToSuggestion(suggestion)
+                onMarkerSelect && !item.inline ? onMarkerSelect(item) : jumpTo(item)
               }
             />
           )
         }
         return (
           <div
-            key={suggestion.id}
-            ref={setCardRef(suggestion.id)}
-            data-suggestion-id={suggestion.id}
-            className={`margin-card ${placed.has(suggestion.id) ? 'is-placed' : ''}`}
-            style={{ top: tops.get(suggestion.id) ?? 0 }}
-            onMouseEnter={() => hover(suggestion.id)}
+            key={item.key}
+            ref={setCardRef(item.key)}
+            data-suggestion-key={item.key}
+            className={`margin-card ${item.inline ? 'margin-card--inline ' : ''}${placed.has(item.key) ? 'is-placed' : ''}`}
+            style={{ top: tops.get(item.key) ?? 0 }}
+            onMouseEnter={() => hover(item.key)}
             onMouseLeave={() => hover(null)}
-            onClick={() => jumpToSuggestion(suggestion)}
+            onClick={() => jumpTo(item)}
           >
-            <div className="suggestion-meta">
-              <span className={`author-chip author-chip--${suggestion.author_kind}`}>
-                {machine && <span aria-hidden>✦ </span>}
-                {suggestion.author_name}
-              </span>
-              {suggestion.intent && (
-                <span className="suggestion-intent">{suggestion.intent}</span>
-              )}
-            </div>
-            {suggestion.replaces && (
-              <del className="margin-old">{truncate(suggestion.replaces, 120)}</del>
-            )}
-            <p className="margin-new">{truncate(suggestion.body, 280)}</p>
-            {/* Optimistic placeholders (negative id) have no server row yet —
-                hide actions until the real id arrives from the reload. */}
-            {suggestion.id > 0 && (
-            <div className="suggestion-actions">
-              <button
-                className="btn-accept"
-                disabled={resolving.has(suggestion.id)}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  resolve(suggestion, onAccept)
-                }}
-                {...nativeHaptic('success')}
-              >
-                Accept
-              </button>
-              <button
-                className="btn-reject"
-                disabled={resolving.has(suggestion.id)}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  resolve(suggestion, onReject)
-                }}
-                {...nativeHaptic('warning')}
-              >
-                Reject
-              </button>
-            </div>
-            )}
+            <SuggestionCardBody
+              item={item}
+              oldLimit={120}
+              newLimit={280}
+              disabled={resolving.has(item.key)}
+              onResolve={resolve}
+            />
           </div>
         )
       })}
