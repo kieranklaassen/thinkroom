@@ -1,7 +1,4 @@
-@import 'tailwindcss';
-
-@plugin '@tailwindcss/typography';
-@plugin '@tailwindcss/forms';
+@import './reset.css';
 
 /* ---------------------------------------------------------------------------
  * Design tokens. The default Thinkroom theme retains the legacy "proof" key
