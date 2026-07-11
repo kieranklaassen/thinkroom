@@ -42,7 +42,7 @@ export function collectInlineSuggestions(doc: Node): InlineSuggestion[] {
       entry.to = Math.max(entry.to, pos + node.nodeSize)
 
       // Strip the zero-width spaces the library inserts at block boundaries.
-      const text = node.text.replace(/​/g, '')
+      const text = node.text.replace(/\u200B/g, '')
       if (name === INSERTION_MARK && entry.insertedText.length < TEXT_LIMIT) {
         entry.insertedText = (entry.insertedText + text).slice(0, TEXT_LIMIT)
       } else if (name === DELETION_MARK && entry.deletedText.length < TEXT_LIMIT) {

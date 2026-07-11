@@ -1,0 +1,480 @@
+/* ----------------------------- Editor typography ------------------------- */
+/* The height reservation lives on the persistent editor mount (not a
+   transient placeholder) so the layout below the editor never shifts while
+   Milkdown finishes binding — any residual pre-content frames are blank
+   within a stable layout, never a pop. */
+.milkdown {
+  outline: none;
+  min-height: 50vh;
+}
+
+/* Instant first paint: a server-rendered prose preview and the live editor
+   share one stacking context. The preview (in flow) holds the layout height;
+   the live editor overlays it while Milkdown boots and binds the synced state,
+   painting its content directly over the identical preview. Once painted, the
+   preview is dropped and the editor returns to normal flow. The preview stays
+   behind the editor until that handoff, so content is never blank — it is
+   replaced, not deleted and re-added. */
+.doc-editor-stack {
+  position: relative;
+  min-height: 50vh;
+}
+
+/* booting + revealing: the editor is an absolute overlay sharing the preview's
+   box; it doesn't intercept pointer events until it owns the flow at 'live'. */
+.doc-editor-stack[data-phase='booting'] .doc-live-editor,
+.doc-editor-stack[data-phase='revealing'] .doc-live-editor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Exactly ONE text layer is ever visible — no doubled/ghosted text at the swap.
+   ProseMirror paints its content during boot, so a transparent editor overlaid
+   on the visible preview would render the same text twice (heavier/anti-aliased
+   shimmer), then drop to one layer when the preview is removed — a visible
+   flicker. Instead: while booting the preview is the sole visible layer and the
+   editor stays hidden behind it (still laid out, so Milkdown measures fine). The
+   instant the editor has painted (revealing, fired on onReady) we flip in a
+   single style recalc — reveal the editor and hide the preview — same content at
+   the same position, so the text never doubles and never blanks. */
+.doc-editor-stack[data-phase='booting'] .doc-live-editor {
+  visibility: hidden;
+}
+.doc-editor-stack[data-phase='revealing'] .doc-static-preview {
+  visibility: hidden;
+}
+
+.doc-static-preview {
+  user-select: none;
+}
+
+/* Sketches and tables can use the screen's visual bandwidth without making
+   prose harder to read. Read/focus layouts grow around the prose center;
+   review layouts hold the gutter-side edge steady and grow into open space. */
+.milkdown .ProseMirror > .thinkroom-sketch,
+.milkdown .ProseMirror > .milkdown-table-block,
+.milkdown .ProseMirror > pre:not([data-language='mermaid']),
+.milkdown .ProseMirror > figure.mermaid-diagram {
+  position: relative;
+  width: min(max(100%, var(--rich-content-width)), calc(100vw - 3rem));
+  max-width: none;
+  margin-left: 50%;
+  transform: translateX(-50%);
+}
+
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .thinkroom-sketch,
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .milkdown-table-block,
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > pre:not([data-language='mermaid']),
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > figure.mermaid-diagram {
+  /* The activity rail shares the centered body row. Half of its width
+     shifts the canvas left, so include it when deriving the safe left edge. */
+  width: min(
+    max(100%, var(--rich-content-width)),
+    calc(50vw + 50% - var(--review-gutter-half-width) - var(--activity-rail-half-width) - 1.5rem)
+  );
+  margin-left: 100%;
+  transform: translateX(-100%);
+}
+
+:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .thinkroom-sketch,
+:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > .milkdown-table-block,
+:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > pre:not([data-language='mermaid']),
+:where(.doc-page.is-panel-hidden:not(.is-read-mode) .doc-canvas:not(.is-focus)) .milkdown .ProseMirror > figure.mermaid-diagram {
+  width: min(
+    max(100%, var(--rich-content-width)),
+    calc(50vw + 50% - var(--review-gutter-half-width) - 1.5rem)
+  );
+}
+
+/* Focus collapses suggestion cards but intentionally leaves the activity rail.
+   Keep the breakout centered on prose while respecting the nearer viewport edge. */
+:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > .thinkroom-sketch,
+:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > .milkdown-table-block,
+:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > pre:not([data-language='mermaid']),
+:where(.doc-page:not(.is-panel-hidden) .doc-canvas.is-focus) .milkdown .ProseMirror > figure.mermaid-diagram {
+  width: min(
+    max(100%, var(--rich-content-width)),
+    max(100%, calc(100vw - var(--review-gutter-width) - var(--activity-rail-width) - 3rem))
+  );
+}
+
+.rich-block-width-handle {
+  position: absolute;
+  z-index: 8;
+  top: 50%;
+  right: -10px;
+  display: grid;
+  width: 20px;
+  height: 48px;
+  place-items: center;
+  margin: 0;
+  border: 0;
+  border-radius: 999px;
+  outline: none;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: col-resize;
+  opacity: 0.52;
+  padding: 0;
+  touch-action: none;
+  transform: translateY(-50%);
+  transition: color 140ms ease, opacity 140ms ease;
+}
+
+.rich-block-width-handle::before {
+  position: absolute;
+  inset: 0 2px;
+  border: 1px solid color-mix(in srgb, var(--ink-faint) 42%, transparent);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--surface-raised) 90%, transparent);
+  box-shadow: 0 1px 5px rgb(0 0 0 / 5%);
+  content: '';
+}
+
+.rich-block-width-handle span {
+  position: relative;
+  font: 600 7px/1 var(--font-ui);
+  letter-spacing: -1px;
+  writing-mode: vertical-rl;
+}
+
+.rich-block-width-handle:hover,
+.rich-block-width-handle:focus-visible,
+.rich-block-width-handle.is-dragging {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.rich-block-width-handle:focus-visible::before {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+:where(.doc-page:not(.is-read-mode) .doc-canvas:not(.is-focus)) .rich-block-width-handle {
+  right: auto;
+  left: -10px;
+}
+
+/* ------------------- Static preview parity (first paint) ------------------
+   The server preview reuses the live editor's own markup and classes
+   (.thinkroom-sketch, .mermaid-diagram, .milkdown-table-block), so almost all
+   styling parity is free. The rules below cover the few editor behaviors that
+   are driven by JS/marks rather than markup. */
+
+/* Uploaded images ship width/height attributes (Active Storage metadata) so
+   their box is reserved before the file loads; height must stay aspect-driven
+   once max-width constrains them, exactly like the editor's attribute-less
+   images. */
+.doc-static-preview .ProseMirror img[width][height] {
+  height: auto;
+}
+
+/* Provenance and suggestion tints for the static preview live grouped with
+   the editor's own tint rules (see "Provenance tints" below) so the two
+   layers can never drift apart — a tint drift is exactly the color flash at
+   the preview → editor swap this file works to prevent. */
+
+.milkdown .ProseMirror {
+  outline: none;
+  font-family: var(--font-doc);
+  font-size: 1.0625rem;
+  line-height: 1.72;
+  color: var(--ink);
+  caret-color: var(--accent);
+}
+
+.milkdown .ProseMirror > * + * {
+  margin-top: 0.85em;
+}
+
+.milkdown .ProseMirror > :first-child {
+  margin-top: 0;
+}
+
+.milkdown .ProseMirror h1,
+.milkdown .ProseMirror h2,
+.milkdown .ProseMirror h3 {
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+/* Headings bind to their section: generous space above (set per level
+   below), tight below — the element FOLLOWING a heading sits close. */
+.milkdown .ProseMirror h1 + *,
+.milkdown .ProseMirror h2 + *,
+.milkdown .ProseMirror h3 + * {
+  margin-top: 0.5em;
+}
+
+.milkdown .ProseMirror h1 {
+  font-size: 2rem;
+  margin-top: 0;
+}
+
+.milkdown .ProseMirror h2 {
+  font-size: 1.45rem;
+  margin-top: 1.6em;
+}
+
+.milkdown .ProseMirror h3 {
+  font-size: 1.15rem;
+  margin-top: 1.3em;
+}
+
+/* Stacked headings bind tighter than the per-level margins above — these
+   come AFTER them in source so the adjacency actually wins the cascade. */
+.milkdown .ProseMirror h1 + h2,
+.milkdown .ProseMirror h2 + h3 {
+  margin-top: 0.75em;
+}
+
+.milkdown .ProseMirror a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-color: var(--accent-soft);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.milkdown .ProseMirror a:hover {
+  text-decoration-color: var(--accent);
+}
+
+/* No forced italic: long italic serif passages tire the eye — the ink
+   shift + border carry the quote (this also unifies proof with whitey,
+   which already overrode the italic). */
+.milkdown .ProseMirror blockquote {
+  border-left: 3px solid var(--line);
+  padding-left: 1.1em;
+  color: var(--ink-soft);
+}
+
+.milkdown .ProseMirror ul,
+.milkdown .ProseMirror ol {
+  padding-left: 1.5em;
+}
+
+.milkdown .ProseMirror ul {
+  list-style: disc;
+}
+
+.milkdown .ProseMirror ol {
+  list-style: decimal;
+}
+
+.milkdown .ProseMirror li {
+  margin: 0.25em 0;
+  padding-left: 0.2em;
+}
+
+/* Muted markers — full-ink bullets shout (Tailwind Typography's move). */
+.milkdown .ProseMirror li::marker {
+  color: var(--ink-faint);
+}
+
+/* Task lists use a native checkbox node view. The control lives outside the
+   ProseMirror content DOM, so toggling updates the node attribute without
+   inserting UI markup into serialized Markdown. */
+.milkdown .ProseMirror li[data-item-type='task'] {
+  list-style: none;
+  position: relative;
+}
+
+.milkdown .ProseMirror .task-checkbox-control {
+  position: absolute;
+  left: -1.45em;
+  top: 0.3em;
+  display: inline-grid;
+  width: 1em;
+  height: 1em;
+  grid-template-columns: 1fr;
+}
+
+.milkdown .ProseMirror .task-checkbox,
+.milkdown .ProseMirror .task-checkbox-icon {
+  grid-column: 1;
+  grid-row: 1;
+  width: 100%;
+  height: 100%;
+}
+
+.milkdown .ProseMirror .task-checkbox {
+  appearance: none;
+  margin: 0;
+  border: 1.5px solid var(--ink-faint);
+  border-radius: 4px;
+  background: var(--surface-raised);
+  cursor: pointer;
+}
+
+.milkdown .ProseMirror .task-checkbox:not(:disabled):hover {
+  border-color: var(--accent);
+}
+
+.milkdown .ProseMirror .task-checkbox:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.milkdown .ProseMirror .task-checkbox:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.milkdown .ProseMirror .task-checkbox-icon {
+  pointer-events: none;
+  place-self: center;
+  stroke: var(--surface-raised);
+}
+
+.milkdown .ProseMirror .task-checkbox:not(:checked) + .task-checkbox-icon {
+  opacity: 0;
+}
+
+.milkdown .ProseMirror .task-checkbox:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.milkdown .ProseMirror li[data-item-type='task'][data-checked='true'] {
+  color: var(--ink-soft);
+}
+
+@media (max-width: 40rem) {
+  .milkdown .ProseMirror .task-checkbox-control {
+    left: -1.55em;
+    width: 1.15em;
+    height: 1.15em;
+  }
+}
+
+@media (forced-colors: active) {
+  .milkdown .ProseMirror .task-checkbox {
+    appearance: auto;
+  }
+
+  .milkdown .ProseMirror .task-checkbox-icon {
+    display: none;
+  }
+}
+
+.milkdown .ProseMirror del {
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  color: var(--ink-soft);
+}
+
+.milkdown .ProseMirror code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 0.12em 0.35em;
+}
+
+.milkdown .ProseMirror pre {
+  background: var(--code-bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem 1.15rem;
+  /* Scroll long lines on the inner <code>, not the <pre>: an overflow on the
+     <pre> would clip the rich-block width handle parked just past its edge. */
+  overflow: visible;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.milkdown .ProseMirror pre code {
+  display: block;
+  overflow-x: auto;
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* Mermaid remains a native code block in the document; the figure before it
+   is a derived, disposable preview. That keeps Markdown, collaboration, undo,
+   and exports faithful while making diagrams readable in place. */
+.milkdown .ProseMirror .mermaid-diagram {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  margin: 1.5em 0 0.75em;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: auto;
+  background: color-mix(in srgb, var(--paper) 94%, var(--ink) 6%);
+  padding: 1rem;
+}
+
+.milkdown .ProseMirror .mermaid-diagram-svg {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 70vh;
+}
+
+.milkdown .ProseMirror .mermaid-diagram-status {
+  color: var(--ink-soft);
+  font: 600 0.8rem/1.4 var(--font-ui);
+}
+
+.milkdown .ProseMirror .mermaid-diagram[data-state='error'] {
+  min-height: 96px;
+  border-style: dashed;
+}
+
+.milkdown .ProseMirror .mermaid-diagram + pre[data-language='mermaid'] {
+  position: relative;
+  margin-top: 0;
+}
+
+.milkdown .ProseMirror .mermaid-diagram + pre[data-language='mermaid']::before {
+  content: 'Mermaid source';
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--ink-faint);
+  font: 700 0.68rem/1 var(--font-ui);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.milkdown .ProseMirror[contenteditable='false']
+  .mermaid-diagram:not([data-state='error']) + pre[data-language='mermaid'] {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .milkdown .ProseMirror .mermaid-diagram {
+    min-height: 150px;
+    margin-inline: -0.25rem;
+    padding: 0.75rem;
+  }
+}
+
+/* A section break deserves air — owl-conformant: extra space comes from
+   margin-top on the rule and on whatever follows it. */
+.milkdown .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--line);
+}
+
+.milkdown .ProseMirror > hr {
+  margin-top: 3em;
+}
+
+.milkdown .ProseMirror > hr + * {
+  margin-top: 3em;
+}
+
+.milkdown .ProseMirror img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.milkdown .ProseMirror ::selection {
+  background: var(--accent-soft);
+}

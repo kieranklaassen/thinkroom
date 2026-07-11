@@ -1,8 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { useMediaQuery } from '../lib/use_media_query'
-import { useDismissable } from '../lib/use_dismissable'
-import type { LinkAccess } from './ownership_chip'
+import { useCallback, useState } from 'react'
+import { PopoverShell } from './popover_shell'
+import type { LinkAccess } from '../types/payloads'
 
 const LINK_ACCESS_HINTS: Record<LinkAccess, string> = {
   edit: 'Anyone with the link can open and edit this live document.',
@@ -35,22 +33,8 @@ export function SharePopover({
   /** Lets the page suppress selection chrome while the popover is open. */
   onOpenChange?: (open: boolean) => void
 }) {
-  const [open, setOpenState] = useState(false)
   const [copied, setCopied] = useState<'link' | 'agent' | null>(null)
   const [exportState, setExportState] = useState<'markdown' | 'html' | 'print' | 'error' | null>(null)
-  const rootRef = useRef<HTMLDivElement>(null)
-  const popoverRef = useRef<HTMLDivElement>(null)
-  // The sticky header's backdrop-filter makes it the containing block for
-  // fixed descendants — so the mobile full-width sheet must portal to body.
-  const isMobile = useMediaQuery('(max-width: 48rem)')
-
-  const setOpen = useCallback((next: boolean | ((value: boolean) => boolean)) => {
-    setOpenState((value) => (typeof next === 'function' ? next(value) : next))
-  }, [])
-
-  useEffect(() => {
-    onOpenChange?.(open)
-  }, [onOpenChange, open])
 
   const url = typeof window === 'undefined' ? '' : window.location.href
 
@@ -89,15 +73,22 @@ export function SharePopover({
 
   const exportBusy = exportState !== null && exportState !== 'error'
 
-  useDismissable(open, () => setOpen(false), [rootRef, popoverRef])
-
-  const popover = (
-    <div
-      className="share-popover"
-      ref={popoverRef}
-      role="dialog"
-      aria-label="Share this document"
-      onClick={(event) => event.stopPropagation()}
+  return (
+    <PopoverShell
+      rootClassName="share-root"
+      popoverClassName="share-popover"
+      popoverLabel="Share this document"
+      onOpenChange={onOpenChange}
+      trigger={({ open, toggle }) => (
+        <button
+          className="share-button"
+          aria-expanded={open}
+          aria-haspopup="dialog"
+          onClick={toggle}
+        >
+          Share
+        </button>
+      )}
     >
       <div className="share-section">
         <div className="share-section-title">Share link</div>
@@ -163,28 +154,6 @@ export function SharePopover({
           </p>
         )}
       </div>
-    </div>
-  )
-
-  return (
-    <div className="share-root" ref={rootRef}>
-      <button
-        className="share-button"
-        aria-expanded={open}
-        aria-haspopup="dialog"
-        onClick={() => setOpen((v) => !v)}
-      >
-        Share
-      </button>
-      {open &&
-        (isMobile
-          ? createPortal(
-              <div className="share-backdrop" onClick={() => setOpen(false)}>
-                {popover}
-              </div>,
-              document.body,
-            )
-          : popover)}
-    </div>
+    </PopoverShell>
   )
 }

@@ -150,7 +150,7 @@ const buildSketchView = (
                 zoom: { value: viewport.zoom },
               },
             },
-          },
+          }
       preview.style.height = `${viewport.height}px`
       void renderExactSketchPreview(data.scene, width, viewport).then((exactPreview) => {
         if (!destroyed && exactPreview && generation === previewGeneration) {

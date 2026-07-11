@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useClaim } from '../lib/use_claim'
 import { getStoredFlag, setStoredFlag } from '../lib/local_storage'
-import type { OwnershipPayload } from './ownership_chip'
+import type { OwnershipPayload } from '../types/payloads'
 
 interface Props {
   slug: string

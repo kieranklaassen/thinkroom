@@ -2,8 +2,12 @@
   "private": true,
   "type": "module",
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/rails__actioncable": "^8.0.3",
+    "eslint": "^10.6.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "playwright": "^1.61.1",
+    "typescript-eslint": "^8.63.0",
     "vite": "^8.1.0",
     "vite-plugin-ruby": "^5.2.2"
   },
@@ -18,9 +22,6 @@
     "@milkdown/react": "7.21.2",
     "@rails/actioncable": "^8.1.300",
     "@ruby-native/react": "^0.10.11",
-    "@tailwindcss/forms": "^0.5.11",
-    "@tailwindcss/typography": "^0.5.20",
-    "@tailwindcss/vite": "^4.3.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
@@ -31,7 +32,6 @@
     "remark-frontmatter": "^5.0.0",
     "riffrec": "github:kieranklaassen/riffrec#fb7276c1a3746cb1dba4bb2f2088c2dddf2e89ea",
     "shiki": "^4.3.0",
-    "tailwindcss": "^4.3.1",
     "typescript": "^6.0.3",
     "y-prosemirror": "^1.3.7",
     "y-protocols": "^1.0.7",
@@ -39,7 +39,8 @@
     "yjs": "^13.6.31"
   },
   "scripts": {
-    "check": "tsc -p tsconfig.app.json && tsc -p tsconfig.node.json && npm run check:cli",
+    "check": "tsc -p tsconfig.app.json && tsc -p tsconfig.node.json && npm run check:lint && npm run check:cli",
+    "check:lint": "eslint app/frontend",
     "check:cli": "node --test cli/test/*.test.js",
     "check:exports": "node script/export_check.mjs",
     "check:html": "node script/html_document_check.mjs",

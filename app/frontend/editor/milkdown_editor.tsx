@@ -7,7 +7,6 @@ import {
   editorViewCtx,
   editorViewOptionsCtx,
   rootCtx,
-  schemaCtx,
 } from '@milkdown/kit/core'
 import { commonmark } from '@milkdown/kit/preset/commonmark'
 import { gfm } from '@milkdown/kit/preset/gfm'
@@ -25,14 +24,20 @@ import '@milkdown/kit/prose/view/style/prosemirror.css'
 import '@milkdown/kit/prose/tables/style/tables.css'
 import './table_block.css'
 import './frontmatter/frontmatter.css'
-import { getMarkdown } from '@milkdown/kit/utils'
 import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
 import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight'
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import type { Node as ProseNode } from '@milkdown/kit/prose/model'
-import { TextSelection } from '@milkdown/kit/prose/state'
-import { CableProvider, type DurableSnapshotPayload, type RenderHints } from './cable_provider'
+import type { CableProvider, RenderHints } from './cable_provider'
+import {
+  acquireSession,
+  getSession,
+  markSeedApplied,
+  releaseSession,
+  seedAlreadyApplied,
+} from './collab_session'
+import { buildSnapshotPayload, createSnapshotScheduler } from './snapshots'
 import { gatedCursorAwareness } from './cursor_awareness'
 import { lazyShikiParser, loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
@@ -46,7 +51,6 @@ import {
 } from './provenance'
 import { frontmatter } from './frontmatter'
 import {
-  attrsFromSketchData,
   DEFAULT_SKETCH_HEIGHT,
   EMPTY_SKETCH_SCENE,
   sketchControlsCtx,
@@ -54,6 +58,7 @@ import {
   sketchSchemaPlugins,
   type SketchData,
 } from './sketch'
+import { deleteSketchNode, focusAfterSketchNode, upsertSketchNode } from './sketch/doc_ops'
 import { InlineSketch } from './sketch/sketch_inline'
 import { suggestChangesMarks } from './suggest_changes'
 import { suggestState, suggestDispatch } from './suggest_changes/intercept'
@@ -61,7 +66,6 @@ import { suggestGuard } from './suggest_changes/normalize'
 import {
   enableSuggestChanges,
   disableSuggestChanges,
-  suggestChangesKey,
 } from '@handlewithcare/prosemirror-suggest-changes'
 import {
   alignCenterIcon,
@@ -77,18 +81,16 @@ import { configureCleanClipboard } from './clipboard'
 import { renderSoftBreaks } from './line_breaks'
 import { interactiveTaskListItems, taskPersistenceCtx } from './task_list_items'
 import { selectionCallbackCtx, selectionWatcher } from './selection_watcher'
-import { postJSON } from '../lib/csrf'
+import type { CollaboratorKind } from '../types/payloads'
 import {
   htmlDefaultValue,
   sanitizeHtml,
-  serializeHtml,
   type DocumentFormat,
 } from './document_format'
 import { configureSlashMenu, slashMenu } from './slash_menu'
 import { readPointerAwarenessCtx, readPointers } from './read_pointers'
 import {
   bindMermaidHintPersistence,
-  collectMermaidRenderHints,
   mermaidDiagrams,
   mermaidRenderHintsCtx,
 } from './mermaid'
@@ -102,7 +104,7 @@ export interface EditorHandle {
 
 export type ConnectionStatus = 'connecting' | 'live'
 
-interface EditorProps {
+export interface EditorProps {
   slug: string
   identity: UserIdentity
   contentFormat: DocumentFormat
@@ -117,11 +119,11 @@ interface EditorProps {
   /** True when documents#show atomically claimed the seed for this page
    *  load — the props-first path that skips the WebSocket round-trip. */
   seedGranted?: boolean
-  /** Who authored the seed source ('human' | 'agent' | null). Non-human
-   *  seeds get their text explicitly AI-attributed after the collab
-   *  connection renders them — otherwise seeded text is unmarked and
-   *  counts as human in the provenance summary. */
-  seedAuthorKind?: string | null
+  /** Who authored the seed source. Non-human seeds get their text
+   *  explicitly AI-attributed after the collab connection renders them —
+   *  otherwise seeded text is unmarked and counts as human in the
+   *  provenance summary. */
+  seedAuthorKind?: CollaboratorKind | null
   seedAuthorName?: string | null
   /** Read-only gate for Comment mode. Implemented EXCLUSIVELY as
    *  ProseMirror `editable: () => false` — provider connection, Yjs sync,
@@ -160,7 +162,6 @@ interface ActiveSketch {
   wrapper: HTMLElement
 }
 
-const SNAPSHOT_DEBOUNCE_MS = 900
 const OPENABLE_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:'])
 // Signed Active Storage paths (blob redirect/proxy and the disk service).
 // These URLs authenticate through their own signature, not the session, so
@@ -223,30 +224,6 @@ function openEditorLink(view: EditorView, event: Event): boolean {
 void loadShikiParser()
 const shikiParser = lazyShikiParser()
 
-function buildSnapshotPayload(
-  ctx: Ctx,
-  ydoc: Y.Doc,
-  contentFormat: DocumentFormat,
-): DurableSnapshotPayload {
-  const view = ctx.get(editorViewCtx)
-  const content =
-    contentFormat === 'html'
-      ? serializeHtml(view.state.doc, ctx.get(schemaCtx))
-      : getMarkdown()(ctx)
-  const spans = collectSpans(view.state.doc)
-  let binaryState = ''
-  Y.encodeStateVector(ydoc).forEach((byte) => {
-    binaryState += String.fromCharCode(byte)
-  })
-
-  // Measured diagram heights ride along so the next load (any client) can
-  // reserve the right space before mermaid renders.
-  const mermaid = collectMermaidRenderHints(view.dom)
-  const renderHints = Object.keys(mermaid).length > 0 ? { render_hints: { mermaid } } : {}
-
-  return { content, spans, state_vector: btoa(binaryState), ...renderHints }
-}
-
 function firstHeadingTitle(doc: ProseNode): string | null {
   let title: string | null = null
   doc.descendants((node) => {
@@ -256,94 +233,6 @@ function firstHeadingTitle(doc: ProseNode): string | null {
     return false
   })
   return title
-}
-
-interface CollabSession {
-  ydoc: Y.Doc
-  provider: CableProvider
-  refs: number
-  destroyTimer: ReturnType<typeof setTimeout> | null
-  canWrite: boolean
-  connectionIdentity: string
-}
-
-// Sessions survive React StrictMode's mount→unmount→mount cycle. Without
-// this, the first (immediately discarded) provider wins the server's seed
-// claim and dies before applying the template, leaving the doc empty until
-// the claim times out. Real teardown happens after a short grace period.
-const sessions = new Map<string, CollabSession>()
-
-function acquireSession(
-  slug: string,
-  identity: UserIdentity,
-  canWrite: boolean,
-  connectionIdentity: string,
-  initialStateB64?: string | null,
-): CollabSession {
-  let session = sessions.get(slug)
-  if (session && (session.canWrite !== canWrite || session.connectionIdentity !== connectionIdentity)) {
-    if (session.destroyTimer) clearTimeout(session.destroyTimer)
-    session.provider.destroy()
-    session.ydoc.destroy()
-    sessions.delete(slug)
-    session = undefined
-  }
-  if (!session) {
-    const ydoc = new Y.Doc()
-    // Hydrate from the server-rendered state the moment the doc exists, so
-    // the editor binds an already-populated doc and content is in its first
-    // paint; Yjs converges idempotently when the provider's sync lands.
-    // The clients-empty guard is redundant for a just-created Y.Doc but
-    // keeps the hydration idempotent if this block ever runs on a doc
-    // that already carries state.
-    if (initialStateB64 && ydoc.store.clients.size === 0) {
-      try {
-        Y.applyUpdate(
-          ydoc,
-          Uint8Array.from(atob(initialStateB64), (c) => c.charCodeAt(0)),
-          'server-hydrate',
-        )
-      } catch {
-        // corrupt/stale prop — fall back to the wait-for-synced path
-      }
-    }
-    const provider = new CableProvider(ydoc, slug, { canWrite, connectionIdentity })
-    provider.awareness.setLocalStateField('user', identity)
-    session = { ydoc, provider, refs: 0, destroyTimer: null, canWrite, connectionIdentity }
-    sessions.set(slug, session)
-  }
-  if (session.destroyTimer) {
-    clearTimeout(session.destroyTimer)
-    session.destroyTimer = null
-  }
-  session.refs += 1
-  return session
-}
-
-// History restores replay stale props: a back-navigation remounts the page
-// with the original seed_granted: true long after the template was applied
-// and synced. Re-applying onto a fresh local doc would duplicate the
-// template when the server state merges in, so grant consumption is made
-// durable per tab. The server generation is part of the key because owner
-// CLI replacement keeps the slug while resetting the CRDT state to a new
-// seed source; that new generation must be allowed to seed again.
-const seedAppliedKey = (slug: string, seedVersion?: string | null) =>
-  `pruf:seed-applied:${slug}:${seedVersion ?? 'unknown'}`
-
-function seedAlreadyApplied(slug: string, seedVersion?: string | null): boolean {
-  try {
-    return sessionStorage.getItem(seedAppliedKey(slug, seedVersion)) === '1'
-  } catch {
-    return false
-  }
-}
-
-function markSeedApplied(slug: string, seedVersion?: string | null): void {
-  try {
-    sessionStorage.setItem(seedAppliedKey(slug, seedVersion), '1')
-  } catch {
-    // best effort — worst case is the pre-fix behavior on history restore
-  }
 }
 
 // Attributes a freshly seeded document to its agent author. applyTemplate
@@ -378,16 +267,18 @@ function attributeSeedToAgent(view: EditorView, author: string): void {
   view.dispatch(tr)
 }
 
-function releaseSession(slug: string): void {
-  const session = sessions.get(slug)
-  if (!session) return
-  session.refs -= 1
-  if (session.refs > 0) return
-  session.destroyTimer = setTimeout(() => {
-    sessions.delete(slug)
-    session.provider.destroy()
-    session.ydoc.destroy()
-  }, 1000)
+// Sync the Suggest-mode flag into the suggest-changes plugin state. Safe to
+// call before the view mounts — start() applies the current value then.
+function syncSuggesting(editor: Editor, suggesting: boolean): void {
+  try {
+    editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx)
+      if (suggesting) enableSuggestChanges(view.state, view.dispatch)
+      else disableSuggestChanges(view.state, view.dispatch)
+    })
+  } catch {
+    // view not mounted yet
+  }
 }
 
 function CollabEditor({
@@ -546,47 +437,18 @@ function CollabEditor({
     )
     callbacksRef.current.onStatus?.('connecting')
 
-    let snapshotTimer: ReturnType<typeof setTimeout> | null = null
-    let snapshotRetryTimer: ReturnType<typeof setTimeout> | null = null
     let cancelled = false
     let unbindMermaidHints: (() => void) | null = null
-    const pushSnapshot = (attempt = 0) => {
-      if (!canWriteRef.current) return
-      editor.action((ctx) => {
-        void postJSON(`/d/${slug}/snapshot`, buildSnapshotPayload(ctx, ydoc, contentFormat))
-          .then((response) => {
-            if (response.status === 409 && attempt < 3 && !cancelled) {
-              if (snapshotRetryTimer) clearTimeout(snapshotRetryTimer)
-              snapshotRetryTimer = setTimeout(() => pushSnapshot(attempt + 1), 250)
-            } else if (!response.ok) {
-              console.warn('pruf: snapshot push rejected', response.status)
-            }
-          })
-          .catch((error) => {
-            // Best-effort persistence, but never silent: the agent API serves
-            // these spans, so a permanently failing push must be observable.
-            console.warn('pruf: snapshot push failed', error)
-          })
-      })
-    }
-
-    const scheduleSnapshot = () => {
-      if (snapshotTimer) clearTimeout(snapshotTimer)
-      snapshotTimer = setTimeout(pushSnapshot, SNAPSHOT_DEBOUNCE_MS)
-    }
+    const snapshots = createSnapshotScheduler({
+      editor,
+      ydoc,
+      slug,
+      contentFormat,
+      canWrite: () => canWriteRef.current,
+    })
+    const scheduleSnapshot = snapshots.schedule
 
     let started = false
-    const syncSuggesting = (instance: Editor) => {
-      try {
-        instance.action((ctx) => {
-          const view = ctx.get(editorViewCtx)
-          if (suggestingRef.current) enableSuggestChanges(view.state, view.dispatch)
-          else disableSuggestChanges(view.state, view.dispatch)
-        })
-      } catch {
-        // view not mounted yet — start() applies the current value
-      }
-    }
     const start = () => {
       if (started || cancelled) return
       started = true
@@ -675,7 +537,7 @@ function CollabEditor({
       startedRef.current = true
       // Seed/initial sync ran with suggesting off; apply a pre-stored
       // suggest mode only now that the document content is settled.
-      syncSuggesting(editor)
+      syncSuggesting(editor, suggestingRef.current)
       callbacksRef.current.onReady?.(handle)
       callbacksRef.current.onStatus?.('live')
     }
@@ -703,8 +565,7 @@ function CollabEditor({
       cancelled = true
       provider.off('synced', start)
       unbindMermaidHints?.()
-      if (snapshotTimer) clearTimeout(snapshotTimer)
-      if (snapshotRetryTimer) clearTimeout(snapshotRetryTimer)
+      snapshots.dispose()
       try {
         editor.action((ctx) => ctx.get(collabServiceCtx).disconnect())
       } catch {
@@ -738,57 +599,28 @@ function CollabEditor({
   useEffect(() => {
     if (loading || !startedRef.current) return
     const editor = get()
-    if (!editor) return
-    try {
-      editor.action((ctx) => {
-        const view = ctx.get(editorViewCtx)
-        if (suggesting) enableSuggestChanges(view.state, view.dispatch)
-        else disableSuggestChanges(view.state, view.dispatch)
-      })
-    } catch {
-      // view not mounted yet — start() applies the current ref value
-    }
+    if (editor) syncSuggesting(editor, suggesting)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggesting, loading])
+
+  // Sketch writes bypass the debounced snapshot: a closed sketch editor must
+  // be durable immediately (persistCurrentState uses keepalive so a save
+  // followed by navigation still lands).
+  const persistSketchChange = (ctx: Ctx) => {
+    const session = getSession(slug)
+    if (session) {
+      void session.provider.persistCurrentState(
+        buildSnapshotPayload(ctx, session.ydoc, contentFormat),
+      )
+    }
+  }
 
   const saveSketch = (data: SketchData, activate = false) => {
     if (!editableRef.current || suggestingRef.current) return
     const editor = get()
     if (!editor) return
     editor.action((ctx) => {
-      const view = ctx.get(editorViewCtx)
-      const type = view.state.schema.nodes.thinkroomSketch
-      if (!type) return
-
-      let existingPos: number | null = null
-      view.state.doc.descendants((node, pos) => {
-        if (node.type === type && node.attrs.id === data.id) {
-          existingPos = pos
-          return false
-        }
-        return existingPos === null
-      })
-
-      const attrs = attrsFromSketchData(data)
-      const tr =
-        existingPos === null
-          ? view.state.tr.replaceSelectionWith(type.create(attrs)).scrollIntoView()
-          : view.state.tr.setNodeMarkup(existingPos, type, attrs)
-      tr.setMeta(SKIP_PROVENANCE, true)
-      tr.setMeta(suggestChangesKey, { skip: true })
-      view.dispatch(tr)
-
-      if (activate) {
-        requestAnimationFrame(() => {
-          const sketch = view.dom.querySelector<HTMLElement>(
-            `.thinkroom-sketch[data-sketch-id="${data.id}"]`,
-          )
-          sketch?.click()
-        })
-      }
-
-      const session = sessions.get(slug)
-      if (session) void session.provider.persistCurrentState(buildSnapshotPayload(ctx, session.ydoc, contentFormat))
+      if (upsertSketchNode(ctx.get(editorViewCtx), data, activate)) persistSketchChange(ctx)
     })
   }
 
@@ -797,29 +629,7 @@ function CollabEditor({
     const editor = get()
     if (!editor) return
     editor.action((ctx) => {
-      const view = ctx.get(editorViewCtx)
-      const type = view.state.schema.nodes.thinkroomSketch
-      if (!type) return
-
-      let targetPos = -1
-      let targetSize = 0
-      view.state.doc.descendants((node, pos) => {
-        if (node.type === type && node.attrs.id === id) {
-          targetPos = pos
-          targetSize = node.nodeSize
-          return false
-        }
-        return targetPos < 0
-      })
-      if (targetPos < 0) return
-
-      const tr = view.state.tr.delete(targetPos, targetPos + targetSize).scrollIntoView()
-      tr.setMeta(SKIP_PROVENANCE, true)
-      tr.setMeta(suggestChangesKey, { skip: true })
-      view.dispatch(tr)
-
-      const session = sessions.get(slug)
-      if (session) void session.provider.persistCurrentState(buildSnapshotPayload(ctx, session.ydoc, contentFormat))
+      if (deleteSketchNode(ctx.get(editorViewCtx), id)) persistSketchChange(ctx)
     })
     setSketchDraft(undefined)
   }
@@ -833,25 +643,7 @@ function CollabEditor({
   const focusAfterSketch = (id: string) => {
     const editor = get()
     if (!editor) return
-    editor.action((ctx) => {
-      const view = ctx.get(editorViewCtx)
-      const type = view.state.schema.nodes.thinkroomSketch
-      if (!type) return
-      let after = -1
-      view.state.doc.descendants((node, pos) => {
-        if (node.type === type && node.attrs.id === id) {
-          after = pos + node.nodeSize
-          return false
-        }
-        return after < 0
-      })
-      if (after < 0) return
-      const nextNode = view.state.doc.nodeAt(after)
-      const textPosition = nextNode?.isTextblock ? after + 1 : after
-      const tr = view.state.tr.setSelection(TextSelection.create(view.state.doc, textPosition))
-      view.dispatch(tr.scrollIntoView())
-      requestAnimationFrame(() => view.focus())
-    })
+    editor.action((ctx) => focusAfterSketchNode(ctx.get(editorViewCtx), id))
   }
 
   insertSketchRef.current = () => {

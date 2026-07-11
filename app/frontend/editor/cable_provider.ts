@@ -2,6 +2,7 @@ import type { Consumer, Subscription } from '@rails/actioncable'
 import { getConsumer } from '../lib/cable'
 import { csrfToken } from '../lib/csrf'
 import type { MermaidRenderHints } from './mermaid'
+import type { CollaboratorKind } from '../types/payloads'
 import * as Y from 'yjs'
 
 /** Wire shape of Document#render_hints — client-measured render geometry
@@ -25,7 +26,7 @@ type SyncMessage = {
   content_format?: 'markdown' | 'html'
   seed_content?: string
   seed_markdown?: string
-  seed_author_kind?: string | null
+  seed_author_kind?: CollaboratorKind | null
   seed_author_name?: string | null
   cid?: string
   seq?: number
@@ -55,6 +56,8 @@ const toBase64 = (u8: Uint8Array): string => {
 const fromBase64 = (b64: string): Uint8Array =>
   Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
 
+export type ProviderEvent = 'synced' | 'seed' | 'rejected' | 'write-denied' | 'stale'
+
 /**
  * Yjs provider over Rails ActionCable. Speaks the SyncChannel protocol:
  * the server transmits full state + its state vector on subscribe; we apply it,
@@ -73,12 +76,12 @@ export class CableProvider {
   // Seed authorship rides alongside seedContent with the same one-shot
   // consume semantics: the editor reads and nulls all three together so a
   // remount can never re-attribute.
-  seedAuthorKind: string | null = null
+  seedAuthorKind: CollaboratorKind | null = null
   seedAuthorName: string | null = null
 
   private subscription: Subscription
   private consumer: Consumer
-  private listeners = new Map<string, Set<(...args: never[]) => void>>()
+  private listeners = new Map<ProviderEvent, Set<() => void>>()
   private destroyed = false
   private updateSequence = 0
   private serverStateVector: Uint8Array | null = null
@@ -128,13 +131,13 @@ export class CableProvider {
     window.addEventListener('beforeunload', this.handleUnload)
   }
 
-  on(event: 'synced' | 'seed' | 'rejected' | 'write-denied' | 'stale', handler: () => void): void {
+  on(event: ProviderEvent, handler: () => void): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set())
-    this.listeners.get(event)!.add(handler as never)
+    this.listeners.get(event)!.add(handler)
   }
 
-  off(event: 'synced' | 'seed' | 'rejected' | 'write-denied' | 'stale', handler: () => void): void {
-    this.listeners.get(event)?.delete(handler as never)
+  off(event: ProviderEvent, handler: () => void): void {
+    this.listeners.get(event)?.delete(handler)
   }
 
   destroy(): void {
@@ -148,12 +151,12 @@ export class CableProvider {
     this.awareness.destroy()
   }
 
-  private emit(event: string): void {
+  private emit(event: ProviderEvent): void {
     // Isolate listener failures: one stale handler (e.g. bound to a
     // destroyed editor) must never prevent the others from running.
     this.listeners.get(event)?.forEach((handler) => {
       try {
-        ;(handler as () => void)()
+        handler()
       } catch (error) {
         console.error(`CableProvider ${event} listener failed`, error)
       }

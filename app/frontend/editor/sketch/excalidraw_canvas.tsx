@@ -2,6 +2,7 @@ import { Excalidraw } from '@excalidraw/excalidraw'
 import '@excalidraw/excalidraw/index.css'
 import { memo, useCallback, useMemo } from 'react'
 import type { SketchScene } from './scene'
+import { excalidrawAppState, excalidrawElements } from './excalidraw_adapter'
 
 interface ExcalidrawCanvasProps {
   scene: SketchScene
@@ -22,8 +23,8 @@ const UI_OPTIONS = {
 function ExcalidrawCanvas({ scene, onSceneChange }: ExcalidrawCanvasProps) {
   const initialData = useMemo(
     () => ({
-      elements: scene.elements,
-      appState: { ...scene.appState, viewBackgroundColor: '#fffef9' },
+      elements: excalidrawElements(scene.elements),
+      appState: { ...excalidrawAppState(scene.appState), viewBackgroundColor: '#fffef9' },
       files: {},
     }),
     [scene],
@@ -38,7 +39,7 @@ function ExcalidrawCanvas({ scene, onSceneChange }: ExcalidrawCanvasProps) {
   )
   return (
     <Excalidraw
-      initialData={initialData as never}
+      initialData={initialData}
       onChange={handleChange}
       UIOptions={UI_OPTIONS}
       aiEnabled={false}

@@ -1,16 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { timeAgo } from '../lib/time'
 import { truncate } from '../lib/truncate'
-
-export interface CommentPayload {
-  id: number
-  author_name: string
-  author_kind: string
-  body: string
-  anchor_text: string | null
-  resolved: boolean
-  created_at: string
-}
+import type { CommentPayload } from '../types/payloads'
 
 interface Props {
   comments: CommentPayload[]

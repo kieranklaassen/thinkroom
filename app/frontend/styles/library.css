@@ -1,0 +1,568 @@
+/* ---------------------------- Document library -------------------------- */
+.document-library {
+  --document-library-muted: color-mix(in srgb, var(--ink-soft) 88%, var(--ink));
+
+  margin-top: 3.5rem;
+  text-align: left;
+}
+
+.document-library--recent {
+  margin-top: 2.75rem;
+}
+
+.document-library-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 28%, var(--line));
+}
+
+.document-library-heading h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--font-doc);
+  font-size: 1.22rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.document-library-heading p {
+  margin: 0.2rem 0 0;
+  color: var(--document-library-muted);
+  font-size: 0.75rem;
+}
+
+.document-tag-filters {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.document-tag-filters button {
+  min-height: 1.85rem;
+  border: 1px solid var(--document-library-muted);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--document-library-muted);
+  padding: 0.28rem 0.65rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.document-tag-filters button:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.document-tag-filters button.is-active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.document-library-empty {
+  margin: 0;
+  padding: 1.2rem 0;
+  color: var(--document-library-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.document-groups {
+  display: grid;
+  gap: 1.5rem;
+  padding-top: 1.25rem;
+}
+
+.document-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.45rem;
+  padding-inline: 0.15rem;
+}
+
+.document-group-heading h3 {
+  margin: 0;
+  color: var(--document-library-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.document-group-heading span {
+  color: var(--document-library-muted);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.document-list {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--ink) 24%, var(--line));
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow: 0 1px 2px rgb(38 28 16 / 4%);
+}
+
+.document-row {
+  --document-row-pad: 0.78rem 0.9rem;
+  padding: var(--document-row-pad);
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 16%, var(--line));
+  transition: background 120ms ease;
+}
+
+/* Failed swipe-delete message, mirroring .document-tag-error's treatment. */
+.document-delete-error {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: #9b2f27;
+}
+
+/* Swipe-to-delete (native app only — the SwipeRow wrapper never renders on
+   the web). The row's padding moves into the sliding content so the revealed
+   action fills the full row height. */
+.document-row--swipe {
+  padding: 0;
+}
+
+.swipe-row {
+  position: relative;
+  overflow: hidden;
+}
+
+.swipe-row-action {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 88px;
+  display: flex;
+}
+
+.swipe-row-action button {
+  flex: 1;
+  border: 0;
+  background: var(--sketch-danger);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.swipe-row-action button:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.swipe-row-content {
+  position: relative;
+  background: var(--surface-raised);
+  transition: transform 180ms ease;
+  /* Vertical panning stays native so the list scrolls; horizontal drags
+     reach the pointer handlers. */
+  touch-action: pan-y;
+}
+
+.swipe-row-content.is-dragging {
+  transition: none;
+}
+
+.swipe-row-padding {
+  padding: var(--document-row-pad);
+}
+
+.document-row:last-child {
+  border-bottom: 0;
+}
+
+.document-row:has(.document-row-title:hover),
+.document-row:has(.document-row-title:focus-visible) {
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-raised));
+}
+
+.document-row-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.document-row-copy {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.document-row-title {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.93rem;
+  font-weight: 620;
+  line-height: 1.35;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-row-title:hover {
+  color: color-mix(in srgb, var(--accent) 68%, var(--ink));
+}
+
+.document-row-date {
+  color: var(--document-library-muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.document-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex: none;
+}
+
+.document-tags {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+  margin-top: 0.55rem;
+}
+
+.document-tag {
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: color-mix(in srgb, var(--accent) 58%, var(--ink));
+  padding: 0.2rem 0.48rem;
+  font-size: 0.65rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.document-tag-edit,
+.document-reveal,
+.document-tag-save,
+.document-tag-cancel {
+  border: 0;
+  background: transparent;
+  color: var(--document-library-muted);
+  font-size: 0.7rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.document-tag-edit:hover,
+.document-reveal:hover,
+.document-tag-cancel:hover {
+  color: var(--ink);
+}
+
+.document-reveal {
+  justify-self: start;
+  padding: 0.2rem 0.15rem;
+}
+
+.document-tag-editor {
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 16%, var(--line));
+}
+
+.document-tag-editor > label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--ink);
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.document-tag-editor-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.document-tag-editor input {
+  flex: 1;
+  min-width: 0;
+  height: 2.15rem;
+  border: 1px solid var(--document-library-muted);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0.4rem 0.55rem;
+  font-size: 0.78rem;
+}
+
+.document-tag-save {
+  height: 2.15rem;
+  border-radius: 7px;
+  background: var(--ink);
+  color: var(--surface);
+  padding: 0.4rem 0.72rem;
+}
+
+.document-tag-save:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.document-tag-cancel {
+  height: 2.15rem;
+  padding: 0.4rem 0.3rem;
+}
+
+.document-tag-help,
+.document-tag-error {
+  margin: 0.32rem 0 0;
+  font-size: 0.67rem;
+  line-height: 1.4;
+}
+
+.document-tag-help {
+  color: var(--document-library-muted);
+}
+
+.document-tag-error {
+  color: #9b2f27;
+}
+
+.recent-claim {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border: 1px solid var(--document-library-muted);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--document-library-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.recent-claim:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.recent-claim:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.recent-owner {
+  font-size: 0.72rem;
+  color: var(--document-library-muted);
+  white-space: nowrap;
+}
+
+@media (max-width: 40rem) {
+  .landing {
+    padding-inline: 1rem;
+  }
+
+  .document-library-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .document-tag-filters {
+    justify-content: flex-start;
+  }
+
+  .document-row-summary {
+    align-items: flex-start;
+  }
+
+  .document-row-actions {
+    flex-wrap: wrap;
+  }
+
+  .document-tag-editor-controls {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .document-tag-editor input {
+    flex-basis: 100%;
+  }
+}
+
+/* --------------------------- Agent create panel --------------------------- */
+.landing-agent {
+  max-width: 36rem;
+  margin: 1rem auto 0;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 24%, var(--line));
+  border-radius: 12px;
+  background: var(--surface-raised);
+  box-shadow: 0 8px 24px rgb(38 28 16 / 7%);
+  text-align: left;
+}
+
+.landing-agent-hint {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  margin-bottom: 0.5rem;
+}
+
+.landing-agent-hint.is-copied {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.landing-agent-hint.is-copied::before {
+  content: '✓ ';
+}
+
+.landing-agent-block {
+  position: relative;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+}
+
+.landing-agent-block code {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding-right: 3.2rem;
+}
+
+.landing-agent-block .share-copy {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+}
+
+.landing-footer {
+  display: grid;
+  justify-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  margin-top: 3rem;
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.landing-github {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-height: 2rem;
+  padding: 0.36rem 0.62rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: 0 1px 1px rgb(38 28 16 / 4%);
+  transition: border-color 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.landing-github:hover {
+  border-color: var(--ink-faint);
+  color: var(--ink);
+  transform: translateY(-1px);
+}
+
+.landing-github:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.landing-github svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.landing-github-star {
+  margin-left: 0.08rem;
+  padding-left: 0.45rem;
+  border-left: 1px solid var(--line);
+  color: #a06a21;
+  font-size: 0.75rem;
+}
+
+.landing-footer p {
+  margin: 0;
+}
+
+.landing-footer p a {
+  color: var(--ink-soft);
+  text-underline-offset: 2px;
+}
+
+.landing-footer p a:hover {
+  color: var(--ink);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 8px;
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.btn-primary {
+  background: var(--ink);
+  color: var(--surface);
+}
+
+.btn-primary:hover {
+  background: #000;
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.btn-agent {
+  border: 1px solid color-mix(in srgb, var(--ink) 50%, var(--line));
+  background: var(--surface-raised);
+  color: var(--ink);
+  box-shadow: 0 2px 7px rgb(38 28 16 / 8%);
+}
+
+.btn-agent:hover,
+.btn-agent[aria-expanded='true'] {
+  border-color: var(--ink);
+  background: color-mix(in srgb, var(--surface-raised) 82%, var(--accent-soft));
+}
+
+.btn-ghost {
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  background: transparent;
+}
+
+.btn-ghost:hover {
+  color: var(--ink);
+  border-color: var(--ink-faint);
+}

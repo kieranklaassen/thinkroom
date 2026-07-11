@@ -1,0 +1,222 @@
+/* ---------------------------------------------------------------------------
+ * Design tokens. The default Thinkroom theme retains the legacy "proof" key
+ * so existing preferences continue to work: warm paper, editorial type.
+ * The "whitey" theme (Typora Whitey homage) overrides these on [data-theme].
+ * ------------------------------------------------------------------------- */
+:root {
+  --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-doc: Charter, 'Bitstream Charter', 'Sitka Text', Cambria, Georgia, serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+
+  --surface: #faf8f4;
+  --surface-raised: #ffffff;
+  --ink: #21201c;
+  --ink-soft: #6f6a60;
+  --ink-faint: #a8a294;
+  --line: #e7e2d8;
+  --accent: #b65c3d;
+  --accent-soft: #b65c3d22;
+
+  --prov-pending-bg: #ead9fb66;
+  --prov-pending-line: #9d4edd99;
+  --prov-reviewed-bg: #ead9fb33;
+  --prov-reviewed-line: #9d4edd55;
+  --prov-endorsed-line: #9d4edd40;
+
+  --sug-ins-bg: #d4edda88;
+  --sug-ins-line: #2e9e4fbb;
+  --sug-del-bg: #fadbd888;
+  --sug-del-line: #c0392bbb;
+
+  --code-bg: #f3f0e9;
+  --measure: 44rem;
+  --document-width: var(--measure);
+  --rich-content-width: 960px;
+  --review-gutter-width: 15rem;
+  --review-gutter-half-width: 7.5rem;
+  --activity-rail-width: 21rem;
+  --activity-rail-half-width: 10.5rem;
+
+  --sketch-surface: #fffef9;
+  --sketch-surface-muted: #fffaf1;
+  --sketch-border: rgb(65 51 32 / 12%);
+  --sketch-border-soft: rgb(65 51 32 / 10%);
+  --sketch-caption-ink: #6f6a60;
+  --sketch-radius: 12px;
+  --sketch-radius-mobile: 9px;
+  --sketch-inner-radius: 11px;
+  --sketch-island-radius: 10px;
+  --sketch-control-radius: 7px;
+  --sketch-shadow:
+    0 1px 1px rgb(38 28 16 / 5%),
+    0 7px 18px rgb(38 28 16 / 7%);
+  --sketch-shadow-hover:
+    0 1px 1px rgb(38 28 16 / 5%),
+    0 10px 23px rgb(38 28 16 / 9%);
+  --sketch-shadow-selected:
+    0 0 0 2px color-mix(in srgb, var(--accent-soft) 45%, transparent),
+    0 8px 22px rgb(38 28 16 / 8%);
+  --sketch-edge:
+    inset 0 1px rgb(255 255 255 / 72%),
+    inset 0 -1px rgb(65 51 32 / 6%);
+  --sketch-island-shadow: 0 5px 16px rgb(38 28 16 / 8%);
+  --sketch-control-shadow: 0 3px 10px rgb(38 28 16 / 9%);
+  --sketch-texture: radial-gradient(rgb(83 63 36 / 5%) 0.55px, transparent 0.55px);
+  --sketch-texture-size: 5px 5px;
+  --sketch-resize-border: rgb(65 51 32 / 9%);
+  --sketch-resize-thumb: rgb(65 51 32 / 18%);
+  --sketch-resize-thumb-active: rgb(65 51 32 / 34%);
+  --sketch-danger: #a1372c;
+  --sketch-danger-border: rgb(161 55 44 / 35%);
+  --sketch-danger-soft-border: rgb(161 55 44 / 18%);
+  --sketch-danger-hover-border: rgb(161 55 44 / 22%);
+  --sketch-danger-hover-bg: #f6ddd5;
+}
+
+/* Whitey — homage to Typora's Whitey theme: clean white, minimal chrome,
+ * generous margins, quiet typography. Everything derives from the tokens, so
+ * provenance tints and code blocks restyle coherently. */
+[data-theme='whitey'] {
+  --font-doc: 'Avenir Next', Avenir, 'Segoe UI', 'Helvetica Neue', sans-serif;
+
+  --surface: #ffffff;
+  --surface-raised: #fcfcfc;
+  --ink: #2b2b2b;
+  --ink-soft: #777777;
+  --ink-faint: #b3b3b3;
+  --line: #ececec;
+  --accent: #4183c4;
+  --accent-soft: #4183c422;
+
+  --prov-pending-bg: #dce9f766;
+  --prov-pending-line: #4183c499;
+  --prov-reviewed-bg: #dce9f733;
+  --prov-reviewed-line: #4183c455;
+  --prov-endorsed-line: #4183c440;
+
+  --sug-ins-bg: #d4edda88;
+  --sug-ins-line: #2e9e4fbb;
+  --sug-del-bg: #fadbd888;
+  --sug-del-line: #c0392bbb;
+
+  --code-bg: #f8f8f8;
+  --measure: 47rem;
+
+  --sketch-surface: #ffffff;
+  --sketch-surface-muted: #f8f8f8;
+  --sketch-border: rgb(43 43 43 / 18%);
+  --sketch-border-soft: rgb(43 43 43 / 12%);
+  --sketch-caption-ink: #666666;
+  --sketch-radius: 0px;
+  --sketch-radius-mobile: 0px;
+  --sketch-inner-radius: 0px;
+  --sketch-island-radius: 0px;
+  --sketch-control-radius: 0px;
+  --sketch-shadow: none;
+  --sketch-shadow-hover: none;
+  --sketch-shadow-selected: 0 0 0 2px rgb(65 131 196 / 18%);
+  --sketch-edge: none;
+  --sketch-island-shadow: none;
+  --sketch-control-shadow: none;
+  --sketch-texture: none;
+  --sketch-texture-size: auto;
+  --sketch-resize-border: rgb(43 43 43 / 14%);
+  --sketch-resize-thumb: rgb(43 43 43 / 28%);
+  --sketch-resize-thumb-active: rgb(43 43 43 / 50%);
+  --sketch-danger: #4f4f4f;
+  --sketch-danger-border: rgb(43 43 43 / 28%);
+  --sketch-danger-soft-border: rgb(43 43 43 / 14%);
+  --sketch-danger-hover-border: rgb(43 43 43 / 42%);
+  --sketch-danger-hover-bg: #eeeeee;
+}
+
+[data-theme='whitey'] .milkdown .ProseMirror {
+  font-size: 1rem;
+  line-height: 1.8;
+  font-weight: 400;
+}
+
+[data-theme='whitey'] .doc-main {
+  padding-top: 4rem;
+}
+
+[data-theme='whitey'] .milkdown .ProseMirror blockquote {
+  font-style: normal;
+  border-left-color: var(--accent-soft);
+}
+
+html,
+body {
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  transition: background 220ms ease, color 220ms ease;
+}
+
+/* Keyboard navigation gets visible, consistent focus everywhere. */
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ------------------------------ Theme picker ------------------------------ */
+.theme-picker {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.theme-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+  font-weight: 550;
+  padding: 0.26rem 0.55rem;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.theme-option.is-active {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+.theme-option:hover:not(.is-active) {
+  color: var(--ink-soft);
+}
+
+.theme-swatch {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+}
+
+.theme-swatch--proof {
+  background: #faf8f4;
+  border-color: #b65c3d66;
+}
+
+.theme-swatch--whitey {
+  background: #ffffff;
+  border-color: #4183c466;
+}

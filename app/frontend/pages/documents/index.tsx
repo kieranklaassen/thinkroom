@@ -8,7 +8,7 @@ import { userIdentity } from '../../editor/identity'
 import { setCookie } from '../../lib/cookies'
 import { useClaim } from '../../lib/use_claim'
 import { useIsClient } from '../../lib/use_is_client'
-import type { OwnershipPayload } from '../../components/ownership_chip'
+import type { OwnershipPayload } from '../../types/payloads'
 import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
 
