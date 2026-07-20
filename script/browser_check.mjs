@@ -1922,6 +1922,60 @@ try {
   await winA.locator('.comment-card', { hasText: clickComment }).waitFor({ timeout: 10000 })
   ok('click-to-comment posted and synced to the other window')
 
+  // --- Comment anchors: rail cards visibly connect to their text ---
+  // The card just posted anchors the first paragraph; Comment mode keeps
+  // every open anchor tinted in the copy.
+  const anchorTintOk = await winB
+    .waitForFunction(() => CSS.highlights?.has('comment-anchor'), undefined, { timeout: 5000 })
+    .then(() => true)
+    .catch(() => false)
+  if (anchorTintOk) ok('comment mode tints open comment anchors in the copy')
+  else fail('comment mode did not register the comment-anchor highlight')
+
+  const linkedCard = winB.locator('.comment-card--linked', { hasText: clickComment })
+  await linkedCard.waitFor({ timeout: 5000 })
+  ok('anchored rail card is linked (whole card clickable)')
+  await linkedCard.locator('.comment-body').click()
+  const flashOk = await winB
+    .waitForFunction(
+      () =>
+        CSS.highlights?.has('comment-anchor-flash') ||
+        CSS.highlights?.has('comment-anchor-flash-soft'),
+      undefined,
+      { timeout: 2000 },
+    )
+    .then(() => true)
+    .catch(() => false)
+  if (flashOk) ok('clicking the card pulsed its anchor in the document')
+  else fail('card click did not pulse the comment anchor')
+
+  // Anchor-status captions: an unanchored comment reads as whole-document,
+  // and an anchor quoting text absent from the doc reads as stale.
+  const trackApi = `${BASE}/api/docs/${trackDoc.slug}`
+  await fetch(`${trackApi}/comments`, {
+    method: 'POST',
+    headers: agentHeaders,
+    body: JSON.stringify({ body: 'General note without an anchor.' }),
+  })
+  await fetch(`${trackApi}/comments`, {
+    method: 'POST',
+    headers: agentHeaders,
+    body: JSON.stringify({
+      body: 'Note anchored to vanished text.',
+      anchor_text: 'This exact sentence never existed in the track document.',
+    }),
+  })
+  await winB
+    .locator('.comment-card', { hasText: 'General note without an anchor.' })
+    .locator('.comment-scope', { hasText: 'On the whole document' })
+    .waitFor({ timeout: 10000 })
+  ok('unanchored comment card reads as on the whole document')
+  await winB
+    .locator('.comment-card', { hasText: 'Note anchored to vanished text.' })
+    .locator('.comment-scope', { hasText: 'no longer in the document' })
+    .waitFor({ timeout: 10000 })
+  ok('stale-anchor comment card flags its missing text')
+
   await winA.close()
   await winB.close()
 
