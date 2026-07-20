@@ -34,6 +34,12 @@ export function CommentsPanel({
     if (composerAnchor !== null) textareaRef.current?.focus()
   }, [composerAnchor])
 
+  // The panel can unmount under the cursor (mode switch, layout collapse) —
+  // mouseleave never fires then, so the hover spotlight must clear here.
+  useEffect(() => {
+    return () => onHover?.(null)
+  }, [onHover])
+
   const open = comments.filter((c) => !c.resolved)
   const resolved = comments.filter((c) => c.resolved)
 
@@ -88,10 +94,15 @@ export function CommentsPanel({
         {open.map((comment) => {
           // Three anchor states once measured: linked (text found — the whole
           // card jumps to it), stale (quoted text edited away), unanchored
-          // (comment was never tied to text). Unmeasured renders plain.
+          // (comment was never tied to text). Unmeasured renders plain, and
+          // so does an unresolved multi-block anchor — its matcher can miss
+          // text that is still present, and the card must not claim it gone.
           const linked = anchoredIds !== null && anchoredIds.has(comment.id)
           const stale =
-            anchoredIds !== null && Boolean(comment.anchor_text) && !linked
+            anchoredIds !== null &&
+            Boolean(comment.anchor_text) &&
+            !comment.anchor_text!.includes('\n') &&
+            !linked
           return (
             <li
               key={comment.id}

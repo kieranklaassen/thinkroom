@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { editorViewCtx } from '@milkdown/kit/core'
 import type { EditorView } from '@milkdown/kit/prose/view'
+import { findCommentAnchorRange } from '../../editor/comment_anchors'
 import type { EditorHandle } from '../../editor/milkdown_editor'
-import { findTextRange } from '../../editor/suggestions'
 import { clearHighlight, domRange, setHighlight } from '../../lib/highlights'
 import type { CommentPayload } from '../../types/payloads'
 
@@ -28,11 +28,11 @@ export interface CommentAnchors {
 }
 
 /**
- * Connects rail comment cards to the text they discuss. Anchors are the
- * same string-match resolution the composer highlight uses (first
- * within-block occurrence); ranges are re-resolved per doc version so
- * highlights track edits around them, mirroring MarginSuggestions'
- * anchor tinting.
+ * Connects rail comment cards to the text they discuss. Anchors resolve
+ * through the same matcher as the composer highlight (first within-block
+ * occurrence, plus a multi-block span fallback for cross-paragraph
+ * selections); ranges are re-resolved per doc version so highlights track
+ * edits around them, mirroring MarginSuggestions' anchor tinting.
  */
 export function useCommentAnchors({
   comments,
@@ -44,7 +44,9 @@ export function useCommentAnchors({
   const hoveredIdRef = useRef<number | null>(null)
   const [anchoredIds, setAnchoredIds] = useState<Set<number> | null>(null)
 
-  useEffect(() => {
+  // Layout effect: an optimistic post must measure before paint, or its
+  // card renders one frame in the unlinked state and flickers to linked.
+  useLayoutEffect(() => {
     if (!handle) return
 
     let view: EditorView
@@ -57,7 +59,7 @@ export function useCommentAnchors({
     const ranges = new Map<number, Range>()
     for (const comment of comments) {
       if (comment.resolved || !comment.anchor_text) continue
-      const range = findTextRange(view.state.doc, comment.anchor_text)
+      const range = findCommentAnchorRange(view.state.doc, comment.anchor_text)
       const dom = range ? domRange(view, range.from, range.to) : null
       if (dom) ranges.set(comment.id, dom)
     }
@@ -109,8 +111,13 @@ export function useCommentAnchors({
     if (!range) return
     // Scroll without touching the ProseMirror selection — a selection
     // transaction would pop the selection toolbar / click-to-comment
-    // affordance over the jumped-to text.
-    range.startContainer.parentElement?.scrollIntoView({
+    // affordance over the jumped-to text. For an anchor starting at a block
+    // boundary, domAtPos returns the block element itself (not its text
+    // node) — its parentElement would be the editor root and "center" would
+    // scroll to the middle of the whole document.
+    const start = range.startContainer
+    const startEl = start instanceof Element ? start : start.parentElement
+    startEl?.scrollIntoView({
       block: 'center',
       behavior: 'smooth',
     })

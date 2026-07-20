@@ -591,6 +591,12 @@ export default function DocumentShow({
     tintAll: effectiveMode === 'comment',
   })
 
+  // ⌘\ hides the rail with CSS while the panel stays mounted, so a card
+  // hovered at that moment never gets its mouseleave — drop the spotlight.
+  useEffect(() => {
+    if (!panelOpen) hoverAnchor(null)
+  }, [panelOpen, hoverAnchor])
+
   // The comment composer lives in the comments panel — on mobile that means
   // opening its sheet when a selection chooses "Comment".
   useEffect(() => {

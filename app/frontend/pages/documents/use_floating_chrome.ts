@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type RefObject } from 'react'
 import type { EditorView } from '@milkdown/kit/prose/view'
+import { findCommentAnchorRange } from '../../editor/comment_anchors'
 import { aiSpanAt, type AiSpan, type ProvenanceSpan } from '../../editor/provenance'
-import { findTextRange } from '../../editor/suggestions'
 import {
   useAnchoredPopover,
   type AnchoredPosition,
@@ -174,7 +174,7 @@ export function useFloatingChrome({
     getRange: () => {
       const view = viewRef.current
       if (!view || composerAnchor === null) return null
-      return findTextRange(view.state.doc, composerAnchor)
+      return findCommentAnchorRange(view.state.doc, composerAnchor)
     },
     preferBelow: true,
     persistent: true,
