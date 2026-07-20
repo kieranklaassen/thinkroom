@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, type RefObject } from 'react'
 import { router } from '@inertiajs/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import { TextSelection } from '@milkdown/kit/prose/state'
 import { findTextRange } from '../../editor/suggestions'
 import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
 import type { CommentPayload } from '../../types/payloads'
@@ -30,7 +29,6 @@ export interface Comments {
   submitComment: (body: string, anchorText: string | null) => void
   submitAnchoredComment: (body: string) => void
   resolveComment: (comment: CommentPayload) => void
-  jumpToAnchor: (anchorText: string) => void
 }
 
 /** Comment submission/resolution and the anchored composer lifecycle. */
@@ -57,8 +55,8 @@ export function useComments({
     if (!view) return
     const range = findTextRange(view.state.doc, composerAnchor)
     const dom = range ? domRange(view, range.from, range.to) : null
-    setHighlight('comment-anchor', dom ? [dom] : [])
-    return () => clearHighlight('comment-anchor')
+    setHighlight('comment-anchor-draft', dom ? [dom] : [])
+    return () => clearHighlight('comment-anchor-draft')
     // docTick keeps the highlight tracking edits around the anchor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [composerOpen, composerAnchor, docTick])
@@ -129,22 +127,6 @@ export function useComments({
     [submitComment, composerAnchor, viewRef],
   )
 
-  const jumpToAnchor = useCallback(
-    (anchorText: string) => {
-      const view = viewRef.current
-      if (!view) return
-      const range = findTextRange(view.state.doc, anchorText)
-      if (!range) return
-      const tr = view.state.tr.setSelection(
-        TextSelection.create(view.state.doc, range.from, range.to),
-      )
-      tr.scrollIntoView()
-      view.dispatch(tr)
-      view.focus()
-    },
-    [viewRef],
-  )
-
   return {
     composerAnchor,
     composerOpen,
@@ -154,6 +136,5 @@ export function useComments({
     submitComment,
     submitAnchoredComment,
     resolveComment,
-    jumpToAnchor,
   }
 }

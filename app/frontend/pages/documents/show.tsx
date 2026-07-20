@@ -48,6 +48,7 @@ import { useSuggestionReview } from './use_suggestion_review'
 import { useDocumentIdentity } from './use_document_identity'
 import { useFollowPresence } from './use_follow_presence'
 import { useComments } from './use_comments'
+import { useCommentAnchors } from './use_comment_anchors'
 import { useFloatingChrome, type TextTarget } from './use_floating_chrome'
 import { NativeDocBridge } from './native_doc_bridge'
 import { StagedDocumentEditor } from './staged_document_editor'
@@ -572,7 +573,6 @@ export default function DocumentShow({
     submitComment,
     submitAnchoredComment,
     resolveComment,
-    jumpToAnchor,
   } = useComments({
     slug: doc.slug,
     identityName: identity.name,
@@ -580,6 +580,15 @@ export default function DocumentShow({
     effectiveMode,
     isMobile,
     docTick,
+  })
+
+  // Rail cards ↔ document text: every open anchor stays tinted in Comment
+  // mode, and hovering/clicking a card highlights/jumps to its text.
+  const { anchoredIds, hoverAnchor, jumpToComment } = useCommentAnchors({
+    comments,
+    handle,
+    docTick,
+    tintAll: effectiveMode === 'comment',
   })
 
   // The comment composer lives in the comments panel — on mobile that means
@@ -819,10 +828,12 @@ export default function DocumentShow({
                 // The desktop composer is the anchored card next to the
                 // selection — the rail keeps the list only.
                 composerAnchor={null}
+                anchoredIds={anchoredIds}
                 onSubmit={submitComment}
                 onCancelComposer={closeComposer}
                 onResolve={resolveComment}
-                onJumpTo={jumpToAnchor}
+                onJumpTo={jumpToComment}
+                onHover={hoverAnchor}
               />
               <ActivityPanel activities={activities} />
             </aside>
@@ -905,11 +916,12 @@ export default function DocumentShow({
             <CommentsPanel
               comments={comments}
               composerAnchor={composerAnchor}
+              anchoredIds={anchoredIds}
               onSubmit={submitComment}
               onCancelComposer={cancelComposer}
               onResolve={resolveComment}
-              onJumpTo={(anchorText) => {
-                jumpToAnchor(anchorText)
+              onJumpTo={(comment) => {
+                jumpToComment(comment)
                 setActiveSheet(null)
               }}
             />
