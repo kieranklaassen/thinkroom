@@ -41,6 +41,7 @@ export function useCommentAnchors({
   tintAll,
 }: Options): CommentAnchors {
   const rangesRef = useRef(new Map<number, Range>())
+  const hoveredIdRef = useRef<number | null>(null)
   const [anchoredIds, setAnchoredIds] = useState<Set<number> | null>(null)
 
   useEffect(() => {
@@ -63,6 +64,12 @@ export function useCommentAnchors({
     rangesRef.current = ranges
 
     setHighlight('comment-anchor', tintAll ? [...ranges.values()] : [])
+    // Re-derive the hover spotlight from the fresh ranges: edits move the
+    // anchor under a hovered card, and resolving a hovered card unmounts it
+    // without ever firing mouseleave.
+    const hovered = hoveredIdRef.current === null ? null : ranges.get(hoveredIdRef.current)
+    if (hovered) setHighlight('comment-anchor-hot', [hovered])
+    else clearHighlight('comment-anchor-hot')
     setAnchoredIds((prev) => {
       const next = new Set(ranges.keys())
       if (prev && prev.size === next.size && [...next].every((id) => prev.has(id))) {
@@ -83,11 +90,14 @@ export function useCommentAnchors({
   }, [])
 
   const hoverAnchor = useCallback((comment: CommentPayload | null) => {
+    hoveredIdRef.current = comment === null ? null : comment.id
     const range = comment === null ? null : rangesRef.current.get(comment.id)
     if (range) setHighlight('comment-anchor-hot', [range])
     else clearHighlight('comment-anchor-hot')
   }, [])
 
+  // Mutated in place (never reassigned) so the unmount cleanup's captured
+  // reference always sees the live timers.
   const flashTimers = useRef<ReturnType<typeof setTimeout>[]>([])
   useEffect(() => {
     const timers = flashTimers.current
@@ -107,14 +117,15 @@ export function useCommentAnchors({
     // Pulse: strong tint stepping down to resting — highlight pseudo-elements
     // can't transition, so the fade is two steps (same as the merge pulse).
     flashTimers.current.forEach(clearTimeout)
+    flashTimers.current.length = 0
     setHighlight('comment-anchor-flash', [range])
-    flashTimers.current = [
+    flashTimers.current.push(
       setTimeout(() => {
         clearHighlight('comment-anchor-flash')
         setHighlight('comment-anchor-flash-soft', [range])
       }, 400),
       setTimeout(() => clearHighlight('comment-anchor-flash-soft'), 1000),
-    ]
+    )
   }, [])
 
   return { anchoredIds, hoverAnchor, jumpToComment }
