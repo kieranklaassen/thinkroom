@@ -388,6 +388,7 @@ class Document < ApplicationRecord
   def plain_markdown
     content_markdown.to_s
       .gsub(/<span data-provenance[^>]*>/, "")
+      .gsub(/<span data-highlighter[^>]*>/, "")
       .gsub("</span>", "")
       .gsub(%r{<(ins|del)\s+data-suggestion-id[^>]*>(.*?)</\1>}m, '\2')
   end

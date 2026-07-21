@@ -40,7 +40,7 @@ interface MetaChannelOptions {
  * up, so a broadcast committed in that window — or while disconnected — is
  * never received and the rail would stay stale until a manual reload.
  */
-const CABLE_FED_PROPS = ['suggestions', 'comments', 'activities', 'presences']
+const CABLE_FED_PROPS = ['suggestions', 'comments', 'activities', 'presences', 'highlight_names']
 
 export function useMetaChannel(slug: string, options?: MetaChannelOptions): void {
   const onDeletedRef = useRef(options?.onDeleted)

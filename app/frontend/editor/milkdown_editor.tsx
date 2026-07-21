@@ -50,6 +50,7 @@ import {
   type ProvenanceSpan,
 } from './provenance'
 import { frontmatter } from './frontmatter'
+import { textHighlighter } from './text_highlighter'
 import {
   DEFAULT_SKETCH_HEIGHT,
   EMPTY_SKETCH_SCENE,
@@ -405,6 +406,7 @@ function CollabEditor({
         .use(mermaidDiagrams)
         .use(upload)
         .use(provenance)
+        .use(textHighlighter)
         .use(frontmatter)
         .use(sketchSchemaPlugins)
         .use(sketchNodeViewPlugins)

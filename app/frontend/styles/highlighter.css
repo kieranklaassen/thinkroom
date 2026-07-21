@@ -1,0 +1,179 @@
+/* ------------------------------ Highlighter ------------------------------- */
+/* Marker-style background tints for the fixed 10-color palette. Each rule
+ * also targets the static preview, which carries the sanitized data
+ * attributes instead of the editor's mark-derived classes — grouping them
+ * keeps the tints identical so the preview → editor swap never flashes. */
+.milkdown .hl,
+.doc-static-preview span[data-highlighter] {
+  border-radius: 2px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.milkdown .hl--yellow,
+.doc-static-preview span[data-highlighter][data-color='yellow'] {
+  background: rgb(250 224 60 / 45%);
+}
+
+.milkdown .hl--green,
+.doc-static-preview span[data-highlighter][data-color='green'] {
+  background: rgb(110 220 140 / 40%);
+}
+
+.milkdown .hl--blue,
+.doc-static-preview span[data-highlighter][data-color='blue'] {
+  background: rgb(110 180 250 / 40%);
+}
+
+.milkdown .hl--pink,
+.doc-static-preview span[data-highlighter][data-color='pink'] {
+  background: rgb(250 150 200 / 40%);
+}
+
+.milkdown .hl--purple,
+.doc-static-preview span[data-highlighter][data-color='purple'] {
+  background: rgb(190 150 250 / 40%);
+}
+
+.milkdown .hl--orange,
+.doc-static-preview span[data-highlighter][data-color='orange'] {
+  background: rgb(255 175 90 / 45%);
+}
+
+.milkdown .hl--teal,
+.doc-static-preview span[data-highlighter][data-color='teal'] {
+  background: rgb(90 220 210 / 40%);
+}
+
+.milkdown .hl--red,
+.doc-static-preview span[data-highlighter][data-color='red'] {
+  background: rgb(250 130 115 / 40%);
+}
+
+.milkdown .hl--gray,
+.doc-static-preview span[data-highlighter][data-color='gray'] {
+  background: rgb(160 155 140 / 30%);
+}
+
+.milkdown .hl--brown,
+.doc-static-preview span[data-highlighter][data-color='brown'] {
+  background: rgb(200 150 100 / 35%);
+}
+
+/* --------------------------- Toolbar swatches ----------------------------- */
+.selection-toolbar-swatches {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 0.4rem;
+}
+
+.selection-toolbar button.selection-swatch {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid rgb(255 255 255 / 0.25);
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+.selection-toolbar button.selection-swatch:hover {
+  border-color: rgb(255 255 255 / 0.75);
+  transform: scale(1.15);
+}
+
+.selection-toolbar button.selection-swatch.is-active {
+  border-color: #fff;
+}
+
+/* ------------------------------ Rail legend ------------------------------- */
+.highlight-legend-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.highlight-legend-color {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.highlight-legend-key {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.highlight-legend-swatch {
+  flex: none;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 50%;
+}
+
+.highlight-legend-name {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 0.1rem 0.25rem;
+  border-radius: 4px;
+}
+
+.highlight-legend-name::placeholder {
+  color: var(--ink-faint);
+  font-weight: 400;
+}
+
+.highlight-legend-name:hover:not(:disabled),
+.highlight-legend-name:focus {
+  background: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  outline: none;
+}
+
+/* Read-only viewers see the name as plain text, not an input affordance. */
+.highlight-legend-name:disabled {
+  color: var(--ink);
+  opacity: 1;
+}
+
+.highlight-legend-snippets {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 1.15rem;
+}
+
+.highlight-legend-snippet {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  padding: 0.1rem 0.25rem;
+  border-radius: 4px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.highlight-legend-snippet:hover {
+  background: var(--surface-raised);
+  color: var(--ink);
+}

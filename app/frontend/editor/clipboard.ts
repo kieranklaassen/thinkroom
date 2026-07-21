@@ -9,7 +9,7 @@ import {
 } from './sketch/portable'
 import { SUGGESTION_MARK_NAMES } from './suggest_changes/marks'
 
-const ACTIVITY_MARK_NAMES = new Set(['provenance', ...SUGGESTION_MARK_NAMES])
+const ACTIVITY_MARK_NAMES = new Set(['provenance', 'highlighter', ...SUGGESTION_MARK_NAMES])
 
 type ClipboardNodeJson = { type?: string; content?: ClipboardNodeJson[] }
 
