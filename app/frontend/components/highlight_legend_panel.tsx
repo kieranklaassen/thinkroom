@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { patchJSON } from '../lib/csrf'
 import {
   HIGHLIGHT_COLORS,
@@ -35,6 +35,9 @@ export function HighlightLegendPanel({ groups, names, canWrite, slug, onJumpTo }
   const [localNames, setLocalNames] = useState(names)
   // In-progress edits keyed by color, live only while the input is dirty.
   const [drafts, setDrafts] = useState<Partial<Record<HighlightColorId, string>>>({})
+  // Escape discards the draft and blurs, but the state update hasn't flushed
+  // when onBlur's commit runs — the ref makes the discard visible in time.
+  const discardedRef = useRef<HighlightColorId | null>(null)
 
   useEffect(() => {
     setLocalNames(names)
@@ -43,6 +46,10 @@ export function HighlightLegendPanel({ groups, names, canWrite, slug, onJumpTo }
   if (groups.length === 0) return null
 
   const commitName = (color: HighlightColorId) => {
+    if (discardedRef.current === color) {
+      discardedRef.current = null
+      return
+    }
     const draft = drafts[color]
     if (draft === undefined) return
     setDrafts(({ [color]: _committed, ...rest }) => rest)
@@ -84,6 +91,7 @@ export function HighlightLegendPanel({ groups, names, canWrite, slug, onJumpTo }
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') event.currentTarget.blur()
                   if (event.key === 'Escape') {
+                    discardedRef.current = group.color
                     setDrafts(({ [group.color]: _discarded, ...rest }) => rest)
                     event.currentTarget.blur()
                   }
