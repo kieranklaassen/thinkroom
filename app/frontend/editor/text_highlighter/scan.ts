@@ -28,8 +28,11 @@ export function collectHighlights(doc: ProseNode): HighlightGroup[] {
     const color = mark?.attrs.color as string | undefined
     if (!color || !isHighlightColorId(color)) return
 
-    const snippets = snippetsByColor.get(color) ?? []
-    if (snippets.length === 0) snippetsByColor.set(color, snippets)
+    let snippets = snippetsByColor.get(color)
+    if (!snippets) {
+      snippets = []
+      snippetsByColor.set(color, snippets)
+    }
     const last = snippets[snippets.length - 1]
     if (last && last.to === pos) {
       last.to = pos + node.nodeSize
@@ -39,8 +42,8 @@ export function collectHighlights(doc: ProseNode): HighlightGroup[] {
     }
   })
 
-  return HIGHLIGHT_COLORS.filter((color) => snippetsByColor.has(color.id)).map((color) => ({
-    color: color.id,
-    snippets: snippetsByColor.get(color.id) as HighlightSnippet[],
-  }))
+  return HIGHLIGHT_COLORS.flatMap((color) => {
+    const snippets = snippetsByColor.get(color.id)
+    return snippets ? [{ color: color.id, snippets }] : []
+  })
 }

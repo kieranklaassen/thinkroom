@@ -15,12 +15,10 @@ export const HIGHLIGHT_COLORS = [
 
 export type HighlightColorId = (typeof HIGHLIGHT_COLORS)[number]['id']
 
-export const HIGHLIGHT_COLOR_IDS: ReadonlySet<string> = new Set(
-  HIGHLIGHT_COLORS.map((color) => color.id),
-)
+const COLOR_IDS: ReadonlySet<string> = new Set(HIGHLIGHT_COLORS.map((color) => color.id))
 
 export const DEFAULT_HIGHLIGHT_COLOR: HighlightColorId = 'yellow'
 
 export function isHighlightColorId(value: string): value is HighlightColorId {
-  return HIGHLIGHT_COLOR_IDS.has(value)
+  return COLOR_IDS.has(value)
 }
