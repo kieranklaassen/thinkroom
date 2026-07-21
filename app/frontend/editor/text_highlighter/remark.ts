@@ -1,15 +1,8 @@
 import { $remark } from '@milkdown/kit/utils'
+import { findSpanClose, type MdastNode } from '../remark_spans'
 import { isHighlightColorId } from './palette'
 
-interface MdastNode {
-  type: string
-  value?: string
-  children?: MdastNode[]
-  [key: string]: unknown
-}
-
 const OPEN_SPAN = /^<span\s+data-highlighter(?:="")?\s*(?:data-color="([^"]*)")?\s*>$/
-const CLOSE_SPAN = /^<\/span>$/
 
 /**
  * Serialization: emit highlighter mdast nodes as HTML spans, mirroring the
@@ -47,7 +40,8 @@ export const highlighterStringify = $remark('highlighterStringify', () =>
  * Parsing: micromark turns inline HTML into opaque `html` nodes. Find
  * <span data-highlighter ...> ... </span> runs inside phrasing content and
  * replace them with a `highlighter` mdast node so the mark schema's
- * parseMarkdown picks them up. Flat spans only (no nesting), and unknown
+ * parseMarkdown picks them up. Close-pairing is nesting-aware (findSpanClose)
+ * because highlighter spans serialize nested inside provenance spans; unknown
  * colors are left as raw HTML for the sanitizer to handle.
  */
 export const highlighterParse = $remark('highlighterParse', () => () => (root: unknown) => {
@@ -65,13 +59,7 @@ export const highlighterParse = $remark('highlighterParse', () => () => (root: u
       const color = open[1] ?? ''
       if (!isHighlightColorId(color)) continue
 
-      const closeIndex = children.findIndex(
-        (sibling, j) =>
-          j > i &&
-          sibling.type === 'html' &&
-          typeof sibling.value === 'string' &&
-          CLOSE_SPAN.test(sibling.value.trim()),
-      )
+      const closeIndex = findSpanClose(children, i)
       if (closeIndex === -1) continue
 
       const inner = children.slice(i + 1, closeIndex)

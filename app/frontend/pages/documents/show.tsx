@@ -654,11 +654,12 @@ export default function DocumentShow({
     const view = viewRef.current
     if (!view) return
     // Positions come from the last scan; a remote edit landing between scan
-    // and click could shift them, so clamp instead of throwing.
+    // and click could shift them. TextSelection.between snaps to the nearest
+    // valid inline positions instead of throwing on a stale range.
     const max = view.state.doc.content.size
     if (snippet.from >= snippet.to || snippet.to > max) return
     const tr = view.state.tr.setSelection(
-      TextSelection.create(view.state.doc, snippet.from, snippet.to),
+      TextSelection.between(view.state.doc.resolve(snippet.from), view.state.doc.resolve(snippet.to)),
     )
     tr.scrollIntoView()
     view.dispatch(tr)

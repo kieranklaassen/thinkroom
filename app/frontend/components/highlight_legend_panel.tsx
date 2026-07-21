@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { router } from '@inertiajs/react'
 import { patchJSON } from '../lib/csrf'
 import {
   HIGHLIGHT_COLORS,
@@ -60,7 +61,18 @@ export function HighlightLegendPanel({ groups, names, canWrite, slug, onJumpTo }
       const { [color]: _removed, ...rest } = prev
       return rest
     })
+    // A failed rename (revoked write access, network drop) never broadcasts,
+    // so nothing would reconcile the optimistic name — refetch it explicitly.
     void patchJSON(`/d/${slug}/highlight_names`, { names: { [color]: value } })
+      .then((response) => {
+        if (response.ok) return
+        console.warn('pruf: highlight rename rejected', response.status)
+        router.reload({ only: ['highlight_names'], async: true })
+      })
+      .catch((error) => {
+        console.warn('pruf: highlight rename failed', error)
+        router.reload({ only: ['highlight_names'], async: true })
+      })
   }
 
   return (
