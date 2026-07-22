@@ -623,7 +623,7 @@ export default function DocumentShow({
   // write capability, not just the visible toolbar (Comment mode selections
   // keep offering Comment only).
   const canHighlight = ownership.can_write && effectiveMode === 'edit'
-  // The selection's uniform color (drives the remove-on-reclick affordance).
+  // The selection's uniform color (drives the active-swatch styling).
   // textTarget is recreated on every selection/doc change, so this stays
   // fresh after a swatch click without a dedicated subscription.
   const activeHighlightColor = useMemo(() => {
@@ -643,7 +643,11 @@ export default function DocumentShow({
       onClick: () => {
         const view = viewRef.current
         if (!view) return
-        if (activeHighlightColor === color.id) removeHighlight(view)
+        // Decide apply-vs-remove from the live editor state, not the memoized
+        // activeHighlightColor — a click can land before React re-renders
+        // (docTick is rAF-deferred), and a stale snapshot would re-apply
+        // instead of toggling off.
+        if (selectionHighlightColor(view.state) === color.id) removeHighlight(view)
         else applyHighlight(view, color.id)
         view.focus()
       },
