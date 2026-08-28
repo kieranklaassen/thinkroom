@@ -9,6 +9,11 @@ class AgentGuideWebmcpTest < ActiveSupport::TestCase
     thinkroom_announce_presence
   ].freeze
   TRUSTED_TOOLS = %w[thinkroom_guide thinkroom_ack_events].freeze
+  READ_ONLY_TOOL_SET = %w[
+    thinkroom_guide thinkroom_read_document thinkroom_propose_suggestion thinkroom_comment
+    thinkroom_resolve_comment thinkroom_announce_presence thinkroom_poll_events thinkroom_ack_events
+    thinkroom_create_document
+  ].freeze
 
   setup do
     @document = Document.create!(title: "Shared Doc", seed_markdown: "# Hello\n\nA paragraph about provenance.")
@@ -77,13 +82,61 @@ class AgentGuideWebmcpTest < ActiveSupport::TestCase
     end
   end
 
-  test "the document page registers exactly the R6 tool set" do
-    assert_equal %w[
-      thinkroom_guide thinkroom_read_document thinkroom_propose_suggestion thinkroom_comment
-      thinkroom_resolve_comment thinkroom_announce_presence thinkroom_poll_events thinkroom_ack_events
-      thinkroom_create_document
-    ].sort, @tools.map { |tool| tool[:name] }.sort
+  test "the document page registers exactly the R6 tool set for a viewer who cannot write" do
+    assert_equal READ_ONLY_TOOL_SET.sort, @tools.map { |tool| tool[:name] }.sort
     assert_equal "#{BASE_URL}/d/#{@document.slug}", @manifest[:share_url]
+  end
+
+  test "the document page adds the in-page update tool when the viewer can write" do
+    manifest = AgentGuide.webmcp_tools(@document, BASE_URL, can_write: true)
+    assert_equal (READ_ONLY_TOOL_SET + %w[thinkroom_update_document]).sort, manifest[:tools].map { |tool| tool[:name] }.sort
+    assert_equal "#{BASE_URL}/d/#{@document.slug}", manifest[:share_url]
+  end
+
+  test "update_document is an editor tool that replaces the document in-page with agent provenance" do
+    tool = AgentGuide.webmcp_tools(@document, BASE_URL, can_write: true)[:tools].find { |t| t[:name] == "thinkroom_update_document" }
+    assert tool, "writable manifest lacks thinkroom_update_document"
+    assert_equal "editor", tool[:kind]
+    assert_equal "replace_content", tool[:action]
+    refute tool.key?(:request)
+    refute tool.key?(:static_text)
+    assert_equal %w[agent_name content], tool[:input_schema][:required]
+    assert_equal AgentGuide::WEBMCP_AGENT_NAME_PROPERTY, tool[:input_schema][:properties][:agent_name]
+    content = tool[:input_schema][:properties][:content]
+    assert_equal "string", content[:type]
+    assert_equal 1, content[:minLength]
+    assert_equal Document::MAX_CONTENT_BYTES, content[:maxLength]
+    assert_includes content[:description], "Markdown"
+    assert_includes content[:description], "UTF-8"
+    assert_equal({ read_only_hint: false, untrusted_content_hint: false }, tool[:annotations])
+    assert_equal true, tool[:include_viewer_context]
+    assert_includes tool[:description], "Markdown"
+    assert_includes tool[:description], "previous_content"
+    assert_includes tool[:description], "operator"
+    assert_includes tool[:description], "thinkroom_propose_suggestion"
+    assert_match(/first heading/, tool[:description])
+    assert_match(/pending/, tool[:description])
+
+    html_document = Document.create!(title: "HTML Doc", content_format: "html", seed_content: "<h1>HTML Doc</h1><p>Body</p>")
+    html_tool = AgentGuide.webmcp_tools(html_document, BASE_URL, can_write: true)[:tools].find { |t| t[:name] == "thinkroom_update_document" }
+    assert_includes html_tool[:description], "HTML"
+    refute_includes html_tool[:description], "Markdown"
+    assert_includes html_tool[:input_schema][:properties][:content][:description], "HTML"
+  end
+
+  test "names and descriptions fit Chrome's guardrails on the writable manifest too" do
+    tools = AgentGuide.webmcp_tools(@document, BASE_URL, can_write: true)[:tools]
+    names = tools.map { |tool| tool[:name] }
+    assert_equal names.uniq, names
+    tools.each do |tool|
+      assert_match CHROME_NAME_PATTERN, tool[:name]
+      assert_operator tool[:name].length, :<=, 30, "#{tool[:name]} exceeds 30 chars"
+      assert_operator tool[:description].length, :<=, 500, "#{tool[:name]} description exceeds 500 chars"
+      assert_equal false, tool[:input_schema][:additionalProperties]
+      tool[:input_schema][:properties].each do |property, schema|
+        assert_operator schema[:description].length, :<=, 150, "#{tool[:name]}.#{property} description exceeds 150 chars"
+      end
+    end
   end
 
   test "propose_suggestion requires identity and body, caps body in bytes, and names edit access" do
@@ -141,10 +194,19 @@ class AgentGuideWebmcpTest < ActiveSupport::TestCase
   end
 
   test "every non-read-only tool requires agent identity with a bounded agent_name" do
-    @tools.each do |tool|
+    tools = AgentGuide.webmcp_tools(@document, BASE_URL, can_write: true)[:tools]
+    assert tools.any? { |tool| tool[:kind] == "editor" }, "writable manifest should include an editor tool"
+    tools.each do |tool|
       next if tool[:kind] == "static"
 
-      if tool[:annotations][:read_only_hint]
+      if tool[:kind] == "editor"
+        refute tool[:annotations][:read_only_hint], tool[:name]
+        agent_name = tool[:input_schema][:properties][:agent_name]
+        assert_equal "string", agent_name[:type]
+        assert_equal 1, agent_name[:minLength]
+        assert_equal 255, agent_name[:maxLength]
+        assert_includes tool[:input_schema][:required], "agent_name"
+      elsif tool[:annotations][:read_only_hint]
         assert_equal "omit", tool[:request][:agent_identity], tool[:name]
       else
         assert_equal "required", tool[:request][:agent_identity], tool[:name]
@@ -175,8 +237,22 @@ class AgentGuideWebmcpTest < ActiveSupport::TestCase
       refute_equal "#{BASE_URL}/api/uploads", url, tool[:name]
     end
     names = @tools.map { |tool| tool[:name] }
-    refute_includes names, "thinkroom_update_document"
     refute_includes names, "thinkroom_list_documents"
+  end
+
+  test "update_document is offered only to viewers who can write and never on the index" do
+    refute_includes @tools.map { |tool| tool[:name] }, "thinkroom_update_document"
+    refute_includes AgentGuide.webmcp_tools(@document, BASE_URL, can_write: false)[:tools].map { |tool| tool[:name] },
+                    "thinkroom_update_document"
+    assert_includes AgentGuide.webmcp_tools(@document, BASE_URL, can_write: true)[:tools].map { |tool| tool[:name] },
+                    "thinkroom_update_document"
+    refute_includes AgentGuide.webmcp_index_tools(BASE_URL)[:tools].map { |tool| tool[:name] }, "thinkroom_update_document"
+
+    # The editor tool never becomes a request tool: the API endpoint stays excluded.
+    request_tools = AgentGuide.webmcp_tools(@document, BASE_URL, can_write: true)[:tools].select { |tool| tool[:kind] == "request" }
+    assert_equal AgentGuide::WEBMCP_TOOLS.size, request_tools.size
+    assert_match(/thinkroom_update_document/, AgentGuide::WEBMCP_EXCLUDED_ENDPOINTS.fetch("update_document"))
+    assert_match(/in-page/, AgentGuide::WEBMCP_EXCLUDED_ENDPOINTS.fetch("update_document"))
   end
 
   test "create_document caps content in bytes and needs no link access" do
@@ -237,7 +313,14 @@ class AgentGuideWebmcpTest < ActiveSupport::TestCase
     notes = AgentGuide.notes(@document)
     assert notes.last.include?("WebMCP"), notes.last
     assert notes.last.include?("thinkroom_*")
-    assert notes.last.include?("document updates are not offered")
+    assert notes.last.include?("thinkroom_update_document"), notes.last
+    assert_match(/in-page/, notes.last)
+    assert_match(/provenance/, notes.last)
+    refute_match(/not offered|not browser tools/, notes.last)
+
+    index_guide = AgentGuide.webmcp_index_tools(BASE_URL)[:tools].find { |tool| tool[:name] == "thinkroom_guide" }[:static_text]
+    assert_includes index_guide, "thinkroom_update_document"
+    refute_match(/not offered|not browser tools/, index_guide)
   end
 
   private

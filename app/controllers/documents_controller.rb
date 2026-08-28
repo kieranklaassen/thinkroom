@@ -155,7 +155,8 @@ class DocumentsController < InertiaController
       presences: -> { document.agent_presences.active.map(&:as_props) },
       # WebMCP tool manifest for agents driving this browser (lazy: partial
       # reloads that poll suggestions/comments/presences never re-ship it).
-      webmcp: -> { AgentGuide.webmcp_tools(document, request.base_url) }
+      # The in-page update tool rides only when THIS viewer can write.
+      webmcp: -> { AgentGuide.webmcp_tools(document, request.base_url, can_write: writable) }
     }
   end
 
