@@ -67,6 +67,10 @@ import type { ReviewableSuggestion } from '../../components/suggestion_card'
 import { useMetaChannel } from '../../lib/use_meta_channel'
 import { useMediaQuery } from '../../lib/use_media_query'
 import { useIsClient } from '../../lib/use_is_client'
+import { useWebmcpTools } from '../../lib/use_webmcp_tools'
+import { executeManifestTool } from '../../lib/webmcp_execute'
+import { executeEditorTool } from '../../lib/webmcp_editor'
+import type { WebmcpManifest } from '../../lib/webmcp'
 import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
 import type {
@@ -122,8 +126,16 @@ export interface DocumentProps {
   presences: AgentPresencePayload[]
   /** Persisted highlighter legend names ({ yellow: 'Urgent' }). */
   highlight_names: Record<string, string>
+  // WebMCP tool manifest (AgentGuide.webmcp_tools) — lazy prop, registered on
+  // document.modelContext once per slug after hydration.
+  webmcp: WebmcpManifest
   nativeApp: SharedProps['nativeApp']
 }
+
+// Tells a browser agent which capabilities in a result are the human viewer's
+// (this tab) versus its own anonymous ones (the API body's `ownership`).
+const VIEWER_CONTEXT_NOTE =
+  "These are the human viewer's capabilities in this tab. Your own capabilities as an anonymous agent are the ownership object in the API body."
 
 const documentModePath = (slug: string, mode: EditorMode) =>
   `/d/${encodeURIComponent(slug)}${mode === 'read' ? '' : `/${mode}`}`
@@ -155,6 +167,7 @@ export default function DocumentShow({
   activities,
   presences,
   highlight_names: highlightNames,
+  webmcp,
   nativeApp,
 }: DocumentProps) {
   // SSR/hydration island flag: the live editor and any render-time browser
@@ -287,6 +300,39 @@ export default function DocumentShow({
   // handleSelection is a stable callback — it reads the live mode via ref.
   const modeRef = useRef(effectiveMode)
   modeRef.current = effectiveMode
+
+  // WebMCP: register this document's tools once per slug (KTD5). Mode
+  // switches and partial reloads re-render without remounting, so the
+  // executor reads the live mode and ownership through refs instead of
+  // closing over them at registration time.
+  const ownershipRef = useRef(ownership)
+  ownershipRef.current = ownership
+  useWebmcpTools({
+    key: doc.slug,
+    tools: webmcp.tools,
+    execute: (tool, args, signal) => {
+      const { yours, can_write, can_comment, link_access } = ownershipRef.current
+      const viewerContext = {
+        ownership: { yours, can_write, can_comment, link_access },
+        mode: modeRef.current,
+        share_url: webmcp.share_url,
+        note: VIEWER_CONTEXT_NOTE,
+      }
+      // Editor tools run in-page against the live editor; only this page
+      // holds the handle, so the interpreter never sees them (KTD1–KTD3).
+      if (tool.kind === 'editor') {
+        return executeEditorTool(tool, args, {
+          handle: handleRef.current,
+          canWrite: can_write,
+          slug: doc.slug,
+          contentFormat: doc.content_format,
+          signal,
+          viewerContext,
+        })
+      }
+      return executeManifestTool(tool, args, { signal, viewerContext })
+    },
+  })
   // Leaving Comment mode dismisses any pending click-to-comment affordance.
   useEffect(() => {
     if (effectiveMode !== 'comment') {

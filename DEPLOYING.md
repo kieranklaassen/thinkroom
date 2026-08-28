@@ -51,6 +51,31 @@ https://thinkroom.kieranklaassen.com/auth/google_oauth2/callback
 https://pruf.kieranklaassen.com/auth/google_oauth2/callback
 ```
 
+### WebMCP origin trial
+
+Thinkroom pages register WebMCP tools for agents driving Chrome 149+. For the
+production origins to take part in Chrome's origin trial, register both at
+<https://developer.chrome.com/origintrials/#/register_trial/4163014905550602241>:
+
+```text
+https://thinkroom.kieranklaassen.com
+https://pruf.kieranklaassen.com
+```
+
+Each origin gets its own token. Put both in `.kamal/deploy.env`, separated by a
+space (or a comma):
+
+```bash
+WEBMCP_ORIGIN_TRIAL_TOKEN="<thinkroom token> <pruf token>"
+```
+
+Tokens are public, bound to one origin each, and signed by Google — they are
+not secrets and do not belong in `.kamal/secrets`. `config/deploy.yml` passes
+the value through `env.clear`; the layout emits one origin-trial meta tag per
+token and Chrome ignores the ones bound to another host. When the variable is
+unset, no tag is emitted and WebMCP still works in browsers with the testing
+flag enabled.
+
 These local deployment files are ignored by Git. Never commit registry tokens,
 the Rails master key, SSH private keys, or production `.env` files.
 
