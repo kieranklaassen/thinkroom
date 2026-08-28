@@ -49,7 +49,7 @@
   },
   "overrides": {
     "@excalidraw/excalidraw": {
-      "nanoid": "3.3.12"
+      "nanoid": "3.3.18"
     },
     "@excalidraw/mermaid-to-excalidraw": {
       "nanoid": "5.1.16"
