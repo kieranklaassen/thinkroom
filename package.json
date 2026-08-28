@@ -44,11 +44,12 @@
     "check:cli": "node --test cli/test/*.test.js",
     "check:exports": "node script/export_check.mjs",
     "check:html": "node script/html_document_check.mjs",
+    "check:webmcp": "node script/webmcp_check.mjs",
     "check:links": "node script/link_check.mjs"
   },
   "overrides": {
     "@excalidraw/excalidraw": {
-      "nanoid": "3.3.12"
+      "nanoid": "3.3.18"
     },
     "@excalidraw/mermaid-to-excalidraw": {
       "nanoid": "5.1.16"
