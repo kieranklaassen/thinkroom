@@ -52,12 +52,17 @@ export function useWebmcpTools({ key, tools, execute }: UseWebmcpToolsOptions): 
 
     // Results are data, never exceptions (KTD4): a throw would reach the
     // agent as a bare UnknownError and `undefined` fails serialization.
+    // The fetch aborts on either signal: the page-lifetime one (cleanup) or
+    // the per-call one the agent passes when it cancels the execution, so a
+    // cancelled write never reaches the server.
     const run = async (
       tool: WebmcpManifestTool,
       args: Record<string, unknown>,
+      callSignal?: AbortSignal,
     ): Promise<WebmcpResult> => {
       try {
-        const result = await executeRef.current(tool, args ?? {}, signal)
+        const combined = callSignal ? AbortSignal.any([signal, callSignal]) : signal
+        const result = await executeRef.current(tool, args ?? {}, combined)
         if (result === undefined || result === null) {
           return errorResult({ error: `${tool.name} returned no result` })
         }
@@ -100,7 +105,7 @@ export function useWebmcpTools({ key, tools, execute }: UseWebmcpToolsOptions): 
               description: tool.description,
               inputSchema: tool.input_schema,
               annotations: toSpecAnnotations(tool.annotations),
-              execute: (input) => run(tool, input),
+              execute: (input, options) => run(tool, input, options?.signal),
             },
             { signal },
           ),

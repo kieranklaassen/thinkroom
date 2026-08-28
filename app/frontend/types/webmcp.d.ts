@@ -21,7 +21,15 @@ interface ToolAnnotations {
  * surfaces to the agent as a bare `UnknownError`, so page code wraps every
  * failure into an MCP-style error result instead of throwing.
  */
-type ToolExecuteCallback = (input: Record<string, unknown>) => unknown | Promise<unknown>
+type ToolExecuteCallback = (
+  input: Record<string, unknown>,
+  options: ToolExecuteCallbackOptions,
+) => unknown | Promise<unknown>
+
+/** Per-execution options; `signal` aborts when the agent cancels the call. */
+interface ToolExecuteCallbackOptions {
+  readonly signal: AbortSignal
+}
 
 interface ModelContextTool {
   name: string

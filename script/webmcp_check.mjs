@@ -70,10 +70,15 @@ const MODEL_CONTEXT_STUB = `
     }
   }
   Object.defineProperty(document, 'modelContext', { value: new ModelContextStub(), configurable: true })
-  window.__webmcpInvoke = (name, args) => {
+  window.__webmcpInvoke = (name, args, { cancel = false } = {}) => {
     const tool = tools.get(name)
     if (!tool) throw new Error('no registered tool named ' + name)
-    return tool.execute(args ?? {}, { signal: new AbortController().signal })
+    // The spec passes a per-execution signal; the cancel option aborts it right after
+    // the call starts, the way an agent's stop button would.
+    const controller = new AbortController()
+    const result = tool.execute(args ?? {}, { signal: controller.signal })
+    if (cancel) controller.abort()
+    return result
   }
 })()
 `
@@ -338,6 +343,20 @@ try {
   const unreachable = parseResult(await seam(requestTool('t_down', `${ORIGIN}/api/docs/unreachable-check`), {}))
   assert(unreachable.isError && unreachable.json?.error === 'unreachable', 'a failed network request yields "unreachable"', unreachable.text)
   await page.unroute('**/api/docs/unreachable-check')
+
+  // Cancellation: the agent's per-execution signal must stop a write from
+  // committing, not just the page-lifetime signal.
+  phase = 'cancellation'
+  const cancelledBody = `Cancelled comment ${Date.now()}`
+  const cancelled = parseResult(
+    await page.evaluate(
+      ([body]) => window.__webmcpInvoke('thinkroom_comment', { agent_name: 'Scout', body }, { cancel: true }),
+      [cancelledBody],
+    ),
+  )
+  assert(cancelled.isError && cancelled.json?.error === 'cancelled', 'a cancelled tool call returns the cancelled envelope', cancelled.text)
+  const afterCancel = await (await fetch(`${BASE}/api/docs/${slug}`)).json()
+  assert(!afterCancel.open_comments.some((c) => c.body === cancelledBody), 'a cancelled comment never reaches the server')
 
   // AE5: Inertia navigation from the index to a document swaps the tool set.
   phase = 'AE5'

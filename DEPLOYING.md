@@ -62,16 +62,19 @@ https://thinkroom.kieranklaassen.com
 https://pruf.kieranklaassen.com
 ```
 
-Put the resulting token in `.kamal/deploy.env`:
+Each origin gets its own token. Put both in `.kamal/deploy.env`, separated by a
+space (or a comma):
 
 ```bash
-WEBMCP_ORIGIN_TRIAL_TOKEN=...
+WEBMCP_ORIGIN_TRIAL_TOKEN="<thinkroom token> <pruf token>"
 ```
 
-The token is public, bound to its origin, and signed by Google — it is not a
-secret and does not belong in `.kamal/secrets`. `config/deploy.yml` passes it
-through `env.clear`; when it is unset, the layout emits no origin-trial meta
-tag and WebMCP still works in browsers with the testing flag enabled.
+Tokens are public, bound to one origin each, and signed by Google — they are
+not secrets and do not belong in `.kamal/secrets`. `config/deploy.yml` passes
+the value through `env.clear`; the layout emits one origin-trial meta tag per
+token and Chrome ignores the ones bound to another host. When the variable is
+unset, no tag is emitted and WebMCP still works in browsers with the testing
+flag enabled.
 
 These local deployment files are ignored by Git. Never commit registry tokens,
 the Rails master key, SSH private keys, or production `.env` files.

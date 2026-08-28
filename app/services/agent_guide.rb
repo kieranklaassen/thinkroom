@@ -86,7 +86,9 @@ class AgentGuide
       required: %w[agent_name status],
       path_params: [], body_params: %w[status location],
       agent_identity: "required",
-      read_only_hint: false, untrusted_content_hint: false,
+      # The response lists every active agent with its free-text location,
+      # so another agent's text rides back to the caller.
+      read_only_hint: false, untrusted_content_hint: true,
       include_viewer_context: false,
       access: "Works on any link access level; requires agent_name."
     },

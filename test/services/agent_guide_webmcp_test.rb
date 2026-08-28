@@ -6,8 +6,9 @@ class AgentGuideWebmcpTest < ActiveSupport::TestCase
   UNTRUSTED_TOOLS = %w[
     thinkroom_read_document thinkroom_poll_events thinkroom_resolve_comment
     thinkroom_comment thinkroom_propose_suggestion thinkroom_create_document
+    thinkroom_announce_presence
   ].freeze
-  TRUSTED_TOOLS = %w[thinkroom_guide thinkroom_announce_presence thinkroom_ack_events].freeze
+  TRUSTED_TOOLS = %w[thinkroom_guide thinkroom_ack_events].freeze
 
   setup do
     @document = Document.create!(title: "Shared Doc", seed_markdown: "# Hello\n\nA paragraph about provenance.")

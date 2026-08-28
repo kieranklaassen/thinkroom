@@ -35,10 +35,10 @@
     <meta name="mobile-web-app-capable" content="yes">
     <%= csrf_meta_tags %>
     <%= csp_meta_tag %>
-    <%# Chrome WebMCP origin trial. The token is public and origin-bound;
-        it is validated in WebmcpOriginTrial and absent when unset. %>
-    <% if Rails.application.config.x.webmcp_origin_trial_token.present? %>
-      <%= tag.meta "http-equiv": "origin-trial", content: Rails.application.config.x.webmcp_origin_trial_token %>
+    <%# Chrome WebMCP origin trial. Tokens are public and origin-bound — one
+        per production host, validated in WebmcpOriginTrial, none when unset. %>
+    <% Array(Rails.application.config.x.webmcp_origin_trial_tokens).each do |token| %>
+      <%= tag.meta "http-equiv": "origin-trial", content: token %>
     <% end %>
 
     <%= yield :head %>

@@ -40,7 +40,7 @@ export async function executeManifestTool(
     if (tool.kind === 'static') return staticResult(tool.static_text, tool, options)
     return await requestResult(tool, input, options)
   } catch (error) {
-    if (isAbortError(error)) return errorResult({ error: 'cancelled: page navigated' })
+    if (isAbortError(error)) return errorResult({ error: 'cancelled' })
     return errorResult({ error: errorMessage(error) })
   }
 }
@@ -104,7 +104,7 @@ async function requestResult(
   try {
     response = await fetch(url.value, init)
   } catch (error) {
-    if (isAbortError(error)) return errorResult({ error: 'cancelled: page navigated' })
+    if (isAbortError(error)) return errorResult({ error: 'cancelled' })
     return errorResult({ error: 'unreachable', detail: errorMessage(error) })
   }
 
