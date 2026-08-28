@@ -38,6 +38,8 @@ env:
     WEB_CONCURRENCY: "1"
     # Empty disables Riffrec automation. Use a comma-separated allowlist.
     RIFFREC_AUTOMATION_EMAILS: <%= ENV.fetch("RIFFREC_AUTOMATION_EMAILS", "") %>
+    # Public Chrome origin-trial token for WebMCP. Empty emits no meta tag.
+    WEBMCP_ORIGIN_TRIAL_TOKEN: <%= ENV.fetch("WEBMCP_ORIGIN_TRIAL_TOKEN", "") %>
 
 aliases:
   console: app exec --interactive --reuse "bin/rails console"
