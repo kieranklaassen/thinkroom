@@ -1922,8 +1922,150 @@ try {
   await winA.locator('.comment-card', { hasText: clickComment }).waitFor({ timeout: 10000 })
   ok('click-to-comment posted and synced to the other window')
 
+  // --- Comment anchors: rail cards visibly connect to their text ---
+  // The card just posted anchors the first paragraph; Comment mode keeps
+  // every open anchor tinted in the copy.
+  const anchorTintOk = await winB
+    .waitForFunction(() => CSS.highlights?.has('comment-anchor'), undefined, { timeout: 5000 })
+    .then(() => true)
+    .catch(() => false)
+  if (anchorTintOk) ok('comment mode tints open comment anchors in the copy')
+  else fail('comment mode did not register the comment-anchor highlight')
+
+  const linkedCard = winB.locator('.comment-card--linked', { hasText: clickComment })
+  await linkedCard.waitFor({ timeout: 5000 })
+  ok('anchored rail card is linked (whole card clickable)')
+  await linkedCard.locator('.comment-body').click()
+  const flashOk = await winB
+    .waitForFunction(
+      () =>
+        CSS.highlights?.has('comment-anchor-flash') ||
+        CSS.highlights?.has('comment-anchor-flash-soft'),
+      undefined,
+      { timeout: 2000 },
+    )
+    .then(() => true)
+    .catch(() => false)
+  if (flashOk) ok('clicking the card pulsed its anchor in the document')
+  else fail('card click did not pulse the comment anchor')
+
+  // Anchor-status captions: an unanchored comment reads as whole-document,
+  // and an anchor quoting text absent from the doc reads as stale.
+  const trackApi = `${BASE}/api/docs/${trackDoc.slug}`
+  await fetch(`${trackApi}/comments`, {
+    method: 'POST',
+    headers: agentHeaders,
+    body: JSON.stringify({ body: 'General note without an anchor.' }),
+  })
+  await fetch(`${trackApi}/comments`, {
+    method: 'POST',
+    headers: agentHeaders,
+    body: JSON.stringify({
+      body: 'Note anchored to vanished text.',
+      anchor_text: 'This exact sentence never existed in the track document.',
+    }),
+  })
+  await winB
+    .locator('.comment-card', { hasText: 'General note without an anchor.' })
+    .locator('.comment-scope', { hasText: 'On the whole document' })
+    .waitFor({ timeout: 10000 })
+  ok('unanchored comment card reads as on the whole document')
+  await winB
+    .locator('.comment-card', { hasText: 'Note anchored to vanished text.' })
+    .locator('.comment-scope', { hasText: 'no longer in the document' })
+    .waitFor({ timeout: 10000 })
+  ok('stale-anchor comment card flags its missing text')
+
   await winA.close()
   await winB.close()
+
+  // --- Comment anchors: block-boundary jump on a long document ---
+  // A whole-paragraph anchor (what click-to-comment produces) resolves to a
+  // range starting at a block boundary; the jump must scroll to that block,
+  // not the middle of the document.
+  const jumpAnchorPara = 'Anchor paragraph for the jump check.'
+  const jumpFiller = Array.from(
+    { length: 40 },
+    (_, i) => `Filler paragraph ${i + 1} keeps the anchor far above the fold.`,
+  )
+  const jumpDoc = await (
+    await fetch(`${BASE}/api/docs`, {
+      method: 'POST',
+      headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Comment jump check',
+        content: `# Comment jump check\n\n${jumpAnchorPara}\n\n${jumpFiller.join('\n\n')}`,
+      }),
+    })
+  ).json()
+  await fetch(`${BASE}/api/docs/${jumpDoc.slug}/comments`, {
+    method: 'POST',
+    headers: { 'X-Agent-Name': 'check', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ body: 'Jump target comment.', anchor_text: jumpAnchorPara }),
+  })
+  const jumpWin = await makePage('a')
+  await jumpWin.goto(`${BASE}/d/${jumpDoc.slug}/comment`)
+  await waitForLive(jumpWin)
+  const jumpCard = jumpWin.locator('.comment-card--linked', { hasText: 'Jump target comment.' })
+  await jumpCard.waitFor({ timeout: 10000 })
+  await jumpWin.mouse.move(400, 400)
+  await jumpWin.mouse.wheel(0, 100000)
+  // Agent pseudo-cursor widgets ("✦ check") inject their labels into
+  // paragraph textContent — strip them before matching, as elsewhere.
+  await jumpWin.waitForFunction(
+    (text) => {
+      const para = Array.from(document.querySelectorAll('.milkdown .ProseMirror p')).find((el) => {
+        const clone = el.cloneNode(true)
+        clone.querySelectorAll('.ProseMirror-yjs-cursor, .agent-cursor').forEach((n) => n.remove())
+        return clone.textContent === text
+      })
+      return Boolean(para) && para.getBoundingClientRect().bottom < 0
+    },
+    jumpAnchorPara,
+    { timeout: 5000 },
+  )
+  await jumpCard.locator('.comment-body').click()
+  const jumpLanded = await jumpWin
+    .waitForFunction(
+      (text) => {
+        const para = Array.from(document.querySelectorAll('.milkdown .ProseMirror p')).find((el) => {
+          const clone = el.cloneNode(true)
+          clone.querySelectorAll('.ProseMirror-yjs-cursor, .agent-cursor').forEach((n) => n.remove())
+          return clone.textContent === text
+        })
+        if (!para) return false
+        const rect = para.getBoundingClientRect()
+        return rect.top >= 0 && rect.bottom <= window.innerHeight
+      },
+      jumpAnchorPara,
+      { timeout: 5000 },
+    )
+    .then(() => true)
+    .catch(() => false)
+  if (jumpLanded) ok('card click scrolled a block-boundary anchor into view on a long document')
+  else fail('card click did not bring the anchor paragraph into view')
+
+  // Multi-paragraph selection comments resolve through the multi-block span
+  // fallback: the card links and jumps instead of reading as stale.
+  const jumpParaBox = (text) =>
+    jumpWin.locator('.milkdown .ProseMirror p', { hasText: text }).first().boundingBox()
+  const spanStart = await jumpParaBox('Filler paragraph 3 keeps')
+  const spanEnd = await jumpParaBox('Filler paragraph 4 keeps')
+  await jumpWin.mouse.move(spanStart.x + 2, spanStart.y + spanStart.height / 2)
+  await jumpWin.mouse.down()
+  await jumpWin.mouse.move(spanEnd.x + spanEnd.width * 0.6, spanEnd.y + spanEnd.height / 2, {
+    steps: 8,
+  })
+  await jumpWin.mouse.up()
+  await jumpWin.locator('.selection-toolbar button', { hasText: 'Comment' }).click()
+  const spanComment = `Cross-paragraph comment ${Date.now()}`
+  await jumpWin.getByPlaceholder('Say something about this…').fill(spanComment)
+  await jumpWin.locator('.comment-composer--anchored .btn-accept').click()
+  await jumpWin
+    .locator('.comment-card--linked', { hasText: spanComment })
+    .waitFor({ timeout: 10000 })
+  ok('multi-paragraph selection comment resolved and linked (not mislabeled stale)')
+  await jumpWin.close()
 
   // --- Demo doc: localStorage tampering cannot unlock suggest mode ---
   const demoPage = await browser.newPage()
