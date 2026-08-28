@@ -19,7 +19,7 @@
     "@milkdown/kit": "7.21.2",
     "@milkdown/plugin-collab": "7.21.2",
     "@milkdown/plugin-highlight": "7.21.2",
-    "@milkdown/react": "7.21.2",
+    "@milkdown/react": "7.22.1",
     "@rails/actioncable": "^8.1.300",
     "@ruby-native/react": "^0.10.11",
     "@types/react": "^19.2.17",
