@@ -940,26 +940,32 @@ export default function DocumentShow({
               </div>
             )}
           </div>
-          {!isReading && !isMobile && (
+          {!isMobile && (!isReading || highlightGroups.length > 0) && (
             <aside className="doc-rail">
-              <CommentsPanel
-                comments={comments}
-                // The desktop composer is the anchored card next to the
-                // selection — the rail keeps the list only.
-                composerAnchor={null}
-                onSubmit={submitComment}
-                onCancelComposer={closeComposer}
-                onResolve={resolveComment}
-                onJumpTo={jumpToAnchor}
-              />
+              {!isReading && (
+                <CommentsPanel
+                  comments={comments}
+                  // The desktop composer is the anchored card next to the
+                  // selection — the rail keeps the list only.
+                  composerAnchor={null}
+                  onSubmit={submitComment}
+                  onCancelComposer={closeComposer}
+                  onResolve={resolveComment}
+                  onJumpTo={jumpToAnchor}
+                />
+              )}
+              {/* The legend is part of reading the document — colors only
+                  mean something with their names — so Read mode keeps it
+                  (names locked, snippets still jump) while the review
+                  panels stay Edit/Suggest/Comment-only. */}
               <HighlightLegendPanel
                 groups={highlightGroups}
                 names={highlightNames}
-                canWrite={ownership.can_write}
+                canWrite={ownership.can_write && !isReading}
                 slug={doc.slug}
                 onJumpTo={jumpToHighlight}
               />
-              <ActivityPanel activities={activities} />
+              {!isReading && <ActivityPanel activities={activities} />}
             </aside>
           )}
         </main>

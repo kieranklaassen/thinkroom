@@ -160,6 +160,35 @@ try {
     'legend color names persist across reloads',
   )
 
+  // Read mode keeps the legend (names and jump targets are part of reading
+  // the document) but locks renaming.
+  await page.goto(`${BASE}/d/${created.slug}`)
+  await waitForLive(page)
+  const readLegend = page.locator('.doc-page.is-read-mode .rail-section[aria-label="Highlights"]')
+  await readLegend.waitFor({ timeout: 15000 })
+  assert(
+    (await readLegend.locator('.highlight-legend-color').count()) === 2,
+    'read mode shows the highlight legend',
+  )
+  assert(
+    (await readLegend.locator('.highlight-legend-name').first().inputValue()) === 'Urgent',
+    'read mode shows persisted color names',
+  )
+  assert(
+    await readLegend.locator('.highlight-legend-name').first().isDisabled(),
+    'read mode locks color renaming',
+  )
+  assert(
+    (await page.locator('.doc-page.is-read-mode .doc-rail .rail-section').count()) === 1,
+    'read mode rail carries only the legend',
+  )
+  await readLegend.locator('.highlight-legend-snippet').first().click()
+  assert(true, 'legend snippets stay clickable in read mode')
+
+  await page.goto(`${BASE}/d/${created.slug}/edit`)
+  await waitForLive(page)
+  await editor.locator('.hl--blue').waitFor({ timeout: 15000 })
+
   // Copy is an export surface: both clipboard flavors drop highlighter
   // metadata while the text itself survives.
   await page.locator('.milkdown .ProseMirror').focus()
