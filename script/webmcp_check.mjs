@@ -24,6 +24,7 @@ const DOCUMENT_TOOLS = [
   'thinkroom_poll_events',
   'thinkroom_ack_events',
   'thinkroom_create_document',
+  'thinkroom_update_document',
 ].sort()
 const INDEX_TOOLS = ['thinkroom_guide', 'thinkroom_create_document'].sort()
 
@@ -187,7 +188,7 @@ try {
   assert(navigation && typeof navigation.headers.cookie === 'string' && navigation.headers.cookie.length > 0,
     'the tab holds a session cookie (so a cookie-less tool request is a real negative)')
   const docTools = await getTools()
-  assert(sameSet(docTools.map((t) => t.name), DOCUMENT_TOOLS), 'document page registers exactly the nine document tools')
+  assert(sameSet(docTools.map((t) => t.name), DOCUMENT_TOOLS), 'document page registers exactly the ten document tools (writable edit link)')
   assert(
     docTools.every((t) => t.description.length > 0 && t.inputSchema?.type === 'object'),
     'document tools carry descriptions and object schemas',
@@ -283,6 +284,41 @@ try {
       `${label} result contains no CSRF token or cookie value`)
   }
 
+  // AE10: in-page whole-document replacement on the unclaimed edit-link page.
+  phase = 'AE10'
+  mark = requests.length
+  const updateIdentity = parseResult(await invoke('thinkroom_update_document', { content: '# Nope' }))
+  assert(updateIdentity.isError && updateIdentity.text.includes('agent identity'), 'update_document without agent_name is refused with the identity message')
+  const blank = parseResult(await invoke('thinkroom_update_document', { agent_name: AGENT, content: '   ' }))
+  assert(blank.isError && blank.text.includes('empty'), 'update_document with blank content is refused', blank.text)
+  const beforeUpdate = await (await fetch(`${BASE}/api/docs/${slug}`)).json()
+  assert(beforeUpdate.plain_text.includes('WebMCP check'), 'refusals left the document unchanged')
+  const updated = parseResult(
+    await invoke('thinkroom_update_document', {
+      agent_name: AGENT,
+      content: '# Rewritten by Scout\n\n<ins data-suggestion-id="stale">Fresh body.</ins>\n',
+    }),
+  )
+  assert(!updated.isError && updated.json?.ok === true, 'update_document replaces the document', updated.text)
+  assert(updated.json.persisted === true && updated.json.title === 'Rewritten by Scout',
+    'update_document result reports persisted: true and the derived title', updated.text)
+  assert(typeof updated.json.previous_content === 'string' && updated.json.previous_content.includes('WebMCP check'),
+    'update_document result returns the previous source for recovery')
+  assert((await apiRequestsSince(mark)).length === 0, 'update_document made no API request')
+  await page
+    .locator(`.milkdown .ProseMirror [data-provenance][data-kind="ai"][data-author="${AGENT}"]`, { hasText: 'Fresh body' })
+    .waitFor({ timeout: 10000 })
+  assert((await page.locator('.milkdown .ProseMirror [data-suggestion-id]').count()) === 0,
+    'stale suggestion markup in the new source is stripped')
+  await page.waitForFunction(() => document.title.includes('Rewritten by Scout'), null, { timeout: 10000 })
+  assert(true, 'the first heading of the replacement becomes the page title')
+  const afterUpdate = await (await fetch(`${BASE}/api/docs/${slug}`)).json()
+  assert(afterUpdate.plain_text.includes('Fresh body') && !afterUpdate.plain_text.includes('WebMCP check'),
+    'the API reads the replaced content right after the awaited result')
+  const spans = afterUpdate.provenance?.spans ?? []
+  assert(spans.length > 0 && spans.every((s) => s.kind === 'ai' && s.author === AGENT),
+    'every persisted provenance span is ai/Scout after the replacement', JSON.stringify(spans).slice(0, 300))
+
   // AE7: the guest claims the draft and becomes the owner.
   phase = 'AE7'
   await page.getByRole('button', { name: 'Claim this doc' }).click()
@@ -291,6 +327,18 @@ try {
     return JSON.parse(result.content[0].text).viewer_context?.ownership?.yours === true
   }, null, { timeout: 15000 })
   assert(true, 'after claiming, read_document reports viewer_context.ownership.yours = true')
+
+  // A second, non-owner tab on the still-Edit link registers the update tool.
+  phase = 'non-owner edit link'
+  const otherContext = await browser.newContext()
+  await otherContext.addInitScript(MODEL_CONTEXT_STUB)
+  const other = await otherContext.newPage()
+  watch(other, 'other')
+  await other.goto(`${BASE}/d/${slug}`)
+  await waitForLive(other)
+  await other.waitForFunction(() => (window.__webmcpToolchange ?? 0) >= 1)
+  const otherTools = (await other.evaluate(() => document.modelContext.getTools())).map((t) => t.name)
+  assert(otherTools.includes('thinkroom_update_document'), 'a non-owner on the Edit link is offered update_document')
 
   // AE3: owner sets the link to View; the anonymous tool is now locked out of comments.
   phase = 'AE3'
@@ -307,6 +355,26 @@ try {
     'comment on a view link returns the 423 body with link_access and next_action', locked.text)
   const readAfterLock = parseResult(await invoke('thinkroom_read_document', {}))
   assert(!readAfterLock.isError, 'read_document still succeeds on a view link')
+
+  // Live revocation: the already-registered tool in the non-owner tab refuses
+  // once the link is View, and a reload no longer registers it at all.
+  phase = 'revocation'
+  await other.waitForFunction(async () => {
+    const result = await window.__webmcpInvoke('thinkroom_read_document', {})
+    return JSON.parse(result.content[0].text).viewer_context?.ownership?.can_write === false
+  }, null, { timeout: 15000 })
+  const revoked = parseResult(
+    await other.evaluate(([n, a]) => window.__webmcpInvoke(n, a), ['thinkroom_update_document', { agent_name: AGENT, content: '# Hijack\n\nNope.' }]),
+  )
+  assert(revoked.isError && revoked.text.includes('no longer allows editing'), 'update_document refuses after write access is revoked', revoked.text)
+  const afterRevoke = await (await fetch(`${BASE}/api/docs/${slug}`)).json()
+  assert(!afterRevoke.plain_text.includes('Hijack'), 'a revoked replacement never reaches the document')
+  await other.reload()
+  await waitForLive(other)
+  await other.waitForFunction(() => (window.__webmcpToolchange ?? 0) >= 1)
+  const reloadedTools = (await other.evaluate(() => document.modelContext.getTools())).map((t) => t.name)
+  assert(!reloadedTools.includes('thinkroom_update_document'), 'a View link does not register update_document')
+  await otherContext.close()
 
   // Interpreter refusals through the development seam: zero API requests.
   phase = 'refusals'
