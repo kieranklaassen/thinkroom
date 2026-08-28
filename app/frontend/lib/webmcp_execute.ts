@@ -3,10 +3,14 @@ import {
   errorResult,
   isAbortError,
   textResult,
+  type WebmcpEditorTool,
   type WebmcpManifestTool,
   type WebmcpRequestTool,
   type WebmcpResult,
 } from './webmcp'
+
+/** Tools the interpreter can run by itself; `editor` tools need the page. */
+export type WebmcpInterpretedTool = Exclude<WebmcpManifestTool, WebmcpEditorTool>
 
 interface ExecuteOptions {
   /** The registration run's signal; cancels the fetch when the page goes away. */
@@ -17,12 +21,33 @@ interface ExecuteOptions {
 
 // Adapted from `requireAgent` in cli/bin/thinkroom.js: same teaching, with
 // the tool argument in place of the CLI flag.
-const IDENTITY_ERROR =
+export const IDENTITY_ERROR =
   'Set your agent identity before writing so this edit is attributed to you. ' +
   'Pass agent_name (for example agent_name: "Claude") on every write tool call.'
 
 const PATH_PARAM_PATTERN = /^\d+$/
 const encoder = new TextEncoder()
+
+/** UTF-8 byte length — the server measures `bytesize`, not characters. */
+export function utf8Bytes(value: string): number {
+  return encoder.encode(value).length
+}
+
+/**
+ * The cap-exceeded error shape shared by request bodies and the in-page
+ * editor tool, so an agent sees one vocabulary for "too long".
+ */
+export function byteCapError(
+  name: string,
+  bytes: number,
+  cap: number,
+): { error: string; field: string; max_bytes: number } {
+  return {
+    error: `${name} is ${bytes} bytes; the cap is ${cap} bytes of UTF-8.`,
+    field: name,
+    max_bytes: cap,
+  }
+}
 
 /**
  * Turns a manifest tool plus arguments into a same-origin, cookie-less fetch
@@ -31,7 +56,7 @@ const encoder = new TextEncoder()
  * headers, abort, network, parse — into an `isError` envelope (KTD4).
  */
 export async function executeManifestTool(
-  tool: WebmcpManifestTool,
+  tool: WebmcpInterpretedTool,
   args: Record<string, unknown>,
   options: ExecuteOptions = {},
 ): Promise<WebmcpResult> {
@@ -47,7 +72,7 @@ export async function executeManifestTool(
 
 function staticResult(
   text: string,
-  tool: WebmcpManifestTool,
+  tool: WebmcpInterpretedTool,
   options: ExecuteOptions,
 ): WebmcpResult {
   if (!tool.include_viewer_context) return textResult(text)
@@ -198,14 +223,8 @@ function buildBody(
     const value = args[name]
     const cap = tool.input_schema.properties[name]?.maxLength
     if (typeof cap === 'number' && typeof value === 'string') {
-      const bytes = encoder.encode(value).length
-      if (bytes > cap) {
-        return {
-          error: `${name} is ${bytes} bytes; the cap is ${cap} bytes of UTF-8.`,
-          field: name,
-          max_bytes: cap,
-        }
-      }
+      const bytes = utf8Bytes(value)
+      if (bytes > cap) return byteCapError(name, bytes, cap)
     }
     body[name] = value
   }

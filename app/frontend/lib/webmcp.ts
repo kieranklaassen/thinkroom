@@ -97,8 +97,20 @@ export interface WebmcpStaticTool extends WebmcpToolBase {
   request?: undefined
 }
 
+/**
+ * Runs inside the page against the live editor instead of fetching: the
+ * document page owns the editor handle, so `executeManifestTool` never sees
+ * this kind — `show.tsx` branches on it first.
+ */
+export interface WebmcpEditorTool extends WebmcpToolBase {
+  kind: 'editor'
+  action: 'replace_content'
+  request?: undefined
+  static_text?: undefined
+}
+
 /** Discriminated on `kind` so the interpreter never reads a missing branch. */
-export type WebmcpManifestTool = WebmcpRequestTool | WebmcpStaticTool
+export type WebmcpManifestTool = WebmcpRequestTool | WebmcpStaticTool | WebmcpEditorTool
 
 export interface WebmcpManifest {
   /** Document manifests only. */

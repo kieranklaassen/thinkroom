@@ -10,7 +10,7 @@ import { useClaim } from '../../lib/use_claim'
 import { useIsClient } from '../../lib/use_is_client'
 import { useWebmcpTools } from '../../lib/use_webmcp_tools'
 import { executeManifestTool } from '../../lib/webmcp_execute'
-import type { WebmcpManifest } from '../../lib/webmcp'
+import { errorResult, type WebmcpManifest } from '../../lib/webmcp'
 import type { OwnershipPayload } from '../../types/payloads'
 import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
@@ -269,14 +269,21 @@ export default function DocumentsIndex({ yours, recent, viewer, webmcp, nativeAp
   useWebmcpTools({
     key: 'index',
     tools: webmcp.tools,
-    execute: (tool, args, signal) =>
-      executeManifestTool(tool, args, {
+    execute: (tool, args, signal) => {
+      // The index has no editor; the server never lists editor tools here.
+      if (tool.kind === 'editor') {
+        return Promise.resolve(
+          errorResult({ error: `${tool.name} is only available on a document page` }),
+        )
+      }
+      return executeManifestTool(tool, args, {
         signal,
         viewerContext: {
           viewer: { name: viewer.name, guest: viewer.guest },
           note: INDEX_VIEWER_CONTEXT_NOTE,
         },
-      }),
+      })
+    },
   })
   const { post, processing } = useForm(() => ({
     name: identityName,

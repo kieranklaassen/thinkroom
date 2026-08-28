@@ -57,6 +57,7 @@ import { useMediaQuery } from '../../lib/use_media_query'
 import { useIsClient } from '../../lib/use_is_client'
 import { useWebmcpTools } from '../../lib/use_webmcp_tools'
 import { executeManifestTool } from '../../lib/webmcp_execute'
+import { executeEditorTool } from '../../lib/webmcp_editor'
 import type { WebmcpManifest } from '../../lib/webmcp'
 import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
@@ -296,15 +297,25 @@ export default function DocumentShow({
     tools: webmcp.tools,
     execute: (tool, args, signal) => {
       const { yours, can_write, can_comment, link_access } = ownershipRef.current
-      return executeManifestTool(tool, args, {
-        signal,
-        viewerContext: {
-          ownership: { yours, can_write, can_comment, link_access },
-          mode: modeRef.current,
-          share_url: webmcp.share_url,
-          note: VIEWER_CONTEXT_NOTE,
-        },
-      })
+      const viewerContext = {
+        ownership: { yours, can_write, can_comment, link_access },
+        mode: modeRef.current,
+        share_url: webmcp.share_url,
+        note: VIEWER_CONTEXT_NOTE,
+      }
+      // Editor tools run in-page against the live editor; only this page
+      // holds the handle, so the interpreter never sees them (KTD1–KTD3).
+      if (tool.kind === 'editor') {
+        return executeEditorTool(tool, args, {
+          handle: handleRef.current,
+          canWrite: can_write,
+          slug: doc.slug,
+          contentFormat: doc.content_format,
+          signal,
+          viewerContext,
+        })
+      }
+      return executeManifestTool(tool, args, { signal, viewerContext })
     },
   })
   // Leaving Comment mode dismisses any pending click-to-comment affordance.

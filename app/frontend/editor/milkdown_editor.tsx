@@ -28,7 +28,6 @@ import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
 import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight'
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import type { Node as ProseNode } from '@milkdown/kit/prose/model'
 import type { CableProvider, RenderHints } from './cable_provider'
 import {
   acquireSession,
@@ -38,6 +37,7 @@ import {
   seedAlreadyApplied,
 } from './collab_session'
 import { buildSnapshotPayload, createSnapshotScheduler } from './snapshots'
+import { firstHeadingTitle } from './document_title'
 import { gatedCursorAwareness } from './cursor_awareness'
 import { lazyShikiParser, loadShikiParser } from './highlighter'
 import { imageUploader } from './upload'
@@ -223,17 +223,6 @@ function openEditorLink(view: EditorView, event: Event): boolean {
 // lazy-parser protocol. Content paint is gated on nothing.
 void loadShikiParser()
 const shikiParser = lazyShikiParser()
-
-function firstHeadingTitle(doc: ProseNode): string | null {
-  let title: string | null = null
-  doc.descendants((node) => {
-    if (node.type.name !== 'heading' || node.attrs.level !== 1) return title === null
-
-    title = node.textContent.replace(/\s+/g, ' ').trim().slice(0, 255) || null
-    return false
-  })
-  return title
-}
 
 // Attributes a freshly seeded document to its agent author. applyTemplate
 // writes the Yjs fragment directly; the content reaches the ProseMirror view
