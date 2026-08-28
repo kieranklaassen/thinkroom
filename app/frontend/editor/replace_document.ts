@@ -20,17 +20,13 @@ export type ReplaceDocumentOutcome =
   | {
       /** The document source as it was immediately before the replacement. */
       previous: string
-      /** UTF-8 bytes of `source`. */
-      bytes: number
       /** First level-1 heading of the new document, or null. */
       title: string | null
     }
   | { error: 'empty' | 'no_provenance' }
 
-const encoder = new TextEncoder()
-
 /** Inline leaves that carry no content of their own. */
-const STRUCTURAL_LEAVES = new Set(['hardbreak', 'hard_break'])
+const STRUCTURAL_LEAVES = new Set(['hardbreak'])
 
 /**
  * Both parsers turn empty or whitespace-only source into a document holding
@@ -110,11 +106,7 @@ export function replaceDocumentContent(
     tr.setSelection(TextSelection.near(tr.doc.resolve(0)))
     view.dispatch(tr)
 
-    outcome = {
-      previous,
-      bytes: encoder.encode(source).length,
-      title: firstHeadingTitle(tr.doc),
-    }
+    outcome = { previous, title: firstHeadingTitle(tr.doc) }
   })
 
   return outcome

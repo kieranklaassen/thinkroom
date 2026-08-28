@@ -94,6 +94,7 @@ const isNoise = (message) =>
     'status of 409',
     'status of 422',
     'status of 423',
+    'status of 503',
     // The "unreachable" scenario aborts a same-origin request with page.route.
     'net::ERR_FAILED',
     'Failed to load resource',
@@ -293,6 +294,11 @@ try {
   assert(blank.isError && blank.text.includes('empty'), 'update_document with blank content is refused', blank.text)
   const beforeUpdate = await (await fetch(`${BASE}/api/docs/${slug}`)).json()
   assert(beforeUpdate.plain_text.includes('WebMCP check'), 'refusals left the document unchanged')
+  const stale = parseResult(
+    await invoke('thinkroom_propose_suggestion', { agent_name: AGENT, body: 'A third paragraph.', replaces: 'A second paragraph to comment on.', intent: 'will go stale' }),
+  )
+  assert(!stale.isError, 'a pending suggestion exists before the replacement', stale.text)
+  mark = requests.length
   const updated = parseResult(
     await invoke('thinkroom_update_document', {
       agent_name: AGENT,
@@ -304,6 +310,7 @@ try {
     'update_document result reports persisted: true and the derived title', updated.text)
   assert(typeof updated.json.previous_content === 'string' && updated.json.previous_content.includes('WebMCP check'),
     'update_document result returns the previous source for recovery')
+  assert(updated.json.auto_rejected_suggestions === 1, 'the pending suggestion whose text vanished is auto-rejected', updated.text)
   assert((await apiRequestsSince(mark)).length === 0, 'update_document made no API request')
   await page
     .locator(`.milkdown .ProseMirror [data-provenance][data-kind="ai"][data-author="${AGENT}"]`, { hasText: 'Fresh body' })
@@ -315,9 +322,27 @@ try {
   const afterUpdate = await (await fetch(`${BASE}/api/docs/${slug}`)).json()
   assert(afterUpdate.plain_text.includes('Fresh body') && !afterUpdate.plain_text.includes('WebMCP check'),
     'the API reads the replaced content right after the awaited result')
+  assert((afterUpdate.recent_activity ?? []).some((a) => a.action === 'updated_document' && a.actor_kind === 'agent' && a.actor_name === AGENT),
+    'the replacement is logged to the activity feed as the agent')
   const spans = afterUpdate.provenance?.spans ?? []
   assert(spans.length > 0 && spans.every((s) => s.kind === 'ai' && s.author === AGENT),
     'every persisted provenance span is ai/Scout after the replacement', JSON.stringify(spans).slice(0, 300))
+  assert((afterUpdate.pending_suggestions ?? []).length === 0, 'no pending suggestion survives the replacement')
+
+  // Snapshot failure: the edit is applied but the agent is told it did not persist.
+  phase = 'AE10 snapshot failure'
+  await page.route(`**/d/${slug}/snapshot`, (route) => route.fulfill({ status: 503, body: 'down' }))
+  const unpersisted = parseResult(
+    await invoke('thinkroom_update_document', { agent_name: AGENT, content: '# Rewritten by Scout\n\nFresh body, second pass.\n' }),
+  )
+  await page.unroute(`**/d/${slug}/snapshot`)
+  assert(!unpersisted.isError && unpersisted.json?.ok === true && unpersisted.json?.persisted === false,
+    'a failed snapshot reports ok with persisted: false', unpersisted.text)
+  assert(typeof unpersisted.json.persistence_note === 'string' && unpersisted.json.snapshot_status === 503 && unpersisted.json.auto_rejected_suggestions === undefined,
+    'a failed snapshot carries persistence_note and snapshot_status and no auto-reject count', unpersisted.text)
+  assert(unpersisted.json.note.includes('Not logged'), 'the note says no activity entry was recorded', unpersisted.json.note)
+  await page.locator('.milkdown .ProseMirror', { hasText: 'second pass' }).waitFor({ timeout: 10000 })
+  assert(true, 'the editor still shows the replacement after a failed snapshot')
 
   // AE7: the guest claims the draft and becomes the owner.
   phase = 'AE7'

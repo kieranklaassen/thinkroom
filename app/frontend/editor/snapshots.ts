@@ -41,11 +41,13 @@ export interface SnapshotTarget {
   contentFormat: DocumentFormat
   /** Aborting stops the 409 retry chain; an in-flight request still settles. */
   signal?: AbortSignal
+  /** Agent whose replacement this snapshot persists; logged to the activity feed. */
+  agentName?: string
 }
 
 export type SnapshotPushOutcome =
-  /** The server answered; `ok` mirrors `Response.ok`. */
-  | { ok: boolean; status: number; error?: undefined }
+  /** The server answered; `ok` mirrors `Response.ok`; `body` is its JSON when ok. */
+  | { ok: boolean; status: number; body?: Record<string, unknown> | null; error?: undefined }
   /** The request never got a response (network failure, aborted mid-flight). */
   | { ok: false; status: null; error: unknown }
 
@@ -61,20 +63,37 @@ const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * debounced scheduler and the in-page replace tool, which awaits it before
  * answering the agent — decide how loud to be.
  */
+function readSnapshotPayload(
+  editor: Editor,
+  ydoc: Y.Doc,
+  contentFormat: DocumentFormat,
+): DurableSnapshotPayload | null {
+  let payload: DurableSnapshotPayload | null = null
+  try {
+    editor.action((ctx) => {
+      payload = buildSnapshotPayload(ctx, ydoc, contentFormat)
+    })
+  } catch {
+    // A torn-down editor (remount, navigation) has no view to read; the
+    // caller treats null like any other failed push instead of throwing
+    // after the replacement already dispatched.
+    return null
+  }
+  return payload
+}
+
 export async function pushSnapshot(
   target: SnapshotTarget,
   attempt = 0,
 ): Promise<SnapshotPushOutcome> {
-  const { editor, ydoc, slug, contentFormat, signal } = target
-  let payload: DurableSnapshotPayload | null = null
-  editor.action((ctx) => {
-    payload = buildSnapshotPayload(ctx, ydoc, contentFormat)
-  })
+  const { editor, ydoc, slug, contentFormat, signal, agentName } = target
+  const payload = readSnapshotPayload(editor, ydoc, contentFormat)
   if (!payload) return { ok: false, status: null, error: new Error('editor has no view') }
 
   let response: Response
   try {
-    response = await postJSON(`/d/${slug}/snapshot`, payload)
+    const body = agentName ? { ...payload, agent_name: agentName } : payload
+    response = await postJSON(`/d/${slug}/snapshot`, body)
   } catch (error) {
     return { ok: false, status: null, error }
   }
@@ -84,7 +103,9 @@ export async function pushSnapshot(
     if (signal?.aborted) return { ok: false, status: response.status }
     return pushSnapshot(target, attempt + 1)
   }
-  return { ok: response.ok, status: response.status }
+  if (!response.ok) return { ok: false, status: response.status }
+  const body = (await response.json().catch(() => null)) as Record<string, unknown> | null
+  return { ok: true, status: response.status, body }
 }
 
 export interface SnapshotScheduler {

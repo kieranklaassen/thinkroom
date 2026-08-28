@@ -44,8 +44,7 @@ export async function executeEditorTool(
 ): Promise<WebmcpResult> {
   const withContext = (value: Record<string, unknown>): Record<string, unknown> =>
     tool.include_viewer_context ? { ...value, viewer_context: context.viewerContext } : value
-  const refuse = (value: Record<string, unknown>): WebmcpResult =>
-    errorResult(JSON.stringify(withContext(value)))
+  const refuse = (value: Record<string, unknown>): WebmcpResult => errorResult(withContext(value))
 
   try {
     const input = args && typeof args === 'object' ? args : {}
@@ -56,11 +55,9 @@ export async function executeEditorTool(
 
     const content = typeof input.content === 'string' ? input.content : ''
     if (content.trim() === '') return refuse({ error: EMPTY_CONTENT_ERROR })
+    const bytes = utf8Bytes(content)
     const cap = tool.input_schema.properties.content?.maxLength
-    if (typeof cap === 'number') {
-      const bytes = utf8Bytes(content)
-      if (bytes > cap) return refuse(byteCapError('content', bytes, cap))
-    }
+    if (typeof cap === 'number' && bytes > cap) return refuse(byteCapError('content', bytes, cap))
 
     if (!context.canWrite) return refuse({ error: NOT_WRITABLE_ERROR })
     const { handle } = context
@@ -85,14 +82,17 @@ export async function executeEditorTool(
       ydoc: handle.ydoc,
       slug: context.slug,
       contentFormat: context.contentFormat,
+      agentName: author,
     })
 
     const truncated = outcome.previous.length > PREVIOUS_CONTENT_LIMIT
+    const autoRejected = snap.ok ? snap.body?.auto_rejected_suggestions : undefined
     const result: Record<string, unknown> = {
       ok: true,
-      bytes: outcome.bytes,
+      bytes,
       title: outcome.title,
       persisted: snap.ok,
+      ...(typeof autoRejected === 'number' ? { auto_rejected_suggestions: autoRejected } : {}),
       previous_content: truncated
         ? outcome.previous.slice(0, PREVIOUS_CONTENT_LIMIT)
         : outcome.previous,
@@ -100,7 +100,10 @@ export async function executeEditorTool(
       note:
         `Replaced the whole document as pending AI provenance by ${author}; awaiting human review. ` +
         'The change is in the shared document and reaches connected collaborators through live sync; ' +
-        'they cannot undo it — keep previous_content to revert. No activity entry was recorded.',
+        'they cannot undo it — keep previous_content to revert. ' +
+        (snap.ok
+          ? 'Logged to the activity feed as you; pending suggestions whose target text is gone were auto-rejected (auto_rejected_suggestions).'
+          : 'Not logged to the activity feed because the snapshot did not persist.'),
     }
     if (!snap.ok) {
       const accessLost = snap.status === 403 || snap.status === 423
@@ -109,7 +112,7 @@ export async function executeEditorTool(
         : PERSISTENCE_LAG_NOTE
       if (snap.status !== null) result.snapshot_status = snap.status
     }
-    return textResult(JSON.stringify(withContext(result)))
+    return textResult(withContext(result))
   } catch (error) {
     return refuse({ error: errorMessage(error) })
   }
