@@ -716,8 +716,17 @@ export default function DocumentShow({
   }, [canHighlight, highlightNames, activeHighlightColor])
 
   const jumpToHighlight = useCallback((snippet: HighlightSnippet) => {
-    const view = viewRef.current
-    if (!view) return
+    // Read mode registers no onSelection, so viewRef never fills there —
+    // fall back to the live editor the legend was scanned from.
+    let view = viewRef.current
+    if (!view) {
+      if (!handle) return
+      try {
+        view = handle.editor.action((ctx) => ctx.get(editorViewCtx))
+      } catch {
+        return // editor torn down mid-navigation
+      }
+    }
     // Positions come from the last scan; a remote edit landing between scan
     // and click could shift them. TextSelection.between snaps to the nearest
     // valid inline positions instead of throwing on a stale range.
@@ -729,7 +738,7 @@ export default function DocumentShow({
     tr.scrollIntoView()
     view.dispatch(tr)
     view.focus()
-  }, [])
+  }, [handle])
 
   // One floating form at a time: an open composer suppresses the selection
   // chrome, and so does the share popover (z-60, above the chrome's z-50).
