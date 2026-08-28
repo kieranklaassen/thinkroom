@@ -98,14 +98,24 @@ try {
   // Highlight by hand. Synthetic triple-clicks are flaky under automation
   // (the third click can land as a word selection), so select the line via
   // the keyboard for a deterministic range.
-  const selectQuietParagraph = async () => {
-    await editor.getByText('A quiet paragraph').click()
-    await page.keyboard.press('Home')
-    await page.keyboard.press('Shift+End')
+  // A selection made while the live editor is still settling (a late
+  // collaboration render resets it) never reaches the toolbar, so re-select
+  // the way a user would instead of trusting the first attempt.
+  const selectQuietParagraph = async (revealed) => {
+    for (let attempt = 1; ; attempt += 1) {
+      await editor.getByText('A quiet paragraph').click()
+      await page.keyboard.press('Home')
+      await page.keyboard.press('Shift+End')
+      try {
+        await revealed.waitFor({ timeout: 4000 })
+        return
+      } catch (error) {
+        if (attempt === 3) throw error
+      }
+    }
   }
-  await selectQuietParagraph()
   const toolbar = page.locator('.selection-toolbar')
-  await toolbar.waitFor({ timeout: 10000 })
+  await selectQuietParagraph(toolbar)
   assert(
     (await toolbar.locator('.selection-swatch').count()) === 10,
     'selection toolbar offers the ten palette swatches',
@@ -124,9 +134,8 @@ try {
 
   // Re-selecting the highlighted run marks the swatch active; clicking it
   // again removes the highlight and its legend entry.
-  await selectQuietParagraph()
   const activeSwatch = toolbar.locator('.selection-swatch.is-active')
-  await activeSwatch.waitFor({ timeout: 10000 })
+  await selectQuietParagraph(activeSwatch)
   assert(
     (await activeSwatch.getAttribute('aria-label')) === 'Remove Green highlight',
     'the active swatch offers removal',
