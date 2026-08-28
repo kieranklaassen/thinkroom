@@ -108,7 +108,7 @@ class AgentGuideWebmcpTest < ActiveSupport::TestCase
     assert_equal Document::MAX_CONTENT_BYTES, content[:maxLength]
     assert_includes content[:description], "Markdown"
     assert_includes content[:description], "UTF-8"
-    assert_equal({ read_only_hint: false, untrusted_content_hint: false }, tool[:annotations])
+    assert_equal({ read_only_hint: false, untrusted_content_hint: true }, tool[:annotations])
     assert_equal true, tool[:include_viewer_context]
     assert_includes tool[:description], "Markdown"
     assert_includes tool[:description], "previous_content"
