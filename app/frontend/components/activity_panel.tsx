@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { timeAgo } from '../lib/time'
-import type { ActivityPayload } from '../pages/documents/show'
+import type { ActivityPayload } from '../types/payloads'
 
 const ACTION_GLYPHS: Record<string, string> = {
   suggested: '✦',

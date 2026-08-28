@@ -1,6 +1,5 @@
 import react from '@vitejs/plugin-react'
 import inertia from '@inertiajs/vite'
-import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'vite'
 import RubyPlugin from 'vite-plugin-ruby'
 
@@ -11,7 +10,6 @@ export default defineConfig(({ isSsrBuild }) => ({
   // build (isSsrBuild) so the client build keeps Vite's default externals.
   ...(isSsrBuild ? { ssr: { noExternal: true } } : {}),
   plugins: [
-    tailwindcss(),
     RubyPlugin(),
     // Our client entry lives outside the plugin's auto-detected SSR paths
     // (resources/js/*, src/*), so point it at the Inertia entry explicitly.

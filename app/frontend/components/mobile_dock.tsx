@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { SuggestionPayload } from '../editor/suggestions'
-import { truncate } from '../lib/truncate'
+import { useEffect, useRef, type ReactNode } from 'react'
+import {
+  SuggestionCardBody,
+  useResolveGuard,
+  type ReviewableSuggestion,
+} from './suggestion_card'
 
 export type SheetKind = 'suggestions' | 'comments' | 'activity'
 
@@ -78,52 +81,33 @@ export function MobileSheet({ title, onClose, children }: SheetProps) {
 }
 
 interface SuggestionSheetProps {
-  suggestions: SuggestionPayload[]
-  focusId: number | null
-  onAccept: (suggestion: SuggestionPayload) => void
-  onReject: (suggestion: SuggestionPayload) => void
+  items: ReviewableSuggestion[]
+  focusKey: string | null
   /** Present only when several server-backed suggestions are pending. */
   onAcceptAll?: () => Promise<void>
   acceptingAll?: boolean
 }
 
-/** The suggestion review surface on mobile — full cards in a scrollable
- *  sheet; opening from a marker scrolls that suggestion into view. */
+/** The suggestion review surface on mobile — full cards (tracked edits and
+ *  server rows) in one scrollable sheet; opening from a marker scrolls that
+ *  suggestion into view. */
 export function SuggestionSheetList({
-  suggestions,
-  focusId,
-  onAccept,
-  onReject,
+  items,
+  focusKey,
   onAcceptAll,
   acceptingAll = false,
 }: SuggestionSheetProps) {
   const listRef = useRef<HTMLUListElement>(null)
-  const [resolving, setResolving] = useState<Set<number>>(new Set())
-
-  // Forget resolving flags for suggestions that left the props.
-  useEffect(() => {
-    setResolving((prev) => {
-      const ids = new Set(suggestions.map((s) => s.id))
-      const next = new Set([...prev].filter((id) => ids.has(id)))
-      return next.size === prev.size ? prev : next
-    })
-  }, [suggestions])
+  const { resolving, resolve } = useResolveGuard(items)
 
   useEffect(() => {
-    if (focusId === null) return
+    if (focusKey === null) return
     listRef.current
-      ?.querySelector(`[data-suggestion-id="${focusId}"]`)
+      ?.querySelector(`[data-suggestion-key="${focusKey}"]`)
       ?.scrollIntoView({ block: 'nearest' })
-  }, [focusId])
+  }, [focusKey])
 
-  const resolve = (suggestion: SuggestionPayload, action: (s: SuggestionPayload) => void) => {
-    // Guard repeat taps — a second accept would insert the text twice.
-    if (resolving.has(suggestion.id)) return
-    setResolving((prev) => new Set(prev).add(suggestion.id))
-    action(suggestion)
-  }
-
-  if (suggestions.length === 0) {
+  if (items.length === 0) {
     return (
       <p className="rail-empty">
         No pending suggestions. Agent proposals land here for review.
@@ -139,50 +123,27 @@ export function SuggestionSheetList({
           disabled={acceptingAll}
           onClick={() => void onAcceptAll()}
         >
-          {acceptingAll ? 'Accepting…' : `Accept all ${suggestions.filter((s) => s.id > 0).length}`}
+          {acceptingAll
+            ? 'Accepting…'
+            : `Accept all ${items.filter((item) => !item.inline && item.canResolve).length}`}
         </button>
       )}
       <ul className="sheet-suggestions" ref={listRef}>
-      {suggestions.map((suggestion) => {
-        const machine = suggestion.author_kind !== 'human'
-        return (
+        {items.map((item) => (
           <li
-            key={suggestion.id}
-            data-suggestion-id={suggestion.id}
-            className={`sheet-card ${focusId === suggestion.id ? 'is-focused' : ''}`}
+            key={item.key}
+            data-suggestion-key={item.key}
+            className={`sheet-card ${item.inline ? 'sheet-card--inline ' : ''}${focusKey === item.key ? 'is-focused' : ''}`}
           >
-            <div className="suggestion-meta">
-              <span className={`author-chip author-chip--${suggestion.author_kind}`}>
-                {machine && <span aria-hidden>✦ </span>}
-                {suggestion.author_name}
-              </span>
-              {suggestion.intent && (
-                <span className="suggestion-intent">{suggestion.intent}</span>
-              )}
-            </div>
-            {suggestion.replaces && (
-              <del className="margin-old">{truncate(suggestion.replaces, 160)}</del>
-            )}
-            <p className="margin-new">{truncate(suggestion.body, 400)}</p>
-            <div className="suggestion-actions">
-              <button
-                className="btn-accept"
-                disabled={resolving.has(suggestion.id)}
-                onClick={() => resolve(suggestion, onAccept)}
-              >
-                Accept
-              </button>
-              <button
-                className="btn-reject"
-                disabled={resolving.has(suggestion.id)}
-                onClick={() => resolve(suggestion, onReject)}
-              >
-                Reject
-              </button>
-            </div>
+            <SuggestionCardBody
+              item={item}
+              oldLimit={160}
+              newLimit={400}
+              disabled={resolving.has(item.key)}
+              onResolve={resolve}
+            />
           </li>
-        )
-      })}
+        ))}
       </ul>
     </>
   )

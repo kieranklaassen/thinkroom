@@ -11,6 +11,51 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     @document = Document.create!(title: "Snap", content_markdown: "original")
   end
 
+  test "snapshot with agent_name logs an agent updated_document activity" do
+    ydoc = Y::Doc.new
+    ydoc.get_text("t") << "agent text"
+    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+
+    assert_difference -> { @document.activities.count }, 1 do
+      post document_snapshot_path(@document.slug), params: {
+        content: "# Rewritten\n\nagent text", spans: [], state_vector:, agent_name: "  Scout  "
+      }, as: :json
+    end
+    assert_response :success
+    assert_equal 0, response.parsed_body["auto_rejected_suggestions"]
+    activity = @document.activities.order(:created_at).last
+    assert_equal %w[Scout agent updated_document], [ activity.actor_name, activity.actor_kind, activity.action ]
+    assert_equal "Rewritten", activity.detail
+  end
+
+  test "agent snapshot auto-rejects pending suggestions whose target text vanished" do
+    stale = @document.suggestions.create!(author_name: "Gemini", author_kind: "ai", body: "x", replaces: "original")
+    kept = @document.suggestions.create!(author_name: "Gemini", author_kind: "ai", body: "y", replaces: "agent text")
+    ydoc = Y::Doc.new
+    ydoc.get_text("t") << "agent text"
+    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+
+    post document_snapshot_path(@document.slug), params: {
+      content: "agent text", spans: [], state_vector:, agent_name: "Scout"
+    }, as: :json
+    assert_response :success
+    assert_equal 1, response.parsed_body["auto_rejected_suggestions"]
+    assert_equal "rejected", stale.reload.status
+    assert_equal "pending", kept.reload.status
+  end
+
+  test "snapshot without agent_name logs no activity" do
+    ydoc = Y::Doc.new
+    ydoc.get_text("t") << "human text"
+    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+
+    assert_no_difference -> { @document.activities.count } do
+      post document_snapshot_path(@document.slug), params: { content: "human text", spans: [], state_vector:, agent_name: "   " }, as: :json
+    end
+    assert_response :success
+    assert_nil response.parsed_body["auto_rejected_suggestions"]
+  end
+
   test "locked non-owner cannot persist a snapshot or sync update" do
     @document.update!(
       owner_token: "someone-else",

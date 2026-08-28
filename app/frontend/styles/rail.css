@@ -1,0 +1,63 @@
+/* --------------------------------- Rail ---------------------------------- */
+.doc-body {
+  gap: 0;
+}
+
+/* Normal flow, no inner scrollbar — the whole page is one scroll surface. */
+.doc-rail {
+  width: var(--activity-rail-width);
+  flex: none;
+  border-left: 1px solid var(--line);
+  padding: 1.5rem 1.25rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.doc-page.is-panel-hidden .doc-rail {
+  display: none;
+}
+
+@media (max-width: 72rem), (hover: none) and (pointer: coarse) {
+  .doc-rail {
+    display: none;
+  }
+}
+
+.rail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.rail-section + .rail-section {
+  border-top: 1px solid var(--line);
+  padding-top: 1.5rem;
+}
+
+.rail-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.rail-heading h2 {
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}
+
+.rail-count {
+  font-size: 0.7rem;
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-empty {
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--ink-faint);
+}

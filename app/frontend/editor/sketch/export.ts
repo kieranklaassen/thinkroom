@@ -1,15 +1,16 @@
 import type { SketchScene } from './scene'
 import { downloadBlob } from '../../lib/download'
+import { excalidrawAppState, excalidrawElements } from './excalidraw_adapter'
 
 export async function sketchToSvg(scene: SketchScene): Promise<SVGSVGElement> {
   const { exportToSvg } = await import('@excalidraw/excalidraw')
   return exportToSvg({
-    elements: scene.elements as never,
+    elements: excalidrawElements(scene.elements),
     appState: {
-      ...scene.appState,
+      ...excalidrawAppState(scene.appState),
       exportBackground: true,
       exportEmbedScene: false,
-    } as never,
+    },
     files: {},
     exportPadding: 24,
   })

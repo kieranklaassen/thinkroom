@@ -3,6 +3,7 @@ import {
   MIN_SKETCH_HEIGHT,
   type SketchScene,
 } from './scene'
+import { excalidrawAppState, excalidrawElements, excalidrawZoom } from './excalidraw_adapter'
 
 // Excalidraw is loaded dynamically (like sketch/export.ts) so it never enters
 // the editor's static module graph. That keeps the editor bundle small AND
@@ -262,25 +263,27 @@ export async function renderExactSketchPreview(
   viewportWidth: number,
   fittedViewport: SketchViewport,
 ): Promise<SVGSVGElement | null> {
-  const elements = scene.elements.filter((element) => element.isDeleted !== true)
+  const elements = excalidrawElements(
+    scene.elements.filter((element) => element.isDeleted !== true),
+  )
   if (elements.length === 0) return null
 
   const { exportToSvg, getCommonBounds, sceneCoordsToViewportCoords } = await loadExcalidraw()
 
   const exportPadding = SKETCH_PADDING
   const exported = await exportToSvg({
-    elements: elements as never,
+    elements,
     appState: {
-      ...scene.appState,
+      ...excalidrawAppState(scene.appState),
       exportBackground: false,
       exportWithDarkMode: false,
       viewBackgroundColor: '#fffef9',
-    } as never,
+    },
     files: null,
     exportPadding,
     skipInliningFonts: true,
   })
-  const [minX, minY] = getCommonBounds(elements as never)
+  const [minX, minY] = getCommonBounds(elements)
   const viewportHeight = fittedViewport.height
   const scrollX = fittedViewport.scrollX
   const scrollY = fittedViewport.scrollY
@@ -288,7 +291,7 @@ export async function renderExactSketchPreview(
   const topLeft = sceneCoordsToViewportCoords(
     { sceneX: minX - exportPadding, sceneY: minY - exportPadding },
     {
-      zoom: { value: zoomValue } as never,
+      zoom: excalidrawZoom(zoomValue),
       offsetLeft: 0,
       offsetTop: 0,
       scrollX,

@@ -1,0 +1,292 @@
+/* ------------------------------- Doc layout ------------------------------ */
+.doc-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ------------------------------ Claim banner ------------------------------ */
+/* In normal flow below the sticky header (not sticky itself) so the popover
+   anchor math — which only accounts for the 52px header band — is untouched. */
+.claim-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 1rem;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+.claim-banner-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Contextual action, not the page primary — Share keeps the solid-ink
+ * treatment; the banner's CTA is an accent-tinted outline. */
+.claim-banner-claim {
+  font-size: 0.8rem;
+  padding: 0.32rem 0.75rem;
+  background: var(--surface-raised);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: color-mix(in srgb, var(--accent) 80%, var(--ink));
+}
+
+.claim-banner-claim:hover {
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface-raised));
+  border-color: var(--accent);
+}
+
+@media (max-width: 48rem) {
+  .claim-banner {
+    justify-content: space-between;
+    text-align: left;
+    gap: 0.5rem;
+    flex-wrap: nowrap;
+  }
+
+  .claim-banner-text {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.claim-banner-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.claim-banner-dismiss:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+
+.doc-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  /* Clears the status bar / Dynamic Island in the Ruby Native shell and
+   * installed PWAs; resolves to the base 0.5rem in regular browsers. The
+   * shell pushes real inset heights into --ruby-native-* on Android, where
+   * env() stays 0. */
+  padding-top: calc(0.5rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  min-height: 2.75rem;
+}
+
+.doc-header-left,
+.doc-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+/* The title side absorbs all shrinkage (it can truncate); the chrome side
+ * is rigid — letting it shrink below content spills avatars and Share
+ * past the viewport edge on narrow screens. */
+.doc-header-left {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.doc-header-right {
+  flex: none;
+}
+
+.doc-home {
+  font-family: var(--font-doc);
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--ink);
+  text-decoration: none;
+  opacity: 0.85;
+}
+
+.doc-home:hover {
+  opacity: 1;
+}
+
+.doc-title {
+  font-size: 0.875rem;
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Flex items default to min-width:auto — without this the nowrap title
+   * refuses to shrink and forces horizontal overflow on narrow screens. */
+  min-width: 0;
+}
+
+.doc-notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+}
+
+.doc-notice button {
+  border: 0;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.doc-notice button:hover {
+  color: var(--ink);
+}
+
+.doc-status {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.doc-status--connecting {
+  background: var(--ink-faint);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.doc-status--live {
+  background: #6a994e;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.doc-body {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+/* The copy and its margin gutter share one scroll context — suggestion cards
+ * positioned against the gutter stay glued to their anchors while scrolling.
+ * The canvas claims the flexible space (capped at measure + gutter) so the
+ * reading column is a stable, centered width — never sized by however much
+ * text happens to be in the document. */
+.doc-canvas {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  flex: 1;
+  max-width: calc(var(--document-width) + var(--review-gutter-width));
+}
+
+.margin-gutter {
+  width: var(--review-gutter-width);
+  flex: none;
+  position: relative;
+  transition: width 200ms ease;
+}
+
+.doc-canvas.is-focus .margin-gutter {
+  width: 2rem;
+}
+
+/* Mobile keeps the gutter as a slim marker strip — suggestions stay
+ * discoverable at their anchors; the cards live in a bottom sheet. */
+@media (max-width: 72rem), (hover: none) and (pointer: coarse) {
+  .margin-gutter,
+  .doc-canvas.is-focus .margin-gutter {
+    width: 1.75rem;
+  }
+}
+
+.doc-main {
+  flex: 1;
+  min-width: 0;
+  max-width: var(--document-width);
+  padding: 3rem 2rem 6rem;
+}
+
+/* A zero-width flex item keeps the grip exactly on the document edge without
+ * stealing space from prose or the suggestion gutter. It is deliberately
+ * quiet, but visible enough to advertise that the edge can move. */
+.document-width-handle {
+  position: relative;
+  z-index: 5;
+  width: 0;
+  flex: none;
+  align-self: stretch;
+  color: var(--ink-faint);
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+
+.document-width-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -12px;
+  width: 24px;
+}
+
+.document-width-handle span {
+  position: sticky;
+  top: calc(50vh - 1.5rem);
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 40px;
+  margin-left: -9px;
+  border: 1px solid color-mix(in srgb, var(--ink-faint) 38%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-raised) 90%, transparent);
+  box-shadow: 0 1px 5px rgb(0 0 0 / 0.05);
+  font: 600 7px/1 var(--font-ui);
+  letter-spacing: -1px;
+  writing-mode: vertical-rl;
+  opacity: 0.48;
+  transition: opacity 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.document-width-handle:hover span,
+.document-width-handle:focus-visible span,
+.document-width-handle.is-dragging span {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+  opacity: 1;
+}
+
+.document-width-handle:focus-visible span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

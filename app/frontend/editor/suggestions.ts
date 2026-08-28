@@ -13,18 +13,7 @@ import {
   type DocumentFormat,
   type SourceParser,
 } from './document_format'
-
-export interface SuggestionPayload {
-  id: number
-  author_name: string
-  author_kind: string
-  intent: string | null
-  body: string
-  anchor_text: string | null
-  replaces: string | null
-  status: string
-  created_at: string
-}
+import type { SuggestionPayload } from '../types/payloads'
 
 /**
  * First within-block occurrence of `search` as a doc position range.
@@ -38,41 +27,7 @@ export function findTextRange(
   doc: Node,
   search: string | null,
 ): { from: number; to: number } | null {
-  if (!search) return null
-  let result: { from: number; to: number } | null = null
-
-  doc.descendants((node, pos) => {
-    if (result) return false
-    if (!node.isTextblock) return true
-
-    let text = ''
-    const segments: { strFrom: number; strTo: number; docFrom: number }[] = []
-    node.forEach((child, offset) => {
-      if (child.isText && child.text) {
-        segments.push({
-          strFrom: text.length,
-          strTo: text.length + child.text.length,
-          docFrom: pos + 1 + offset,
-        })
-        text += child.text
-      }
-    })
-
-    const index = text.indexOf(search)
-    if (index === -1) return true
-
-    const endIndex = index + search.length
-    const startSeg = segments.find((s) => index >= s.strFrom && index < s.strTo)
-    const endSeg = segments.find((s) => endIndex > s.strFrom && endIndex <= s.strTo)
-    if (!startSeg || !endSeg) return true
-
-    result = {
-      from: startSeg.docFrom + (index - startSeg.strFrom),
-      to: endSeg.docFrom + (endIndex - endSeg.strFrom),
-    }
-    return false
-  })
-  return result
+  return findTextRanges(doc, search)[0] ?? null
 }
 
 function findTextRanges(doc: Node, search: string | null): { from: number; to: number }[] {
@@ -199,7 +154,7 @@ const parseQuote = (parser: SourceParser, cacheScope: string, search: string): N
   const cacheKey = `${cacheScope}\u0000${search}`
   const cached = parseCache.get(cacheKey)
   if (cached !== undefined) return cached
-  let parsed: Node | null = null
+  let parsed: Node | null
   try {
     parsed = parser(search) ?? null
   } catch {

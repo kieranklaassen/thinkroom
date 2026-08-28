@@ -1,0 +1,547 @@
+/* ----------------------------- Presence & agents -------------------------- */
+.presence-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.presence-stack {
+  display: inline-flex;
+  align-items: center;
+}
+
+.presence-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid var(--surface-raised);
+  font-size: 0.66rem;
+  font-weight: 650;
+  color: #fff;
+  flex: none;
+  user-select: none;
+}
+
+.presence-avatar--human {
+  padding: 0;
+  font-family: var(--font-ui);
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.presence-avatar--human:hover {
+  transform: translateY(-1px);
+}
+
+.presence-avatar--human:focus-visible,
+.presence-avatar--human.is-following {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--surface-raised), 0 0 0 4px var(--accent);
+  z-index: 2;
+}
+
+.presence-stack .presence-avatar + .presence-avatar {
+  margin-left: -8px;
+}
+
+.presence-overflow {
+  background: var(--ink-faint);
+}
+
+.presence-avatar--agent {
+  background: var(--prov-pending-bg);
+  border: 2px dashed var(--prov-pending-line);
+  color: color-mix(in srgb, var(--prov-pending-line) 85%, var(--ink));
+  font-size: 0.78rem;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.presence-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.presence-agent-name {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.12rem 0.5rem;
+  border-radius: 99px;
+  background: var(--prov-pending-bg);
+  color: color-mix(in srgb, var(--prov-pending-line) 85%, var(--ink));
+  white-space: nowrap;
+}
+
+.presence-count {
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.presence-following {
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--ink-soft);
+  padding: 0.12rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+/* Compact (mobile header) variant: 24px avatars. */
+.presence-bar--compact .presence-avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 0.58rem;
+}
+
+.presence-bar--compact .presence-stack .presence-avatar + .presence-avatar {
+  margin-left: -7px;
+}
+
+/* Share is the header's primary action — inked like btn-primary, sized for
+   the chrome row. Everything secondary lives in the ⋯ menu. */
+.share-button {
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.74rem;
+  font-weight: 550;
+  border-radius: 7px;
+  padding: 0.28rem 0.8rem;
+  min-height: 1.8rem;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+  min-width: 4rem;
+}
+
+.share-button:hover {
+  background: #000;
+  border-color: #000;
+}
+
+/* Header right side groups: people cluster · mode · Share · ⋯ menu. */
+.doc-header-people {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+/* Bulk accept for agent suggestion batches — appears beside the mode
+   control only while two or more server-backed suggestions are pending. */
+.accept-all-button {
+  border: 1px solid var(--sug-ins-line);
+  background: var(--sug-ins-bg);
+  color: var(--ink);
+  font-size: 0.74rem;
+  font-weight: 550;
+  border-radius: 7px;
+  padding: 0.28rem 0.8rem;
+  min-height: 1.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.accept-all-button:hover:not(:disabled) {
+  background: var(--sug-ins-line);
+  color: var(--surface);
+}
+
+.accept-all-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.accept-all-button--sheet {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  font-size: 0.9rem;
+  margin-bottom: 0.75rem;
+}
+
+.header-menu-trigger {
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.28rem 0.5rem;
+}
+
+/* The ⋯ surface is a grouped document-options dialog. OwnershipChip's
+ * chrome-toggles and the riffrec feedback button are restyled into the same
+ * full-width row register by scope. */
+.header-menu-popover {
+  width: 16.5rem;
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.header-menu-group {
+  padding: 0.3rem;
+}
+
+.header-menu-group + .header-menu-group {
+  border-top: 1px solid var(--line);
+}
+
+.header-menu-label {
+  padding: 0.2rem 0.55rem 0.3rem;
+  color: var(--ink-faint);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.header-menu-item,
+.header-menu-status,
+.header-menu-popover .chrome-toggle,
+.header-menu-popover .feedback-button {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.header-menu-status {
+  cursor: default;
+  color: var(--ink-faint);
+}
+
+.header-menu-access {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.header-menu-access-option {
+  display: grid;
+  grid-template-columns: 1rem minmax(0, 1fr);
+  gap: 0.45rem;
+  width: 100%;
+  border: none;
+  border-radius: 7px;
+  padding: 0.45rem 0.55rem;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.header-menu-access-option:hover,
+.header-menu-access-option[aria-checked='true'] {
+  background: var(--accent-soft);
+}
+
+.header-menu-access-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.header-menu-access-option:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.header-menu-access-check {
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2rem;
+}
+
+.header-menu-access-label,
+.header-menu-access-hint {
+  display: block;
+}
+
+.header-menu-access-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.header-menu-access-hint {
+  margin-top: 0.05rem;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+}
+
+.header-menu-access-error {
+  padding: 0.25rem 0.55rem;
+  color: #a1372c;
+  font-size: 0.68rem;
+}
+
+.header-menu-item:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.header-menu-item:hover,
+.header-menu-popover .chrome-toggle:hover,
+.header-menu-popover .feedback-button:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.header-menu-check {
+  width: 0.9rem;
+  flex: none;
+  color: var(--accent);
+  font-size: 0.72rem;
+}
+
+.header-menu-hint {
+  margin-left: auto;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.header-menu-account {
+  overflow: hidden;
+  padding: 0.35rem 0.55rem 0.1rem;
+  color: var(--ink-faint);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-menu-theme {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.5rem 0.55rem 0.4rem;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 550;
+}
+
+.header-menu-theme .theme-picker {
+  display: flex;
+  width: 100%;
+}
+
+.header-menu-theme .theme-option {
+  flex: 1;
+  justify-content: center;
+  min-height: 2.25rem;
+  font-size: 0.74rem;
+}
+
+.header-menu-popover .ownership-owner {
+  display: block;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+}
+
+.header-menu-popover .ownership-confirm {
+  display: flex;
+  gap: 0.2rem;
+}
+
+.header-menu-popover .ownership-delete {
+  color: #c0392b;
+}
+
+/* Riffrec wraps our className on a <span> and inline-styles its inner
+ * <button>; the descendant !important override is its supported reskin
+ * path (see the Feedback section below). In the menu it reads as a row. */
+.header-menu-popover .feedback-button {
+  padding: 0;
+}
+
+.header-menu-popover .feedback-button > button {
+  width: 100% !important;
+  border: none !important;
+  background: transparent !important;
+  color: var(--ink) !important;
+  font-size: 0.8rem !important;
+  font-weight: 500 !important;
+  padding: 0.45rem 0.55rem !important;
+  border-radius: 7px !important;
+  text-align: left !important;
+  justify-content: flex-start !important;
+}
+
+.header-menu-popover .feedback-button > button:hover {
+  background: var(--accent-soft) !important;
+  color: var(--ink) !important;
+}
+
+/* Mode switcher (Edit / Suggest / Comment / Read). */
+.doc-header-left .mode-control {
+  flex: none;
+}
+
+.doc-header-left .mode-control-popover {
+  left: 0;
+  right: auto;
+}
+
+.mode-control-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.mode-control-trigger:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.mode-control-caret {
+  font-size: 0.6rem;
+  color: var(--ink-faint);
+}
+
+.mode-control-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.mode-control-dot--suggest {
+  background: var(--sug-ins-line);
+}
+
+.mode-control-dot--comment {
+  background: var(--prov-pending-line);
+}
+
+.mode-control-dot--read {
+  background: var(--ink-faint);
+}
+
+.mode-control-popover {
+  width: 13.5rem;
+  padding: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.mode-control-option {
+  display: grid;
+  grid-template-columns: 0.85rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  padding: 0.32rem 0.45rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mode-control-option:hover {
+  background: var(--accent-soft);
+}
+
+.mode-control-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.mode-control-option:disabled:hover {
+  background: transparent;
+}
+
+/* Selected = soft tint + checkmark. No accent bars or outlines — the check
+   column already carries the state. */
+.mode-control-option.is-active {
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface-raised));
+}
+
+.mode-control-option-check {
+  align-self: start;
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1.15rem;
+}
+
+.mode-control-option-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.05rem;
+}
+
+.mode-control-option-label {
+  font-size: 0.76rem;
+  font-weight: 550;
+  color: var(--ink);
+  line-height: 1.15rem;
+}
+
+.mode-control-option-hint {
+  font-size: 0.65rem;
+  line-height: 1.3;
+  color: var(--ink-faint);
+}
+
+.mode-control-shortcut {
+  align-self: center;
+  min-width: 1.6rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  line-height: 1.15rem;
+  text-align: center;
+}
+
+.selection-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* Header chrome toggles (panel / focus). */
+.chrome-toggle {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+  font-weight: 550;
+  border-radius: 7px;
+  padding: 0.28rem 0.6rem;
+  min-height: 1.8rem;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.chrome-toggle:hover {
+  border-color: var(--ink-faint);
+  color: var(--ink);
+}
+
+.chrome-toggle[aria-pressed='true'] {
+  background: var(--surface-raised);
+  color: var(--ink);
+}
