@@ -134,7 +134,7 @@ GEM
       logger
     i18n (1.15.2)
       concurrent-ruby (~> 1.0)
-    inertia_rails (3.21.2)
+    inertia_rails (3.22.0)
       railties (>= 6)
     io-console (0.9.2)
     irb (1.18.0)
@@ -455,7 +455,7 @@ DEPENDENCIES
   bundler-audit
   commonmarker (~> 2.8)
   debug
-  inertia_rails (~> 3.21)
+  inertia_rails (~> 3.22)
   kamal (~> 2.12.0)
   omniauth-google-oauth2 (~> 1.2)
   omniauth-rails_csrf_protection (~> 2.0)
@@ -531,7 +531,7 @@ CHECKSUMS
   globalid (1.4.0) sha256=037f12fbf1d9d7a014d501c2d5c77356fd4ddd96d7a7991d6700bba96706f427
   hashie (5.1.0) sha256=c266471896f323c446ea8207f8ffac985d2718df0a0ba98651a3057096ca3870
   i18n (1.15.2) sha256=00f9eb62412fe593b2a65a97daa75300d37abb8f7202ec748e94b6d46a9dd1b5
-  inertia_rails (3.21.2) sha256=8806b2b2e230a994c1359d4578b4fb30b7eccdbdaf7fd11e9db718341b8e73aa
+  inertia_rails (3.22.0) sha256=39c20120de472015d2831fa461f8a09672c68e91c41d3d660e0b1d16b787b7b1
   io-console (0.9.2) sha256=efa74f891dd03c0939a931dfc6e74c2813d904763d456ea9762b0525e748db08
   irb (1.18.0) sha256=de9454a0703a54704b9811a5ef31a60c86949fbf4013fcf244fabc7c775248e3
   json (2.21.2) sha256=1f1d3b7cf2b3ba1a69beca0bb6db13d5438b80bff3cd54cdaaa620b9b07c1c6a
