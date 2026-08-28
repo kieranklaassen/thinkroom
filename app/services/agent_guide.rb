@@ -726,7 +726,8 @@ class AgentGuide
           required: %w[agent_name content],
           additionalProperties: false
         },
-        annotations: { read_only_hint: false, untrusted_content_hint: false },
+        # previous_content in the result is other humans' and agents' writing.
+        annotations: { read_only_hint: false, untrusted_content_hint: true },
         kind: "editor",
         action: "replace_content",
         include_viewer_context: true

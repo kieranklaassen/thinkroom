@@ -6,7 +6,7 @@ class AgentGuideWebmcpTest < ActiveSupport::TestCase
   UNTRUSTED_TOOLS = %w[
     thinkroom_read_document thinkroom_poll_events thinkroom_resolve_comment
     thinkroom_comment thinkroom_propose_suggestion thinkroom_create_document
-    thinkroom_announce_presence
+    thinkroom_announce_presence thinkroom_update_document
   ].freeze
   TRUSTED_TOOLS = %w[thinkroom_guide thinkroom_ack_events].freeze
   READ_ONLY_TOOL_SET = %w[
@@ -108,7 +108,7 @@ class AgentGuideWebmcpTest < ActiveSupport::TestCase
     assert_equal Document::MAX_CONTENT_BYTES, content[:maxLength]
     assert_includes content[:description], "Markdown"
     assert_includes content[:description], "UTF-8"
-    assert_equal({ read_only_hint: false, untrusted_content_hint: false }, tool[:annotations])
+    assert_equal({ read_only_hint: false, untrusted_content_hint: true }, tool[:annotations])
     assert_equal true, tool[:include_viewer_context]
     assert_includes tool[:description], "Markdown"
     assert_includes tool[:description], "previous_content"
@@ -325,8 +325,11 @@ class AgentGuideWebmcpTest < ActiveSupport::TestCase
 
   private
 
+  # The editor tool only exists on the writable manifest, so fall back to it.
   def find_tool(name)
-    @tools.find { |tool| tool[:name] == name } || flunk("no tool named #{name}")
+    @tools.find { |tool| tool[:name] == name } ||
+      AgentGuide.webmcp_tools(@document, BASE_URL, can_write: true)[:tools].find { |tool| tool[:name] == name } ||
+      flunk("no tool named #{name}")
   end
 
   def collect_strings(value, acc = [])
