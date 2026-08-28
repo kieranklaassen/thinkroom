@@ -60,6 +60,7 @@ import { useSuggestionReview } from './use_suggestion_review'
 import { useDocumentIdentity } from './use_document_identity'
 import { useFollowPresence } from './use_follow_presence'
 import { useComments } from './use_comments'
+import { useCommentAnchors } from './use_comment_anchors'
 import { useFloatingChrome, type TextTarget } from './use_floating_chrome'
 import { NativeDocBridge } from './native_doc_bridge'
 import { StagedDocumentEditor } from './staged_document_editor'
@@ -633,7 +634,6 @@ export default function DocumentShow({
     submitComment,
     submitAnchoredComment,
     resolveComment,
-    jumpToAnchor,
   } = useComments({
     slug: doc.slug,
     identityName: identity.name,
@@ -642,6 +642,21 @@ export default function DocumentShow({
     isMobile,
     docTick,
   })
+
+  // Rail cards ↔ document text: every open anchor stays tinted in Comment
+  // mode, and hovering/clicking a card highlights/jumps to its text.
+  const { anchoredIds, hoverAnchor, jumpToComment } = useCommentAnchors({
+    comments,
+    handle,
+    docTick,
+    tintAll: effectiveMode === 'comment',
+  })
+
+  // ⌘\ hides the rail with CSS while the panel stays mounted, so a card
+  // hovered at that moment never gets its mouseleave — drop the spotlight.
+  useEffect(() => {
+    if (!panelOpen) hoverAnchor(null)
+  }, [panelOpen, hoverAnchor])
 
   // The comment composer lives in the comments panel — on mobile that means
   // opening its sheet when a selection chooses "Comment".
@@ -948,10 +963,12 @@ export default function DocumentShow({
                   // The desktop composer is the anchored card next to the
                   // selection — the rail keeps the list only.
                   composerAnchor={null}
+                  anchoredIds={anchoredIds}
                   onSubmit={submitComment}
                   onCancelComposer={closeComposer}
                   onResolve={resolveComment}
-                  onJumpTo={jumpToAnchor}
+                  onJumpTo={jumpToComment}
+                  onHover={hoverAnchor}
                 />
               )}
               {/* The legend is part of reading the document — colors only
@@ -1047,11 +1064,12 @@ export default function DocumentShow({
             <CommentsPanel
               comments={comments}
               composerAnchor={composerAnchor}
+              anchoredIds={anchoredIds}
               onSubmit={submitComment}
               onCancelComposer={cancelComposer}
               onResolve={resolveComment}
-              onJumpTo={(anchorText) => {
-                jumpToAnchor(anchorText)
+              onJumpTo={(comment) => {
+                jumpToComment(comment)
                 setActiveSheet(null)
               }}
             />

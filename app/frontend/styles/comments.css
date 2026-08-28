@@ -20,6 +20,18 @@
   opacity: 0.6;
 }
 
+/* Cards whose anchor text resolves in the copy: the whole card jumps to it,
+ * with hover tinting the anchor (mirrors the margin suggestion cards). */
+.comment-card--linked {
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.comment-card--linked:hover {
+  border-color: var(--accent);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.06);
+}
+
 .comment-meta {
   display: flex;
   align-items: center;
@@ -41,14 +53,18 @@
   line-height: 1.4;
 }
 
-.comment-quote--link {
-  cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease;
+/* The quoted text was edited out of the document — the quote stays for
+ * context but no longer navigates anywhere. */
+.comment-quote--stale {
+  color: var(--ink-faint);
+  border-left-color: var(--line);
 }
 
-.comment-quote--link:hover {
-  border-color: var(--accent);
-  color: var(--ink);
+/* Anchor-state caption: "On the whole document" / "no longer in the document". */
+.comment-scope {
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+  font-style: italic;
 }
 
 .comment-body {
@@ -141,11 +157,51 @@
   margin: 0;
 }
 
+/* Comment anchors in the copy, via the CSS Custom Highlight API — the
+ * accent (terracotta on proof, blue on whitey) keeps comment anchors
+ * distinct from the purple suggestion/provenance tints. */
+
 /* The anchored text stays tinted while its composer is open. */
+::highlight(comment-anchor-draft) {
+  background-color: rgb(182 92 61 / 0.2);
+}
+
+/* Every open comment's anchor, tinted while in Comment mode. */
 ::highlight(comment-anchor) {
-  background-color: rgb(157 78 221 / 0.18);
+  background-color: rgb(182 92 61 / 0.12);
+}
+
+/* Hovering a linked rail card spotlights its anchor. */
+::highlight(comment-anchor-hot) {
+  background-color: rgb(182 92 61 / 0.3);
+}
+
+/* Jump pulse: strong tint stepping down to resting (two steps — highlight
+ * pseudo-elements can't transition). */
+::highlight(comment-anchor-flash) {
+  background-color: rgb(182 92 61 / 0.38);
+}
+
+::highlight(comment-anchor-flash-soft) {
+  background-color: rgb(182 92 61 / 0.16);
+}
+
+[data-theme='whitey'] ::highlight(comment-anchor-draft) {
+  background-color: rgb(65 131 196 / 0.2);
 }
 
 [data-theme='whitey'] ::highlight(comment-anchor) {
-  background-color: rgb(65 131 196 / 0.18);
+  background-color: rgb(65 131 196 / 0.12);
+}
+
+[data-theme='whitey'] ::highlight(comment-anchor-hot) {
+  background-color: rgb(65 131 196 / 0.3);
+}
+
+[data-theme='whitey'] ::highlight(comment-anchor-flash) {
+  background-color: rgb(65 131 196 / 0.38);
+}
+
+[data-theme='whitey'] ::highlight(comment-anchor-flash-soft) {
+  background-color: rgb(65 131 196 / 0.16);
 }
