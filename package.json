@@ -44,6 +44,7 @@
     "check:cli": "node --test cli/test/*.test.js",
     "check:exports": "node script/export_check.mjs",
     "check:html": "node script/html_document_check.mjs",
+    "check:webmcp": "node script/webmcp_check.mjs",
     "check:links": "node script/link_check.mjs"
   },
   "overrides": {
