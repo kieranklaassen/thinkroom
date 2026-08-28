@@ -16,7 +16,7 @@
     "@handlewithcare/prosemirror-suggest-changes": "^0.1.8",
     "@inertiajs/react": "^3.5.0",
     "@inertiajs/vite": "^3.5.0",
-    "@milkdown/kit": "7.21.2",
+    "@milkdown/kit": "7.22.1",
     "@milkdown/plugin-collab": "7.21.2",
     "@milkdown/plugin-highlight": "7.21.2",
     "@milkdown/react": "7.21.2",
