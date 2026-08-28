@@ -62,6 +62,16 @@ active plans. For a self-hosted deployment, pass `--url https://your-host` to
 `thinkroom login` or set `THINKROOM_URL`; automation can use
 `THINKROOM_TOKEN` without writing a config file.
 
+Thinkroom pages also register [WebMCP](https://developer.chrome.com/docs/ai/webmcp)
+tools for agents that drive a browser. In Chrome 149+ (origin trial, or
+`chrome://flags/#enable-webmcp-testing` locally), a document page exposes
+`thinkroom_*` tools on `document.modelContext` for reading, suggesting,
+commenting, resolving, presence, events, and creating unclaimed drafts; the
+index exposes guide and create. Every write carries an `agent_name` and runs at
+anonymous link-holder privilege, never the viewer's account. Content changes,
+retitling, review decisions, claiming, and link access remain with the CLI and
+with humans.
+
 ## Run locally
 
 Requires Ruby 3.4, Node 20 or newer, and SQLite.

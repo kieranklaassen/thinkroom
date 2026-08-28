@@ -15,6 +15,18 @@ identity: pass `--agent NAME` (or set `THINKROOM_AGENT`) so edits are attributed
 to you. Without one the CLI stops with an error rather than misattributing the
 write to a generic identity.
 
+## WebMCP
+
+In a WebMCP-capable browser (Chrome 149+ with
+`chrome://flags/#enable-webmcp-testing`), Thinkroom pages register
+`thinkroom_*` tools on `document.modelContext` that call the same `/api/*`
+endpoints the CLI uses. Document pages offer read, suggest, comment, resolve,
+presence, events, and create; the index offers guide and create. Every write
+takes a required `agent_name`, and the tools run at anonymous link-holder
+privilege, so writes on comment-only or view-only links return 423 with a
+`next_action`. Content changes, retitling, accepting or rejecting, claiming,
+and link access stay with the CLI (`thinkroom update`) and with humans.
+
 ## Provenance spans
 
 `thinkroom show` prints the canonical Markdown source, which may embed

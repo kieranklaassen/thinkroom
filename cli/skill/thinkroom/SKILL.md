@@ -75,6 +75,25 @@ thinkroom comment SHARE_URL --body "Could we verify this assumption?" --agent "C
 
 When an API conflict provides a next action, follow that guidance instead of retrying the same write.
 
+## In a WebMCP browser
+
+If you are driving a WebMCP-capable browser and the open Thinkroom page exposes `document.modelContext` tools named `thinkroom_*`, prefer them over curl. Always pass `agent_name` — the same identity rule as `--agent`. Never invent a generic name.
+
+Document pages (`/d/SLUG`) register nine tools:
+
+- `thinkroom_guide` — the agent guide for this server (read-only).
+- `thinkroom_read_document` — canonical source, suggestions, comments, and ownership (read-only, no presence).
+- `thinkroom_propose_suggestion` — exact-text replacement with intent; needs an edit link.
+- `thinkroom_comment` — review note or question; needs a comment or edit link.
+- `thinkroom_resolve_comment` — resolve an open comment on this document; needs a comment or edit link.
+- `thinkroom_announce_presence` — tell readers you are working here.
+- `thinkroom_poll_events` / `thinkroom_ack_events` — pending events addressed to your agent name, and their acknowledgement.
+- `thinkroom_create_document` — a new unclaimed draft (rate-limited per IP).
+
+The documents index (`/`) registers two: `thinkroom_guide` and `thinkroom_create_document`.
+
+These tools run at anonymous link-holder privilege — no token, never the viewer's account. Write tools return 423 with a `next_action` on comment-only or view-only links; follow it instead of retrying. Content changes, retitling, accepting or rejecting suggestions, claiming, and link access are not browser tools — use the CLI (`thinkroom update`) or leave them to a human.
+
 ## Handoff
 
 Finish by giving the person the share URL and one sentence describing what judgment or action is needed. Do not expose CLI config files, bearer tokens, browser cookies, or raw API responses containing credentials.
