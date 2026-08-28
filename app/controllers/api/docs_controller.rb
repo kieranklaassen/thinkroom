@@ -110,7 +110,9 @@ module Api
       source = nil
       content_reset = false
       if content.present?
-        source, normalized, warning = normalized_source_and_signal(document.content_format, content)
+        source, normalized, warning = normalized_source_and_signal(
+          document.content_format, content, trusted_metadata: targeted_replace?
+        )
         # Only (re)attribute when an agent identifies itself; an anonymous
         # update preserves the original seed authorship rather than erasing it.
         kind, name = agent_seed_attribution(content)
@@ -243,6 +245,8 @@ module Api
     # an overlapping self-similar target read as ambiguous while stopping at
     # the second hit instead of counting every match in a large document.
     def targeted_replacement_source
+      return nil if reject_reserved_metadata_in_replacement
+
       replaces = params[:replaces]
       source = document.current_content.to_s
       first = source.index(replaces)
@@ -273,6 +277,27 @@ module Api
         return nil
       end
       replaced
+    end
+
+    # The spliced source is sanitized with metadata trusted so the untouched
+    # remainder keeps its sketches, provenance spans, and suggestion marks. The
+    # caller's own `with` text is not trusted, so it must not carry those
+    # reserved attributes — otherwise a targeted replacement could forge
+    # provenance or a suggestion mark that a full-content update strips.
+    # A substring test is enough: HTML never entity-decodes attribute names.
+    # Renders and returns true when it fires.
+    def reject_reserved_metadata_in_replacement
+      return false unless document.html?
+
+      with = params[:with].to_s.downcase
+      reserved = HtmlDocumentSanitizer::THINKROOM_ATTRIBUTES.select { |attribute| with.include?(attribute) }
+      return false if reserved.empty?
+
+      render json: {
+        error: "with must not set reserved Thinkroom attributes (#{reserved.join(', ')}) — " \
+               "sketches, provenance, and suggestion marks are written by the editor, not by the API."
+      }, status: :unprocessable_entity
+      true
     end
 
     # A well-formed request that conflicts with the document's current state.
@@ -311,9 +336,19 @@ module Api
     # the stored source so the response can report it instead of looking
     # byte-for-byte identical to a recognized sketch. `fallback` seeds the
     # source when no content was supplied (create's DEFAULT_SEED); callers with
-    # guaranteed content omit it.
-    def normalized_source_and_signal(format, content, fallback: nil)
-      normalization = format == "html" ? HtmlDocumentSanitizer.external(content) : nil
+    # guaranteed content omit it. `trusted_metadata` is for a targeted
+    # replacement, where everything but the swapped span is the document's own
+    # canonical source: the untrusted sanitizer would strip the sketches,
+    # provenance spans, and suggestion marks the caller never sent.
+    def normalized_source_and_signal(format, content, fallback: nil, trusted_metadata: false)
+      normalization =
+        if format != "html"
+          nil
+        elsif trusted_metadata
+          HtmlDocumentSanitizer.snapshot(content)
+        else
+          HtmlDocumentSanitizer.external(content)
+        end
       source = normalization&.content || content || fallback
       sketch_audit = format == "html" ? nil : MarkdownSketchAudit.call(source)
       normalized = normalization&.changed? || sketch_audit&.unrecognized? || false

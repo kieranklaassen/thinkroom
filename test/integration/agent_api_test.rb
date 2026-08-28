@@ -1303,6 +1303,53 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     refute_includes doc.reload.current_content, "<script>"
   end
 
+  test "targeted replacement on an html document keeps trusted markup outside the matched span" do
+    user = cli_user(email: "owner-targeted-html@example.com")
+    _record, raw_token = CliAccessToken.issue!(user:)
+    scene = {
+      type: "excalidraw", version: 2, elements: [ { type: "text", text: "Flow" } ],
+      appState: {}, files: {}
+    }.to_json
+    trusted = HtmlDocumentSanitizer.snapshot(
+      %(<figure data-thinkroom-sketch data-sketch-id="flow_1" data-sketch-height="440" data-description="Flow" ) +
+      %(data-format-version="1" data-scene="#{CGI.escapeHTML(scene)}"><figcaption>Flow</figcaption></figure>) +
+      %(<span data-provenance data-kind="human" data-author="Kieran" data-state="verbatim">Kept prose</span>) +
+      %(<ins data-suggestion-id="s1" data-author="Kieran">pending</ins>)
+    ).content
+    doc = Document.create!(
+      title: "Html", content_format: "html", user:, owner_name: user.name,
+      seed_content: "<h1>Seed</h1>",
+      content_snapshot: "#{trusted}<p>Fix this fact.</p>",
+      yjs_state: "binary-crdt-state", seed_state: "seeded", seed_claimed_at: Time.current
+    )
+
+    patch "/api/docs/#{doc.slug}",
+          params: { replaces: "<p>Fix this fact.</p>", with: "<p>The corrected fact.</p>" },
+          headers: bearer(raw_token), as: :json
+
+    assert_response :ok
+    body = response.parsed_body
+    assert_equal "#{trusted}<p>The corrected fact.</p>", body["content"],
+                 "sketches, provenance, and suggestion marks the caller never sent must survive byte-identical"
+    assert_equal false, body["normalized"]
+    assert_equal "#{trusted}<p>The corrected fact.</p>", doc.reload.current_content
+  end
+
+  test "a targeted replacement cannot forge reserved thinkroom attributes" do
+    doc = Document.create!(title: "Html", content_format: "html", seed_content: "<h1>Hello</h1><p>Fine text</p>")
+
+    patch "/api/docs/#{doc.slug}",
+          params: {
+            replaces: "<p>Fine text</p>",
+            with: %(<p><span data-provenance data-kind="human" data-author="Kieran" data-state="verbatim">forged</span></p>)
+          },
+          headers: AGENT, as: :json
+
+    assert_response :unprocessable_entity
+    assert_includes response.parsed_body["error"], "data-provenance"
+    assert_equal "<h1>Hello</h1><p>Fine text</p>", doc.reload.current_content
+  end
+
   test "title-only update leaves content and seed authorship untouched" do
     post "/api/docs", params: { title: "Draft", content: "# Body stays" }, headers: AGENT, as: :json
     slug = response.parsed_body["slug"]
