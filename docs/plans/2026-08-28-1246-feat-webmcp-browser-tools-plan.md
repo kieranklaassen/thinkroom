@@ -100,7 +100,7 @@ Thinkroom already serves agents over HTTP (`app/controllers/api/`, identity via 
 
 - Human-judgment tools (`accept_suggestion`, `reject_suggestion`, review-state advance) and ownership tools (`claim`, `set_link_access`, `delete_document`) — require a product decision and a "human via agent" attribution shape in `Activity`.
 - Owner-privileged browser tools (list my documents, retitle, content replacement) — would need a page-scoped credential design; see KTD2's rejected alternative.
-- In-page document replacement through the Yjs editor (a `replaceDocumentSource` helper beside `applySuggestion`).
+- In-page document replacement through the Yjs editor (a `replaceDocumentSource` helper beside `applySuggestion`) — delivered by `docs/plans/2026-08-28-1447-feat-webmcp-update-document-plan.md` as `thinkroom_update_document`.
 - `thinkroom_upload_image` (binary through JSON arguments).
 - `thinkroom_switch_mode`, `focus_suggestion`/`focus_comment` navigation helpers.
 - A surface marker (for example `X-Thinkroom-Client: webmcp` logged into `Activity.detail`) so humans and metrics can tell browser agents from CLI agents; until it lands, WebMCP usage is not separately measurable.

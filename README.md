@@ -68,9 +68,13 @@ tools for agents that drive a browser. In Chrome 149+ (origin trial, or
 `thinkroom_*` tools on `document.modelContext` for reading, suggesting,
 commenting, resolving, presence, events, and creating unclaimed drafts; the
 index exposes guide and create. Every write carries an `agent_name` and runs at
-anonymous link-holder privilege, never the viewer's account. Content changes,
-retitling, review decisions, claiming, and link access remain with the CLI and
-with humans.
+anonymous link-holder privilege, never the viewer's account. A writable
+document page — opened through an Edit link, claimed or not, or owned by the
+viewer — also exposes `thinkroom_update_document`, the in-page equivalent of
+`thinkroom update`: it replaces the whole document through the live editor,
+with the replaced text landing as pending AI provenance for human review.
+Retitling without a heading, review decisions, claiming, and link access
+remain with the CLI and with humans.
 
 ## Run locally
 
