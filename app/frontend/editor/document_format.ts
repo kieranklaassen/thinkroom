@@ -7,6 +7,7 @@ import {
   type Schema,
 } from '@milkdown/kit/prose/model'
 import { normalizeSketchData } from './sketch/scene'
+import { isHighlightColorId } from './text_highlighter/palette'
 
 export type DocumentFormat = 'markdown' | 'html'
 export type HtmlTrust = 'external' | 'snapshot'
@@ -76,6 +77,8 @@ const ALLOWED_ATTR = [
   'data-scene',
   'data-description',
   'data-format-version',
+  'data-highlighter',
+  'data-color',
 ]
 
 const ACTIVE_STORAGE_PATH =
@@ -94,8 +97,9 @@ const SKETCH_ATTRS = [
   'data-description',
   'data-format-version',
 ]
+const HIGHLIGHTER_ATTRS = ['data-highlighter', 'data-color']
 const THINKROOM_ATTRS = Array.from(
-  new Set([...PROVENANCE_ATTRS, ...SUGGESTION_ATTRS, ...SKETCH_ATTRS]),
+  new Set([...PROVENANCE_ATTRS, ...SUGGESTION_ATTRS, ...SKETCH_ATTRS, ...HIGHLIGHTER_ATTRS]),
 )
 
 const removeAttrs = (element: Element, attrs: string[]) => {
@@ -145,6 +149,15 @@ const sanitizeMetadata = (element: HTMLElement, trust: HtmlTrust) => {
     element.setAttribute('data-kind', metadata['data-kind']!)
     element.setAttribute('data-author', author)
     element.setAttribute('data-state', metadata['data-state']!)
+  }
+
+  const validHighlighter =
+    metadata['data-highlighter'] !== null &&
+    element.tagName === 'SPAN' &&
+    isHighlightColorId(metadata['data-color'] ?? '')
+  if (validHighlighter) {
+    element.setAttribute('data-highlighter', '')
+    element.setAttribute('data-color', metadata['data-color']!)
   }
 
   const suggestionId = metadata['data-suggestion-id'] ?? ''

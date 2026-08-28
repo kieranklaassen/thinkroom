@@ -14,6 +14,7 @@ class HtmlDocumentSanitizer
     data-language data-item-type data-label data-list-type data-spread data-checked
     data-is-header data-provenance data-kind data-author data-state data-suggestion-id
     data-thinkroom-sketch data-sketch-id data-sketch-height data-scene data-description data-format-version
+    data-highlighter data-color
   ].freeze
 
   PROVENANCE_KINDS = %w[human ai].freeze
@@ -35,7 +36,10 @@ class HtmlDocumentSanitizer
   SKETCH_ATTRIBUTES = %w[
     data-thinkroom-sketch data-sketch-id data-sketch-height data-scene data-description data-format-version
   ].freeze
-  THINKROOM_ATTRIBUTES = (PROVENANCE_ATTRIBUTES + SUGGESTION_ATTRIBUTES + SKETCH_ATTRIBUTES).uniq.freeze
+  HIGHLIGHTER_ATTRIBUTES = %w[data-highlighter data-color].freeze
+  THINKROOM_ATTRIBUTES = (
+    PROVENANCE_ATTRIBUTES + SUGGESTION_ATTRIBUTES + SKETCH_ATTRIBUTES + HIGHLIGHTER_ATTRIBUTES
+  ).uniq.freeze
   EXTERNAL_ATTRIBUTES = (ATTRIBUTES - THINKROOM_ATTRIBUTES).freeze
 
   class << self
@@ -97,6 +101,7 @@ class HtmlDocumentSanitizer
       restore_provenance(node, metadata) if valid_provenance?(node, metadata)
       restore_suggestion(node, metadata) if valid_suggestion?(node, metadata)
       restore_sketch(node, metadata) if valid_sketch?(node, metadata)
+      restore_highlighter(node, metadata) if valid_highlighter?(node, metadata)
     end
 
     def valid_active_storage_src?(source)
@@ -161,6 +166,17 @@ class HtmlDocumentSanitizer
       end
       node["data-thinkroom-sketch"] = ""
       node["data-format-version"] = ThinkroomSketch::FORMAT_VERSION.to_s
+    end
+
+    def valid_highlighter?(node, metadata)
+      node.name == "span" &&
+        !metadata["data-highlighter"].nil? &&
+        HighlightPalette::COLOR_IDS.include?(metadata["data-color"])
+    end
+
+    def restore_highlighter(node, metadata)
+      node["data-highlighter"] = ""
+      node["data-color"] = metadata["data-color"]
     end
 
     def strip_thinkroom_metadata(node)

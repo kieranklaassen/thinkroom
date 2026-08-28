@@ -1,15 +1,8 @@
 import { $remark } from '@milkdown/kit/utils'
-
-interface MdastNode {
-  type: string
-  value?: string
-  children?: MdastNode[]
-  [key: string]: unknown
-}
+import { findSpanClose, type MdastNode } from '../remark_spans'
 
 const OPEN_SPAN =
   /^<span\s+data-provenance(?:="")?\s*(?:data-kind="([^"]*)")?\s*(?:data-author="([^"]*)")?\s*(?:data-state="([^"]*)")?\s*>$/
-const CLOSE_SPAN = /^<\/span>$/
 
 const escapeAttr = (value: string): string =>
   value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
@@ -49,7 +42,9 @@ export const provenanceStringify = $remark('provenanceStringify', () =>
  * Parsing: micromark turns inline HTML into opaque `html` nodes. This
  * transformer finds <span data-provenance ...> ... </span> runs inside
  * phrasing content and replaces them with a `provenance` mdast node so the
- * mark schema's parseMarkdown picks them up. Flat spans only (no nesting).
+ * mark schema's parseMarkdown picks them up. Close-pairing is nesting-aware
+ * (findSpanClose): highlighter spans serialize nested inside provenance
+ * spans, and the later highlighter transformer converts those children.
  */
 export const provenanceParse = $remark('provenanceParse', () => () => (root: unknown) => {
   const tree = root as MdastNode
@@ -64,13 +59,7 @@ export const provenanceParse = $remark('provenanceParse', () => () => (root: unk
       const open = OPEN_SPAN.exec(child.value.trim())
       if (!open) continue
 
-      const closeIndex = children.findIndex(
-        (sibling, j) =>
-          j > i &&
-          sibling.type === 'html' &&
-          typeof sibling.value === 'string' &&
-          CLOSE_SPAN.test(sibling.value.trim()),
-      )
+      const closeIndex = findSpanClose(children, i)
       if (closeIndex === -1) continue
 
       const inner = children.slice(i + 1, closeIndex)

@@ -88,9 +88,12 @@ const absolutizeDocumentUrls = (root: ParentNode): void => {
 }
 
 export async function exportedDocumentHtml(editor: Editor, title: string): Promise<string> {
-  const source = editor.action((ctx) =>
-    serializeHtml(ctx.get(editorViewCtx).state.doc, ctx.get(schemaCtx)),
-  )
+  // Downloads are an export surface like the markdown path above: activity
+  // marks (provenance, suggestions, highlighter) stay Thinkroom-internal.
+  const source = editor.action((ctx) => {
+    const doc = ctx.get(editorViewCtx).state.doc
+    return serializeHtml(doc.copy(stripActivityMarks(doc.content)), ctx.get(schemaCtx))
+  })
   const exported = document.implementation.createHTMLDocument(title.trim() || 'Thinkroom document')
   exported.documentElement.lang = 'en'
   const charset = exported.createElement('meta')

@@ -406,6 +406,14 @@ class DocumentTest < ActiveSupport::TestCase
     assert_equal "robot text", doc.plain_markdown
   end
 
+  test "plain_markdown strips highlighter spans keeping content" do
+    doc = Document.create!(
+      title: "Highlighted",
+      content_markdown: 'Keep <span data-highlighter data-color="yellow">the marked part</span> readable'
+    )
+    assert_equal "Keep the marked part readable", doc.plain_markdown
+  end
+
   test "provenance_summary with no spans is all zeros" do
     doc = Document.create!(title: "Empty")
     assert_equal({ total: 0, human_pct: 0, ai_pct: 0, unreviewed_pct: 0 }, doc.provenance_summary)

@@ -153,6 +153,7 @@ class DocumentsController < InertiaController
       comments: -> { document.comments.order(:created_at).map(&:as_props) },
       activities: -> { document.activities.recent.map(&:as_props) },
       presences: -> { document.agent_presences.active.map(&:as_props) },
+      highlight_names: -> { document.highlight_names || {} },
       # WebMCP tool manifest for agents driving this browser (lazy: partial
       # reloads that poll suggestions/comments/presences never re-ship it).
       # The in-page update tool rides only when THIS viewer can write.
@@ -237,6 +238,24 @@ class DocumentsController < InertiaController
     end
   rescue ActiveRecord::RecordNotFound
     redirect_to root_path, status: :see_other
+  end
+
+  # Writers name the highlighter legend's colors; the sanitized map merges
+  # into the stored one (blank names clear their entry) and every open rail
+  # reloads the highlight_names prop via the meta-channel event.
+  def update_highlight_names
+    document = Document.find_by!(slug: params[:slug])
+    names = HighlightPalette.sanitize_names(params[:names])
+    if names.nil?
+      return render json: { error: "Send names as { color => name } using palette colors." },
+                    status: :unprocessable_entity
+    end
+
+    with_document_write_access(document) do
+      document.update!(highlight_names: HighlightPalette.merge_names(document.highlight_names, names))
+    end
+    DocumentMetaChannel.broadcast_event(document, :highlight_names)
+    head :no_content
   end
 
   LOCK_VALUES = {

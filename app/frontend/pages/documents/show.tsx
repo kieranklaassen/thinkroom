@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Head, Link, router, usePoll } from '@inertiajs/react'
 import { nativeHaptic } from '@ruby-native/react'
+import { editorViewCtx } from '@milkdown/kit/core'
 import type { EditorView } from '@milkdown/kit/prose/view'
+import { TextSelection } from '@milkdown/kit/prose/state'
 import type { ConnectionStatus, EditorHandle } from '../../editor/milkdown_editor'
 import type { DocumentFormat } from '../../editor/document_format'
 import { provenanceIdentityCtx } from '../../editor/provenance'
@@ -12,6 +14,15 @@ import {
   type ReviewState,
 } from '../../editor/provenance'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
+import {
+  HIGHLIGHT_COLORS,
+  applyHighlight,
+  collectHighlights,
+  removeHighlight,
+  selectionHighlightColor,
+  type HighlightGroup,
+  type HighlightSnippet,
+} from '../../editor/text_highlighter'
 import type { RenderHints } from '../../editor/cable_provider'
 import { bindReadModeCopy } from '../../editor/clipboard'
 import { bindReadPointerBroadcast } from '../../editor/read_pointers'
@@ -21,6 +32,7 @@ import {
   printDocument,
 } from '../../editor/document_export'
 import { ProvenanceSummaryChip } from '../../components/provenance_summary'
+import { HighlightLegendPanel } from '../../components/highlight_legend_panel'
 import { ReviewPopover } from '../../components/review_popover'
 import { MarginSuggestions } from '../../components/margin_suggestions'
 import { CommentsPanel } from '../../components/comments_panel'
@@ -113,6 +125,8 @@ export interface DocumentProps {
   comments: CommentPayload[]
   activities: ActivityPayload[]
   presences: AgentPresencePayload[]
+  /** Persisted highlighter legend names ({ yellow: 'Urgent' }). */
+  highlight_names: Record<string, string>
   // WebMCP tool manifest (AgentGuide.webmcp_tools) — lazy prop, registered on
   // document.modelContext once per slug after hydration.
   webmcp: WebmcpManifest
@@ -153,6 +167,7 @@ export default function DocumentShow({
   comments,
   activities,
   presences,
+  highlight_names: highlightNames,
   webmcp,
   nativeApp,
 }: DocumentProps) {
@@ -649,6 +664,73 @@ export default function DocumentShow({
     if (isMobile && composerAnchor !== null) setActiveSheet('comments')
   }, [isMobile, composerAnchor])
 
+  // Highlighter legend content, re-scanned from the live doc whenever it
+  // changes (docTick — the same recompute signal the review surfaces use).
+  const highlightGroups = useMemo<HighlightGroup[]>(() => {
+    void docTick
+    if (!handle) return []
+    let groups: HighlightGroup[] = []
+    try {
+      handle.editor.action((ctx) => {
+        groups = collectHighlights(ctx.get(editorViewCtx).state.doc)
+      })
+    } catch {
+      // view not mounted yet
+    }
+    return groups
+  }, [handle, docTick])
+
+  // Applying colors mutates document content, so the swatches follow the
+  // write capability, not just the visible toolbar (Comment mode selections
+  // keep offering Comment only).
+  const canHighlight = ownership.can_write && effectiveMode === 'edit'
+  // The selection's uniform color (drives the active-swatch styling).
+  // textTarget is recreated on every selection/doc change, so this stays
+  // fresh after a swatch click without a dedicated subscription.
+  const activeHighlightColor = useMemo(() => {
+    void docTick
+    const view = viewRef.current
+    if (!canHighlight || !view || textTarget?.kind !== 'selection') return null
+    return selectionHighlightColor(view.state)
+  }, [canHighlight, textTarget, docTick])
+
+  const highlightSwatches = useMemo(() => {
+    if (!canHighlight) return undefined
+    return HIGHLIGHT_COLORS.map((color) => ({
+      id: color.id,
+      label: highlightNames[color.id] || color.label,
+      color: color.swatch,
+      active: activeHighlightColor === color.id,
+      onClick: () => {
+        const view = viewRef.current
+        if (!view) return
+        // Decide apply-vs-remove from the live editor state, not the memoized
+        // activeHighlightColor — a click can land before React re-renders
+        // (docTick is rAF-deferred), and a stale snapshot would re-apply
+        // instead of toggling off.
+        if (selectionHighlightColor(view.state) === color.id) removeHighlight(view)
+        else applyHighlight(view, color.id)
+        view.focus()
+      },
+    }))
+  }, [canHighlight, highlightNames, activeHighlightColor])
+
+  const jumpToHighlight = useCallback((snippet: HighlightSnippet) => {
+    const view = viewRef.current
+    if (!view) return
+    // Positions come from the last scan; a remote edit landing between scan
+    // and click could shift them. TextSelection.between snaps to the nearest
+    // valid inline positions instead of throwing on a stale range.
+    const max = view.state.doc.content.size
+    if (snippet.from >= snippet.to || snippet.to > max) return
+    const tr = view.state.tr.setSelection(
+      TextSelection.between(view.state.doc.resolve(snippet.from), view.state.doc.resolve(snippet.to)),
+    )
+    tr.scrollIntoView()
+    view.dispatch(tr)
+    view.focus()
+  }, [])
+
   // One floating form at a time: an open composer suppresses the selection
   // chrome, and so does the share popover (z-60, above the chrome's z-50).
   const [shareOpen, setShareOpen] = useState(false)
@@ -873,21 +955,34 @@ export default function DocumentShow({
               </div>
             )}
           </div>
-          {!isReading && !isMobile && (
+          {!isMobile && (!isReading || highlightGroups.length > 0) && (
             <aside className="doc-rail">
-              <CommentsPanel
-                comments={comments}
-                // The desktop composer is the anchored card next to the
-                // selection — the rail keeps the list only.
-                composerAnchor={null}
-                anchoredIds={anchoredIds}
-                onSubmit={submitComment}
-                onCancelComposer={closeComposer}
-                onResolve={resolveComment}
-                onJumpTo={jumpToComment}
-                onHover={hoverAnchor}
+              {!isReading && (
+                <CommentsPanel
+                  comments={comments}
+                  // The desktop composer is the anchored card next to the
+                  // selection — the rail keeps the list only.
+                  composerAnchor={null}
+                  anchoredIds={anchoredIds}
+                  onSubmit={submitComment}
+                  onCancelComposer={closeComposer}
+                  onResolve={resolveComment}
+                  onJumpTo={jumpToComment}
+                  onHover={hoverAnchor}
+                />
+              )}
+              {/* The legend is part of reading the document — colors only
+                  mean something with their names — so Read mode keeps it
+                  (names locked, snippets still jump) while the review
+                  panels stay Edit/Suggest/Comment-only. */}
+              <HighlightLegendPanel
+                groups={highlightGroups}
+                names={highlightNames}
+                canWrite={ownership.can_write && !isReading}
+                slug={doc.slug}
+                onJumpTo={jumpToHighlight}
               />
-              <ActivityPanel activities={activities} />
+              {!isReading && <ActivityPanel activities={activities} />}
             </aside>
           )}
         </main>
@@ -904,6 +999,7 @@ export default function DocumentShow({
                 },
               },
             ]}
+            swatches={highlightSwatches}
           />
         )}
         {!isReading && textTarget?.kind === 'comment' && commentAffordanceActive && (

@@ -85,6 +85,34 @@ class HtmlDocumentSanitizerTest < ActiveSupport::TestCase
     refute_match(/data-provenance|data-kind|data-state|data-suggestion-id|data-author/, result.content)
   end
 
+  test "trusted snapshots preserve valid highlighter spans" do
+    source = %(<span data-highlighter data-color="yellow">marked</span>)
+
+    result = HtmlDocumentSanitizer.snapshot(source)
+
+    assert_includes result.content, "marked"
+    assert_match(/data-highlighter/, result.content)
+    assert_match(/data-color="yellow"/, result.content)
+  end
+
+  test "trusted snapshots strip highlighter spans with unknown colors" do
+    source = %(<span data-highlighter data-color="chartreuse">marked</span>)
+
+    result = HtmlDocumentSanitizer.snapshot(source)
+
+    assert_includes result.content, "marked"
+    refute_match(/data-highlighter|data-color/, result.content)
+  end
+
+  test "external html cannot forge highlighter spans" do
+    source = %(<span data-highlighter data-color="yellow">forged highlight</span>)
+
+    result = HtmlDocumentSanitizer.external(source)
+
+    assert_includes result.content, "forged highlight"
+    refute_match(/data-highlighter|data-color/, result.content)
+  end
+
   test "only active storage images survive" do
     source = <<~HTML
       <p><img src="/rails/active_storage/blobs/redirect/token/file.png" alt="local"></p>
