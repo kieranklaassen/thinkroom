@@ -8,6 +8,9 @@ import { userIdentity } from '../../editor/identity'
 import { setCookie } from '../../lib/cookies'
 import { useClaim } from '../../lib/use_claim'
 import { useIsClient } from '../../lib/use_is_client'
+import { useWebmcpTools } from '../../lib/use_webmcp_tools'
+import { executeManifestTool } from '../../lib/webmcp_execute'
+import type { WebmcpManifest } from '../../lib/webmcp'
 import type { OwnershipPayload } from '../../types/payloads'
 import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
@@ -29,7 +32,13 @@ type Props = Pick<SharedProps, 'nativeApp'> & {
   yours: DocLink[]
   recent: RecentDoc[]
   viewer: ViewerPayload
+  // WebMCP tool manifest (AgentGuide.webmcp_index_tools) — lazy prop.
+  webmcp: WebmcpManifest
 }
+
+// The index has no document, so the guide's viewer context is the viewer only.
+const INDEX_VIEWER_CONTEXT_NOTE =
+  'This is the human viewer of the documents index. You act as an anonymous agent; created documents start unclaimed.'
 
 const EARLIER_PREVIEW_LIMIT = 8
 const GITHUB_REPOSITORY_URL = 'https://github.com/kieranklaassen/thinkroom'
@@ -253,8 +262,22 @@ function DocumentGroup({
   )
 }
 
-export default function DocumentsIndex({ yours, recent, viewer, nativeApp }: Props) {
+export default function DocumentsIndex({ yours, recent, viewer, webmcp, nativeApp }: Props) {
   const [identityName] = useState(() => userIdentity(viewer.name).name)
+  // WebMCP: the index registers its two tools once (KTD5); the page component
+  // is remounted on every cross-page Inertia visit, so cleanup unregisters.
+  useWebmcpTools({
+    key: 'index',
+    tools: webmcp.tools,
+    execute: (tool, args, signal) =>
+      executeManifestTool(tool, args, {
+        signal,
+        viewerContext: {
+          viewer: { name: viewer.name, guest: viewer.guest },
+          note: INDEX_VIEWER_CONTEXT_NOTE,
+        },
+      }),
+  })
   const { post, processing } = useForm(() => ({
     name: identityName,
   }))

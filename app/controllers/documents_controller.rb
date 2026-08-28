@@ -49,7 +49,8 @@ class DocumentsController < InertiaController
                    .map do |d|
                      index_document_props(d, week_start:, current_year: now.year, zone:)
                        .merge(d.ownership_props(owner_token, viewer_user: current_user))
-                   end
+                   end,
+      webmcp: -> { AgentGuide.webmcp_index_tools(request.base_url) }
     }
   end
 
@@ -151,7 +152,10 @@ class DocumentsController < InertiaController
       suggestions: -> { document.suggestions.pending.order(:created_at).map(&:as_props) },
       comments: -> { document.comments.order(:created_at).map(&:as_props) },
       activities: -> { document.activities.recent.map(&:as_props) },
-      presences: -> { document.agent_presences.active.map(&:as_props) }
+      presences: -> { document.agent_presences.active.map(&:as_props) },
+      # WebMCP tool manifest for agents driving this browser (lazy: partial
+      # reloads that poll suggestions/comments/presences never re-ship it).
+      webmcp: -> { AgentGuide.webmcp_tools(document, request.base_url) }
     }
   end
 
