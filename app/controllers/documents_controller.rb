@@ -49,7 +49,8 @@ class DocumentsController < InertiaController
                    .map do |d|
                      index_document_props(d, week_start:, current_year: now.year, zone:)
                        .merge(d.ownership_props(owner_token, viewer_user: current_user))
-                   end
+                   end,
+      webmcp: -> { AgentGuide.webmcp_index_tools(request.base_url) }
     }
   end
 
@@ -151,7 +152,11 @@ class DocumentsController < InertiaController
       suggestions: -> { document.suggestions.pending.order(:created_at).map(&:as_props) },
       comments: -> { document.comments.order(:created_at).map(&:as_props) },
       activities: -> { document.activities.recent.map(&:as_props) },
-      presences: -> { document.agent_presences.active.map(&:as_props) }
+      presences: -> { document.agent_presences.active.map(&:as_props) },
+      # WebMCP tool manifest for agents driving this browser (lazy: partial
+      # reloads that poll suggestions/comments/presences never re-ship it).
+      # The in-page update tool rides only when THIS viewer can write.
+      webmcp: -> { AgentGuide.webmcp_tools(document, request.base_url, can_write: writable) }
     }
   end
 
@@ -342,7 +347,9 @@ class DocumentsController < InertiaController
     return head :content_too_large if state_vector.bytesize > MAX_STATE_VECTOR_BYTES
 
     result = persist_snapshot_from_params(document, content:, state_vector:)
-    render json: result if result
+    return unless result
+
+    render json: result.merge(record_agent_replacement(document, content:))
   end
 
   # Discrete editor actions (currently task-checkbox toggles) also send their
@@ -422,6 +429,23 @@ class DocumentsController < InertiaController
 
   def broadcast_title(document)
     DocumentMetaChannel.broadcast_event(document, :title, title: document.title)
+  end
+
+  # A browser-driven agent replacement (the WebMCP `thinkroom_update_document`
+  # tool) persists through this session-authorized snapshot rather than the
+  # Bearer API, so it names its agent here to get the same side effects as
+  # `thinkroom update`: an agent activity entry and auto-rejection of pending
+  # suggestions whose target text no longer exists. The name is self-asserted,
+  # like X-Agent-Name. Returns the extra response fields ({} for human pushes).
+  def record_agent_replacement(document, content:)
+    agent = Document.normalize_display_name(params[:agent_name])
+    return {} unless agent
+
+    Activity.log!(
+      document:, actor_name: agent, actor_kind: "agent",
+      action: "updated_document", detail: document.title
+    )
+    { auto_rejected_suggestions: Suggestion.auto_reject_stale!(document, new_content: content) }
   end
 
   def index_document_props(document, week_start:, current_year:, zone: Time.zone)
