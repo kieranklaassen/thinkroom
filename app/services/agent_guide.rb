@@ -285,13 +285,15 @@ class AgentGuide
                            rate_limits: contribution_rate_limits,
                            body: { title: "(optional) replacement title",
                                    format: "(optional) must equal this document's immutable content_format",
-                                   content: "(optional) replacement canonical #{source_name} source; send title and/or content" },
+                                   replaces: "(preferred for small edits) exact text to change, quoted verbatim from this document's content field (the canonical source, not plain_text); must occur exactly once. Mutually exclusive with content; requires with.",
+                                   with: "(required with replaces) replacement #{source_name} source for the replaces target; an empty string deletes it",
+                                   content: "(optional) replacement canonical #{source_name} source for a full rewrite; mutually exclusive with replaces/with" },
                            limits: { content_max_bytes: Document::MAX_CONTENT_BYTES },
                            returns: { slug: "Unchanged identifier", share_url: "Unchanged share URL",
                                       content: "Updated canonical source", plain_text: "Updated rendered text",
                                       normalized: "Whether source changed during normalization", warning: "Normalization detail",
                                       auto_rejected_suggestions: "Present only on a live-document replacement: how many pending suggestions were auto-rejected because the text they targeted no longer exists in the new content" },
-                           purpose: "Revise the document you created in place — same slug, same share URL. An authenticated owner (CLI Bearer token) can replace their own document even after live editing has started; non-owners receive 409 and should propose a suggestion instead. Replacing a live document auto-rejects pending suggestions whose targeted text no longer exists in the new content." }
+                           purpose: "Revise the document you created in place — same slug, same share URL. Prefer a targeted replacement (replaces + with) so small edits do not resend the whole document; send full content only when rewriting most of it. A replaces target that is missing, matches more than once, or would leave the document empty fails with 422 and changes nothing. An authenticated owner (CLI Bearer token) can revise their own document even after live editing has started; non-owners receive 409 and should propose a suggestion instead. Replacing a live document auto-rejects pending suggestions whose targeted text no longer exists in the new content." }
       }
     end
 
@@ -429,7 +431,7 @@ class AgentGuide
         "All your writes go through the same provenance/suggestion machinery as the human UI. There is no side channel: you propose, humans review.",
         "Text you contribute is marked kind=ai provenance (with your agent name as author) and tinted in the editor until a human advances its review state (pending -> reviewed -> endorsed).",
         "Documents you create with source content are pre-attributed as 100% unreviewed AI prose. Before any editor session opens the doc, the provenance summary is derived from the seed source and replaced by the first editor snapshot.",
-        "Updating: PATCH /api/docs/:slug rewrites your document in place — same slug, same share URL — so revisions stay at the link you already shared. An authenticated owner (a Bearer token from `thinkroom login`) can replace their own live document; non-owners get a 409 and should propose suggestions instead.",
+        "Updating: PATCH /api/docs/:slug revises your document in place — same slug, same share URL — so revisions stay at the link you already shared. Prefer a targeted replacement: send replaces (exact text quoted verbatim from the content field, matching exactly once — unlike suggestion replaces targets, which quote plain_text) plus with (the new source; empty string deletes) instead of resending the whole document. Send full content only for a wholesale rewrite. An authenticated owner (a Bearer token from `thinkroom login`) can revise their own live document; non-owners get a 409 and should propose suggestions instead.",
         "Connected editors see your suggestions, comments, and presence live over WebSocket — no refresh needed on their side.",
         "Reading state: use plain_text as working context and content when source fidelity matters. This document expects #{source_name} suggestion bodies. State may lag if no human has the document open — the Yjs CRDT state is always authoritative.",
         "Sketches: inline Excalidraw scenes appear in content and are summarized in plain_text from their human description and text labels. Treat the scene as editable source and SVG as a derived browser export; embedded bitmap files are not supported. To author one in Markdown, embed a fenced excalidraw block following content_contract.sketches.markdown_source (formatVersion, id, description, height, and a full excalidraw scene with type/version/appState/files) — copy its example to start. A recognized sketch shows in plain_text as \"Sketch: <description> — <labels>\"; raw scene JSON in plain_text means the block was not recognized, and the create response then returns normalized: true with a warning.",
@@ -572,9 +574,20 @@ class AgentGuide
            payload, poll events while waiting for review, then sign off.
 
         ## Revise a document you created
-        You can rewrite an owned document in place — same slug, same share URL,
-        so the link you shared keeps working. Send a new title, content, or
-        both:
+        You can revise an owned document in place — same slug, same share URL,
+        so the link you shared keeps working.
+
+        Preferred: a targeted replacement. Quote the exact text to change
+        verbatim from the content field (the canonical source — it must match
+        exactly once) and send the replacement:
+           curl -X PATCH #{base_url}/api/docs/RETURNED_SLUG \\
+             -H "X-Agent-Name: YOUR_NAME" -H "Content-Type: application/json" \\
+             -d '{"replaces": "exact current text", "with": "new text"}'
+        A missing or ambiguous replaces target returns 422 and changes
+        nothing; an empty "with" deletes the target text.
+
+        For a wholesale rewrite (only when most of the document changes),
+        send a new title, full content, or both:
            curl -X PATCH #{base_url}/api/docs/RETURNED_SLUG \\
              -H "X-Agent-Name: YOUR_NAME" -H "Content-Type: application/json" \\
              -d '{"title": "Revised", "content": "..."}'

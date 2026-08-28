@@ -20,7 +20,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 
-const VERSION = '0.1.0'
+const VERSION = '0.2.0'
 const DEFAULT_URL = 'https://thinkroom.kieranklaassen.com'
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 
@@ -318,12 +318,32 @@ async function showDocument(positionals, options) {
 async function updateDocument(positionals, options) {
   const agent = requireAgent(options)
   const slug = slugFrom(positionals[0])
-  const content = await readContent(positionals[1])
+  // Targeted replacement: swap one exact span server-side instead of
+  // resending the whole document. Preferred for small edits — never read a
+  // file or stdin in this mode, so a stray pipe cannot turn a targeted edit
+  // into an accidental full replacement.
+  const targeted = options.replaces !== undefined || options.with !== undefined
+  if (targeted && (options.replaces === undefined || options.with === undefined)) {
+    throw new CliError(
+      'Targeted replacement needs both --replaces "exact current text" and --with "new text" (use --with "" to delete the target).',
+    )
+  }
+  if (targeted && positionals[1] !== undefined) {
+    throw new CliError('Use either --replaces/--with (targeted replacement) or a FILE argument (full replacement), not both.')
+  }
+  const content = targeted ? undefined : await readContent(positionals[1])
   const body = {}
   if (options.title) body.title = options.title
-  if (content !== undefined) body.content = content
+  if (targeted) {
+    body.replaces = options.replaces
+    body.with = options.with
+  } else if (content !== undefined) {
+    body.content = content
+  }
   if (options.format) body.format = options.format
-  if (Object.keys(body).length === 0) throw new CliError('Provide a file/stdin and/or --title to update the document.')
+  if (Object.keys(body).length === 0) {
+    throw new CliError('Provide --replaces/--with, a file/stdin, and/or --title to update the document.')
+  }
   const result = await request(`/api/docs/${encodeURIComponent(slug)}`, options, {
     method: 'PATCH',
     body,
@@ -512,8 +532,9 @@ function help() {
   process.stdout.write(`Thinkroom CLI ${VERSION}\n\n`)
   process.stdout.write('Usage: thinkroom <command> [arguments] [options]\n\n')
   process.stdout.write('Account\n  login [--url URL] [--no-open]\n  whoami [--json]\n  logout\n\n')
-  process.stdout.write('Documents\n  new [FILE|-] [--title TITLE] [--format markdown|html] --agent NAME [--json]\n  show SLUG|URL [--json]\n  update SLUG|URL [FILE|-] [--title TITLE] --agent NAME [--json]\n  suggest SLUG|URL [FILE|-] --body TEXT --replaces TEXT --intent TEXT --agent NAME\n  comment SLUG|URL [FILE|-] --body TEXT [--anchor TEXT] --agent NAME\n  open SLUG|URL\n\n')
-  process.stdout.write('Writes require an agent identity: pass --agent NAME or set THINKROOM_AGENT.\n\n')
+  process.stdout.write('Documents\n  new [FILE|-] [--title TITLE] [--format markdown|html] --agent NAME [--json]\n  show SLUG|URL [--json]\n  update SLUG|URL --replaces TEXT --with TEXT [--title TITLE] --agent NAME [--json]\n  update SLUG|URL [FILE|-] [--title TITLE] --agent NAME [--json]\n  suggest SLUG|URL [FILE|-] --body TEXT --replaces TEXT --intent TEXT --agent NAME\n  comment SLUG|URL [FILE|-] --body TEXT [--anchor TEXT] --agent NAME\n  open SLUG|URL\n\n')
+  process.stdout.write('Writes require an agent identity: pass --agent NAME or set THINKROOM_AGENT.\n')
+  process.stdout.write('Prefer update --replaces/--with for edits to a document you own: it swaps one exact\nspan of the canonical source (quote it verbatim from the `content` field of\n`show --json`, not plain_text; it must match exactly once). Send a full FILE only\nwhen rewriting most of the document.\n\n')
   process.stdout.write('Agent setup\n  init [--agent agents|claude|codex|all]\n  skill install [--agent agents|claude|codex|all]\n  prime [--json]\n\n')
   process.stdout.write('Environment: THINKROOM_URL, THINKROOM_TOKEN, THINKROOM_AGENT, XDG_CONFIG_HOME\n')
 }
