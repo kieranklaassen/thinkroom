@@ -15,7 +15,7 @@
     "@excalidraw/excalidraw": "^0.18.1",
     "@handlewithcare/prosemirror-suggest-changes": "^0.1.8",
     "@inertiajs/react": "^3.7.0",
-    "@inertiajs/vite": "^3.5.0",
+    "@inertiajs/vite": "^3.7.0",
     "@milkdown/kit": "7.21.3",
     "@milkdown/plugin-collab": "7.21.3",
     "@milkdown/plugin-highlight": "7.21.3",
