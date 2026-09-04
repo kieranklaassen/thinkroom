@@ -2,17 +2,6 @@ import { useMemo, useState } from 'react'
 import { timeAgo } from '../lib/time'
 import type { ActivityPayload } from '../types/payloads'
 
-const ACTION_GLYPHS: Record<string, string> = {
-  suggested: '✦',
-  commented: '◆',
-  joined: '→',
-  left: '←',
-  created_document: '+',
-  accepted_suggestion: '✓',
-  rejected_suggestion: '✕',
-  resolved_comment: '✓',
-}
-
 const ACTION_LABELS: Record<string, string> = {
   suggested: 'proposed an edit',
   commented: 'commented',
@@ -101,9 +90,11 @@ export function ActivityPanel({ activities }: { activities: ActivityPayload[] })
               key={group.oldestId}
               className={`activity-row activity-row--${newest.actor_kind}`}
             >
-              <span className="activity-glyph">{ACTION_GLYPHS[newest.action] ?? '·'}</span>
+              <span className="activity-dot" aria-hidden="true" />
               <span className="activity-text">
-                <strong>{newest.actor_name}</strong> {label}
+                <strong>{newest.actor_name}</strong>
+                <span className="activity-kind"> · {newest.actor_kind === 'ai' ? 'agent' : newest.actor_kind}</span>
+                {' '}{label}
                 {count === 1 && newest.detail && (
                   <em className="activity-detail"> — {newest.detail}</em>
                 )}
@@ -113,7 +104,7 @@ export function ActivityPanel({ activities }: { activities: ActivityPayload[] })
                   "1m ago"), the text mismatch makes React regenerate the
                   WHOLE tree — the entire page blinks. Suppress on this node
                   only; React patches the text in place instead. */}
-              <time className="activity-time" suppressHydrationWarning>
+              <time className="activity-time" dateTime={newest.created_at} suppressHydrationWarning>
                 {timeAgo(newest.created_at)}
               </time>
             </li>
