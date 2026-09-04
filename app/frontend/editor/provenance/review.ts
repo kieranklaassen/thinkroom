@@ -43,9 +43,7 @@ export function nextProvenanceRange(state: EditorState, filter: ProvenanceFilter
   const ranges = provenanceRanges(state.doc).filter(({ attrs }) =>
     filter === 'unreviewed' ? attrs.kind === 'ai' && attrs.state === 'pending' : attrs.kind === filter,
   )
-  return ranges.find((range) => state.selection.empty
-    ? range.from > state.selection.head
-    : range.from >= state.selection.to) ?? ranges[0] ?? null
+  return ranges.find((range) => range.from >= state.selection.to) ?? ranges[0] ?? null
 }
 
 /** The complete contiguous AI run at the cursor, including formatting splits. */

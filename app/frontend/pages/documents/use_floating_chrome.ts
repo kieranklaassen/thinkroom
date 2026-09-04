@@ -161,7 +161,9 @@ export function useFloatingChrome({
       const view = viewRef.current
       if (!view || textTarget?.kind !== 'review') return null
       const span = resolveReviewTarget(view.state, textTarget.target)
-      return span ? { from: span.from, to: span.to } : null
+      // Place around the beginning line, not the far end of a multi-screen
+      // passage. Selection and review mutations still use the full interval.
+      return span ? { from: span.from, to: span.from } : null
     },
     gap: popoverGap,
     deps: [textTarget, spans, popoverTick, docTick],

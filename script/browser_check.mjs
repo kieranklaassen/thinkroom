@@ -64,6 +64,7 @@ try {
       attributed('Already endorsed.', 'endorsed'),
       attributed('Repeated text.', 'pending', 'First author'),
       attributed('Repeated text.', 'pending', 'Second author'),
+      attributed('Another human passage.', 'verbatim', 'Alex', 'human'),
     ].join('\n\n') }),
   })).json()
   const reviewA = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
@@ -207,6 +208,19 @@ try {
   await reviewCard(reviewA).waitFor({ state: 'visible' })
   const longReviewBox = await reviewCard(reviewA).boundingBox()
   assertReview(longReviewBox.y >= 0 && longReviewBox.y + longReviewBox.height <= 844, 'long phone passages keep review actions in the viewport')
+  await reviewA.setViewportSize({ width: 800, height: 400 })
+  await reviewA.goto(`${BASE}/d/${longReviewDoc.slug}/edit`); await waitForLive(reviewA)
+  await reviewNav(reviewA, 'unreviewed').click()
+  await reviewCard(reviewA).waitFor({ state: 'visible' })
+  const shortReviewBox = await reviewCard(reviewA).boundingBox()
+  const firstReviewLine = await reviewA.locator('.doc-live-editor .prov--ai').first().evaluate((el) => {
+    const rect = el.getClientRects()[0]
+    return { top: rect.top, bottom: rect.bottom }
+  })
+  assertReview(shortReviewBox.y >= 0 && shortReviewBox.y + shortReviewBox.height <= 400, 'long passages keep actions visible in a short viewport')
+  assertReview(firstReviewLine.top >= 52 && firstReviewLine.bottom <= 400 &&
+    (shortReviewBox.y + shortReviewBox.height <= firstReviewLine.top || shortReviewBox.y >= firstReviewLine.bottom), 'short-viewport guidance keeps the passage beginning readable')
+  await reviewA.setViewportSize({ width: 390, height: 844 })
   const boundaryDoc = await (await reviewFetch(`${BASE}/api/docs`, {
     method: 'POST', headers: reviewHeaders,
     body: JSON.stringify({ content: [
