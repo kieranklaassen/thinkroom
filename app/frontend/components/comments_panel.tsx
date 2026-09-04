@@ -100,7 +100,7 @@ export function CommentsPanel({
       )}
 
       {marginIds && marginIds.size > 0 && <p className="rail-empty">{marginIds.size} beside the text</p>}
-      {visibleOpen.length > 0 && marginIds && <p className="comment-scope">Other comments</p>}
+      {visibleOpen.length > 0 && marginIds && marginIds.size > 0 && <p className="comment-scope">Other comments</p>}
       <ul className="comment-list">
         {visibleOpen.map((comment) => (
           <li key={comment.id}>

@@ -83,9 +83,15 @@ export function MarginAnnotations({ items, comments, anchorRanges, handle, focus
     for (const comment of comments) {
       const range = anchorRanges.get(comment.id)
       if (!range) continue
+      let top: number
       try {
-        entries.push({ key: `comment:${comment.id}`, top: Math.max(0, view.coordsAtPos(range.from).top - containerTop) })
-      } catch { /* remeasured after the next document change */ }
+        top = view.coordsAtPos(range.from).top - containerTop
+      } catch {
+        // The card still mounts, so it has to stay in the stack (a card left
+        // out would sit at 0 over another one); remeasured on the next change.
+        top = 0
+      }
+      entries.push({ key: `comment:${comment.id}`, top: Math.max(0, top) })
     }
     setHighlight('sug-anchor', [...rangesRef.current.values()])
     return entries
