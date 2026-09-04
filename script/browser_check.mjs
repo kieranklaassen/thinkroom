@@ -326,6 +326,37 @@ try {
   if (await cardsPage.getByRole('textbox', { name: 'Unsent comment' }).inputValue() !== 'Pending across a resolve reload.') throw new Error('lost response lost recoverable draft')
   ok('resolve reload preserves an in-flight optimistic post and its lost-response recovery')
   await cardsPage.close()
+
+  // A tiny missing quote with common first/last lines must not enumerate
+  // millions of candidate ranges while every connected editor types.
+  const commonText = 'a'.repeat(2500)
+  const hostileQuoteDoc = await (await cardFetch(`${BASE}/api/docs`, {
+    method: 'POST', headers: cardHeaders,
+    body: JSON.stringify({ title: 'Quote matching stays responsive', content: `# Quote matching\n\n${commonText}\n\nA distinctive bridge.\n\n${commonText}` }),
+  })).json()
+  for (const [body, anchor_text] of [
+    ['Missing multi-line quote', 'a\nnot in this document\na'],
+    ['Unique multi-line quote', 'aa\nA distinctive bridge.\naa'],
+    ['Overlapping ambiguous quote', 'aaa'],
+  ]) {
+    await cardFetch(`${BASE}/api/docs/${hostileQuoteDoc.slug}/comments`, {
+      method: 'POST', headers: cardHeaders, body: JSON.stringify({ body, anchor_text }),
+    })
+  }
+  const quotePage = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
+  await quotePage.goto(`${BASE}/d/${hostileQuoteDoc.slug}/edit`)
+  await waitForLive(quotePage)
+  await quotePage.locator('.comment-card--linked', { hasText: 'Unique multi-line quote' }).waitFor()
+  if (await quotePage.locator('.comment-card--linked').count() !== 1) throw new Error('missing or overlapping quote guessed an anchor')
+  await quotePage.locator('.doc-live-editor .ProseMirror h1').click()
+  await quotePage.keyboard.press('End')
+  await quotePage.keyboard.type(' remains responsive')
+  await quotePage.waitForFunction(() => document.querySelector('.doc-live-editor .ProseMirror h1')?.textContent.includes('remains responsive'))
+  await quotePage.reload()
+  await waitForLive(quotePage)
+  await quotePage.locator('.comment-card--linked', { hasText: 'Unique multi-line quote' }).waitFor()
+  await quotePage.close()
+  ok('common-line missing quotes stay responsive; unique multi-block and overlapping matches stay safe')
   // END comment-card contract.
 
   // Personal appearance: the direct picker, options menu and shortcut share
