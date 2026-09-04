@@ -5,7 +5,7 @@ import {
   type ReviewableSuggestion,
 } from './suggestion_card'
 
-export type SheetKind = 'suggestions' | 'comments' | 'activity'
+export type SheetKind = 'suggestions' | 'comments' | 'activity' | 'theme'
 
 interface DockProps {
   suggestionCount: number

@@ -95,6 +95,23 @@ try {
   })
   check(bodyClearsNotch, 'doc: body inset honors the shell safe-area variable with the header hidden')
 
+  check(
+    await page.locator('[data-native-menu-item][data-native-click="#native-theme-open"]').count() === 1,
+    'doc: native menu offers document appearance',
+  )
+  await page.evaluate(() => document.querySelector('#native-theme-open')?.click())
+  const themeDialog = page.getByRole('dialog', { name: 'Document theme', exact: true })
+  await themeDialog.waitFor({ timeout: 5000 })
+  check(await themeDialog.locator('kbd').innerText() === '⌘/Ctrl ⇧ .', 'native: appearance labels the same keyboard shortcut')
+  await themeDialog.getByRole('radio', { name: /Whitey/ }).tap()
+  check(await page.locator('html').getAttribute('data-theme') === 'whitey', 'native: touch theme selection applies immediately')
+  await page.reload({ waitUntil: 'networkidle' })
+  await waitForLive(page)
+  check(await page.locator('html').getAttribute('data-theme') === 'whitey', 'native: selected theme survives refresh')
+  await page.evaluate(() => document.querySelector('#native-theme-open')?.click())
+  await page.getByRole('radio', { name: /Thinkroom/ }).tap()
+  await page.getByRole('button', { name: 'Close', exact: true }).tap()
+
   await page.goto(`${BASE}/`, { waitUntil: 'networkidle' })
   await mounted(page)
   check(

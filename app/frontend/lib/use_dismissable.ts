@@ -6,7 +6,7 @@ import { useEffect, type RefObject } from 'react'
  */
 export function useDismissable(
   open: boolean,
-  onClose: () => void,
+  onClose: (reason: 'outside' | 'escape') => void,
   refs: RefObject<HTMLElement | null>[],
 ): void {
   useEffect(() => {
@@ -14,10 +14,10 @@ export function useDismissable(
     const close = (e: MouseEvent) => {
       const target = e.target as Node
       if (refs.some((ref) => ref.current?.contains(target))) return
-      onClose()
+      onClose('outside')
     }
     const esc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onClose('escape')
     }
     document.addEventListener('mousedown', close)
     document.addEventListener('keydown', esc)

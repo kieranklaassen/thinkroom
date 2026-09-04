@@ -83,6 +83,9 @@ import type {
   SuggestionPayload,
 } from '../../types/payloads'
 import { setCookie, setCookieFlag } from '../../lib/cookies'
+import { applyTheme, type ThemeName } from '../../lib/theme'
+import { matchesShortcut } from '../../lib/shortcuts'
+import { ThemePicker, ThemeSwitcher } from '../../components/theme_picker'
 import {
   RICH_BLOCK_WIDTH_EVENT,
   type RichBlockWidthEventDetail,
@@ -114,6 +117,7 @@ export interface DocumentProps {
   // Server-rendered UI prefs from cookies — the source of truth for first
   // paint so SSR and the client's first render agree (no post-hydration flip).
   ui: {
+    theme: ThemeName
     panel_open: boolean
     focus_mode: boolean
     mode: EditorMode
@@ -198,6 +202,14 @@ export default function DocumentShow({
   // width while the URL supplies mode, so SSR and the first client render agree.
   const [panelOpen, setPanelOpen] = useState(ui.panel_open)
   const [focusMode, setFocusMode] = useState(ui.focus_mode)
+  const [theme, setTheme] = useState(ui.theme)
+  const changeTheme = useCallback((next: ThemeName) => {
+    applyTheme(next)
+    setTheme(next)
+  }, [])
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+  }, [theme])
   const [documentWidth, setDocumentWidth] = useState<number | null>(ui.document_width)
   const [richContentWidth, setRichContentWidth] = useState<number | null>(ui.rich_content_width)
 
@@ -416,27 +428,30 @@ export default function DocumentShow({
   // and ⌘. toggles suggestion focus. Control mirrors Command for parity.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey)) return
-      const shortcutMode = MODE_SHORTCUTS[event.code] ?? MODE_SHORTCUTS[`Digit${event.key}`]
+      if (matchesShortcut(event, 'Period', true)) {
+        event.preventDefault()
+        changeTheme(theme === 'proof' ? 'whitey' : 'proof')
+        return
+      }
+      const modeCode = Object.keys(MODE_SHORTCUTS).find((code) => matchesShortcut(event, code))
+      const shortcutMode = modeCode ? MODE_SHORTCUTS[modeCode] : undefined
       if (shortcutMode) {
         if (modeLocked || !availableModes.includes(shortcutMode)) return
         event.preventDefault()
         changeMode(shortcutMode)
         return
       }
-      const target = event.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
-      if (event.key === '\\') {
+      if (matchesShortcut(event, 'Backslash')) {
         event.preventDefault()
         setPanelOpen((open) => !open)
-      } else if (event.key === '.') {
+      } else if (matchesShortcut(event, 'Period')) {
         event.preventDefault()
         setFocusMode((focus) => !focus)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [availableModes, changeMode, modeLocked])
+  }, [availableModes, changeMode, changeTheme, modeLocked, theme])
 
   // Identity state is the source of truth for the live editor surfaces:
   // re-applied whenever the handle arrives or the identity changes.
@@ -732,8 +747,9 @@ export default function DocumentShow({
   }, [])
 
   // One floating form at a time: an open composer suppresses the selection
-  // chrome, and so does the share popover (z-60, above the chrome's z-50).
+  // chrome, as do share and theme popovers (z-60, above chrome's z-50).
   const [shareOpen, setShareOpen] = useState(false)
+  const [themeOpen, setThemeOpen] = useState(false)
 
   const {
     selectionToolbarActive,
@@ -749,7 +765,7 @@ export default function DocumentShow({
     textTarget,
     composerAnchor,
     composerOpen,
-    chromeSuppressed: composerOpen || shareOpen,
+    chromeSuppressed: composerOpen || shareOpen || themeOpen,
     spans,
     docTick,
     isMobile,
@@ -773,6 +789,7 @@ export default function DocumentShow({
         onToggleActivity={() =>
           setActiveSheet((current) => (current === 'activity' ? null : 'activity'))
         }
+        onOpenTheme={() => setActiveSheet('theme')}
         exportReady={Boolean(handle)}
         onExportMarkdown={exportMarkdown}
         onExportHtml={exportHtml}
@@ -868,7 +885,10 @@ export default function DocumentShow({
               onPrint={printDocument}
               onOpenChange={setShareOpen}
             />
+            <ThemeSwitcher theme={theme} onChange={changeTheme} onOpenChange={setThemeOpen} />
             <HeaderMenu
+              theme={theme}
+              onChangeTheme={changeTheme}
               panelOpen={panelOpen}
               onTogglePanel={() => setPanelOpen((open) => !open)}
               focusMode={focusMode}
@@ -1078,6 +1098,11 @@ export default function DocumentShow({
         {!isReading && isMobile && activeSheet === 'activity' && (
           <MobileSheet title="Activity" onClose={() => setActiveSheet(null)}>
             <ActivityPanel activities={activities} />
+          </MobileSheet>
+        )}
+        {activeSheet === 'theme' && (
+          <MobileSheet title="Document theme" onClose={() => setActiveSheet(null)}>
+            <ThemePicker theme={theme} onChange={changeTheme} autoFocus />
           </MobileSheet>
         )}
       </div>
