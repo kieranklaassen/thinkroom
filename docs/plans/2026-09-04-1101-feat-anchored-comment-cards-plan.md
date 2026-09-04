@@ -64,8 +64,8 @@ Notice the readable metadata, quote treatment, separated action row, and explici
 
 - KTD1. **One card body, multiple placements.** Extract a reusable comment card from `CommentsPanel` for desktop margin, fallback list, and mobile sheet. Reuse the existing `CommentPayload`, handlers, and author kinds. Governs R1, R3-R5.
 - KTD2. **One measured annotation stack.** Extend the seam around `MarginSuggestions` and `useMarginStack` to accept typed suggestion/comment items with namespaced keys. Do not create two independently positioned stacks in the same gutter. Preserve `useSuggestionReview` and `useResolveGuard`. Governs R2, R7.
-- KTD3. **Keep current anchor resolution authoritative.** Extend `useCommentAnchors` and its document-change signal. Reject ambiguous quote matches and reuse collaborative relative positions within the open session. An unresolved measurement is not proof that text is stale; show a neutral state until resolution completes. Governs R3, R7.
-- KTD4. **Keep state outside disposable views.** Own resolved expansion and in-flight comment state at page/hook level. Persist only the browser presentation preference through validated cookie-backed UI props; never serialize DOM coordinates or transient anchors. Governs R5-R6.
+- KTD3. **Keep current anchor resolution authoritative.** Extend `useCommentAnchors` and its document-change signal. Reject ambiguous quote matches and reuse `collab_positions.ts` relative positions within the open editor session. Once bound, a deleted or changed range must not silently rebind to another matching quote. Clear session bindings when the editor handle changes. An unresolved measurement is not proof that text is stale; keep the card in the fallback list with a neutral, jump-free state until resolution completes. Governs R3, R7.
+- KTD4. **Keep state outside disposable views.** Own resolved expansion and in-flight comment state at page/hook level. Use the same controller-validation and page-owned state pattern as `activity_filter` and `activity_expanded`. Persist only the browser presentation preference through validated cookie-backed UI props; never serialize DOM coordinates or transient anchors. Governs R5-R6.
 
 ### Assumptions
 
@@ -88,11 +88,36 @@ flowchart TD
   G --> H
 ```
 
+```mermaid
+stateDiagram-v2
+  [*] --> Unmeasured
+  Unmeasured --> Linked: unique quote in live editor
+  Unmeasured --> Fallback: missing or ambiguous quote
+  Linked --> Unmeasured: new editor session
+  Linked --> Linked: relative range still matches
+  Linked --> Fallback: bound text changed or deleted
+  Fallback --> Unmeasured: new editor session
+```
+
+```mermaid
+stateDiagram-v2
+  Draft --> Pending: submit once
+  Pending --> Saved: server confirmation
+  Pending --> RetryableDraft: request failed
+  RetryableDraft --> Pending: retry after anchor validation
+  Saved --> Resolving: resolve
+  Resolving --> Resolved: server confirmation
+  Resolving --> Saved: rollback and visible error
+```
+
 ### Sources and Risks
 
-Baseline: Thinkroom main `259fad051e62b0f03bcf34b1cd3dda1102e4ed28`.
+Baseline: Thinkroom main `c3699e4ca48ed14acd75387dc807ca5f0b63622f`, including theme PR #222 and activity PR #223.
 Reference: LFGBench run `01M1545XV8CV5PF3NGYS9CPPSA`, generated `features/comments/comment_card.tsx` and `styles/comments.css`.
 `docs/solutions/architecture-patterns/server-first-instant-paint.md` records the DOMObserver loop caused by adding chrome inside editor-owned nodes.
+`useCommentAnchors` already reacts to `docTick`; its current quote matcher chooses the first hit and must become ambiguity-safe. `useMarginStack` measures geometry but only observes window/image reflows; observe card and document size changes for variable comment bodies and custom document widths.
+`useComments` currently closes the composer before posting and has no local error state. Keep failed drafts in the page-owned hook, guard duplicate requests, and inspect installed Inertia callbacks before choosing recovery hooks.
+Dense same-paragraph annotations can push cards far below their anchors. Preserve one accessible, scroll-reachable stack; characterize displacement before changing placement and do not introduce overflow controls in this port.
 `script/browser_check.mjs` already covers multi-block anchors, stale quotes, hidden-panel composition, and optimistic-ID safety; extend these cases rather than duplicating the harness.
 
 ---
@@ -124,13 +149,13 @@ Reference: LFGBench run `01M1545XV8CV5PF3NGYS9CPPSA`, generated `features/commen
 
 **Goal:** Keep contextual comments close to their text without annotation collisions.
 
-**Requirements:** R2-R4, R7. **Dependencies:** U1. Coordinate shared layout edits with [Calm Sidebar and Activity Timeline](2026-09-04-1101-feat-sidebar-activity-timeline-plan.md); no hard dependency on its filters.
+**Requirements:** R2-R4, R7. **Dependencies:** U1. Coordinate shared layout edits with [Calm Sidebar and Activity Timeline](2026-09-04-1101-feat-sidebar-activity-timeline-plan.md); its shared preference pattern is now on the baseline.
 
 **Files:** `app/frontend/components/margin_suggestions.tsx`, `app/frontend/components/margin_annotations.tsx` (new shared coordinator), `app/frontend/lib/use_margin_stack.ts`, `app/frontend/pages/documents/use_comment_anchors.ts`, `app/frontend/editor/comment_anchors.ts`, `app/frontend/editor/collab_positions.ts`, `app/frontend/pages/documents/show.tsx`, `app/frontend/styles/comments.css`, `app/frontend/styles/suggestions.css`, `script/browser_check.mjs`, `script/rich_block_width_check.mjs`.
 
 **Approach:** Apply KTD2-KTD3 around existing suggestion logic. Use document-coordinate placement and one collision pass. Route stale/unanchored comments to a reachable fallback list. Keep compact markers and sheets; clear hover highlights when a view hides or unmounts.
 
-**Execution note:** Start with characterization coverage for mixed annotations before changing the placement coordinator.
+**Execution note:** Start with characterization coverage for mixed annotations before changing the placement coordinator. Include unique, duplicate, and missing quotes and record which move to fallback. Correctness governs this change: ambiguous quotes always lose the guessed jump, irrespective of fallback rate. For dense annotations record displacement, and gate on non-overlap, a scroll-reachable final card, and working jump controls; a viewport-sized displacement cap is not a product requirement.
 
 **Test scenarios:**
 
@@ -139,7 +164,8 @@ Reference: LFGBench run `01M1545XV8CV5PF3NGYS9CPPSA`, generated `features/commen
 3. Window resize, custom widths, page scroll, and expanded cards preserve alignment.
 4. Focus mode and phone layout keep every comment reachable; hiding the sidebar does not strand the composer.
 5. Suggestion accept/reject and conflict reopening still use their existing safe paths.
-6. Read/edit mode, focus mode, and compact/desktop transitions revalidate anchors: live matches remeasure, while stale or ambiguous matches move to the fallback list without a jump action.
+6. A repeated quote starts in fallback; a once-linked quote that is deleted must not rebind to a second occurrence introduced later. Record the fixture linked/fallback counts.
+7. Read/edit mode, focus mode, and compact/desktop transitions revalidate anchors: live matches remeasure, while stale or ambiguous matches move to the fallback list without a jump action.
 
 **Verification:** Mixed-annotation screenshots and two-window browser checks prove placement and collaboration behavior.
 
@@ -151,7 +177,7 @@ Reference: LFGBench run `01M1545XV8CV5PF3NGYS9CPPSA`, generated `features/commen
 
 **Files:** `app/frontend/pages/documents/use_comments.ts`, `app/frontend/pages/documents/show.tsx`, `app/frontend/components/comments_panel.tsx`, `app/frontend/components/comment_card.tsx`, `app/frontend/lib/cookies.ts`, `app/controllers/documents_controller.rb`, `test/integration/document_ui_preferences_test.rb`, `test/integration/comment_flow_test.rb`, `script/browser_check.mjs`.
 
-**Approach:** Follow KTD4. Reuse Inertia optimistic updates and rollback, adding visible retry feedback without double-submitting. Preserve the unsent body and requested anchor after failure; revalidate that anchor before retry.
+**Approach:** Follow KTD4. Reuse Inertia optimistic updates and rollback, adding visible retry feedback without double-submitting. Preserve the unsent body and requested anchor after failure; revalidate that anchor before retry. If it no longer resolves, retain the quoted context and show a text-changed notice; an explicit retry posts it as a stale fallback comment, matching the existing detached-composer behavior. For a lost response, retain the draft but refresh comment state before offering another post; do not claim an unconfirmed request was unsaved.
 
 **Test scenarios:**
 
@@ -159,6 +185,8 @@ Reference: LFGBench run `01M1545XV8CV5PF3NGYS9CPPSA`, generated `features/commen
 2. Failed create restores a retryable draft; retry produces one durable card, not duplicate optimistic rows.
 3. Failed resolve restores the unresolved card with visible feedback.
 4. A remote resolution, permission change, or deleted anchor during a pending action does not produce a stale write or false success.
+5. An anchor deleted between failure and retry keeps its quote and a visible stale notice; the saved comment remains in fallback.
+6. A response lost after persistence is reconciled before a retry, without a duplicate durable comment.
 
 **Verification:** Network-failure browser scenarios and existing comment integration checks pass.
 

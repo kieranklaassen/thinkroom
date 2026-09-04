@@ -62,7 +62,7 @@ try {
 
   try {
     await page.waitForFunction(
-      (text) => document.querySelector('.margin-suggestions')?.innerText.includes(text),
+      (text) => document.querySelector('.margin-annotations')?.innerText.includes(text),
       marker,
       { timeout: 15000 },
     )

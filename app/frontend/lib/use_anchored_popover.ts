@@ -100,8 +100,14 @@ export function useAnchoredPopover<T extends HTMLElement>({
 
     const range = getRange()
     if (!range) {
-      // Anchor gone: stateful chrome freezes where it was; stateless hides.
-      place(persistent && lastGood.current ? { ...lastGood.current, detached: true } : null)
+      // A repeated quote may be unresolvable on the very first measurement.
+      // Stateful chrome must still offer its draft, submit and cancel controls.
+      const fallback = lastGood.current ?? {
+        x: Math.max(VIEWPORT_PAD, (window.innerWidth - el.offsetWidth) / 2),
+        y: Math.max(HEADER_CLEARANCE, window.innerHeight - el.offsetHeight - VIEWPORT_PAD),
+        detached: true,
+      }
+      place(persistent ? { ...fallback, detached: true } : null)
       return
     }
 

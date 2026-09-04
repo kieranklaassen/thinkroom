@@ -131,11 +131,10 @@
 }
 
 /* --------------------------- Margin suggestions --------------------------- */
-.margin-suggestions {
-  position: absolute;
-  inset: 0;
-  /* Two card stacks (server-row + inline tracked edits) share the gutter;
-   * the containers must not shadow each other's cards from clicks. */
+.margin-annotations {
+  position: relative;
+  width: 100%;
+  /* One scroll-reachable stack for suggestions and comments. */
   pointer-events: none;
 }
 

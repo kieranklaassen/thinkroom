@@ -27,14 +27,18 @@ export const collabSyncState = (state: EditorState): CollabSyncState | undefined
 export const toRelativePosition = (
   state: EditorState,
   position: number,
+  association: 0 | -1 = 0,
 ): Y.RelativePosition | null => {
   const syncState = collabSyncState(state)
   if (!syncState || syncState.binding.mapping.size === 0) return null
-  return absolutePositionToRelativePosition(
+  const relative = absolutePositionToRelativePosition(
     position,
     syncState.type,
     syncState.binding.mapping,
   )
+  if (association === 0) return relative
+  const absolute = Y.createAbsolutePositionFromRelativePosition(relative, syncState.doc)
+  return absolute ? Y.createRelativePositionFromTypeIndex(absolute.type, absolute.index, association) : null
 }
 
 export const fromRelativePosition = (

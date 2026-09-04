@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { timeAgo } from '../lib/time'
+import { CommentCard } from './comment_card'
 import { truncate } from '../lib/truncate'
 import type { CommentPayload } from '../types/payloads'
 
 interface Props {
   comments: CommentPayload[]
+  /** Linked open cards are rendered once in the desktop margin. */
+  marginIds?: Set<number> | null
+  showResolved: boolean
+  onShowResolvedChange: (show: boolean) => void
+  resolvingComments: Set<number>
   composerAnchor: string | null
   /** Ids of open comments whose anchor text resolves in the document; null
    *  while unmeasured (editor not mounted yet) — no linked/stale states then. */
@@ -18,6 +23,10 @@ interface Props {
 
 export function CommentsPanel({
   comments,
+  marginIds,
+  showResolved,
+  onShowResolvedChange,
+  resolvingComments,
   composerAnchor,
   anchoredIds,
   onSubmit,
@@ -27,7 +36,6 @@ export function CommentsPanel({
   onHover,
 }: Props) {
   const [body, setBody] = useState('')
-  const [showResolved, setShowResolved] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -41,6 +49,7 @@ export function CommentsPanel({
   }, [onHover])
 
   const open = comments.filter((c) => !c.resolved)
+  const visibleOpen = open.filter((comment) => !marginIds?.has(comment.id))
   const resolved = comments.filter((c) => c.resolved)
 
   const submit = (event: FormEvent) => {
@@ -90,76 +99,22 @@ export function CommentsPanel({
         <p className="rail-empty">Select any text to start a conversation.</p>
       )}
 
+      {marginIds && marginIds.size > 0 && <p className="rail-empty">{marginIds.size} beside the text</p>}
+      {visibleOpen.length > 0 && marginIds && marginIds.size > 0 && <p className="comment-scope">Other comments</p>}
       <ul className="comment-list">
-        {open.map((comment) => {
-          // Three anchor states once measured: linked (text found — the whole
-          // card jumps to it), stale (quoted text edited away), unanchored
-          // (comment was never tied to text). Unmeasured renders plain, and
-          // so does an unresolved multi-block anchor — its matcher can miss
-          // text that is still present, and the card must not claim it gone.
-          const linked = anchoredIds !== null && anchoredIds.has(comment.id)
-          const stale =
-            anchoredIds !== null &&
-            Boolean(comment.anchor_text) &&
-            !comment.anchor_text!.includes('\n') &&
-            !linked
-          return (
-            <li
-              key={comment.id}
-              className={`comment-card ${linked ? 'comment-card--linked' : ''}`}
-              onClick={linked ? () => onJumpTo(comment) : undefined}
-              onMouseEnter={linked && onHover ? () => onHover(comment) : undefined}
-              onMouseLeave={linked && onHover ? () => onHover(null) : undefined}
-              title={linked ? 'Show in document' : undefined}
-            >
-              <div className="comment-meta">
-                <span className={`author-chip author-chip--${comment.author_kind}`}>
-                  {comment.author_name}
-                </span>
-                {/* timeAgo depends on Date.now(); a bucket flip between SSR and
-                 hydration would otherwise regenerate the whole tree. */}
-                <span className="comment-time" suppressHydrationWarning>
-                  {timeAgo(comment.created_at)}
-                </span>
-              </div>
-              {comment.anchor_text ? (
-                <blockquote className={`comment-quote ${stale ? 'comment-quote--stale' : ''}`}>
-                  {truncate(comment.anchor_text, 90)}
-                </blockquote>
-              ) : (
-                anchoredIds !== null && (
-                  <span className="comment-scope">On the whole document</span>
-                )
-              )}
-              {stale && (
-                <span className="comment-scope">Quoted text is no longer in the document</span>
-              )}
-              <p className="comment-body">{comment.body}</p>
-              {/* Optimistic placeholders (negative id) have no server row yet —
-                a resolve PATCH against them would 404. The button appears
-                when the reload delivers the real id (same gate as the
-                suggestion cards' accept/reject). */}
-              {comment.id > 0 && (
-                <button
-                  className="comment-resolve"
-                  onClick={(event) => {
-                    // The linked card's own click would also fire and jump.
-                    event.stopPropagation()
-                    onResolve(comment)
-                  }}
-                >
-                  Resolve
-                </button>
-              )}
-            </li>
-          )
-        })}
+        {visibleOpen.map((comment) => (
+          <li key={comment.id}>
+            <CommentCard comment={comment} linked={anchoredIds?.has(comment.id) ?? false}
+              measured={anchoredIds !== null} resolving={resolvingComments.has(comment.id)} onResolve={onResolve} onJumpTo={onJumpTo} onHover={onHover} />
+          </li>
+        ))}
       </ul>
 
       {resolved.length > 0 && (
         <button
           className="comment-resolved-toggle"
-          onClick={() => setShowResolved((value) => !value)}
+          aria-expanded={showResolved}
+          onClick={() => onShowResolvedChange(!showResolved)}
         >
           {showResolved ? 'Hide' : 'Show'} {resolved.length} resolved
         </button>
@@ -167,18 +122,9 @@ export function CommentsPanel({
       {showResolved && (
         <ul className="comment-list comment-list--resolved">
           {resolved.map((comment) => (
-            <li key={comment.id} className="comment-card is-resolved">
-              <div className="comment-meta">
-                <span className={`author-chip author-chip--${comment.author_kind}`}>
-                  {comment.author_name}
-                </span>
-                {/* timeAgo depends on Date.now(); a bucket flip between SSR and
-                 hydration would otherwise regenerate the whole tree. */}
-              <span className="comment-time" suppressHydrationWarning>
-                {timeAgo(comment.created_at)}
-              </span>
-              </div>
-              <p className="comment-body">{comment.body}</p>
+            <li key={comment.id}>
+              <CommentCard comment={comment} linked={false} measured={anchoredIds !== null}
+                resolving={resolvingComments.has(comment.id)} onResolve={onResolve} onJumpTo={onJumpTo} />
             </li>
           ))}
         </ul>

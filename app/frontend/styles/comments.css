@@ -13,11 +13,11 @@
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  animation: card-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  overflow-wrap: anywhere;
 }
 
 .comment-card.is-resolved {
-  opacity: 0.6;
+  border-style: dashed;
 }
 
 /* Cards whose anchor text resolves in the copy: the whole card jumps to it,
@@ -35,13 +35,13 @@
 .comment-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
 .comment-time {
   font-size: 0.68rem;
-  color: var(--ink-faint);
+  color: var(--ink-soft);
 }
 
 .comment-quote {
@@ -56,14 +56,14 @@
 /* The quoted text was edited out of the document — the quote stays for
  * context but no longer navigates anywhere. */
 .comment-quote--stale {
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   border-left-color: var(--line);
 }
 
 /* Anchor-state caption: "On the whole document" / "no longer in the document". */
 .comment-scope {
   font-size: 0.68rem;
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   font-style: italic;
 }
 
@@ -77,7 +77,7 @@
   align-self: flex-start;
   border: none;
   background: none;
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   font-size: 0.72rem;
   font-weight: 550;
   cursor: pointer;
@@ -92,7 +92,7 @@
 .comment-resolved-toggle {
   border: none;
   background: none;
-  color: var(--ink-faint);
+  color: var(--ink-soft);
   font-size: 0.72rem;
   cursor: pointer;
   text-align: left;
@@ -205,3 +205,28 @@
 [data-theme='whitey'] ::highlight(comment-anchor-flash-soft) {
   background-color: rgb(65 131 196 / 0.16);
 }
+
+.comment-kind { font-size: 0.65rem; color: var(--ink-soft); }
+.comment-time { margin-left: auto; }
+.comment-meta .author-chip { white-space: normal; min-width: 0; }
+.comment-body { white-space: pre-wrap; }
+.comment-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.75rem; border-top: 1px solid var(--line); margin-top: 0.25rem; padding-top: 0.25rem; }
+.comment-jump, .comment-resolve, .comment-resolved-toggle { min-height: 36px; }
+.comment-jump { border: none; background: none; padding: 0; color: var(--accent); font: inherit; font-size: 0.72rem; cursor: pointer; text-align: left; }
+.comment-card button:focus-visible, .comment-resolved-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+@media (max-width: 72rem), (pointer: coarse) {
+  .comment-jump, .comment-resolve, .comment-resolved-toggle { min-height: 44px; }
+}
+
+.margin-comment { position: absolute; left: 0.9rem; right: 0.4rem; pointer-events: auto; }
+.margin-comment.is-placed { transition: top 160ms ease; }
+.margin-marker--comment { width: 24px; height: 44px; margin-left: -12px; border-radius: 6px; background: none; }
+.margin-marker--comment::after { content: ''; display: block; width: 10px; height: 10px; margin: auto; border-radius: 50%; background: var(--accent); }
+.margin-marker--comment:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) { .margin-comment.is-placed { transition: none; } }
+
+.comment-recovery { position: fixed; z-index: 70; bottom: 1rem; right: 1rem; width: min(24rem, calc(100vw - 2rem)); max-height: 65vh; overflow: auto; padding: 1rem; display: flex; flex-direction: column; gap: 0.65rem; border: 1px solid var(--accent); border-radius: 10px; background: var(--surface-raised); box-shadow: 0 8px 28px rgb(0 0 0 / 0.12); font-size: 0.82rem; overflow-wrap: anywhere; }
+.comment-recovery textarea { width: 100%; min-height: 5rem; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0.5rem; font: inherit; }
+.comment-recovery button { min-height: 44px; color: var(--accent); background: none; border: none; cursor: pointer; font: inherit; }
+.comment-recovery button:disabled { opacity: 0.5; cursor: default; }
+@media (max-width: 72rem) { .comment-recovery { bottom: 4.5rem; } }

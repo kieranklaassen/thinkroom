@@ -33,7 +33,332 @@ const modeOption = (page, label) =>
     .locator('.mode-control-option')
     .filter({ has: page.locator('.mode-control-option-label', { hasText: new RegExp(`^${label}$`) }) })
 
+// Clicking agent-authored text opens review chrome; End is not a portable
+// caret binding. Sketch fixtures need an explicit insertion point.
+const placeCaretAtEnd = async (paragraph) => {
+  await paragraph.evaluate((element) => {
+    element.closest('.ProseMirror').focus()
+    const range = document.createRange(); range.selectNodeContents(element); range.collapse(false)
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  await paragraph.page().waitForTimeout(100) // let ProseMirror read the native caret
+}
+
 try {
+  // BEGIN comment-card contract (also runnable as a focused local slice).
+  const cardFetch = async (...args) => {
+    const response = await fetch(...args)
+    if (!response.ok) throw new Error(`comment fixture API failed: ${response.status} ${args[0]}`)
+    return response
+  }
+  const cardHeaders = { 'X-Agent-Name': 'Review partner', 'Content-Type': 'application/json' }
+  const cardDoc = await (await cardFetch(`${BASE}/api/docs`, {
+    method: 'POST', headers: cardHeaders,
+    body: JSON.stringify({ title: 'Comment card contract', content: '# Comment card contract\n\nA considered review starts with a clear question.\n\nRepeated phrase.\n\nRepeated phrase.' }),
+  })).json()
+  const cardApi = `${BASE}/api/docs/${cardDoc.slug}`
+  const cardAnchor = 'A considered review starts with a clear question.'
+  for (const [body, anchor_text] of [['A useful anchored note.', cardAnchor], ['A whole-document note.', null], ['A missing quote.', 'Text that is absent.'], ['An ambiguous quote.', 'Repeated phrase.']]) {
+    await cardFetch(`${cardApi}/comments`, { method: 'POST', headers: cardHeaders, body: JSON.stringify({ body, anchor_text }) })
+  }
+  await cardFetch(`${cardApi}/suggestions`, { method: 'POST', headers: cardHeaders, body: JSON.stringify({ body: 'A thoughtful review starts with a clear question.', anchor_text: cardAnchor, intent: 'clarity' }) })
+  const cardsPage = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
+  cardsPage.setDefaultTimeout(10000)
+  await cardsPage.goto(`${BASE}/d/${cardDoc.slug}/comment`)
+  await waitForLive(cardsPage)
+  const linkedNote = cardsPage.locator('.comment-card--linked', { hasText: 'A useful anchored note.' })
+  await linkedNote.waitFor()
+  const cardBaseline = await cardsPage.evaluate(() => ({
+    marginComments: document.querySelectorAll('.margin-gutter .comment-card').length,
+    railComments: document.querySelectorAll('.doc-rail .comment-card').length,
+    suggestions: document.querySelectorAll('.margin-card').length,
+    linkedComments: document.querySelectorAll('.comment-card--linked').length,
+  }))
+  console.log('comment layout characterization', JSON.stringify(cardBaseline))
+  const jumpButton = linkedNote.getByRole('button', { name: 'Show in document', exact: true })
+  await jumpButton.focus({ timeout: 3000 })
+  await cardsPage.keyboard.press('Enter')
+  await cardsPage.waitForFunction(() => CSS.highlights?.has('comment-anchor-flash'))
+  if (!await jumpButton.evaluate((el) => el === document.activeElement)) throw new Error('comment jump stole keyboard focus')
+  ok('comment card has a keyboard jump that preserves focus')
+  const marginNote = cardsPage.locator('.margin-gutter .comment-card', { hasText: 'A useful anchored note.' })
+  await marginNote.waitFor({ timeout: 3000 })
+  if (await cardsPage.locator('.comment-card--linked').count() !== 1) throw new Error('ambiguous quote retained a guessed jump')
+  const annotations = await cardsPage.locator('.margin-card, .margin-comment').evaluateAll((els) => els.map((el) => {
+    const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }
+  }).sort((a, b) => a.top - b.top))
+  if (annotations.length !== 2 || annotations[1].top < annotations[0].bottom + 9) throw new Error('mixed annotation cards overlap')
+  console.log('mixed annotation geometry', JSON.stringify(annotations))
+  ok('unique quote joins suggestions; ambiguous and missing quotes remain in fallback')
+  await cardsPage.locator('.doc-live-editor .ProseMirror p', { hasText: 'Repeated phrase.' }).first().click({ position: { x: 12, y: 10 } })
+  await cardsPage.getByRole('button', { name: 'Comment on this paragraph', exact: true }).click()
+  await cardsPage.getByPlaceholder('Say something about this…').fill('A draft on a repeated quote.')
+  if (await cardsPage.locator('.comment-composer-note').count()) throw new Error('clicked occurrence lost its draft anchor')
+  const correctDraftOccurrence = await cardsPage.evaluate(() => {
+    const range = [...CSS.highlights.get('comment-anchor-draft')][0]
+    const node = range.startContainer
+    const paragraph = (node instanceof Element ? node : node.parentElement).closest('p')
+    return paragraph === [...document.querySelectorAll('.doc-live-editor .ProseMirror p')].find(el => el.textContent === 'Repeated phrase.')
+  })
+  if (!correctDraftOccurrence) throw new Error('draft highlights another occurrence')
+  await cardsPage.locator('.comment-composer--anchored').getByRole('button', { name: 'Cancel', exact: true }).click()
+  ok('a repeated quote opens a reachable composer at the clicked occurrence')
+  await cardsPage.setViewportSize({ width: 390, height: 844 })
+  await cardsPage.getByRole('button', { name: 'Comment by Review partner: A useful anchored note.' }).click()
+  await cardsPage.locator('.sheet .comment-card', { hasText: 'A useful anchored note.' }).waitFor()
+  await cardsPage.getByRole('button', { name: 'Show in document', exact: true }).click()
+  await cardsPage.locator('.sheet').waitFor({ state: 'detached' })
+  await cardsPage.setViewportSize({ width: 1600, height: 1000 })
+  await marginNote.waitFor()
+  for (let n = 1; n <= 8; n++) {
+    await cardFetch(`${cardApi}/comments`, { method: 'POST', headers: cardHeaders,
+      body: JSON.stringify({ body: `Dense note ${n}. ${'A longer note remains readable. '.repeat(n)}`, anchor_text: cardAnchor }) })
+  }
+  await cardsPage.waitForFunction(() => document.querySelectorAll('.margin-comment').length === 9)
+  await cardsPage.waitForTimeout(250) // the existing stack transition must settle before geometry
+  const denseGeometry = await cardsPage.locator('.margin-card, .margin-comment').evaluateAll((els) => els.map((el) => {
+    const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }
+  }).sort((a, b) => a.top - b.top))
+  if (denseGeometry.some((r, i) => i > 0 && r.top < denseGeometry[i - 1].bottom + 9)) throw new Error('dense mixed stack overlaps')
+  const lastDense = cardsPage.locator('.margin-comment', { hasText: 'Dense note 8.' })
+  await lastDense.scrollIntoViewIfNeeded()
+  if (!await lastDense.isVisible()) throw new Error('last annotation is not scroll-reachable')
+  console.log('dense annotation displacement', Math.round(denseGeometry.at(-1).top - denseGeometry[0].top))
+  await marginNote.getByRole('button', { name: 'Show in document', exact: true }).click()
+  const cardsWriter = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
+  await cardsWriter.goto(`${BASE}/d/${cardDoc.slug}/edit`)
+  await waitForLive(cardsWriter)
+  const writerParagraph = cardsWriter.locator('.doc-live-editor .ProseMirror p').first()
+  await writerParagraph.click()
+  await cardsWriter.keyboard.press('Home')
+  await cardsWriter.keyboard.type('Inserted before the quote. ')
+  await cardsPage.locator('.doc-live-editor .ProseMirror p', { hasText: 'Inserted before the quote.' }).waitFor()
+  await marginNote.waitFor()
+  await writerParagraph.evaluate((paragraph) => {
+    paragraph.closest('.ProseMirror').focus()
+    const range = document.createRange(); range.selectNodeContents(paragraph); range.collapse(false)
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  await cardsWriter.waitForTimeout(100)
+  await cardsWriter.keyboard.type(' Added after the quote.')
+  await cardsPage.locator('.doc-live-editor .ProseMirror p', { hasText: 'Added after the quote.' }).waitFor()
+  await cardsPage.waitForTimeout(200)
+  if (!await marginNote.count()) throw new Error('typing after the quote orphaned an unchanged anchor')
+  await cardsWriter.locator('.doc-live-editor .ProseMirror p').last().evaluate((paragraph) => {
+    paragraph.closest('.ProseMirror').focus()
+    const range = document.createRange(); range.selectNodeContents(paragraph); range.collapse(false)
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  await cardsWriter.waitForTimeout(100) // let ProseMirror read the native caret
+
+  await cardsWriter.keyboard.press('Enter')
+  await cardsWriter.keyboard.type(cardAnchor)
+  await cardsPage.waitForFunction((text) => [...document.querySelectorAll('.doc-live-editor .ProseMirror p')].filter((p) => p.textContent.includes(text)).length === 2, cardAnchor)
+  await marginNote.waitFor()
+  await writerParagraph.evaluate((paragraph) => {
+    paragraph.closest('.ProseMirror').focus()
+    const range = document.createRange(); range.selectNodeContents(paragraph)
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  await cardsWriter.waitForTimeout(100)
+
+  await cardsWriter.keyboard.press('Backspace')
+  await cardsPage.locator('.doc-rail .comment-card', { hasText: 'A useful anchored note.' }).waitFor()
+  if (await cardsPage.locator('.comment-card--linked', { hasText: 'A useful anchored note.' }).count()) throw new Error('deleted bound quote jumped to its later duplicate')
+  ok('remote edits track the original quote; deletion never rebinds to another occurrence')
+  await cardsWriter.close()
+  const recoveryDoc = await (await cardFetch(`${BASE}/api/docs`, { method: 'POST', headers: cardHeaders,
+    body: JSON.stringify({ title: 'Comment recovery', content: '# Comment recovery\n\nKeep this quoted context.' }) })).json()
+  await cardsPage.goto(`${BASE}/d/${recoveryDoc.slug}/comment`)
+  await waitForLive(cardsPage)
+  const postDraft = async (body, page = cardsPage) => {
+    await page.locator('.doc-live-editor .ProseMirror p').first().click({ position: { x: 12, y: 10 } })
+    await page.getByRole('button', { name: 'Comment on this paragraph', exact: true }).click()
+    await page.getByPlaceholder('Say something about this…').fill(body)
+    await page.locator('.comment-composer .btn-accept').click()
+  }
+  let createAttempts = 0
+  await cardsPage.route(`**/d/${recoveryDoc.slug}/comments`, async (route) => {
+    createAttempts++
+    if (createAttempts === 1) await route.fulfill({ status: 422, contentType: 'text/plain', body: 'Rejected fixture request' })
+    else await route.continue()
+  })
+  await postDraft('Keep this failed draft.')
+  await cardsPage.getByRole('button', { name: 'Retry comment', exact: true }).waitFor()
+  if (await cardsPage.getByRole('textbox', { name: 'Unsent comment' }).inputValue() !== 'Keep this failed draft.') throw new Error('failed post lost its draft')
+  const draftEditor = await browser.newPage()
+  await draftEditor.goto(`${BASE}/d/${recoveryDoc.slug}/edit`)
+  await waitForLive(draftEditor)
+  await draftEditor.locator('.doc-live-editor .ProseMirror p').first().evaluate((paragraph) => {
+    paragraph.closest('.ProseMirror').focus()
+    const range = document.createRange(); range.selectNodeContents(paragraph)
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  await draftEditor.waitForTimeout(100)
+  await draftEditor.keyboard.type('The original quote has been revised.')
+  await cardsPage.locator('.comment-recovery', { hasText: 'Original text changed' }).waitFor()
+  await draftEditor.close()
+  await cardsPage.getByRole('button', { name: 'Retry comment', exact: true }).dblclick()
+  const recovered = cardsPage.locator('.comment-card', { hasText: 'Keep this failed draft.' })
+  await recovered.locator('.comment-resolve').waitFor()
+  if (await recovered.locator('.comment-jump').count()) throw new Error('retried stale quote acquired a jump')
+  if (await cardsPage.locator('.margin-comment').count() || await cardsPage.locator('.doc-rail').getByText('Other comments', { exact: true }).count()) throw new Error('fallback-only comments were labeled Other comments without any margin comments')
+  if (createAttempts !== 2 || await recovered.count() !== 1) throw new Error('retry double-posted the draft')
+  let resolveAttempts = 0
+  await cardsPage.route('**/comments/*/resolve', async (route) => {
+    resolveAttempts++
+    if (resolveAttempts === 1) await route.fulfill({ status: 422, contentType: 'text/plain', body: 'Rejected fixture resolution' })
+    else await route.continue()
+  })
+  await recovered.locator('.comment-resolve').click()
+  await cardsPage.locator('.comment-recovery', { hasText: 'Could not confirm resolution' }).waitFor()
+  await recovered.locator('.comment-resolve').waitFor()
+  await recovered.locator('.comment-resolve').click()
+  await recovered.waitFor({ state: 'detached' })
+  await cardsPage.locator('.comment-resolved-toggle').click()
+  await cardsPage.reload()
+  await waitForLive(cardsPage)
+  await cardsPage.locator('.comment-card.is-resolved', { hasText: 'Keep this failed draft.' }).waitFor()
+  if (await cardsPage.locator('.comment-resolved-toggle').getAttribute('aria-expanded') !== 'true') throw new Error('resolved expansion was not restored')
+  await cardsPage.setViewportSize({ width: 390, height: 844 })
+  await cardsPage.locator('.mobile-dock button', { hasText: 'Comments' }).click()
+  await cardsPage.locator('.sheet .comment-card.is-resolved', { hasText: 'Keep this failed draft.' }).waitFor()
+  await cardsPage.locator('.sheet-close').click()
+  await cardsPage.setViewportSize({ width: 1600, height: 1000 })
+  ok('failed post and resolve recover; resolved expansion survives reload and mobile layout')
+  await cardsPage.unroute(`**/d/${recoveryDoc.slug}/comments`)
+  let lostPosts = 0
+  await cardsPage.route(`**/d/${recoveryDoc.slug}/comments`, async (route) => {
+    lostPosts++
+    await route.fetch() // the server commits; only its response is lost
+    await route.abort('failed')
+  })
+  await postDraft('Saved despite the lost response.')
+  await cardsPage.getByRole('button', { name: 'Check saved comments', exact: true }).click()
+  await cardsPage.locator('.comment-recovery', { hasText: 'already saved' }).waitFor()
+  if (lostPosts !== 1 || await cardsPage.locator('.comment-card', { hasText: 'Saved despite the lost response.' }).count() !== 1) throw new Error('lost response recovery duplicated the comment')
+  ok('lost response checks saved comments without posting twice')
+  await cardsPage.unroute(`**/d/${recoveryDoc.slug}/comments`)
+  await cardsPage.route(`**/d/${recoveryDoc.slug}/comments`, (route) => route.abort('failed'))
+  await postDraft('Identical feedback.')
+  await cardsPage.getByRole('button', { name: 'Check saved comments', exact: true }).waitFor()
+  const otherCommenter = await browser.newPage()
+  await otherCommenter.goto(`${BASE}/d/${recoveryDoc.slug}/comment`)
+  await waitForLive(otherCommenter)
+  await postDraft('Identical feedback.', otherCommenter)
+  await otherCommenter.locator('.comment-card', { hasText: 'Identical feedback.' }).getByRole('button', { name: 'Resolve', exact: true }).waitFor()
+  await otherCommenter.close()
+  await cardsPage.getByRole('button', { name: 'Check saved comments', exact: true }).click()
+  await cardsPage.getByRole('button', { name: 'Retry anyway', exact: true }).waitFor()
+  if (await cardsPage.getByRole('textbox', { name: 'Unsent comment' }).inputValue() !== 'Identical feedback.') throw new Error('another author consumed the unsaved draft')
+  await cardsPage.unroute(`**/d/${recoveryDoc.slug}/comments`)
+  await cardsPage.getByRole('button', { name: 'Retry anyway', exact: true }).click()
+  await cardsPage.waitForFunction(() => [...document.querySelectorAll('.comment-card')].filter((el) => el.textContent.includes('Identical feedback.') && Number(el.dataset.commentId) > 0).length === 2)
+  ok('a checked missing draft can retry explicitly; another author does not consume it')
+  const concurrentIds = await cardsPage.locator('.comment-card', { hasText: 'Identical feedback.' }).evaluateAll((els) => els.map((el) => el.dataset.commentId))
+  let releaseResolve
+  const resolveRelease = new Promise((resolve) => { releaseResolve = resolve })
+  await cardsPage.route('**/comments/*/resolve', async (route) => {
+    if (route.request().url().includes(`/comments/${concurrentIds[0]}/`)) {
+      await route.fulfill({ status: 422, contentType: 'text/plain', body: 'One resolve fails' })
+    } else {
+      await resolveRelease
+      await route.continue()
+    }
+  })
+  await cardsPage.locator(`[data-comment-id="${concurrentIds[0]}"]`).getByRole('button', { name: 'Resolve', exact: true }).click()
+  await cardsPage.locator(`[data-comment-id="${concurrentIds[1]}"]`).getByRole('button', { name: 'Resolve', exact: true }).click()
+  await cardsPage.locator('.comment-recovery', { hasText: 'Could not confirm resolution' }).waitFor()
+  releaseResolve()
+  await cardsPage.locator(`[data-comment-id="${concurrentIds[1]}"].is-resolved`).waitFor()
+  if (!await cardsPage.locator('.comment-recovery', { hasText: 'Could not confirm resolution' }).count()) throw new Error('successful resolve erased another failure')
+  ok('concurrent successful resolution preserves another comment failure')
+  await cardsPage.route(`**/d/${recoveryDoc.slug}/comments`, (route) => route.abort('failed'))
+  await postDraft('Discard this while checking.')
+  await cardsPage.getByRole('button', { name: 'Check saved comments', exact: true }).waitFor()
+  let releaseCheck
+  let checkStarted
+  const started = new Promise((resolve) => { checkStarted = resolve })
+  const release = new Promise((resolve) => { releaseCheck = resolve })
+  await cardsPage.route(`**/d/${recoveryDoc.slug}/comment`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    checkStarted()
+    await release
+    await route.continue()
+  })
+  await cardsPage.getByRole('button', { name: 'Check saved comments', exact: true }).click()
+  await started
+  await cardsPage.getByRole('button', { name: 'Discard draft', exact: true }).click()
+  releaseCheck()
+  await cardsPage.waitForTimeout(1000)
+  if (await cardsPage.getByRole('textbox', { name: 'Unsent comment' }).count()) throw new Error('late saved-check response restored a discarded draft')
+  ok('discarded draft stays discarded after late check response')
+
+  // Inertia preserves pending optimistic props across a resolve's reload.
+  // Hold the POST until the reload has really finished, then lose its response.
+  await cardsPage.unroute(`**/d/${recoveryDoc.slug}/comments`)
+  await cardsPage.unroute(`**/d/${recoveryDoc.slug}/comment`)
+  await cardsPage.unroute('**/comments/*/resolve')
+  await cardsPage.route('**/comments/*/resolve', (route) => route.fulfill({ status: 422, contentType: 'text/plain', body: 'Unconfirmed resolution' }))
+  let finishHeldPost
+  const heldPost = new Promise((resolve) => { finishHeldPost = resolve })
+  await cardsPage.route(`**/d/${recoveryDoc.slug}/comments`, async (route) => {
+    await heldPost
+    await route.abort('failed')
+  })
+  await postDraft('Pending across a resolve reload.')
+  const pendingCard = cardsPage.locator('.comment-card', { hasText: 'Pending across a resolve reload.' })
+  await pendingCard.waitFor()
+  if (Number(await pendingCard.getAttribute('data-comment-id')) >= 0) throw new Error('fixture was not optimistic')
+  const reloadFinished = cardsPage.waitForResponse((response) => response.request().method() === 'GET' &&
+    response.url().includes(`/d/${recoveryDoc.slug}/comment`) && response.request().headers()['x-inertia-partial-data'] === 'comments,ownership')
+  await cardsPage.locator(`[data-comment-id="${concurrentIds[0]}"]`).getByRole('button', { name: 'Resolve', exact: true }).click()
+  await (await reloadFinished).finished()
+  await cardsPage.waitForTimeout(250)
+  if (await pendingCard.count() !== 1) throw new Error('resolve reload lost pending optimistic post')
+  finishHeldPost()
+  await cardsPage.getByRole('textbox', { name: 'Unsent comment' }).waitFor()
+  if (await cardsPage.getByRole('textbox', { name: 'Unsent comment' }).inputValue() !== 'Pending across a resolve reload.') throw new Error('lost response lost recoverable draft')
+  ok('resolve reload preserves an in-flight optimistic post and its lost-response recovery')
+  await cardsPage.close()
+
+  // A tiny missing quote with common first/last lines must not enumerate
+  // millions of candidate ranges while every connected editor types.
+  const commonText = 'a'.repeat(2500)
+  const hostileQuoteDoc = await (await cardFetch(`${BASE}/api/docs`, {
+    method: 'POST', headers: cardHeaders,
+    body: JSON.stringify({ title: 'Quote matching stays responsive', content: `# Quote matching\n\n${commonText}\n\nA distinctive bridge.\n\n${commonText}` }),
+  })).json()
+  for (const [body, anchor_text] of [
+    ['Missing multi-line quote', 'a\nnot in this document\na'],
+    ['Unique multi-line quote', 'aa\nA distinctive bridge.\naa'],
+    ['Overlapping ambiguous quote', 'aaa'],
+  ]) {
+    await cardFetch(`${BASE}/api/docs/${hostileQuoteDoc.slug}/comments`, {
+      method: 'POST', headers: cardHeaders, body: JSON.stringify({ body, anchor_text }),
+    })
+  }
+  const quotePage = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
+  await quotePage.goto(`${BASE}/d/${hostileQuoteDoc.slug}/edit`)
+  await waitForLive(quotePage)
+  await quotePage.locator('.comment-card--linked', { hasText: 'Unique multi-line quote' }).waitFor()
+  if (await quotePage.locator('.comment-card--linked').count() !== 1) throw new Error('missing or overlapping quote guessed an anchor')
+  await quotePage.locator('.doc-live-editor .ProseMirror h1').click()
+  await quotePage.keyboard.press('End')
+  await quotePage.keyboard.type(' remains responsive')
+  await quotePage.waitForFunction(() => document.querySelector('.doc-live-editor .ProseMirror h1')?.textContent.includes('remains responsive'))
+  await quotePage.reload()
+  await waitForLive(quotePage)
+  await quotePage.locator('.comment-card--linked', { hasText: 'Unique multi-line quote' }).waitFor()
+  await quotePage.close()
+  ok('common-line missing quotes stay responsive; unique multi-block and overlapping matches stay safe')
+  // END comment-card contract.
+
   // Personal appearance: the direct picker, options menu and shortcut share
   // one state, without replacing the live editor or losing a saved choice.
   const appearance = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
@@ -720,10 +1045,7 @@ try {
     waitForLive(sketchA),
     waitForLive(sketchB),
   ])
-  // Click the known trailing paragraph — Meta+ArrowDown is a macOS-only
-  // caret binding that no-ops on the Linux runner.
-  await sketchA.locator('.milkdown .ProseMirror > p', { hasText: 'Body.' }).click()
-  await sketchA.keyboard.press('End')
+  await placeCaretAtEnd(sketchA.locator('.doc-live-editor .ProseMirror > p', { hasText: 'Body.' }))
   await sketchA.keyboard.press('Enter')
   await sketchA.keyboard.type('/')
   await sketchA.locator('.thinkroom-slash-menu[data-visible="true"]').waitFor({ timeout: 5000 })
@@ -1188,11 +1510,7 @@ try {
   // Clicks must wait for the live editor: before the instant-paint swap the
   // only .milkdown .ProseMirror is the inert server preview.
   await waitForLive(failedChunkPage)
-  // Click the trailing paragraph directly — Meta+ArrowDown is a macOS-only
-  // caret binding, and on Linux Chromium a center click lands inside the
-  // code fence, turning /sketch into literal code text.
-  await failedChunkPage.locator('.doc-live-editor .ProseMirror > p', { hasText: 'Trailing line.' }).click()
-  await failedChunkPage.keyboard.press('End')
+  await placeCaretAtEnd(failedChunkPage.locator('.doc-live-editor .ProseMirror > p', { hasText: 'Trailing line.' }))
   await failedChunkPage.keyboard.press('Enter')
   await failedChunkPage.keyboard.type('/sketch')
   await failedChunkPage.locator('.sketch-load-error').waitFor({ timeout: 15000 })
@@ -2135,7 +2453,7 @@ try {
   ok('unanchored comment card reads as on the whole document')
   await winB
     .locator('.comment-card', { hasText: 'Note anchored to vanished text.' })
-    .locator('.comment-scope', { hasText: 'no longer in the document' })
+    .locator('.comment-scope', { hasText: 'changed or cannot be matched uniquely' })
     .waitFor({ timeout: 10000 })
   ok('stale-anchor comment card flags its missing text')
 

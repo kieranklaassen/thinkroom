@@ -60,7 +60,7 @@ export function AnchoredComposer({ rootRef, anchor, position, onSubmit, onCancel
     >
       {anchor && <blockquote className="comment-quote">{truncate(anchor, 120)}</blockquote>}
       {position?.detached && (
-        <p className="comment-composer-note">Original text changed — comment still posts.</p>
+        <p className="comment-composer-note">Quoted text changed or cannot be located uniquely — comment still posts.</p>
       )}
       <textarea
         ref={textareaRef}
