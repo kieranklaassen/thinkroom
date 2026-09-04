@@ -747,8 +747,9 @@ export default function DocumentShow({
   }, [])
 
   // One floating form at a time: an open composer suppresses the selection
-  // chrome, and so does the share popover (z-60, above the chrome's z-50).
+  // chrome, as do share and theme popovers (z-60, above chrome's z-50).
   const [shareOpen, setShareOpen] = useState(false)
+  const [themeOpen, setThemeOpen] = useState(false)
 
   const {
     selectionToolbarActive,
@@ -764,7 +765,7 @@ export default function DocumentShow({
     textTarget,
     composerAnchor,
     composerOpen,
-    chromeSuppressed: composerOpen || shareOpen,
+    chromeSuppressed: composerOpen || shareOpen || themeOpen,
     spans,
     docTick,
     isMobile,
@@ -884,7 +885,7 @@ export default function DocumentShow({
               onPrint={printDocument}
               onOpenChange={setShareOpen}
             />
-            <ThemeSwitcher theme={theme} onChange={changeTheme} />
+            <ThemeSwitcher theme={theme} onChange={changeTheme} onOpenChange={setThemeOpen} />
             <HeaderMenu
               theme={theme}
               onChangeTheme={changeTheme}

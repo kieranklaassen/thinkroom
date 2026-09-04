@@ -96,6 +96,22 @@ try {
   })
   if (ignoredChords) ok('theme shortcut ignores composition, text inputs and extra modifiers')
   else fail('theme shortcut consumed a text-entry or modified chord')
+  const layoutTheme = await appearance.locator('html').getAttribute('data-theme')
+  const layoutFocus = await appearance.locator('.doc-canvas').getAttribute('class')
+  const shiftedPeriod = () => appearance.evaluate(() => {
+    document.body.dispatchEvent(new KeyboardEvent('keydown', {
+      code: 'Comma', key: '.', metaKey: true, shiftKey: true, bubbles: true,
+    }))
+  })
+  await shiftedPeriod()
+  await appearance.waitForFunction((before) => document.querySelector('.doc-canvas').className !== before, layoutFocus, { timeout: 1000 }).catch(() => {})
+  if (
+    await appearance.locator('html').getAttribute('data-theme') === layoutTheme &&
+    await appearance.locator('.doc-canvas').getAttribute('class') !== layoutFocus
+  ) ok('a shifted period on another physical key keeps the existing focus shortcut')
+  else fail('layout-specific period was stolen by the theme shortcut')
+  await shiftedPeriod()
+  await appearance.waitForFunction((before) => document.querySelector('.doc-canvas').className === before, layoutFocus, { timeout: 1000 }).catch(() => {})
   await themeTrigger.click()
   if (await themeDialog.locator('kbd').innerText() === '⌘/Ctrl ⇧ .') ok('theme picker labels the shipped shortcut')
   else fail('theme shortcut label differs from the shipped chord')
@@ -153,6 +169,30 @@ try {
     ok('rejected cookie and localStorage writes leave the in-memory theme usable')
   } else fail('storage denial prevented changing appearance')
   await appearance.close()
+
+  const themeSelection = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+  themeSelection.on('pageerror', (err) => errors.a.push(String(err)))
+  await themeSelection.goto(`${BASE}/d/${SLUG}/comment`)
+  await waitForLive(themeSelection)
+  await themeSelection.evaluate(() => {
+    const paragraph = document.querySelector('.doc-live-editor .ProseMirror p')
+    const range = document.createRange()
+    range.selectNodeContents(paragraph)
+    getSelection().removeAllRanges()
+    getSelection().addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  const selectionActions = themeSelection.getByRole('toolbar', { name: 'Selection actions' })
+  await selectionActions.waitFor({ state: 'visible', timeout: 3000 })
+  await themeSelection.getByRole('button', { name: 'Change theme', exact: true }).focus()
+  await themeSelection.keyboard.press('Enter')
+  await themeSelection.getByRole('dialog', { name: 'Document theme' }).waitFor({ state: 'visible' })
+  await selectionActions.waitFor({ state: 'hidden', timeout: 1000 }).catch(() => {})
+  if (!(await selectionActions.isVisible())) ok('keyboard-opened theme picker suppresses selection actions')
+  else fail('theme picker and selection actions are both active')
+  await themeSelection.keyboard.press('Escape')
+  await selectionActions.waitFor({ state: 'visible', timeout: 3000 })
+  await themeSelection.close()
 
   const landing = await browser.newPage()
   // Headless shell denies clipboard writes by default; real browsers allow them
