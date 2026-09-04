@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { timeAgo } from '../lib/time'
 import type { ActivityPayload } from '../types/payloads'
 
@@ -65,9 +65,15 @@ function groupActivities(activities: ActivityPayload[]): ActivityGroup[] {
   return groups
 }
 
-export function ActivityPanel({ activities }: { activities: ActivityPayload[] }) {
-  const [expanded, setExpanded] = useState(false)
-  const [filter, setFilter] = useState<ActivityFilter>('all')
+interface ActivityPanelProps {
+  activities: ActivityPayload[]
+  filter: ActivityFilter
+  expanded: boolean
+  onFilterChange: (filter: ActivityFilter) => void
+  onExpandedChange: (expanded: boolean) => void
+}
+
+export function ActivityPanel({ activities, filter, expanded, onFilterChange, onExpandedChange }: ActivityPanelProps) {
   const matching = useMemo(() => activities.filter((activity) => {
     if (filter === 'agents') return activity.actor_kind === 'agent' || activity.actor_kind === 'ai'
     if (filter === 'decisions') return DECISIONS.has(activity.action)
@@ -84,7 +90,7 @@ export function ActivityPanel({ activities }: { activities: ActivityPayload[] })
       </header>
       <div className="activity-filters" role="group" aria-label="Filter activity">
         {FILTERS.map((value) => (
-          <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>
+          <button key={value} type="button" aria-pressed={filter === value} onClick={() => onFilterChange(value)}>
             {FILTER_LABELS[value]}
           </button>
         ))}
@@ -140,7 +146,7 @@ export function ActivityPanel({ activities }: { activities: ActivityPayload[] })
         })}
       </ul>
       {hidden > 0 && (
-        <button type="button" className="activity-expander" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
+        <button type="button" className="activity-expander" aria-expanded={expanded} onClick={() => onExpandedChange(!expanded)}>
           {expanded ? 'Show fewer' : `Show all ${groups.length} groups`}
         </button>
       )}

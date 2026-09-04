@@ -192,6 +192,17 @@ try {
     (await page.locator('[data-native-menu-item][data-native-click="#native-toggle-activity"]').count()) === 1,
     'doc: menu offers Activity outside Read mode',
   )
+  await page.evaluate(() => document.querySelector('#native-toggle-activity')?.click())
+  const activityDialog = page.getByRole('dialog', { name: 'Activity', exact: true })
+  await activityDialog.getByRole('button', { name: 'Agents', exact: true }).tap()
+  await page.reload()
+  await waitForLive(page)
+  await page.evaluate(() => document.querySelector('#native-toggle-activity')?.click())
+  check(
+    await activityDialog.getByRole('button', { name: 'Agents', exact: true }).getAttribute('aria-pressed') === 'true',
+    'native: activity filter survives refresh and opens from the bridge',
+  )
+  await activityDialog.getByRole('button', { name: 'Close', exact: true }).tap()
   await page.evaluate(() => document.querySelector('#native-mode-read')?.click())
   await page.waitForFunction(() => document.querySelector('.doc-page')?.classList.contains('is-read-mode'))
   ok('doc: mode bridge button switches the editor to Read mode')
