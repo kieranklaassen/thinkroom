@@ -73,19 +73,19 @@
   --sketch-danger-hover-bg: #f6ddd5;
 }
 
-/* Whitey — homage to Typora's Whitey theme: clean white, minimal chrome,
- * generous margins, quiet typography. Everything derives from the tokens, so
+/* Whitey — clean white, editorial serif, minimal chrome and generous margins.
+ * Everything derives from the tokens, so
  * provenance tints and code blocks restyle coherently. */
 [data-theme='whitey'] {
-  --font-doc: 'Avenir Next', Avenir, 'Segoe UI', 'Helvetica Neue', sans-serif;
+  --font-doc: Georgia, 'Times New Roman', serif;
 
   --surface: #ffffff;
   --surface-raised: #fcfcfc;
   --ink: #2b2b2b;
-  --ink-soft: #777777;
+  --ink-soft: #666666;
   --ink-faint: #b3b3b3;
   --line: #ececec;
-  --accent: #4183c4;
+  --accent: #326c9d;
   --accent-soft: #4183c422;
 
   --prov-pending-bg: #dce9f766;
@@ -131,9 +131,25 @@
 }
 
 [data-theme='whitey'] .milkdown .ProseMirror {
-  font-size: 1rem;
+  font-size: 1.125rem;
   line-height: 1.8;
   font-weight: 400;
+}
+
+[data-theme='whitey'] .milkdown .ProseMirror :is(h1, h2) {
+  text-align: center;
+  font-weight: 400;
+}
+
+[data-theme='whitey'] .milkdown .ProseMirror h1 {
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1.15;
+}
+
+[data-theme='whitey'] .milkdown .ProseMirror h2 {
+  font-size: 1.8rem;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--line);
 }
 
 [data-theme='whitey'] .doc-main {

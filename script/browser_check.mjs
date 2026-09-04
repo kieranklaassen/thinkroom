@@ -118,6 +118,32 @@ try {
     await appearance.getByRole('radio', { name: /Whitey/ }).getAttribute('aria-checked') === 'true'
   ) ok('theme cookie, initial page and hydrated picker agree after refresh')
   else fail('theme preference differs after refresh')
+  await appearance.keyboard.press('Escape')
+  await appearance.evaluate(() => {
+    // Stay away from the document end: a shorter theme can clamp scrollY at
+    // its new maximum, where no viewport offset can be preserved exactly.
+    window.scrollTo(0, 300)
+    const headerBottom = document.querySelector('.doc-header').getBoundingClientRect().bottom
+    const editor = document.querySelector('.doc-live-editor .ProseMirror')
+    window.__readingAnchor = [...editor.querySelectorAll('p, h1, h2, h3, h4, pre, li, figure')]
+      .find((node) => node.getBoundingClientRect().bottom > headerBottom)
+    window.__readingTop = window.__readingAnchor.getBoundingClientRect().top
+  })
+  await appearance.keyboard.press(`${mod}+Shift+.`)
+  const readingOffset = await appearance.evaluate(() => Math.abs(window.__readingAnchor.getBoundingClientRect().top - window.__readingTop))
+  if (readingOffset < 2) ok('theme typography reflow preserves the visible reading block offset')
+  else fail(`theme reflow moved the reading block by ${readingOffset}px`)
+  const firstParagraph = appearance.locator('.doc-live-editor .ProseMirror p').first()
+  await firstParagraph.click()
+  await appearance.keyboard.press('Home')
+  await appearance.keyboard.press('Shift+ArrowRight')
+  const selectedText = await appearance.evaluate(() => getSelection()?.toString())
+  await appearance.keyboard.press(`${mod}+Shift+.`)
+  if (selectedText && await appearance.evaluate(() => getSelection()?.toString()) === selectedText) {
+    ok('cycling appearance keeps the live text selection')
+  } else fail('theme change cleared the live text selection')
+  await appearance.getByRole('button', { name: 'More options', exact: true }).click()
+  await appearance.getByRole('radio', { name: /Whitey/ }).click()
   await appearance.evaluate(() => {
     Object.defineProperty(document, 'cookie', { configurable: true, get: () => '', set: () => { throw new Error('storage denied') } })
     Storage.prototype.setItem = () => { throw new Error('storage denied') }

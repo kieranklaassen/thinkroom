@@ -153,6 +153,16 @@ try {
     JSON.stringify(initial),
   )
 
+  const chooseTheme = async (name) => {
+    await page.getByRole('button', { name: 'Change theme', exact: true }).click()
+    await page.getByRole('radio', { name: new RegExp(name) }).click()
+  }
+  await chooseTheme('Whitey')
+  const whitey = await liveGeometry()
+  check(whitey.prose.width > initial.prose.width && closeTo(whitey.sketch.width, initial.sketch.width),
+    'unset prose widths follow the theme while rich blocks retain their default')
+  await chooseTheme('Thinkroom')
+
   const initialDocumentWidth = initial.documentWidth
   const sketchHandle = page.locator('.thinkroom-sketch .rich-block-width-handle')
   const handleBox = await sketchHandle.boundingBox()
@@ -190,6 +200,19 @@ try {
   await page.locator('.thinkroom-sketch .rich-block-width-handle').waitFor({ timeout: 15_000 })
   const reloaded = await liveGeometry()
   check(closeTo(reloaded.sketch.width, 928), 'saved rich width survives reload on first live paint', JSON.stringify(reloaded))
+
+  await page.context().addCookies([{ name: 'pruf_width', value: '640', url: BASE }])
+  await page.reload()
+  await waitForLive(page)
+  const explicitProse = (await liveGeometry()).prose.width
+  await chooseTheme('Whitey')
+  const explicitWhitey = await liveGeometry()
+  check(closeTo(explicitWhitey.prose.width, explicitProse) && closeTo(explicitWhitey.sketch.width, 928),
+    'explicit prose and rich widths both survive a theme change')
+  await chooseTheme('Thinkroom')
+  await page.context().addCookies([{ name: 'pruf_width', value: 'default', url: BASE }])
+  await page.reload()
+  await waitForLive(page)
 
   await page.locator('.thinkroom-sketch .rich-block-width-handle').dblclick()
   await page.waitForFunction(() => Math.abs((document.querySelector('.thinkroom-sketch')?.getBoundingClientRect().width ?? 0) - 960) < 2)
