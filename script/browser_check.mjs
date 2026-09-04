@@ -69,6 +69,7 @@ try {
   const reviewA = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
   const reviewB = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
   for (const page of [reviewA, reviewB]) {
+    page.on('pageerror', (error) => fail(`guided review page error: ${error}`))
     page.setDefaultTimeout(10000)
     await page.goto(`${BASE}/d/${reviewDoc.slug}/edit`)
     await waitForLive(page)
@@ -199,6 +200,38 @@ try {
   await reviewCard(reviewA).waitFor({ state: 'visible' })
   const longReviewBox = await reviewCard(reviewA).boundingBox()
   assertReview(longReviewBox.y >= 0 && longReviewBox.y + longReviewBox.height <= 844, 'long phone passages keep review actions in the viewport')
+  const boundaryDoc = await (await reviewFetch(`${BASE}/api/docs`, {
+    method: 'POST', headers: reviewHeaders,
+    body: JSON.stringify({ content: [
+      `# ${attributed('Review boundaries', 'verbatim', 'Alex', 'human')}`,
+      `| ${attributed('Left', 'verbatim', 'Alex', 'human')} | ${attributed('Right', 'verbatim', 'Alex', 'human')} |\n| --- | --- |\n| ${attributed('First cell.')} | ${attributed('Second cell.')} |`,
+      `<ins data-suggestion-id="review-insertion" data-author="Review partner">${attributed('Not accepted yet.')}</ins>`,
+      `<del data-suggestion-id="review-deletion" data-author="Review partner">${attributed('Still part of the document.')}</del>`,
+    ].join('\n\n') }),
+  })).json()
+  await reviewA.setViewportSize({ width: 1600, height: 1000 })
+  for (const page of [reviewA, reviewB]) {
+    await page.goto(`${BASE}/d/${boundaryDoc.slug}/edit`); await waitForLive(page)
+  }
+  assertReview(await reviewA.locator('.doc-live-editor ins').count() > 0 && await reviewA.locator('.doc-live-editor del').count() > 0, 'boundary fixture retains pending insertion and deletion marks')
+  const boundaryTargets = []
+  for (let i = 0; i < 4; i++) {
+    await reviewNav(reviewA, 'unreviewed').click()
+    boundaryTargets.push(await selectedReviewText(reviewA))
+  }
+  assertReview(JSON.stringify(boundaryTargets) === JSON.stringify(['First cell.', 'Second cell.', 'Still part of the document.', 'First cell.']), 'navigation separates table cells, skips pending insertions, and retains deletion-marked text')
+  await reviewNav(reviewB, 'unreviewed').click()
+  await reviewB.locator('.doc-live-editor .ProseMirror').focus()
+  await reviewB.keyboard.press('Backspace')
+  await reviewCard(reviewA).waitFor({ state: 'hidden' })
+  await reviewA.getByRole('status').filter({ hasText: 'That passage changed.' }).waitFor()
+  ok('deleting the exact target in another client closes guidance safely')
+  await reviewNav(reviewA, 'unreviewed').click()
+  await reviewB.locator('.doc-live-editor .ProseMirror').focus()
+  await reviewB.keyboard.press('ControlOrMeta+a'); await reviewB.keyboard.type('A replacement document.')
+  await reviewCard(reviewA).waitFor({ state: 'hidden' })
+  await reviewA.getByRole('status').filter({ hasText: 'That passage changed.' }).waitFor()
+  ok('whole-document replacement invalidates the old review target')
   await reviewA.close(); await reviewB.close()
   // END guided-review contract.
 
@@ -1381,7 +1414,11 @@ try {
   } else {
     fail(`Thinkroom sketch styling did not return: ${JSON.stringify(thinkroomPreviewTheme)}`)
   }
-  const sketchFitsPaper = await sketchA.locator('.thinkroom-sketch').evaluate((node) => {
+  // The preview resizes after the viewport/theme change via ResizeObserver.
+  // Verify settled containment, not the first pre-observer frame.
+  const sketchFitsPaper = await sketchA.waitForFunction(() => {
+    const node = document.querySelector('.thinkroom-sketch')
+    if (!node) return false
     const paper = node.querySelector('svg[data-renderer="excalidraw"]')?.getBoundingClientRect()
     const drawing = node.querySelector('[data-excalidraw-scene]')?.getBoundingClientRect()
     return Boolean(
@@ -1391,7 +1428,7 @@ try {
       drawing.bottom <= paper.bottom + 0.1 &&
       drawing.left >= paper.left - 0.1
     )
-  })
+  }, null, { timeout: 5000 }).then(() => true).catch(() => false)
   if (sketchFitsPaper) ok('the complete sketch fits inside its fixed-width paper')
   else fail('the saved sketch preview clips content outside its paper')
   const closedSketchHeight = await sketchA.locator('.thinkroom-sketch').evaluate((node) =>
@@ -2185,7 +2222,13 @@ try {
     panelWasHidden,
     { timeout: 5000 },
   )
-  await a.waitForTimeout(250)
+  // ResizeObserver and the cursor clamp settle after the panel transition.
+  // Assert the resulting geometry rather than sampling a fixed animation frame.
+  await a.waitForFunction((agentName) => {
+    const label = [...document.querySelectorAll('.agent-cursor-label')].find((el) => el.textContent?.includes(agentName))
+    const rect = label?.getBoundingClientRect()
+    return rect && rect.left >= 8 && rect.right <= innerWidth - 8 && document.documentElement.scrollWidth <= innerWidth
+  }, overflowAgentName, { timeout: 10000 }).catch(() => null)
   const shiftedCursorBox = await a
     .locator('.agent-cursor-label', { hasText: overflowAgentName })
     .first()

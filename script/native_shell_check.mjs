@@ -47,6 +47,7 @@ try {
   if (!reviewFixtureResponse.ok) throw new Error(`native review fixture: ${reviewFixtureResponse.status}`)
   const reviewFixture = await reviewFixtureResponse.json()
   const guided = await native.newPage()
+  guided.on('pageerror', (error) => fail(`native guided review page error: ${error}`))
   await guided.goto(`${BASE}/d/${reviewFixture.slug}/edit`); await waitForLive(guided)
   await guided.evaluate(() => {
     document.documentElement.style.setProperty('--ruby-native-safe-area-inset-top', '47px')
