@@ -110,6 +110,17 @@ try {
   await cardsWriter.keyboard.type('Inserted before the quote. ')
   await cardsPage.locator('.doc-live-editor .ProseMirror p', { hasText: 'Inserted before the quote.' }).waitFor()
   await marginNote.waitFor()
+  await writerParagraph.evaluate((paragraph) => {
+    paragraph.closest('.ProseMirror').focus()
+    const range = document.createRange(); range.selectNodeContents(paragraph); range.collapse(false)
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  await cardsWriter.waitForTimeout(100)
+  await cardsWriter.keyboard.type(' Added after the quote.')
+  await cardsPage.locator('.doc-live-editor .ProseMirror p', { hasText: 'Added after the quote.' }).waitFor()
+  await cardsPage.waitForTimeout(200)
+  if (!await marginNote.count()) throw new Error('typing after the quote orphaned an unchanged anchor')
   await cardsWriter.locator('.doc-live-editor .ProseMirror p').last().evaluate((paragraph) => {
     paragraph.closest('.ProseMirror').focus()
     const range = document.createRange(); range.selectNodeContents(paragraph); range.collapse(false)
@@ -139,11 +150,11 @@ try {
     body: JSON.stringify({ title: 'Comment recovery', content: '# Comment recovery\n\nKeep this quoted context.' }) })).json()
   await cardsPage.goto(`${BASE}/d/${recoveryDoc.slug}/comment`)
   await waitForLive(cardsPage)
-  const postDraft = async (body) => {
-    await cardsPage.locator('.doc-live-editor .ProseMirror p').first().click({ position: { x: 12, y: 10 } })
-    await cardsPage.getByRole('button', { name: 'Comment on this paragraph', exact: true }).click()
-    await cardsPage.getByPlaceholder('Say something about this…').fill(body)
-    await cardsPage.locator('.comment-composer .btn-accept').click()
+  const postDraft = async (body, page = cardsPage) => {
+    await page.locator('.doc-live-editor .ProseMirror p').first().click({ position: { x: 12, y: 10 } })
+    await page.getByRole('button', { name: 'Comment on this paragraph', exact: true }).click()
+    await page.getByPlaceholder('Say something about this…').fill(body)
+    await page.locator('.comment-composer .btn-accept').click()
   }
   let createAttempts = 0
   await cardsPage.route(`**/d/${recoveryDoc.slug}/comments`, async (route) => {
@@ -206,6 +217,61 @@ try {
   await cardsPage.locator('.comment-recovery', { hasText: 'already saved' }).waitFor()
   if (lostPosts !== 1 || await cardsPage.locator('.comment-card', { hasText: 'Saved despite the lost response.' }).count() !== 1) throw new Error('lost response recovery duplicated the comment')
   ok('lost response checks saved comments without posting twice')
+  await cardsPage.unroute(`**/d/${recoveryDoc.slug}/comments`)
+  await cardsPage.route(`**/d/${recoveryDoc.slug}/comments`, (route) => route.abort('failed'))
+  await postDraft('Identical feedback.')
+  await cardsPage.getByRole('button', { name: 'Check saved comments', exact: true }).waitFor()
+  const otherCommenter = await browser.newPage()
+  await otherCommenter.goto(`${BASE}/d/${recoveryDoc.slug}/comment`)
+  await waitForLive(otherCommenter)
+  await postDraft('Identical feedback.', otherCommenter)
+  await otherCommenter.locator('.comment-card', { hasText: 'Identical feedback.' }).getByRole('button', { name: 'Resolve', exact: true }).waitFor()
+  await otherCommenter.close()
+  await cardsPage.getByRole('button', { name: 'Check saved comments', exact: true }).click()
+  await cardsPage.getByRole('button', { name: 'Retry anyway', exact: true }).waitFor()
+  if (await cardsPage.getByRole('textbox', { name: 'Unsent comment' }).inputValue() !== 'Identical feedback.') throw new Error('another author consumed the unsaved draft')
+  await cardsPage.unroute(`**/d/${recoveryDoc.slug}/comments`)
+  await cardsPage.getByRole('button', { name: 'Retry anyway', exact: true }).click()
+  await cardsPage.waitForFunction(() => [...document.querySelectorAll('.comment-card')].filter((el) => el.textContent.includes('Identical feedback.') && Number(el.dataset.commentId) > 0).length === 2)
+  ok('a checked missing draft can retry explicitly; another author does not consume it')
+  const concurrentIds = await cardsPage.locator('.comment-card', { hasText: 'Identical feedback.' }).evaluateAll((els) => els.map((el) => el.dataset.commentId))
+  let releaseResolve
+  const resolveRelease = new Promise((resolve) => { releaseResolve = resolve })
+  await cardsPage.route('**/comments/*/resolve', async (route) => {
+    if (route.request().url().includes(`/comments/${concurrentIds[0]}/`)) {
+      await route.fulfill({ status: 422, contentType: 'text/plain', body: 'One resolve fails' })
+    } else {
+      await resolveRelease
+      await route.continue()
+    }
+  })
+  await cardsPage.locator(`[data-comment-id="${concurrentIds[0]}"]`).getByRole('button', { name: 'Resolve', exact: true }).click()
+  await cardsPage.locator(`[data-comment-id="${concurrentIds[1]}"]`).getByRole('button', { name: 'Resolve', exact: true }).click()
+  await cardsPage.locator('.comment-recovery', { hasText: 'Could not confirm resolution' }).waitFor()
+  releaseResolve()
+  await cardsPage.locator(`[data-comment-id="${concurrentIds[1]}"].is-resolved`).waitFor()
+  if (!await cardsPage.locator('.comment-recovery', { hasText: 'Could not confirm resolution' }).count()) throw new Error('successful resolve erased another failure')
+  ok('concurrent successful resolution preserves another comment failure')
+  await cardsPage.route(`**/d/${recoveryDoc.slug}/comments`, (route) => route.abort('failed'))
+  await postDraft('Discard this while checking.')
+  await cardsPage.getByRole('button', { name: 'Check saved comments', exact: true }).waitFor()
+  let releaseCheck
+  let checkStarted
+  const started = new Promise((resolve) => { checkStarted = resolve })
+  const release = new Promise((resolve) => { releaseCheck = resolve })
+  await cardsPage.route(`**/d/${recoveryDoc.slug}/comment`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    checkStarted()
+    await release
+    await route.continue()
+  })
+  await cardsPage.getByRole('button', { name: 'Check saved comments', exact: true }).click()
+  await started
+  await cardsPage.getByRole('button', { name: 'Discard draft', exact: true }).click()
+  releaseCheck()
+  await cardsPage.waitForTimeout(1000)
+  if (await cardsPage.getByRole('textbox', { name: 'Unsent comment' }).count()) throw new Error('late saved-check response restored a discarded draft')
+  ok('discarded draft stays discarded after late check response')
   await cardsPage.close()
   // END comment-card contract.
 

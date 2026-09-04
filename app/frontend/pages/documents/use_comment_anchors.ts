@@ -64,7 +64,8 @@ export function useCommentAnchors({
     const range = findCommentAnchorRange(view.state.doc, comment.anchor_text)
     if (range) {
       const from = toRelativePosition(view.state, range.from)
-      const to = toRelativePosition(view.state, range.to)
+      // Exclude text inserted immediately after the quote from its identity.
+      const to = toRelativePosition(view.state, range.to, -1)
       if (from && to) bindings.set(comment.id, { from, to })
     }
     return range

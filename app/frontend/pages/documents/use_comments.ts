@@ -24,6 +24,8 @@ export interface FailedComment {
   message: string
   uncertain: boolean
   previousIds: number[]
+  authorName: string
+  checkedMissing: boolean
 }
 
 export interface Comments {
@@ -64,7 +66,9 @@ export function useComments({
   const [commentNotice, setCommentNotice] = useState<string | null>(null)
   const [checkingComment, setCheckingComment] = useState(false)
   const [resolvingComments, setResolvingComments] = useState(new Set<number>())
+  const [resolveErrors, setResolveErrors] = useState(new Set<number>())
   const postingRef = useRef(false)
+  const checkGeneration = useRef(0)
   const resolvingRef = useRef(new Set<number>())
   const commentsRef = useRef(comments)
   commentsRef.current = comments
@@ -93,12 +97,14 @@ export function useComments({
     (body: string, anchorText: string | null) => {
       if (postingRef.current || !canComment || !body.trim()) return
       postingRef.current = true
+      checkGeneration.current++
+      setCheckingComment(false)
       setFailedComment(null)
       setCommentNotice(null)
       setComposerAnchor(null)
       const previousIds = commentsRef.current.map((comment) => comment.id)
       const failed = (message: string, uncertain = false) => {
-        setFailedComment({ body, anchor: anchorText, message, uncertain, previousIds })
+        setFailedComment({ body, anchor: anchorText, message, uncertain, previousIds, authorName: identityName, checkedMissing: false })
         return false
       }
       const optimisticComment: CommentPayload = {
@@ -138,8 +144,10 @@ export function useComments({
       if (comment.id <= 0 || !current || current.resolved || !canComment || resolvingRef.current.has(comment.id)) return
       resolvingRef.current.add(comment.id)
       setResolvingComments(new Set(resolvingRef.current))
-      setCommentNotice('Resolving comment…')
-      const failed = () => { setCommentNotice('Could not confirm resolution. Check your connection and try Resolve again if the comment is still open.'); return false }
+      const failed = () => {
+        setResolveErrors((errors) => new Set(errors).add(comment.id))
+        return false
+      }
       router
         .optimistic((props: { comments?: CommentPayload[] }) => ({
           comments: (props.comments ?? []).map((c) =>
@@ -151,7 +159,14 @@ export function useComments({
           { by: identityName },
           {
             preserveScroll: true, only: ['comments', 'activities', 'ownership'], async: true,
-            onSuccess: () => { setCommentNotice(null) },
+            onSuccess: () => {
+              setResolveErrors((errors) => {
+                if (!errors.has(comment.id)) return errors
+                const next = new Set(errors)
+                next.delete(comment.id)
+                return next
+              })
+            },
             onError: () => { failed() },
             onHttpException: failed,
             onNetworkError: failed,
@@ -159,7 +174,7 @@ export function useComments({
             onFinish: () => {
               resolvingRef.current.delete(comment.id)
               setResolvingComments(new Set(resolvingRef.current))
-              router.reload({ only: ['comments', 'ownership'] })
+              router.reload({ only: ['comments', 'ownership'], onHttpException: () => false, onNetworkError: () => false })
             },
           },
         )
@@ -173,29 +188,32 @@ export function useComments({
   }, [failedComment])
 
   const retryFailedComment = useCallback(() => {
-    if (!failedComment || failedComment.uncertain || !canComment) return
+    if (!failedComment || (failedComment.uncertain && !failedComment.checkedMissing) || !canComment) return
     submitComment(failedComment.body, failedComment.anchor)
   }, [failedComment, canComment, submitComment])
 
   const checkFailedComment = useCallback(() => {
     if (!failedComment || checkingComment) return
+    const generation = ++checkGeneration.current
     setCheckingComment(true)
     router.reload({
       only: ['comments', 'ownership'],
       onSuccess: (page) => {
+        if (generation !== checkGeneration.current) return
         const rows = page.props.comments as CommentPayload[]
         const saved = rows.some((row) => !failedComment.previousIds.includes(row.id) && row.id > 0 &&
-          row.author_kind === 'human' && row.body === failedComment.body && row.anchor_text === failedComment.anchor)
+          row.author_kind === 'human' && row.author_name === failedComment.authorName &&
+          row.body === failedComment.body && row.anchor_text === failedComment.anchor)
         if (saved) {
           setFailedComment(null)
           setCommentNotice('A matching comment is already saved. It was not posted again.')
         } else {
-          setFailedComment({ ...failedComment, message: 'No saved copy found yet. Your draft is kept below; check again when connected before posting it again.' })
+          setFailedComment({ ...failedComment, checkedMissing: true, message: 'No saved copy found yet. Check again, or retry anyway. Retrying could create a duplicate if the original request is still completing.' })
         }
       },
       onHttpException: () => false,
       onNetworkError: () => false,
-      onFinish: () => setCheckingComment(false),
+      onFinish: () => { if (generation === checkGeneration.current) setCheckingComment(false) },
     })
   }, [failedComment, checkingComment])
 
@@ -220,10 +238,19 @@ export function useComments({
     failedComment,
     retryFailedComment,
     checkFailedComment,
-    dismissFailedComment: () => setFailedComment(null),
+    dismissFailedComment: () => {
+      checkGeneration.current++
+      setCheckingComment(false)
+      setFailedComment(null)
+    },
     checkingComment,
-    commentNotice,
-    clearCommentNotice: () => setCommentNotice(null),
+    commentNotice: resolveErrors.size > 0
+      ? 'Could not confirm resolution. Check your connection and try Resolve again if the comment is still open.'
+      : resolvingComments.size > 0 ? 'Resolving comment…' : commentNotice,
+    clearCommentNotice: () => {
+      setCommentNotice(null)
+      setResolveErrors(new Set())
+    },
     resolvingComments,
     composerAnchor,
     composerOpen,

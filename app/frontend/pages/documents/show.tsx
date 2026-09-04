@@ -959,6 +959,9 @@ export default function DocumentShow({
                 {failedComment.uncertain
                   ? <button type="button" disabled={checkingComment} onClick={checkFailedComment}>{checkingComment ? 'Checking…' : 'Check saved comments'}</button>
                   : <button type="button" disabled={!ownership.can_comment} onClick={retryFailedComment}>Retry comment</button>}
+                {failedComment.uncertain && failedComment.checkedMissing && (
+                  <button type="button" disabled={!ownership.can_comment || checkingComment} onClick={retryFailedComment}>Retry anyway</button>
+                )}
                 <button type="button" onClick={dismissFailedComment}>Discard draft</button>
               </div>
               {!ownership.can_comment && <p className="comment-scope">Comment access is no longer available. You can copy your draft.</p>}
