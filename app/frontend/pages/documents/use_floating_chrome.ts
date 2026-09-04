@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type RefObject } from 'react'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import { findCommentAnchorRange } from '../../editor/comment_anchors'
+import type { CommentRange } from '../../editor/comment_anchors'
 import { aiSpanAt, type AiSpan, type ProvenanceSpan } from '../../editor/provenance'
 import {
   useAnchoredPopover,
@@ -24,6 +24,7 @@ interface Options {
   textTarget: TextTarget | null
   composerAnchor: string | null
   composerOpen: boolean
+  getComposerRange: () => CommentRange | null
   /** One floating form at a time: an open composer suppresses the selection
    *  chrome, and so does the share popover (z-60, above the chrome's z-50). */
   chromeSuppressed: boolean
@@ -56,6 +57,7 @@ export function useFloatingChrome({
   textTarget,
   composerAnchor,
   composerOpen,
+  getComposerRange,
   chromeSuppressed,
   spans,
   docTick,
@@ -165,16 +167,23 @@ export function useFloatingChrome({
     deps: [textTarget, spans, popoverTick],
   })
 
-  // The composer anchors below the selection's last line and never overlaps
-  // the anchored text; if a remote edit removes the anchor it freezes in
+  // Keep the whole boundary textblocks readable, not only the selected word:
+  // a composer below the first line can otherwise cover its wrapped paragraph.
+  // If a remote edit removes the anchor it freezes in
   // place (detached) instead of vanishing mid-draft.
   const composerPopover = useAnchoredPopover<HTMLFormElement>({
     active: composerOpen,
     getView: () => viewRef.current,
     getRange: () => {
+      const range = getComposerRange()
       const view = viewRef.current
-      if (!view || composerAnchor === null) return null
-      return findCommentAnchorRange(view.state.doc, composerAnchor)
+      if (!range || !view) return null
+      const start = view.state.doc.resolve(range.from)
+      const end = view.state.doc.resolve(range.to)
+      return {
+        from: start.parent.isTextblock ? start.start() : range.from,
+        to: end.parent.isTextblock ? end.end() : range.to,
+      }
     },
     preferBelow: true,
     persistent: true,

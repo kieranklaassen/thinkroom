@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { router } from '@inertiajs/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import { findCommentAnchorRange } from '../../editor/comment_anchors'
+import { findCommentAnchorRange, type CommentRange } from '../../editor/comment_anchors'
+import { fromRelativePosition, toRelativePosition } from '../../editor/collab_positions'
 import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
 import type { CommentPayload } from '../../types/payloads'
 
@@ -41,6 +42,7 @@ export interface Comments {
   composerAnchor: string | null
   /** The desktop anchored composer card is open (mobile uses the sheet). */
   composerOpen: boolean
+  getComposerRange: () => CommentRange | null
   openComposer: (anchorText: string) => void
   /** Close without posting and return focus to the editor. */
   closeComposer: () => void
@@ -74,6 +76,18 @@ export function useComments({
   commentsRef.current = comments
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
   const composerOpen = !isMobile && composerAnchor !== null
+  const composerBinding = useRef<{ from: unknown; to: unknown } | null>(null)
+  const getComposerRange = useCallback((): CommentRange | null => {
+    const view = viewRef.current
+    const binding = composerBinding.current
+    if (!view || !binding || composerAnchor === null) return null
+    const from = fromRelativePosition(view.state, binding.from)
+    const to = fromRelativePosition(view.state, binding.to)
+    if (from !== null && to !== null && from < to && to <= view.state.doc.content.size &&
+        view.state.doc.textBetween(from, to, '\n') === composerAnchor) return { from, to }
+    composerBinding.current = null // never switch to another copy mid-draft
+    return null
+  }, [composerAnchor, viewRef])
 
   useEffect(() => {
     setComposerAnchor(null)
@@ -85,13 +99,13 @@ export function useComments({
     if (!composerOpen || composerAnchor === null) return
     const view = viewRef.current
     if (!view) return
-    const range = findCommentAnchorRange(view.state.doc, composerAnchor)
+    const range = getComposerRange()
     const dom = range ? domRange(view, range.from, range.to) : null
     setHighlight('comment-anchor-draft', dom ? [dom] : [])
     return () => clearHighlight('comment-anchor-draft')
     // docTick keeps the highlight tracking edits around the anchor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [composerOpen, composerAnchor, docTick])
+  }, [composerOpen, composerAnchor, docTick, getComposerRange])
 
   const submitComment = useCallback(
     (body: string, anchorText: string | null) => {
@@ -184,8 +198,25 @@ export function useComments({
 
   const openComposer = useCallback((anchorText: string) => {
     if (postingRef.current || failedComment) return
+    const state = viewRef.current?.state
+    composerBinding.current = null
+    if (state) {
+      const { from, to, $from, empty } = state.selection
+      // A new draft knows which occurrence was selected/clicked. Saved
+      // quote-only comments do not: they still use the unique matcher.
+      const range: CommentRange | null = !empty && state.doc.textBetween(from, to, '\n') === anchorText
+        ? { from, to }
+        : $from.depth > 0 && $from.parent.textBetween(0, $from.parent.content.size, '\n') === anchorText
+          ? { from: $from.start(), to: $from.end() }
+          : findCommentAnchorRange(state.doc, anchorText)
+      if (range) {
+        const start = toRelativePosition(state, range.from)
+        const end = toRelativePosition(state, range.to, -1)
+        if (start && end) composerBinding.current = { from: start, to: end }
+      }
+    }
     setComposerAnchor(anchorText)
-  }, [failedComment])
+  }, [failedComment, viewRef])
 
   const retryFailedComment = useCallback(() => {
     if (!failedComment || (failedComment.uncertain && !failedComment.checkedMissing) || !canComment) return
@@ -254,6 +285,7 @@ export function useComments({
     resolvingComments,
     composerAnchor,
     composerOpen,
+    getComposerRange,
     openComposer,
     closeComposer,
     cancelComposer,

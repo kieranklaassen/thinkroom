@@ -33,6 +33,18 @@ const modeOption = (page, label) =>
     .locator('.mode-control-option')
     .filter({ has: page.locator('.mode-control-option-label', { hasText: new RegExp(`^${label}$`) }) })
 
+// Clicking agent-authored text opens review chrome; End is not a portable
+// caret binding. Sketch fixtures need an explicit insertion point.
+const placeCaretAtEnd = async (paragraph) => {
+  await paragraph.evaluate((element) => {
+    element.closest('.ProseMirror').focus()
+    const range = document.createRange(); range.selectNodeContents(element); range.collapse(false)
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  await paragraph.page().waitForTimeout(100) // let ProseMirror read the native caret
+}
+
 try {
   // BEGIN comment-card contract (also runnable as a focused local slice).
   const cardFetch = async (...args) => {
@@ -79,6 +91,19 @@ try {
   if (annotations.length !== 2 || annotations[1].top < annotations[0].bottom + 9) throw new Error('mixed annotation cards overlap')
   console.log('mixed annotation geometry', JSON.stringify(annotations))
   ok('unique quote joins suggestions; ambiguous and missing quotes remain in fallback')
+  await cardsPage.locator('.doc-live-editor .ProseMirror p', { hasText: 'Repeated phrase.' }).first().click({ position: { x: 12, y: 10 } })
+  await cardsPage.getByRole('button', { name: 'Comment on this paragraph', exact: true }).click()
+  await cardsPage.getByPlaceholder('Say something about this…').fill('A draft on a repeated quote.')
+  if (await cardsPage.locator('.comment-composer-note').count()) throw new Error('clicked occurrence lost its draft anchor')
+  const correctDraftOccurrence = await cardsPage.evaluate(() => {
+    const range = [...CSS.highlights.get('comment-anchor-draft')][0]
+    const node = range.startContainer
+    const paragraph = (node instanceof Element ? node : node.parentElement).closest('p')
+    return paragraph === [...document.querySelectorAll('.doc-live-editor .ProseMirror p')].find(el => el.textContent === 'Repeated phrase.')
+  })
+  if (!correctDraftOccurrence) throw new Error('draft highlights another occurrence')
+  await cardsPage.locator('.comment-composer--anchored').getByRole('button', { name: 'Cancel', exact: true }).click()
+  ok('a repeated quote opens a reachable composer at the clicked occurrence')
   await cardsPage.setViewportSize({ width: 390, height: 844 })
   await cardsPage.getByRole('button', { name: 'Comment by Review partner: A useful anchored note.' }).click()
   await cardsPage.locator('.sheet .comment-card', { hasText: 'A useful anchored note.' }).waitFor()
@@ -961,10 +986,7 @@ try {
     waitForLive(sketchA),
     waitForLive(sketchB),
   ])
-  // Click the known trailing paragraph — Meta+ArrowDown is a macOS-only
-  // caret binding that no-ops on the Linux runner.
-  await sketchA.locator('.milkdown .ProseMirror > p', { hasText: 'Body.' }).click()
-  await sketchA.keyboard.press('End')
+  await placeCaretAtEnd(sketchA.locator('.doc-live-editor .ProseMirror > p', { hasText: 'Body.' }))
   await sketchA.keyboard.press('Enter')
   await sketchA.keyboard.type('/')
   await sketchA.locator('.thinkroom-slash-menu[data-visible="true"]').waitFor({ timeout: 5000 })
@@ -1429,11 +1451,7 @@ try {
   // Clicks must wait for the live editor: before the instant-paint swap the
   // only .milkdown .ProseMirror is the inert server preview.
   await waitForLive(failedChunkPage)
-  // Click the trailing paragraph directly — Meta+ArrowDown is a macOS-only
-  // caret binding, and on Linux Chromium a center click lands inside the
-  // code fence, turning /sketch into literal code text.
-  await failedChunkPage.locator('.doc-live-editor .ProseMirror > p', { hasText: 'Trailing line.' }).click()
-  await failedChunkPage.keyboard.press('End')
+  await placeCaretAtEnd(failedChunkPage.locator('.doc-live-editor .ProseMirror > p', { hasText: 'Trailing line.' }))
   await failedChunkPage.keyboard.press('Enter')
   await failedChunkPage.keyboard.type('/sketch')
   await failedChunkPage.locator('.sketch-load-error').waitFor({ timeout: 15000 })
