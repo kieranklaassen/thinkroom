@@ -130,6 +130,27 @@ try {
   assert.match(await feed.innerText(), /1 of \d+ recent events/)
   ok('Decisions remains selected and updates from real committed events')
 
+  await feed.getByRole('button', { name: 'All', exact: true }).click()
+  const humanStatus = await activityPage.evaluate(async (slug) => {
+    const response = await fetch(`/d/${slug}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content },
+      body: JSON.stringify({ slug, body: 'Human negative control', author_name: 'Human Reviewer' }),
+    })
+    return response.status
+  }, activitySlug)
+  assert.equal(humanStatus, 200)
+  const humanRow = feed.locator('.activity-row--human', { hasText: 'commented' }).first()
+  await humanRow.waitFor()
+  const humanName = await humanRow.locator('strong').innerText()
+  await postComment(humanName, 'Agent namesake')
+  await feed.locator('.activity-row--agent', { hasText: humanName }).first().waitFor()
+  assert.equal(await humanRow.count(), 1, 'human and agent namesakes retain separate rows')
+  await feed.getByRole('button', { name: 'Agents', exact: true }).click()
+  assert.equal(await feed.locator('.activity-row--human').count(), 0)
+  assert(await feed.locator('.activity-row--agent', { hasText: humanName }).count() > 0)
+  ok('Agents excludes human activity without conflating namesakes')
+
   await feed.getByRole('button', { name: 'Agents', exact: true }).click()
   assert(await feed.locator('.activity-row').count() > 6, 'filter changes preserve expansion')
   const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
@@ -161,8 +182,9 @@ try {
   await sheet.getByRole('button', { name: 'Agents', exact: true }).click()
   assert.equal(await sheet.locator('.activity-row').count(), 6)
   assert.equal(await sheet.locator('.activity-expander').getAttribute('aria-expanded'), 'false')
-  const buttonsFit = await sheet.locator('.activity-filters button').evaluateAll(elements => elements.every(el => el.getBoundingClientRect().height >= 44))
-  assert(buttonsFit, 'compact filter targets remain touch-sized')
+  const buttonHeights = await sheet.locator('.activity-filters button').evaluateAll(elements => elements.map(el => el.getBoundingClientRect().height))
+  assert.equal(buttonHeights.length, 3, 'compact sheet renders all three filters')
+  assert(buttonHeights.every(height => height >= 44), 'compact filter targets remain touch-sized')
   ok('mobile sheet shares preferences, persists changes and locks the underlying page')
   await activityPage.evaluate(() => {
     Object.defineProperty(document, 'cookie', { configurable: true, get: () => '', set: () => { throw new Error('Storage blocked') } })

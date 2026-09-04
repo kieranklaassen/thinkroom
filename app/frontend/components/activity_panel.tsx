@@ -10,6 +10,7 @@ const ACTION_LABELS: Record<string, string> = {
   created_document: 'created the document',
   accepted_suggestion: 'accepted a suggestion',
   rejected_suggestion: 'rejected a suggestion',
+  auto_rejected_suggestion: 'auto-rejected a suggestion',
   resolved_comment: 'resolved a comment',
 }
 
@@ -18,6 +19,7 @@ const PLURAL_LABELS: Record<string, (n: number) => string> = {
   commented: (n) => `left ${n} comments`,
   accepted_suggestion: (n) => `accepted ${n} suggestions`,
   rejected_suggestion: (n) => `rejected ${n} suggestions`,
+  auto_rejected_suggestion: (n) => `auto-rejected ${n} suggestions`,
   resolved_comment: (n) => `resolved ${n} comments`,
 }
 
@@ -26,7 +28,7 @@ const GROUP_WINDOW_MS = 60_000
 const FILTERS = ['all', 'agents', 'decisions'] as const
 export type ActivityFilter = (typeof FILTERS)[number]
 const FILTER_LABELS: Record<ActivityFilter, string> = { all: 'All', agents: 'Agents', decisions: 'Decisions' }
-const DECISIONS = new Set(['accepted_suggestion', 'rejected_suggestion', 'resolved_comment'])
+const DECISIONS = new Set(['accepted_suggestion', 'rejected_suggestion', 'auto_rejected_suggestion', 'resolved_comment'])
 
 interface ActivityGroup {
   newest: ActivityPayload
