@@ -23,6 +23,10 @@ const PLURAL_LABELS: Record<string, (n: number) => string> = {
 
 const VISIBLE_GROUPS = 6
 const GROUP_WINDOW_MS = 60_000
+const FILTERS = ['all', 'agents', 'decisions'] as const
+export type ActivityFilter = (typeof FILTERS)[number]
+const FILTER_LABELS: Record<ActivityFilter, string> = { all: 'All', agents: 'Agents', decisions: 'Decisions' }
+const DECISIONS = new Set(['accepted_suggestion', 'rejected_suggestion', 'resolved_comment'])
 
 interface ActivityGroup {
   newest: ActivityPayload
@@ -46,6 +50,7 @@ function groupActivities(activities: ActivityPayload[]): ActivityGroup[] {
     if (
       current &&
       current.newest.actor_name === activity.actor_name &&
+      current.newest.actor_kind === activity.actor_kind &&
       current.newest.action === activity.action &&
       Math.abs(current.lastAt - at) <= GROUP_WINDOW_MS
     ) {
@@ -62,7 +67,13 @@ function groupActivities(activities: ActivityPayload[]): ActivityGroup[] {
 
 export function ActivityPanel({ activities }: { activities: ActivityPayload[] }) {
   const [expanded, setExpanded] = useState(false)
-  const groups = useMemo(() => groupActivities(activities), [activities])
+  const [filter, setFilter] = useState<ActivityFilter>('all')
+  const matching = useMemo(() => activities.filter((activity) => {
+    if (filter === 'agents') return activity.actor_kind === 'agent' || activity.actor_kind === 'ai'
+    if (filter === 'decisions') return DECISIONS.has(activity.action)
+    return true
+  }), [activities, filter])
+  const groups = useMemo(() => groupActivities(matching), [matching])
   const visible = expanded ? groups : groups.slice(0, VISIBLE_GROUPS)
   const hidden = groups.length - VISIBLE_GROUPS
 
@@ -71,10 +82,27 @@ export function ActivityPanel({ activities }: { activities: ActivityPayload[] })
       <header className="rail-heading">
         <h2>Activity</h2>
       </header>
+      <div className="activity-filters" role="group" aria-label="Filter activity">
+        {FILTERS.map((value) => (
+          <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>
+            {FILTER_LABELS[value]}
+          </button>
+        ))}
+      </div>
+      {activities.length > 0 && (
+        <p className="activity-summary">
+          {matching.length} of {activities.length} recent events
+        </p>
+      )}
       {activities.length === 0 && (
         <p className="rail-empty">
           Quiet so far. When agents or collaborators act — suggest, comment,
           join — it shows up here live.
+        </p>
+      )}
+      {activities.length > 0 && matching.length === 0 && (
+        <p className="rail-empty">
+          No {filter === 'agents' ? 'agent activity' : 'decisions'} in the {activities.length} most recent events.
         </p>
       )}
       <ul className="activity-list">
@@ -112,8 +140,8 @@ export function ActivityPanel({ activities }: { activities: ActivityPayload[] })
         })}
       </ul>
       {hidden > 0 && (
-        <button className="activity-expander" onClick={() => setExpanded((v) => !v)}>
-          {expanded ? 'Show fewer' : `Show all (${activities.length})`}
+        <button type="button" className="activity-expander" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
+          {expanded ? 'Show fewer' : `Show all ${groups.length} groups`}
         </button>
       )}
     </section>

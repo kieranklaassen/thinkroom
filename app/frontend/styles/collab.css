@@ -132,6 +132,39 @@
 }
 
 /* ------------------------------ Activity feed ----------------------------- */
+.activity-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.activity-filters button {
+  min-height: 2.75rem;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 1.5rem;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.activity-filters button[aria-pressed='true'] {
+  border-color: var(--line);
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+.activity-filters button:hover {
+  color: var(--ink);
+}
+
+.activity-summary {
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .activity-list {
   display: flex;
   flex-direction: column;

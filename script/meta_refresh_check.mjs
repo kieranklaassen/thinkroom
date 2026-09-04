@@ -14,6 +14,8 @@
 //   BASE_URL=http://localhost:3000 SLUG=demo node script/meta_refresh_check.mjs
 //
 import { chromium } from 'playwright'
+import assert from 'node:assert/strict'
+import { waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 const SLUG = process.env.SLUG ?? 'demo'
@@ -68,6 +70,66 @@ try {
   } catch {
     fail('suggestion never appeared: connected-refresh of cable-fed props is broken')
   }
+
+  // An isolated document exercises the real cable → Inertia → timeline chain.
+  const activityContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+  const activityPage = await activityContext.newPage()
+  const created = await activityContext.request.post(`${BASE}/api/docs`, {
+    data: { title: 'Activity filters check', content: '# Activity\n\nA document for live review.' },
+  })
+  assert(created.ok())
+  const activitySlug = (await created.json()).slug
+  await activityPage.goto(`${BASE}/d/${activitySlug}/edit`)
+  await waitForLive(activityPage)
+  const feed = activityPage.locator('.doc-rail').getByRole('region', { name: 'Activity', exact: true })
+  await feed.getByRole('button', { name: 'Agents', exact: true }).click({ timeout: 5000 })
+  assert.match(await feed.innerText(), /Quiet so far/)
+
+  const postComment = async (name, body) => {
+    const response = await activityContext.request.post(`${BASE}/api/docs/${activitySlug}/comments`, {
+      headers: { 'X-Agent-Name': name }, data: { body },
+    })
+    assert(response.ok(), `comment failed: ${response.status()}`)
+    return (await response.json()).comment.id
+  }
+  const commentIds = []
+  for (let i = 0; i < 7; i++) commentIds.push(await postComment(`Reviewer ${i}`, `Observation ${i}`))
+  await feed.locator('.activity-row', { hasText: 'Reviewer 6' }).first().waitFor()
+  assert.equal(await feed.getByRole('button', { name: 'Agents', exact: true }).getAttribute('aria-pressed'), 'true')
+  assert.equal(await feed.locator('.activity-row').count(), 6)
+  await feed.getByRole('button', { name: /Show all/ }).click()
+  assert(await feed.locator('.activity-row').count() > 6)
+  assert.match(await feed.innerText(), /recent events/)
+
+  // A new member of the head group keeps the actual DOM row and focus.
+  // The first comment is followed by the actor's joined event, so start a
+  // fresh consecutive comment group after that presence has been established.
+  await postComment('Reviewer 6', 'Second observation')
+  await postComment('Reviewer 6', 'Third observation')
+  await feed.locator('.activity-row', { hasText: 'left 2 comments' }).waitFor()
+  await feed.getByRole('button', { name: 'Agents', exact: true }).focus()
+  await activityPage.evaluate(() => {
+    window.__activityRow = [...document.querySelectorAll('.doc-rail .activity-row')].find(el => el.textContent.includes('left 2 comments'))
+    window.__activityFocus = document.activeElement
+  })
+  await postComment('Reviewer 6', 'Fourth observation')
+  await feed.locator('.activity-row', { hasText: 'left 3 comments' }).waitFor()
+  assert(await activityPage.evaluate(() => window.__activityRow?.isConnected && window.__activityFocus === document.activeElement))
+  ok('live grouping retains row identity, expansion and keyboard focus')
+
+  await feed.getByRole('button', { name: 'Decisions', exact: true }).click()
+  assert.equal(await feed.locator('.activity-row').count(), 0)
+  assert.match(await feed.innerText(), /No decisions in the .*recent events/)
+  const resolved = await activityContext.request.post(`${BASE}/api/docs/${activitySlug}/comments/${commentIds[0]}/resolve`, {
+    headers: { 'X-Agent-Name': 'Reviewer 0' },
+  })
+  assert(resolved.ok())
+  await feed.locator('.activity-row', { hasText: 'resolved a comment' }).waitFor()
+  assert.equal(await feed.getByRole('button', { name: 'Decisions', exact: true }).getAttribute('aria-pressed'), 'true')
+  assert.equal(await feed.locator('.activity-row').count(), 1)
+  assert.match(await feed.innerText(), /1 of \d+ recent events/)
+  ok('Decisions remains selected and updates from real committed events')
+  await activityContext.close()
 } finally {
   // Leave the shared demo doc as found: a lingering pending suggestion
   // becomes the FIRST margin card for later checks in the CI loop
