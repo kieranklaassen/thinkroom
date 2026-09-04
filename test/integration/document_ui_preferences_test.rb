@@ -5,6 +5,26 @@ class DocumentUiPreferencesTest < ActionDispatch::IntegrationTest
     @document = Document.create!(title: "Preferences", seed_markdown: "# Preferences")
   end
 
+  test "theme preference agrees with the initial HTML for both legacy choices" do
+    %w[proof whitey].each do |theme|
+      cookies[:proof_theme] = theme
+      get document_page_path(@document.slug), headers: browser
+
+      assert_inertia_props { |props| props.dig(:ui, :theme) == theme }
+      assert_select "html[data-theme=?]", theme
+    end
+  end
+
+  test "missing and invalid theme preferences use the same server default" do
+    [ nil, "", "unknown" ].each do |theme|
+      cookies[:proof_theme] = theme
+      get document_page_path(@document.slug), headers: browser
+
+      assert_inertia_props { |props| props.dig(:ui, :theme) == "proof" }
+      assert_select "html[data-theme=proof]"
+    end
+  end
+
   test "document width preference is exposed for first paint" do
     cookies[:pruf_width] = "864"
 

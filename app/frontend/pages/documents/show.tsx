@@ -83,6 +83,7 @@ import type {
   SuggestionPayload,
 } from '../../types/payloads'
 import { setCookie, setCookieFlag } from '../../lib/cookies'
+import { applyTheme, type ThemeName } from '../../lib/theme'
 import {
   RICH_BLOCK_WIDTH_EVENT,
   type RichBlockWidthEventDetail,
@@ -114,6 +115,7 @@ export interface DocumentProps {
   // Server-rendered UI prefs from cookies — the source of truth for first
   // paint so SSR and the client's first render agree (no post-hydration flip).
   ui: {
+    theme: ThemeName
     panel_open: boolean
     focus_mode: boolean
     mode: EditorMode
@@ -198,6 +200,14 @@ export default function DocumentShow({
   // width while the URL supplies mode, so SSR and the first client render agree.
   const [panelOpen, setPanelOpen] = useState(ui.panel_open)
   const [focusMode, setFocusMode] = useState(ui.focus_mode)
+  const [theme, setTheme] = useState(ui.theme)
+  const changeTheme = useCallback((next: ThemeName) => {
+    applyTheme(next)
+    setTheme(next)
+  }, [])
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+  }, [theme])
   const [documentWidth, setDocumentWidth] = useState<number | null>(ui.document_width)
   const [richContentWidth, setRichContentWidth] = useState<number | null>(ui.rich_content_width)
 
@@ -869,6 +879,8 @@ export default function DocumentShow({
               onOpenChange={setShareOpen}
             />
             <HeaderMenu
+              theme={theme}
+              onChangeTheme={changeTheme}
               panelOpen={panelOpen}
               onTogglePanel={() => setPanelOpen((open) => !open)}
               focusMode={focusMode}

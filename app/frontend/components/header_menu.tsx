@@ -5,9 +5,12 @@ import { OwnershipChip } from './ownership_chip'
 import type { LinkAccess, OwnershipPayload } from '../types/payloads'
 import { FeedbackButton } from './feedback_button'
 import { ThemePicker } from './theme_picker'
+import type { ThemeName } from '../lib/theme'
 import type { AccountPayload } from '../types/viewer'
 
 interface Props {
+  theme: ThemeName
+  onChangeTheme: (theme: ThemeName) => void
   panelOpen: boolean
   onTogglePanel: () => void
   focusMode: boolean
@@ -36,6 +39,8 @@ const LINK_ACCESS_OPTIONS: ReadonlyArray<{
  * ‹name›", or the fallback Claim item (the banner is the primary claim CTA).
  */
 export function HeaderMenu({
+  theme,
+  onChangeTheme,
   panelOpen,
   onTogglePanel,
   focusMode,
@@ -100,7 +105,7 @@ export function HeaderMenu({
         </button>
         <div className="header-menu-theme">
           <span>Theme</span>
-          <ThemePicker />
+          <ThemePicker theme={theme} onChange={onChangeTheme} />
         </div>
       </div>
       {showOwnership && (

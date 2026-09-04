@@ -539,6 +539,7 @@ class DocumentsController < InertiaController
     document_width = Integer(cookies[:pruf_width], exception: false)
     rich_content_width = Integer(cookies[:pruf_rich_width], exception: false)
     {
+      theme: cookies[:proof_theme].to_s.presence_in(%w[proof whitey]) || "proof",
       panel_open: cookies[:pruf_panel] != "0",
       focus_mode: cookies[:pruf_focus] == "1",
       mode:,
