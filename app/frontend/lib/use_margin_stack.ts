@@ -24,12 +24,15 @@ export interface MarginStackEntry<K extends string | number> {
 export function useMarginStack<K extends string | number>(
   measure: () => MarginStackEntry<K>[] | null,
   deps: unknown[],
+  layoutElement: HTMLElement | null = null,
 ): {
+  height: number
   tops: Map<K, number>
   placed: Set<K>
   setCardRef: (key: K) => (el: HTMLElement | null) => void
 } {
   const cardRefs = useRef(new Map<K, HTMLElement>())
+  const [height, setHeight] = useState(0)
   const [tops, setTops] = useState(new Map<K, number>())
   const [placed, setPlaced] = useState<Set<K>>(new Set())
   const [resizeTick, setResizeTick] = useState(0)
@@ -53,6 +56,15 @@ export function useMarginStack<K extends string | number>(
     }
   }, [])
 
+  useEffect(() => {
+    const observer = new ResizeObserver(() => setResizeTick((tick) => tick + 1))
+    cardRefs.current.forEach((element) => observer.observe(element))
+    if (layoutElement) observer.observe(layoutElement)
+    return () => observer.disconnect()
+    // Re-subscribe when membership or layout changes, not on a position update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, layoutElement])
+
   useLayoutEffect(() => {
     const entries = measure()
     if (!entries) return
@@ -66,6 +78,7 @@ export function useMarginStack<K extends string | number>(
       next.set(entry.key, top)
       prevBottom = top + height
     }
+    setHeight(Math.max(0, prevBottom + CARD_GAP))
     setTops((prev) => {
       if (prev.size === next.size && [...next].every(([key, top]) => prev.get(key) === top)) {
         return prev
@@ -98,5 +111,5 @@ export function useMarginStack<K extends string | number>(
     [],
   )
 
-  return { tops, placed, setCardRef }
+  return { tops, placed, setCardRef, height }
 }

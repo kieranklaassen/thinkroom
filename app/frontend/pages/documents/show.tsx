@@ -34,7 +34,7 @@ import {
 import { ProvenanceSummaryChip } from '../../components/provenance_summary'
 import { HighlightLegendPanel } from '../../components/highlight_legend_panel'
 import { ReviewPopover } from '../../components/review_popover'
-import { MarginSuggestions } from '../../components/margin_suggestions'
+import { MarginAnnotations } from '../../components/margin_annotations'
 import { CommentsPanel } from '../../components/comments_panel'
 import { AnchoredComposer } from '../../components/anchored_composer'
 import { SelectionToolbar } from '../../components/selection_toolbar'
@@ -677,12 +677,14 @@ export default function DocumentShow({
 
   // Rail cards ↔ document text: every open anchor stays tinted in Comment
   // mode, and hovering/clicking a card highlights/jumps to its text.
-  const { anchoredIds, hoverAnchor, jumpToComment } = useCommentAnchors({
+  const { anchoredIds, anchorRanges, hoverAnchor, jumpToComment } = useCommentAnchors({
     comments,
     handle,
     docTick,
     tintAll: effectiveMode === 'comment',
   })
+
+  const marginComments = useMemo(() => comments.filter((comment) => !comment.resolved && anchorRanges.has(comment.id)), [comments, anchorRanges])
 
   // ⌘\ hides the rail with CSS while the panel stays mounted, so a card
   // hovered at that moment never gets its mouseleave — drop the spotlight.
@@ -976,7 +978,16 @@ export default function DocumentShow({
             />
             {!isReading && (
               <div className="margin-gutter">
-                <MarginSuggestions
+                <MarginAnnotations
+                  comments={marginComments}
+                  anchorRanges={anchorRanges}
+                  onResolveComment={resolveComment}
+                  onJumpToComment={jumpToComment}
+                  onHoverComment={hoverAnchor}
+                  onCommentMarkerSelect={(comment) => {
+                    if (isMobile) setActiveSheet('comments')
+                    else { setFocusMode(false); jumpToComment(comment) }
+                  }}
                   items={reviewItems}
                   handle={handle}
                   focusMode={focusMode || isMobile}
@@ -997,6 +1008,7 @@ export default function DocumentShow({
               {!isReading && (
                 <CommentsPanel
                   comments={comments}
+                  marginIds={focusMode ? null : anchoredIds}
                   // The desktop composer is the anchored card next to the
                   // selection — the rail keeps the list only.
                   composerAnchor={null}

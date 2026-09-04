@@ -11,7 +11,18 @@ import {
   type ReviewableSuggestion,
 } from './suggestion_card'
 
+import { CommentCard } from './comment_card'
+import type { CommentPayload } from '../types/payloads'
+import type { CommentRange } from '../editor/comment_anchors'
+
 interface Props {
+  comments: CommentPayload[]
+  anchorRanges: Map<number, CommentRange>
+  onResolveComment: (comment: CommentPayload) => void
+  onJumpToComment: (comment: CommentPayload) => void
+  onHoverComment: (comment: CommentPayload | null) => void
+  onCommentMarkerSelect: (comment: CommentPayload) => void
+  resolvingComments?: Set<number>
   /** Server rows and doc-native tracked edits, ranges pre-resolved per doc
    *  version (useSuggestionReview) — new array identity is the remeasure
    *  signal for local AND remote document changes. */
@@ -32,11 +43,13 @@ interface Props {
  * the CSS Custom Highlight API where available; tracked edits are already
  * tinted by their marks.
  */
-export function MarginSuggestions({ items, handle, focusMode, onMarkerSelect }: Props) {
+export function MarginAnnotations({ items, comments, anchorRanges, handle, focusMode, onMarkerSelect, onResolveComment, onJumpToComment, onHoverComment, onCommentMarkerSelect, resolvingComments }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rangesRef = useRef(new Map<string, Range>())
 
-  const { tops, placed, setCardRef } = useMarginStack<string>(() => {
+  let layoutElement: HTMLElement | null = null
+  try { layoutElement = handle?.editor.action((ctx) => ctx.get(editorViewCtx).dom) ?? null } catch { /* editor unmount */ }
+  const { tops, placed, setCardRef, height } = useMarginStack<string>(() => {
     const container = containerRef.current
     if (!container || !handle) return null
 
@@ -67,9 +80,16 @@ export function MarginSuggestions({ items, handle, focusMode, onMarkerSelect }: 
       return { key: item.key, top: Math.max(0, top) }
     })
 
+    for (const comment of comments) {
+      const range = anchorRanges.get(comment.id)
+      if (!range) continue
+      try {
+        entries.push({ key: `comment:${comment.id}`, top: Math.max(0, view.coordsAtPos(range.from).top - containerTop) })
+      } catch { /* remeasured after the next document change */ }
+    }
     setHighlight('sug-anchor', [...rangesRef.current.values()])
     return entries
-  }, [items, handle, focusMode])
+  }, [items, comments, anchorRanges, handle, focusMode], layoutElement)
 
   useEffect(() => {
     if (!supportsHighlights) return
@@ -109,7 +129,24 @@ export function MarginSuggestions({ items, handle, focusMode, onMarkerSelect }: 
   const { resolving, resolve } = useResolveGuard(items)
 
   return (
-    <div className="margin-suggestions" ref={containerRef} aria-label="Pending suggestions">
+    <div className="margin-annotations" style={{ minHeight: height }} ref={containerRef} aria-label="Document annotations">
+      {comments.map((comment) => {
+        const key = `comment:${comment.id}`
+        return focusMode ? (
+          <button key={key} ref={setCardRef(key)}
+            className={`margin-marker margin-marker--comment ${placed.has(key) ? 'is-placed' : ''}`}
+            style={{ top: tops.get(key) ?? 0 }}
+            aria-label={`Comment by ${comment.author_name}: ${comment.body}`}
+            title={`Comment by ${comment.author_name}`}
+            onClick={() => onCommentMarkerSelect(comment)} />
+        ) : (
+          <div key={key} ref={setCardRef(key)} className={`margin-comment ${placed.has(key) ? 'is-placed' : ''}`}
+            style={{ top: tops.get(key) ?? 0 }}>
+            <CommentCard comment={comment} linked measured onResolve={onResolveComment}
+              onJumpTo={onJumpToComment} onHover={onHoverComment} resolving={resolvingComments?.has(comment.id)} />
+          </div>
+        )
+      })}
       {items.map((item) => {
         if (focusMode) {
           return (

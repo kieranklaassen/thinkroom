@@ -47,6 +47,7 @@ try {
   }
   await fetch(`${cardApi}/suggestions`, { method: 'POST', headers: cardHeaders, body: JSON.stringify({ body: 'A thoughtful review starts with a clear question.', anchor_text: cardAnchor, intent: 'clarity' }) })
   const cardsPage = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
+  cardsPage.setDefaultTimeout(10000)
   await cardsPage.goto(`${BASE}/d/${cardDoc.slug}/comment`)
   await waitForLive(cardsPage)
   const linkedNote = cardsPage.locator('.comment-card--linked', { hasText: 'A useful anchored note.' })
@@ -64,6 +65,71 @@ try {
   await cardsPage.waitForFunction(() => CSS.highlights?.has('comment-anchor-flash'))
   if (!await jumpButton.evaluate((el) => el === document.activeElement)) throw new Error('comment jump stole keyboard focus')
   ok('comment card has a keyboard jump that preserves focus')
+  const marginNote = cardsPage.locator('.margin-gutter .comment-card', { hasText: 'A useful anchored note.' })
+  await marginNote.waitFor({ timeout: 3000 })
+  if (await cardsPage.locator('.comment-card--linked').count() !== 1) throw new Error('ambiguous quote retained a guessed jump')
+  const annotations = await cardsPage.locator('.margin-card, .margin-comment').evaluateAll((els) => els.map((el) => {
+    const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }
+  }).sort((a, b) => a.top - b.top))
+  if (annotations.length !== 2 || annotations[1].top < annotations[0].bottom + 9) throw new Error('mixed annotation cards overlap')
+  console.log('mixed annotation geometry', JSON.stringify(annotations))
+  ok('unique quote joins suggestions; ambiguous and missing quotes remain in fallback')
+  await cardsPage.setViewportSize({ width: 390, height: 844 })
+  await cardsPage.getByRole('button', { name: 'Comment by Review partner: A useful anchored note.' }).click()
+  await cardsPage.locator('.sheet .comment-card', { hasText: 'A useful anchored note.' }).waitFor()
+  await cardsPage.getByRole('button', { name: 'Show in document', exact: true }).click()
+  await cardsPage.locator('.sheet').waitFor({ state: 'detached' })
+  await cardsPage.setViewportSize({ width: 1600, height: 1000 })
+  await marginNote.waitFor()
+  for (let n = 1; n <= 8; n++) {
+    await fetch(`${cardApi}/comments`, { method: 'POST', headers: cardHeaders,
+      body: JSON.stringify({ body: `Dense note ${n}. ${'A longer note remains readable. '.repeat(n)}`, anchor_text: cardAnchor }) })
+  }
+  await cardsPage.waitForFunction(() => document.querySelectorAll('.margin-comment').length === 9)
+  await cardsPage.waitForTimeout(250) // the existing stack transition must settle before geometry
+  const denseGeometry = await cardsPage.locator('.margin-card, .margin-comment').evaluateAll((els) => els.map((el) => {
+    const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }
+  }).sort((a, b) => a.top - b.top))
+  if (denseGeometry.some((r, i) => i > 0 && r.top < denseGeometry[i - 1].bottom + 9)) throw new Error('dense mixed stack overlaps')
+  const lastDense = cardsPage.locator('.margin-comment', { hasText: 'Dense note 8.' })
+  await lastDense.scrollIntoViewIfNeeded()
+  if (!await lastDense.isVisible()) throw new Error('last annotation is not scroll-reachable')
+  console.log('dense annotation displacement', Math.round(denseGeometry.at(-1).top - denseGeometry[0].top))
+  await marginNote.getByRole('button', { name: 'Show in document', exact: true }).click()
+  const cardsWriter = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
+  await cardsWriter.goto(`${BASE}/d/${cardDoc.slug}/edit`)
+  await waitForLive(cardsWriter)
+  const writerParagraph = cardsWriter.locator('.doc-live-editor .ProseMirror p').first()
+  await writerParagraph.click()
+  await cardsWriter.keyboard.press('Home')
+  await cardsWriter.keyboard.type('Inserted before the quote. ')
+  await cardsPage.locator('.doc-live-editor .ProseMirror p', { hasText: 'Inserted before the quote.' }).waitFor()
+  await marginNote.waitFor()
+  await cardsWriter.locator('.doc-live-editor .ProseMirror p').last().evaluate((paragraph) => {
+    paragraph.closest('.ProseMirror').focus()
+    const range = document.createRange(); range.selectNodeContents(paragraph); range.collapse(false)
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  await cardsWriter.waitForTimeout(100) // let ProseMirror read the native caret
+
+  await cardsWriter.keyboard.press('Enter')
+  await cardsWriter.keyboard.type(cardAnchor)
+  await cardsPage.waitForFunction((text) => [...document.querySelectorAll('.doc-live-editor .ProseMirror p')].filter((p) => p.textContent.includes(text)).length === 2, cardAnchor)
+  await marginNote.waitFor()
+  await writerParagraph.evaluate((paragraph) => {
+    paragraph.closest('.ProseMirror').focus()
+    const range = document.createRange(); range.selectNodeContents(paragraph)
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  await cardsWriter.waitForTimeout(100)
+
+  await cardsWriter.keyboard.press('Backspace')
+  await cardsPage.locator('.doc-rail .comment-card', { hasText: 'A useful anchored note.' }).waitFor()
+  if (await cardsPage.locator('.comment-card--linked', { hasText: 'A useful anchored note.' }).count()) throw new Error('deleted bound quote jumped to its later duplicate')
+  ok('remote edits track the original quote; deletion never rebinds to another occurrence')
+  await cardsWriter.close()
   await cardsPage.close()
   // END comment-card contract.
 

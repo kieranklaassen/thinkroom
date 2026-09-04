@@ -217,3 +217,10 @@
 @media (max-width: 72rem), (pointer: coarse) {
   .comment-jump, .comment-resolve, .comment-resolved-toggle { min-height: 44px; }
 }
+
+.margin-comment { position: absolute; left: 0.9rem; right: 0.4rem; pointer-events: auto; }
+.margin-comment.is-placed { transition: top 160ms ease; }
+.margin-marker--comment { width: 24px; height: 44px; margin-left: -12px; border-radius: 6px; background: none; }
+.margin-marker--comment::after { content: ''; display: block; width: 10px; height: 10px; margin: auto; border-radius: 50%; background: var(--accent); }
+.margin-marker--comment:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) { .margin-comment.is-placed { transition: none; } }

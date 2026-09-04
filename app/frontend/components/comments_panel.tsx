@@ -5,6 +5,8 @@ import type { CommentPayload } from '../types/payloads'
 
 interface Props {
   comments: CommentPayload[]
+  /** Linked open cards are rendered once in the desktop margin. */
+  marginIds?: Set<number> | null
   composerAnchor: string | null
   /** Ids of open comments whose anchor text resolves in the document; null
    *  while unmeasured (editor not mounted yet) — no linked/stale states then. */
@@ -18,6 +20,7 @@ interface Props {
 
 export function CommentsPanel({
   comments,
+  marginIds,
   composerAnchor,
   anchoredIds,
   onSubmit,
@@ -41,6 +44,7 @@ export function CommentsPanel({
   }, [onHover])
 
   const open = comments.filter((c) => !c.resolved)
+  const visibleOpen = open.filter((comment) => !marginIds?.has(comment.id))
   const resolved = comments.filter((c) => c.resolved)
 
   const submit = (event: FormEvent) => {
@@ -90,8 +94,10 @@ export function CommentsPanel({
         <p className="rail-empty">Select any text to start a conversation.</p>
       )}
 
+      {marginIds && marginIds.size > 0 && <p className="rail-empty">{marginIds.size} beside the text</p>}
+      {visibleOpen.length > 0 && marginIds && <p className="comment-scope">Other comments</p>}
       <ul className="comment-list">
-        {open.map((comment) => (
+        {visibleOpen.map((comment) => (
           <li key={comment.id}>
             <CommentCard comment={comment} linked={anchoredIds?.has(comment.id) ?? false}
               measured={anchoredIds !== null} onResolve={onResolve} onJumpTo={onJumpTo} onHover={onHover} />

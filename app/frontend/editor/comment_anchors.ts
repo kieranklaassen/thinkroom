@@ -1,36 +1,25 @@
 import type { Node } from '@milkdown/kit/prose/model'
-import { findTextRange } from './suggestions'
+import { findTextRanges } from './suggestions'
 
-/**
- * Selection-toolbar comments over multiple paragraphs store the anchor as
- * `textBetween(from, to, '\n')`, which the within-block matcher can never
- * find. Locate the first and last lines separately and accept the span only
- * when the text between them reproduces the anchor exactly — a false hit on
- * a duplicated first line fails that check and resolves to nothing.
- */
-function findMultiBlockRange(
-  doc: Node,
-  anchor: string,
-): { from: number; to: number } | null {
-  const lines = anchor.split('\n').filter((line) => line.length > 0)
-  if (lines.length < 2) return null
-  const first = findTextRange(doc, lines[0])
-  const last = findTextRange(doc, lines[lines.length - 1])
-  if (!first || !last || last.to <= first.from) return null
-  if (doc.textBetween(first.from, last.to, '\n') !== anchor) return null
-  return { from: first.from, to: last.to }
-}
+export interface CommentRange { from: number; to: number }
 
-/**
- * Where a comment's anchor text lives in the doc: first within-block
- * occurrence (the historical comment behavior), else the multi-block span
- * a cross-paragraph selection produced. Used for composer placement, the
- * draft highlight, and the rail cards' anchor tint/hover/jump.
- */
-export const findCommentAnchorRange = (
-  doc: Node,
-  anchor: string | null,
-): { from: number; to: number } | null => {
+/** Stored quotes have no durable identity. Never guess among occurrences,
+ * including overlapping matches or duplicated multi-paragraph selections. */
+export function findCommentAnchorRange(doc: Node, anchor: string | null): CommentRange | null {
   if (!anchor) return null
-  return findTextRange(doc, anchor) ?? findMultiBlockRange(doc, anchor)
+  const matches = findTextRanges(doc, anchor, true)
+  if (matches.length) return matches.length === 1 ? matches[0] : null
+  const lines = anchor.split('\n').filter(Boolean)
+  if (lines.length < 2) return null
+  const first = findTextRanges(doc, lines[0], true)
+  const last = findTextRanges(doc, lines[lines.length - 1], true)
+  let found: CommentRange | null = null
+  for (const start of first) {
+    for (const end of last) {
+      if (end.to <= start.from || doc.textBetween(start.from, end.to, '\n') !== anchor) continue
+      if (found) return null
+      found = { from: start.from, to: end.to }
+    }
+  }
+  return found
 }

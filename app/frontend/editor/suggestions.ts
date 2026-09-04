@@ -30,7 +30,7 @@ export function findTextRange(
   return findTextRanges(doc, search)[0] ?? null
 }
 
-function findTextRanges(doc: Node, search: string | null): { from: number; to: number }[] {
+export function findTextRanges(doc: Node, search: string | null, overlapping = false): { from: number; to: number }[] {
   if (!search) return []
   const results: { from: number; to: number }[] = []
 
@@ -63,7 +63,7 @@ function findTextRanges(doc: Node, search: string | null): { from: number; to: n
           to: endSeg.docFrom + (endIndex - endSeg.strFrom),
         })
       }
-      fromIndex = index + Math.max(1, search.length)
+      fromIndex = index + (overlapping ? 1 : Math.max(1, search.length))
     }
     return true
   })
