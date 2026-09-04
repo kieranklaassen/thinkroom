@@ -34,6 +34,39 @@ const modeOption = (page, label) =>
     .filter({ has: page.locator('.mode-control-option-label', { hasText: new RegExp(`^${label}$`) }) })
 
 try {
+  // BEGIN comment-card contract (also runnable as a focused local slice).
+  const cardHeaders = { 'X-Agent-Name': 'Review partner', 'Content-Type': 'application/json' }
+  const cardDoc = await (await fetch(`${BASE}/api/docs`, {
+    method: 'POST', headers: cardHeaders,
+    body: JSON.stringify({ title: 'Comment card contract', content: '# Comment card contract\n\nA considered review starts with a clear question.\n\nRepeated phrase.\n\nRepeated phrase.' }),
+  })).json()
+  const cardApi = `${BASE}/api/docs/${cardDoc.slug}`
+  const cardAnchor = 'A considered review starts with a clear question.'
+  for (const [body, anchor_text] of [['A useful anchored note.', cardAnchor], ['A whole-document note.', null], ['A missing quote.', 'Text that is absent.'], ['An ambiguous quote.', 'Repeated phrase.']]) {
+    await fetch(`${cardApi}/comments`, { method: 'POST', headers: cardHeaders, body: JSON.stringify({ body, anchor_text }) })
+  }
+  await fetch(`${cardApi}/suggestions`, { method: 'POST', headers: cardHeaders, body: JSON.stringify({ body: 'A thoughtful review starts with a clear question.', anchor_text: cardAnchor, intent: 'clarity' }) })
+  const cardsPage = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
+  await cardsPage.goto(`${BASE}/d/${cardDoc.slug}/comment`)
+  await waitForLive(cardsPage)
+  const linkedNote = cardsPage.locator('.comment-card--linked', { hasText: 'A useful anchored note.' })
+  await linkedNote.waitFor()
+  const cardBaseline = await cardsPage.evaluate(() => ({
+    marginComments: document.querySelectorAll('.margin-gutter .comment-card').length,
+    railComments: document.querySelectorAll('.doc-rail .comment-card').length,
+    suggestions: document.querySelectorAll('.margin-card').length,
+    linkedComments: document.querySelectorAll('.comment-card--linked').length,
+  }))
+  console.log('comment layout characterization', JSON.stringify(cardBaseline))
+  const jumpButton = linkedNote.getByRole('button', { name: 'Show in document', exact: true })
+  await jumpButton.focus({ timeout: 3000 })
+  await cardsPage.keyboard.press('Enter')
+  await cardsPage.waitForFunction(() => CSS.highlights?.has('comment-anchor-flash'))
+  if (!await jumpButton.evaluate((el) => el === document.activeElement)) throw new Error('comment jump stole keyboard focus')
+  ok('comment card has a keyboard jump that preserves focus')
+  await cardsPage.close()
+  // END comment-card contract.
+
   // Personal appearance: the direct picker, options menu and shortcut share
   // one state, without replacing the live editor or losing a saved choice.
   const appearance = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
@@ -2135,7 +2168,7 @@ try {
   ok('unanchored comment card reads as on the whole document')
   await winB
     .locator('.comment-card', { hasText: 'Note anchored to vanished text.' })
-    .locator('.comment-scope', { hasText: 'no longer in the document' })
+    .locator('.comment-scope', { hasText: 'changed or cannot be matched uniquely' })
     .waitFor({ timeout: 10000 })
   ok('stale-anchor comment card flags its missing text')
 
