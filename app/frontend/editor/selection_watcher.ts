@@ -2,7 +2,7 @@ import { $ctx, $prose } from '@milkdown/kit/utils'
 import { Plugin, PluginKey } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
 
-export type SelectionCallback = (view: EditorView) => void
+export type SelectionCallback = (view: EditorView, cause: 'selection' | 'document') => void
 
 /** React registers a callback here to observe selection/doc changes. */
 export const selectionCallbackCtx = $ctx<{ fn: SelectionCallback | null }, 'selectionCallback'>(
@@ -22,7 +22,7 @@ const selectionWatcherProse = $prose((ctx) => {
         ) {
           return
         }
-        ctx.get(selectionCallbackCtx.key).fn?.(view)
+        ctx.get(selectionCallbackCtx.key).fn?.(view, prevState.doc.eq(view.state.doc) ? 'selection' : 'document')
       },
     }),
   })

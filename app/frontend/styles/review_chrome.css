@@ -138,86 +138,69 @@
 .prov-summary {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.2rem;
   font-size: 0.72rem;
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-
-.prov-summary-sep {
-  color: var(--ink-faint);
+.prov-summary-part {
+  font: inherit;
+  color: inherit;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: 0.35rem 0.2rem;
+  cursor: pointer;
 }
-
-.prov-summary-part--unreviewed {
-  color: var(--accent);
-}
+.prov-summary-part:hover { border-bottom-color: currentColor; }
+.prov-summary-part:disabled { cursor: wait; opacity: 0.5; }
+.prov-summary-part:focus-visible,
+.review-popover button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.prov-summary-sep { color: var(--ink-faint); }
+.prov-summary-part--unreviewed { color: var(--accent); }
+.prov-summary-compact { display: none; }
+.prov-summary-compact.is-native { display: flex; justify-content: center; padding: 0.35rem 0.5rem; }
+.prov-summary-compact .prov-summary { display: inline-flex; }
+.prov-summary-compact .prov-summary-part { min-height: 44px; }
+.review-notice { font-size: 0.8rem; text-align: center; color: var(--ink-soft); }
+.review-notice:not(:empty) { padding: 0.5rem 1rem; }
+::highlight(review-target) { background: var(--prov-pending-bg); text-decoration: underline; }
 
 /* ------------------------------ Review popover --------------------------- */
 .review-popover {
   position: fixed;
   z-index: 50;
   display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.65rem;
+  width: 304px;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
   background: var(--surface-raised);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.08);
-  padding: 0.3rem 0.6rem;
-  font-size: 0.72rem;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.1);
+  padding: 0.75rem;
+  font-size: 0.78rem;
   visibility: hidden;
 }
-
-.review-popover.is-placed {
-  visibility: visible;
-  animation: popover-in 140ms ease;
-}
-
-@keyframes popover-in {
-  from {
-    opacity: 0;
-    transform: translateY(3px);
-  }
-}
-
-.review-popover-author {
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.review-popover-states {
-  display: inline-flex;
-  gap: 3px;
-}
-
-.review-popover-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--line);
-}
-
-.review-popover-dot.is-active {
-  background: var(--prov-pending-line);
-}
-
-.review-popover-state {
-  color: var(--ink-soft);
-}
-
-.review-popover-action {
-  border: none;
-  background: var(--ink);
-  color: var(--surface);
-  font-size: 0.72rem;
-  font-weight: 550;
-  border-radius: 6px;
-  padding: 0.25rem 0.6rem;
-  cursor: pointer;
-  transition: background 120ms ease;
-}
-
-.review-popover-action:hover {
-  background: #000;
+.review-popover.is-placed { visibility: visible; animation: popover-in 140ms ease; }
+@keyframes popover-in { from { opacity: 0; transform: translateY(3px); } }
+.review-popover-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 0.75rem; }
+.review-popover-author { font-weight: 600; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.review-popover-author > span { font-weight: 400; color: var(--ink-soft); }
+.review-popover-state { flex-shrink: 0; color: var(--ink-soft); font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; padding: 0.2rem 0.4rem; border-radius: 10px; background: var(--surface); }
+.review-popover-state--pending { color: var(--accent); background: var(--prov-pending-bg); }
+.review-popover-explanation { margin: 0; line-height: 1.45; color: var(--ink-soft); }
+.review-popover-permission { display: block; margin-top: 0.5rem; }
+.review-popover-actions { display: flex; gap: 0.5rem; }
+.review-popover-action, .review-popover-close { min-height: 36px; font: inherit; border: 0; border-radius: 6px; padding: 0.4rem 0.7rem; cursor: pointer; }
+.review-popover-action { flex: 1; background: var(--ink); color: var(--surface-raised); font-weight: 550; }
+.review-popover-action:hover { background: var(--accent); }
+.review-popover-close { background: transparent; color: var(--ink-soft); }
+.review-popover-close:hover { background: var(--surface); }
+@media (max-width: 48rem) {
+  .prov-summary-compact { display: flex; justify-content: center; padding: 0.25rem 0.5rem; }
+  .review-popover-action, .review-popover-close { min-height: 44px; }
 }

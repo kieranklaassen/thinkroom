@@ -269,8 +269,8 @@
     max-width: calc(100vw - 16px);
   }
 
-  .review-popover-action {
-    min-height: 40px;
+  .review-popover-action, .review-popover-close {
+    min-height: 44px;
     padding: 0.5rem 0.9rem;
     font-size: 0.8rem;
   }

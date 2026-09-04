@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type RefObject } from 'react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import type { CommentRange } from '../../editor/comment_anchors'
-import { aiSpanAt, type AiSpan, type ProvenanceSpan } from '../../editor/provenance'
+import { resolveReviewTarget, type AiSpan, type ReviewTarget, type ProvenanceSpan } from '../../editor/provenance'
 import {
   useAnchoredPopover,
   type AnchoredPosition,
@@ -17,7 +17,7 @@ export type TextTarget =
   // Click-to-comment (Comment mode): the clicked block's text, anchored at
   // the click's collapsed selection.
   | { kind: 'comment'; text: string }
-  | { kind: 'review'; span: AiSpan }
+  | { kind: 'review'; target: ReviewTarget; keyboard: boolean }
 
 interface Options {
   viewRef: RefObject<EditorView | null>
@@ -150,21 +150,21 @@ export function useFloatingChrome({
     if (textTarget?.kind !== 'review') return null
     const view = viewRef.current
     if (!view) return null
-    return aiSpanAt(view.state)
+    return resolveReviewTarget(view.state, textTarget.target)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [textTarget, spans, popoverTick])
+  }, [textTarget, spans, popoverTick, docTick])
   const reviewActive = Boolean(liveReviewSpan) && !pointerHeld && !chromeSuppressed
   const reviewPopover = useAnchoredPopover<HTMLDivElement>({
     active: reviewActive,
     getView: () => viewRef.current,
     getRange: () => {
       const view = viewRef.current
-      if (!view) return null
-      const span = aiSpanAt(view.state)
+      if (!view || textTarget?.kind !== 'review') return null
+      const span = resolveReviewTarget(view.state, textTarget.target)
       return span ? { from: span.from, to: span.to } : null
     },
     gap: popoverGap,
-    deps: [textTarget, spans, popoverTick],
+    deps: [textTarget, spans, popoverTick, docTick],
   })
 
   // Keep the whole boundary textblocks readable, not only the selected word:

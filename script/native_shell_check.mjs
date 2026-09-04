@@ -39,6 +39,39 @@ try {
     hasTouch: true,
   })
   const page = await native.newPage()
+  // Guided review remains reachable when the web header is hidden.
+  const reviewFixtureResponse = await fetch(`${BASE}/api/docs`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Agent-Name': 'Native reviewer' },
+    body: JSON.stringify({ content: '# Native review\n\nRead this passage before endorsing it.' }),
+  })
+  if (!reviewFixtureResponse.ok) throw new Error(`native review fixture: ${reviewFixtureResponse.status}`)
+  const reviewFixture = await reviewFixtureResponse.json()
+  const guided = await native.newPage()
+  await guided.goto(`${BASE}/d/${reviewFixture.slug}/edit`); await waitForLive(guided)
+  await guided.evaluate(() => {
+    document.documentElement.style.setProperty('--ruby-native-safe-area-inset-top', '47px')
+    document.documentElement.style.setProperty('--ruby-native-safe-area-inset-bottom', '34px')
+  })
+  const pendingNavigation = guided.locator('.prov-summary-compact').getByRole('button', { name: /Find next unreviewed/ })
+  await pendingNavigation.tap()
+  const guidance = guided.getByRole('dialog', { name: 'Review AI text' })
+  await guidance.waitFor({ state: 'visible' })
+  const guidanceBox = await guidance.boundingBox()
+  check(guidanceBox.y >= 47 && guidanceBox.y + guidanceBox.height <= 810, 'native: guided review clears safe areas')
+  const nextAction = guidance.getByRole('button', { name: 'Mark reviewed', exact: true })
+  check((await nextAction.boundingBox()).height >= 44, 'native: review actions have touch-sized targets')
+  await nextAction.tap()
+  await guidance.getByRole('button', { name: 'Endorse', exact: true }).tap()
+  await guidance.getByRole('button', { name: 'Done', exact: true }).tap()
+  for (let i = 0; i < 4; i++) {
+    await pendingNavigation.tap()
+    if (await guided.getByRole('status').filter({ hasText: 'All caught up' }).isVisible()) break
+    await guidance.getByRole('button', { name: 'Mark reviewed', exact: true }).tap()
+    await guidance.getByRole('button', { name: 'Close', exact: true }).tap()
+  }
+  check(await guided.getByRole('status').filter({ hasText: 'All caught up' }).isVisible() && await guidance.count() === 0,
+    'native: zero pending passages announce completion without stale guidance')
+  await guided.close()
 
   // Doc page first: opening it records the slug in the session's recents,
   // which the home trailing menu's "Open the demo" item renders from.

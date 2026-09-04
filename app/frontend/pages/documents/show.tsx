@@ -1,4 +1,5 @@
 import { findCommentAnchorRange } from '../../editor/comment_anchors'
+import { clearHighlight, domRange, setHighlight } from '../../lib/highlights'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Head, Link, router, usePoll } from '@inertiajs/react'
 import { nativeHaptic } from '@ruby-native/react'
@@ -11,6 +12,10 @@ import { provenanceIdentityCtx } from '../../editor/provenance'
 import {
   aiSpanAt,
   applyReviewState,
+  bindReviewTarget,
+  resolveReviewTarget,
+  nextProvenanceRange,
+  type ProvenanceFilter,
   type ProvenanceSpan,
   type ReviewState,
 } from '../../editor/provenance'
@@ -202,6 +207,11 @@ export default function DocumentShow({
   // click-to-comment, AI review) — one cell, structurally mutually exclusive.
   const [textTarget, setTextTarget] = useState<TextTarget | null>(null)
   const viewRef = useRef<EditorView | null>(null)
+  const textTargetRef = useRef(textTarget)
+  textTargetRef.current = textTarget
+  const reviewTrigger = useRef<HTMLElement | null>(null)
+  const navigatingReview = useRef(false)
+  const [reviewNotice, setReviewNotice] = useState('')
   // Hydration-safe init from server-rendered prefs: cookies supply panel/focus/
   // width while the URL supplies mode, so SSR and the first client render agree.
   const [panelOpen, setPanelOpen] = useState(ui.panel_open)
@@ -560,8 +570,23 @@ export default function DocumentShow({
   // Priority-ordered dispatch: text selection → mobile suggestion tap →
   // click-to-comment → AI review span. Exactly one target (or none) comes
   // out — the single textTarget cell makes that mutual exclusion structural.
-  const handleSelection = useCallback((view: EditorView) => {
+  const handleSelection = useCallback((view: EditorView, cause: 'selection' | 'document' = 'selection') => {
     viewRef.current = view
+    if (navigatingReview.current || modeRef.current === 'read') return
+    if (cause === 'document') {
+      const current = textTargetRef.current
+      if (current?.kind === 'review') {
+        if (!resolveReviewTarget(view.state, current.target)) {
+          setTextTarget(null)
+          setReviewNotice('That passage changed. Choose text to review again.')
+        }
+        return
+      }
+      // A remote edit or undo must not reopen dismissed guidance.
+      if (!current) return
+    }
+    setReviewNotice('')
+    reviewTrigger.current = null
     const { from, to, empty } = view.state.selection
 
     // Only require focus when the view is editable: in Comment mode the
@@ -614,7 +639,8 @@ export default function DocumentShow({
     }
 
     const span = aiSpanAt(view.state)
-    setTextTarget(span ? { kind: 'review', span } : null)
+    const target = span ? bindReviewTarget(view.state, span) : null
+    setTextTarget(target ? { kind: 'review', target, keyboard: false } : null)
   }, [])
 
   // Review/selection chrome belongs to the text that opened it. ProseMirror
@@ -641,7 +667,7 @@ export default function DocumentShow({
         return
       }
       if (
-        target.closest('.selection-toolbar, .review-popover, .comment-composer--anchored')
+        target.closest('.selection-toolbar, .review-popover, .comment-composer--anchored, .prov-summary')
       ) {
         return
       }
@@ -656,11 +682,56 @@ export default function DocumentShow({
     }
   }, [handleSelection])
 
+  const closeReview = useCallback(() => {
+    setTextTarget(null)
+    textTargetRef.current = null
+    clearHighlight('review-target')
+    const trigger = reviewTrigger.current
+    if (trigger?.isConnected) trigger.focus({ preventScroll: true })
+    else viewRef.current?.focus()
+  }, [])
+
+  const navigateProvenance = useCallback((filter: ProvenanceFilter, trigger: HTMLButtonElement, keyboard: boolean) => {
+    const handle = handleRef.current
+    if (!handle || modeRef.current === 'read') return
+    const view = handle.editor.action((ctx) => ctx.get(editorViewCtx))
+    viewRef.current = view
+    const span = nextProvenanceRange(view.state, filter)
+    clearHighlight('review-target')
+    if (!span) {
+      setTextTarget(null)
+      textTargetRef.current = null
+      setReviewNotice(filter === 'unreviewed'
+        ? 'All caught up — no unreviewed AI text.'
+        : `No ${filter === 'human' ? 'human' : 'AI'} text in this document.`)
+      return
+    }
+    const target = span.attrs.kind === 'ai' ? bindReviewTarget(view.state, span) : null
+    navigatingReview.current = true
+    view.focus()
+    // Reveal the beginning, not the far end of a multi-screen passage.
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, span.to, span.from)).scrollIntoView())
+    const start = view.coordsAtPos(span.from)
+    window.scrollBy({ top: start.top - Math.min(300, window.innerHeight * 0.4), behavior: 'instant' })
+    navigatingReview.current = false
+    reviewTrigger.current = trigger
+    const next: TextTarget | null = target ? { kind: 'review', target, keyboard } : null
+    textTargetRef.current = next
+    setTextTarget(next)
+    setReviewNotice(span.attrs.kind === 'human' ? 'Human-written passage selected.' : '')
+    if (!target) trigger.focus({ preventScroll: true })
+  }, [])
+
   const handleAdvance = useCallback((state: ReviewState) => {
     const view = viewRef.current
-    if (!view) return
-    const span = aiSpanAt(view.state)
-    if (!span) return
+    const current = textTargetRef.current
+    if (!view || current?.kind !== 'review' || modeRef.current !== 'edit' || !ownershipRef.current.can_write) return
+    const span = resolveReviewTarget(view.state, current.target)
+    if (!span) {
+      setTextTarget(null)
+      setReviewNotice('That passage changed. Choose text to review again.')
+      return
+    }
     applyReviewState(view, span, state)
   }, [])
 
@@ -803,6 +874,24 @@ export default function DocumentShow({
     isMobile,
   })
 
+  useEffect(() => {
+    const view = viewRef.current
+    const range = reviewActive && liveReviewSpan && view ? domRange(view, liveReviewSpan.from, liveReviewSpan.to) : null
+    setHighlight('review-target', range ? [range] : [])
+    return () => clearHighlight('review-target')
+  }, [reviewActive, liveReviewSpan, docTick])
+
+  useEffect(() => {
+    if (textTarget?.kind !== 'review') return
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      closeReview()
+    }
+    window.addEventListener('keydown', escape)
+    return () => window.removeEventListener('keydown', escape)
+  }, [textTarget, closeReview])
+
   const documentStyle = {
     ...(documentWidth === null ? {} : { '--document-width': `${documentWidth}px` }),
     ...(richContentWidth === null ? {} : { '--rich-content-width': `${richContentWidth}px` }),
@@ -889,7 +978,7 @@ export default function DocumentShow({
                 followingClientId={followingClientId}
                 onFollow={toggleFollow}
               />
-              {!isReading && <ProvenanceSummaryChip spans={spans} />}
+              {!isReading && <ProvenanceSummaryChip spans={spans} ready={Boolean(handle)} onNavigate={navigateProvenance} />}
               <IdentityChip
                 identity={identity}
                 guest={guest}
@@ -973,6 +1062,10 @@ export default function DocumentShow({
             </>}
           </section>
         )}
+        {!isReading && <div className={`prov-summary-compact ${nativeApp ? 'is-native' : ''}`}>
+          <ProvenanceSummaryChip spans={spans} ready={Boolean(handle)} onNavigate={navigateProvenance} />
+        </div>}
+        {!isReading && <div className="review-notice" role="status" aria-live="polite">{reviewNotice}</div>}
         <main className="doc-body">
           <div className={`doc-canvas ${focusMode ? 'is-focus' : ''}`}>
             <article className="doc-main">
@@ -1114,6 +1207,9 @@ export default function DocumentShow({
             span={liveReviewSpan}
             position={reviewPopover.position}
             onAdvance={handleAdvance}
+            canReview={effectiveMode === 'edit' && ownership.can_write}
+            focusRequest={textTarget?.kind === 'review' && textTarget.keyboard ? textTarget.target : null}
+            onClose={closeReview}
           />
         )}
         {!isReading && composerOpen && composerAnchor !== null && (
