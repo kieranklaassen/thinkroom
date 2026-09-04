@@ -89,6 +89,18 @@ try {
     return clone.textContent
   })
   const assertReview = (condition, message) => { if (!condition) throw new Error(message); ok(message) }
+  const reviewStateSnapshot = (page) => page.locator('.doc-live-editor [data-provenance]').evaluateAll((els) => els.map((el) => {
+    const clone = el.cloneNode(true)
+    clone.querySelectorAll('.ProseMirror-widget').forEach((widget) => widget.remove())
+    return [el.dataset.kind, el.dataset.author, el.dataset.state, clone.textContent]
+  }))
+  const beforeHumanNavigation = await reviewStateSnapshot(reviewA)
+  await reviewNav(reviewA, 'human').focus()
+  await reviewA.keyboard.press('Enter')
+  await reviewA.getByRole('status').filter({ hasText: 'Human-written passage selected.' }).waitFor()
+  assertReview(await selectedReviewText(reviewA) === 'Guided review contract', 'Human navigation selects the exact human passage')
+  assertReview(await reviewCard(reviewA).count() === 0 && await reviewNav(reviewA, 'human').evaluate((el) => el === document.activeElement), 'Human navigation retains trigger focus without review guidance')
+  assertReview(JSON.stringify(await reviewStateSnapshot(reviewA)) === JSON.stringify(beforeHumanNavigation), 'Human navigation does not change provenance state')
   await reviewNav(reviewA, 'unreviewed').click()
   await reviewNav(reviewB, 'unreviewed').click()
   await reviewCard(reviewA).waitFor({ state: 'visible' })
@@ -154,11 +166,6 @@ try {
   // Undo may group recent local mark/text operations under the existing
   // Yjs capture window. Persistence must preserve the resulting state, not
   // impose a different undo contract on this UI port.
-  const reviewStateSnapshot = (page) => page.locator('.doc-live-editor [data-provenance]').evaluateAll((els) => els.map((el) => {
-    const clone = el.cloneNode(true)
-    clone.querySelectorAll('.ProseMirror-widget').forEach((widget) => widget.remove())
-    return [el.dataset.kind, el.dataset.author, el.dataset.state, clone.textContent]
-  }))
   const savedReviewState = await reviewStateSnapshot(reviewB)
   await reviewA.waitForFunction((expected) => JSON.stringify([...document.querySelectorAll('.doc-live-editor [data-provenance]')].map((el) => {
     const clone = el.cloneNode(true)

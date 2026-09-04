@@ -17,8 +17,14 @@ export type ProvenanceFilter = 'human' | 'ai' | 'unreviewed'
 const sameAttrs = (a: ProvenanceAttrs, b: ProvenanceAttrs): boolean =>
   a.kind === b.kind && a.author === b.author && a.state === b.state
 
+// ProseMirror documents are immutable. Scroll/selection remeasurement can
+// reuse their ranges; an edit or review transition produces a new document.
+const rangeCache = new WeakMap<Node, AiSpan[]>()
+
 /** Actual text intervals, never joined across blocks or pending insertions. */
-export function provenanceRanges(doc: Node): AiSpan[] {
+export function provenanceRanges(doc: Node): readonly AiSpan[] {
+  const cached = rangeCache.get(doc)
+  if (cached) return cached
   const ranges: AiSpan[] = []
   doc.descendants((node, pos) => {
     if (!node.isText || node.marks.some((m) => m.type.name === INSERTION_MARK)) return
@@ -28,6 +34,7 @@ export function provenanceRanges(doc: Node): AiSpan[] {
     if (last && last.to === pos && sameAttrs(last.attrs, attrs)) last.to += node.nodeSize
     else ranges.push({ from: pos, to: pos + node.nodeSize, attrs })
   })
+  rangeCache.set(doc, ranges)
   return ranges
 }
 
