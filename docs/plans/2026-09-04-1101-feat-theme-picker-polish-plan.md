@@ -37,7 +37,7 @@ The user prefers the benchmark's theme switcher. Thinkroom already applies theme
 
 - R1. Provide a directly discoverable desktop theme trigger and equivalent compact/mobile access, with a swatch, name, description, and selected indicator for each choice.
 - R2. Pointer and keyboard interaction must expose the same selection and keep every mounted picker synchronized.
-- R3. Theme changes must update the document and surrounding controls immediately without remounting the editor or losing selection.
+- R3. Theme changes must update the document and surrounding controls immediately without remounting the editor or losing selection; keep the reader's visible text block at its viewport position when typography reflows.
 
 **Remembering and rendering**
 
@@ -68,8 +68,8 @@ Whitey changes typography and page treatment, not just background color. Preserv
 
 - KTD1. **One page-owned theme state, seeded by Rails.** Extend `ui_prefs` and pass the selected theme to controlled picker instances. Reuse `lib/cookies.ts`; retain `proof_theme` and its existing values. This avoids independent picker state and module-global SSR state. Governs R2-R4.
 - KTD2. **Reuse the existing popover shell and token layer.** Extend `ThemePicker` with reusable options rather than introducing another overlay library. Keep `foundation.css` as the theme owner and audit component-specific overrides. Governs R1, R3, R5-R6.
-- KTD3. **Match exact keyboard chords.** Consolidate affected chrome shortcut matching and visible labels. The reference uses Mod+Shift+Period; validate it on target browsers and the native shell before adopting it. Preserve Mod+Backslash and Mod+Period. Governs R7.
-- KTD4. **Follow native radio-group behavior.** Arrow navigation changes selection while the group remains open; explicit activation or Escape can close it and restore trigger focus. This avoids closing the group after the first arrow key. Governs R2. See [WAI radio-group guidance](https://www.w3.org/WAI/ARIA/apg/patterns/radio/).
+- KTD3. **Match exact keyboard chords.** Consolidate affected chrome shortcut matching and visible labels. The reference uses Mod+Shift+Period; validate it on target browsers and the native shell before adopting it. If it conflicts, select and verify an unclaimed modifier chord and record the shipped chord with its UI label in the PR. Preserve Mod+Backslash and Mod+Period. Governs R7.
+- KTD4. **Follow native radio-group behavior.** Arrow navigation changes selection while the group remains open; explicit activation or Escape can close it and restore trigger focus without reverting the applied choice. This avoids closing the group after the first arrow key. Governs R2. See [WAI radio-group guidance](https://www.w3.org/WAI/ARIA/apg/patterns/radio/).
 
 ### Assumptions
 
@@ -92,6 +92,7 @@ flowchart TD
 ### Sources and Risks
 
 Current baseline: Thinkroom main `259fad051e62b0f03bcf34b1cd3dda1102e4ed28`.
+Revalidated for implementation against the same main commit on 2026-09-04. [Issue 218](https://github.com/kieranklaassen/thinkroom/issues/218) is the shipping scope; land this improvement before starting the sidebar, comments, or guided-review issues.
 Reference source: LFGBench run `01M1545XV8CV5PF3NGYS9CPPSA`, `app/frontend/features/theme/theme_picker.tsx`, `features/theme/use_theme.ts`, `lib/prefs.ts`, and `features/focus/shortcuts.ts` within its generated workspace.
 Use `docs/solutions/architecture-patterns/server-first-instant-paint.md` for first-paint constraints.
 If an external store proves necessary, its server snapshot must match hydration; do not copy a process-global mutable store into SSR ([React guidance](https://react.dev/reference/react/useSyncExternalStore)).
@@ -109,6 +110,7 @@ If an external store proves necessary, its server snapshot must match hydration;
 **Files:** `app/controllers/documents_controller.rb`, `app/views/layouts/application.html.erb`, `app/frontend/pages/documents/show.tsx`, `app/frontend/components/theme_picker.tsx`, `app/frontend/components/header_menu.tsx`, `app/frontend/lib/cookies.ts`, `test/integration/document_ui_preferences_test.rb`, `script/browser_check.mjs`.
 
 **Approach:** Apply KTD1 to existing UI props and callbacks. Preserve legacy keys and validate unknown values identically on server and client. Treat localStorage as optional compatibility storage, not an authority that flips a correct SSR paint.
+Preserve the topmost visible text block's viewport offset across the synchronous theme change; remeasure existing anchored chrome after typography changes without inserting editor DOM.
 
 **Patterns to follow:** Cookie-backed panel/focus/width props and controlled header toggles.
 
@@ -118,6 +120,7 @@ If an external store proves necessary, its server snapshot must match hydration;
 2. Change theme in one control, open another, and refresh: all show the same choice.
 3. Invalid cookie and unavailable localStorage produce a safe default without an exception.
 4. Switch themes with custom document/rich widths and a live editor selection: widths and selection remain intact.
+5. Reject storage writes mid-session: the selected theme remains applied without an exception. Switching while reading mid-document preserves the visible text block's position.
 
 **Verification:** Existing preference integration checks pass; no editor remount or hydration flash is introduced.
 
@@ -136,9 +139,10 @@ If an external store proves necessary, its server snapshot must match hydration;
 **Test scenarios:**
 
 1. Mouse and touch select either theme; swatch, description, and selected state agree.
-2. Tab enters at the selected radio; arrows and Space work; Escape returns focus to the trigger.
+2. Tab enters at the selected radio; arrows and Space work; Escape returns focus to the trigger and keeps the arrow-selected theme applied.
 3. Theme cycling fires once; repeated keydown, composition, and comment-input typing do not change preferences.
 4. Bold, mode switching, panel toggle, and suggestion focus keep their existing meanings.
+5. The shipped shortcut is visibly labeled in desktop and compact/native theme controls.
 
 **Verification:** Desktop, phone, and native-shell controls remain reachable with no header overflow.
 
@@ -157,6 +161,7 @@ If an external store proves necessary, its server snapshot must match hydration;
 1. Capture both themes at phone, tablet, and desktop widths with prose, code, comments, provenance, suggestions, highlights, and sketches.
 2. Theme change with reduced motion enabled performs no crossfade.
 3. Refresh with a selected theme shows no wrong-theme first frame or preview/editor geometry jump.
+4. Unset widths follow the active theme's defaults; explicit widths survive switching. Existing annotation chrome remains aligned after the typography change.
 
 **Verification:** The reviewer can compare the captured result to the references; no text or action loses contrast.
 
