@@ -14,6 +14,7 @@ interface Props {
   isReading: boolean
   changeMode: (mode: EditorMode) => void
   onToggleActivity: () => void
+  onOpenTheme: () => void
   /** The export helpers throw before the live editor handle exists; the web
    *  UI disables its export buttons the same way (SharePopover's
    *  exportReady). A pre-ready tap is a silent no-op. */
@@ -36,6 +37,7 @@ export function NativeDocBridge({
   isReading,
   changeMode,
   onToggleActivity,
+  onOpenTheme,
   exportReady,
   onExportMarkdown,
   onExportHtml,
@@ -56,6 +58,7 @@ export function NativeDocBridge({
               />
             ))}
           {!isReading && <NativeMenuItem title="Activity" click="#native-toggle-activity" />}
+          <NativeMenuItem title="Appearance" click="#native-theme-open" />
           <NativeMenuItem title="Export Markdown" click="#native-export-markdown" />
           <NativeMenuItem title="Export HTML" click="#native-export-html" />
           <NativeMenuItem title="Home" href="/" />
@@ -96,6 +99,14 @@ export function NativeDocBridge({
           }}
         >
           Activity
+        </button>
+        <button
+          id="native-theme-open"
+          type="button"
+          tabIndex={-1}
+          onClick={onOpenTheme}
+        >
+          Appearance
         </button>
         <button
           id="native-export-markdown"

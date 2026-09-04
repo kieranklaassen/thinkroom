@@ -331,18 +331,6 @@
   font-weight: 550;
 }
 
-.header-menu-theme .theme-picker {
-  display: flex;
-  width: 100%;
-}
-
-.header-menu-theme .theme-option {
-  flex: 1;
-  justify-content: center;
-  min-height: 2.25rem;
-  font-size: 0.74rem;
-}
-
 .header-menu-popover .ownership-owner {
   display: block;
   padding: 0.45rem 0.55rem;
@@ -544,4 +532,72 @@
 .chrome-toggle[aria-pressed='true'] {
   background: var(--surface-raised);
   color: var(--ink);
+}
+
+/* Appearance controls share options and state in the header and compact menu. */
+.theme-popover {
+  width: 19.5rem;
+  max-width: calc(100vw - 2rem);
+  padding: 0.75rem;
+}
+
+.theme-trigger { font-size: 1.2rem; }
+
+.theme-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.theme-option {
+  display: grid;
+  grid-template-columns: 2.75rem minmax(0, 1fr) 1rem;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  min-height: 4rem;
+  padding: 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.theme-option:hover { background: var(--code-bg); }
+.theme-option.is-active { background: var(--accent-soft); border-color: var(--accent); }
+.theme-copy { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+.theme-label { font-size: 0.82rem; font-weight: 600; }
+.theme-description { font-size: 0.7rem; font-weight: 400; line-height: 1.4; color: var(--ink-soft); }
+.theme-check { color: var(--accent); font-size: 0.85rem; }
+.theme-swatch {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid rgb(35 31 24 / 16%);
+  border-radius: 0.35rem;
+  color: #26241f;
+  font-size: 1.15rem;
+}
+.theme-swatch--proof { background: #faf8f4; font-family: Charter, Georgia, serif; }
+.theme-swatch--whitey { background: #fff; font-family: Georgia, 'Times New Roman', serif; }
+.theme-shortcut {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.65rem;
+  padding: 0.65rem 0.25rem 0.1rem;
+  border-top: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 0.68rem;
+  font-weight: 400;
+}
+.theme-shortcut kbd { font: inherit; white-space: nowrap; }
+
+@media (max-width: 48rem) {
+  .theme-switcher-root { display: none; }
 }

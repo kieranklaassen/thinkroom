@@ -34,6 +34,100 @@ const modeOption = (page, label) =>
     .filter({ has: page.locator('.mode-control-option-label', { hasText: new RegExp(`^${label}$`) }) })
 
 try {
+  // Personal appearance: the direct picker, options menu and shortcut share
+  // one state, without replacing the live editor or losing a saved choice.
+  const appearance = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+  appearance.on('pageerror', (err) => errors.a.push(String(err)))
+  await appearance.goto(`${BASE}/d/${SLUG}`)
+  await waitForLive(appearance)
+  const themeTrigger = appearance.getByRole('button', { name: 'Change theme', exact: true })
+  await themeTrigger.waitFor({ timeout: 5000 })
+  await appearance.evaluate(() => { window.__themeEditor = document.querySelector('.doc-live-editor .ProseMirror') })
+  await themeTrigger.click()
+  const themeDialog = appearance.getByRole('dialog', { name: 'Document theme', exact: true })
+  const whiteTheme = themeDialog.getByRole('radio', { name: /Whitey/ })
+  const paperTheme = themeDialog.getByRole('radio', { name: /Thinkroom/ })
+  await paperTheme.focus()
+  await appearance.keyboard.press('ArrowDown')
+  if (
+    await themeDialog.isVisible() &&
+    await whiteTheme.getAttribute('aria-checked') === 'true' &&
+    await appearance.locator('html').getAttribute('data-theme') === 'whitey'
+  ) ok('theme arrows apply the choice without dismissing the radio group')
+  else fail('theme radio navigation did not keep selection and dialog synchronized')
+  await appearance.keyboard.press('Escape')
+  if (
+    await themeTrigger.evaluate((el) => el === document.activeElement) &&
+    await appearance.locator('html').getAttribute('data-theme') === 'whitey'
+  ) ok('Escape restores theme-trigger focus without reverting the choice')
+  else fail('theme dismissal lost focus or reverted the arrow-selected theme')
+  await appearance.getByRole('button', { name: 'More options', exact: true }).click()
+  if (await appearance.getByRole('radio', { name: /Whitey/ }).getAttribute('aria-checked') === 'true') {
+    ok('options-menu theme agrees with the direct picker')
+  } else fail('mounted theme controls have independent state')
+  await appearance.keyboard.press('Escape')
+  const mod = process.platform === 'darwin' ? 'Meta' : 'Control'
+  const focusBefore = await appearance.locator('.doc-canvas').getAttribute('class')
+  await appearance.keyboard.down(mod)
+  await appearance.keyboard.down('Shift')
+  await appearance.keyboard.down('.')
+  await appearance.keyboard.down('.')
+  await appearance.keyboard.up('.')
+  await appearance.keyboard.up('Shift')
+  await appearance.keyboard.up(mod)
+  if (
+    await appearance.locator('html').getAttribute('data-theme') === 'proof' &&
+    await appearance.locator('.doc-canvas').getAttribute('class') === focusBefore
+  ) ok('theme shortcut fires once on repeat and does not also toggle focus')
+  else fail('theme shortcut repeated or collided with suggestion focus')
+  const ignoredChords = await appearance.evaluate(() => {
+    const initial = document.documentElement.dataset.theme
+    const chord = { key: '>', code: 'Period', metaKey: true, shiftKey: true, bubbles: true }
+    const modifiers = [{ altKey: true }, { ctrlKey: true }, { isComposing: true }, { repeat: true }]
+    for (const extra of modifiers) {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { ...chord, ...extra }))
+      if (document.documentElement.dataset.theme !== initial) return false
+    }
+    const input = document.createElement('textarea')
+    document.body.append(input)
+    input.dispatchEvent(new KeyboardEvent('keydown', chord))
+    input.remove()
+    return document.documentElement.dataset.theme === initial
+  })
+  if (ignoredChords) ok('theme shortcut ignores composition, text inputs and extra modifiers')
+  else fail('theme shortcut consumed a text-entry or modified chord')
+  await themeTrigger.click()
+  if (await themeDialog.locator('kbd').innerText() === '⌘/Ctrl ⇧ .') ok('theme picker labels the shipped shortcut')
+  else fail('theme shortcut label differs from the shipped chord')
+  await paperTheme.focus()
+  await appearance.keyboard.press('ArrowDown')
+  await appearance.keyboard.press('Space')
+  if (!(await themeDialog.isVisible()) && await themeTrigger.evaluate((el) => el === document.activeElement)) {
+    ok('Space selects a theme and restores trigger focus')
+  } else fail('explicit keyboard theme selection left the dialog open or lost focus')
+  if (await appearance.evaluate(() => window.__themeEditor === document.querySelector('.doc-live-editor .ProseMirror'))) {
+    ok('theme switching preserves the live editor instance')
+  } else fail('theme switching remounted the editor')
+  await themeTrigger.click()
+  await themeDialog.getByRole('radio', { name: /Whitey/ }).click()
+  await appearance.reload()
+  await waitForLive(appearance)
+  await appearance.getByRole('button', { name: 'More options', exact: true }).click()
+  if (
+    await appearance.locator('html').getAttribute('data-theme') === 'whitey' &&
+    await appearance.getByRole('radio', { name: /Whitey/ }).getAttribute('aria-checked') === 'true'
+  ) ok('theme cookie, initial page and hydrated picker agree after refresh')
+  else fail('theme preference differs after refresh')
+  await appearance.evaluate(() => {
+    Object.defineProperty(document, 'cookie', { configurable: true, get: () => '', set: () => { throw new Error('storage denied') } })
+    Storage.prototype.setItem = () => { throw new Error('storage denied') }
+  })
+  await appearance.getByRole('radio', { name: /Thinkroom/ }).click()
+  if (await appearance.locator('html').getAttribute('data-theme') === 'proof') {
+    ok('rejected cookie and localStorage writes leave the in-memory theme usable')
+  } else fail('storage denial prevented changing appearance')
+  await appearance.close()
+
   const landing = await browser.newPage()
   // Headless shell denies clipboard writes by default; real browsers allow them
   // under a user gesture. Grant them so the agent-start copy path is testable.

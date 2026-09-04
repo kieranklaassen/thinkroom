@@ -13,7 +13,7 @@ interface Props {
   /** Lets the page react to the popover opening (e.g. suppress selection
    *  chrome while it is above the chrome's z-index). */
   onOpenChange?: (open: boolean) => void
-  children: ReactNode
+  children: ReactNode | ((actions: { close: () => void }) => ReactNode)
 }
 
 /**
@@ -36,7 +36,11 @@ export function PopoverShell({
   const popoverRef = useRef<HTMLDivElement>(null)
   const isMobile = useMediaQuery('(max-width: 48rem)')
 
-  useDismissable(open, () => setOpen(false), [rootRef, popoverRef])
+  const close = useCallback((restoreFocus = true) => {
+    setOpen(false)
+    if (restoreFocus) rootRef.current?.querySelector('button')?.focus({ preventScroll: true })
+  }, [])
+  useDismissable(open, (reason) => close(reason === 'escape'), [rootRef, popoverRef])
 
   useEffect(() => {
     onOpenChange?.(open)
@@ -52,7 +56,7 @@ export function PopoverShell({
       aria-label={popoverLabel}
       onClick={(event) => event.stopPropagation()}
     >
-      {children}
+      {typeof children === 'function' ? children({ close }) : children}
     </div>
   )
 
