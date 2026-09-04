@@ -542,6 +542,8 @@ class DocumentsController < InertiaController
       theme: cookies[:proof_theme].to_s.presence_in(%w[proof whitey]) || "proof",
       panel_open: cookies[:pruf_panel] != "0",
       focus_mode: cookies[:pruf_focus] == "1",
+      activity_filter: cookies[:pruf_activity_filter].to_s.presence_in(%w[all agents decisions]) || "all",
+      activity_expanded: cookies[:pruf_activity_expanded] == "1",
       mode:,
       document_width: document_width&.clamp(MIN_DOCUMENT_WIDTH, MAX_DOCUMENT_WIDTH),
       rich_content_width: rich_content_width&.clamp(MIN_RICH_CONTENT_WIDTH, MAX_RICH_CONTENT_WIDTH)

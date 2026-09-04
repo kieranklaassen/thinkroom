@@ -33,6 +33,30 @@ class DocumentUiPreferencesTest < ActionDispatch::IntegrationTest
     assert_inertia_props { |props| props.dig(:ui, :document_width) == 864 }
   end
 
+  test "activity preferences are validated and exposed for first paint" do
+    %w[all agents decisions].each do |filter|
+      cookies[:pruf_activity_filter] = filter
+      cookies[:pruf_activity_expanded] = "1"
+      get document_page_path(@document.slug), headers: browser
+
+      assert_inertia_props do |props|
+        props.dig(:ui, :activity_filter) == filter && props.dig(:ui, :activity_expanded) == true
+      end
+    end
+  end
+
+  test "missing and invalid activity preferences use safe defaults" do
+    [ nil, "", "unknown", "<script>" ].each do |value|
+      cookies[:pruf_activity_filter] = value
+      cookies[:pruf_activity_expanded] = value
+      get document_page_path(@document.slug), headers: browser
+
+      assert_inertia_props do |props|
+        props.dig(:ui, :activity_filter) == "all" && props.dig(:ui, :activity_expanded) == false
+      end
+    end
+  end
+
   test "document width preference is clamped to safe bounds" do
     cookies[:pruf_width] = "20"
     get document_page_path(@document.slug), headers: browser

@@ -39,7 +39,7 @@ import { CommentsPanel } from '../../components/comments_panel'
 import { AnchoredComposer } from '../../components/anchored_composer'
 import { SelectionToolbar } from '../../components/selection_toolbar'
 import { PresenceBar } from '../../components/presence_bar'
-import { ActivityPanel } from '../../components/activity_panel'
+import { ActivityPanel, type ActivityFilter } from '../../components/activity_panel'
 import { IdentityChip } from '../../components/identity_chip'
 import { ClaimBanner } from '../../components/claim_banner'
 import { HeaderMenu } from '../../components/header_menu'
@@ -120,6 +120,8 @@ export interface DocumentProps {
     theme: ThemeName
     panel_open: boolean
     focus_mode: boolean
+    activity_filter: ActivityFilter
+    activity_expanded: boolean
     mode: EditorMode
     document_width: number | null
     rich_content_width: number | null
@@ -202,6 +204,21 @@ export default function DocumentShow({
   // width while the URL supplies mode, so SSR and the first client render agree.
   const [panelOpen, setPanelOpen] = useState(ui.panel_open)
   const [focusMode, setFocusMode] = useState(ui.focus_mode)
+  const [activityFilter, setActivityFilter] = useState(ui.activity_filter)
+  const [activityExpanded, setActivityExpanded] = useState(ui.activity_expanded)
+  const activityProps = {
+    activities,
+    filter: activityFilter,
+    expanded: activityExpanded,
+    onFilterChange: (value: ActivityFilter) => {
+      setActivityFilter(value)
+      setCookie('pruf_activity_filter', value)
+    },
+    onExpandedChange: (value: boolean) => {
+      setActivityExpanded(value)
+      setCookieFlag('pruf_activity_expanded', value)
+    },
+  }
   const [theme, setTheme] = useState(ui.theme)
   const changeTheme = useCallback((next: ThemeName) => {
     applyTheme(next)
@@ -1002,7 +1019,7 @@ export default function DocumentShow({
                 slug={doc.slug}
                 onJumpTo={jumpToHighlight}
               />
-              {!isReading && <ActivityPanel activities={activities} />}
+              {!isReading && <ActivityPanel {...activityProps} />}
             </aside>
           )}
         </main>
@@ -1097,7 +1114,7 @@ export default function DocumentShow({
         )}
         {!isReading && isMobile && activeSheet === 'activity' && (
           <MobileSheet title="Activity" onClose={() => setActiveSheet(null)}>
-            <ActivityPanel activities={activities} />
+            <ActivityPanel {...activityProps} />
           </MobileSheet>
         )}
         {activeSheet === 'theme' && (

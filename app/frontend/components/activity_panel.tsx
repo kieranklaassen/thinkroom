@@ -1,17 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { timeAgo } from '../lib/time'
 import type { ActivityPayload } from '../types/payloads'
-
-const ACTION_GLYPHS: Record<string, string> = {
-  suggested: '✦',
-  commented: '◆',
-  joined: '→',
-  left: '←',
-  created_document: '+',
-  accepted_suggestion: '✓',
-  rejected_suggestion: '✕',
-  resolved_comment: '✓',
-}
 
 const ACTION_LABELS: Record<string, string> = {
   suggested: 'proposed an edit',
@@ -21,6 +10,7 @@ const ACTION_LABELS: Record<string, string> = {
   created_document: 'created the document',
   accepted_suggestion: 'accepted a suggestion',
   rejected_suggestion: 'rejected a suggestion',
+  auto_rejected_suggestion: 'auto-rejected a suggestion',
   resolved_comment: 'resolved a comment',
 }
 
@@ -29,11 +19,16 @@ const PLURAL_LABELS: Record<string, (n: number) => string> = {
   commented: (n) => `left ${n} comments`,
   accepted_suggestion: (n) => `accepted ${n} suggestions`,
   rejected_suggestion: (n) => `rejected ${n} suggestions`,
+  auto_rejected_suggestion: (n) => `auto-rejected ${n} suggestions`,
   resolved_comment: (n) => `resolved ${n} comments`,
 }
 
 const VISIBLE_GROUPS = 6
 const GROUP_WINDOW_MS = 60_000
+const FILTERS = ['all', 'agents', 'decisions'] as const
+export type ActivityFilter = (typeof FILTERS)[number]
+const FILTER_LABELS: Record<ActivityFilter, string> = { all: 'All', agents: 'Agents', decisions: 'Decisions' }
+const DECISIONS = new Set(['accepted_suggestion', 'rejected_suggestion', 'auto_rejected_suggestion', 'resolved_comment'])
 
 interface ActivityGroup {
   newest: ActivityPayload
@@ -57,6 +52,7 @@ function groupActivities(activities: ActivityPayload[]): ActivityGroup[] {
     if (
       current &&
       current.newest.actor_name === activity.actor_name &&
+      current.newest.actor_kind === activity.actor_kind &&
       current.newest.action === activity.action &&
       Math.abs(current.lastAt - at) <= GROUP_WINDOW_MS
     ) {
@@ -71,9 +67,21 @@ function groupActivities(activities: ActivityPayload[]): ActivityGroup[] {
   return groups
 }
 
-export function ActivityPanel({ activities }: { activities: ActivityPayload[] }) {
-  const [expanded, setExpanded] = useState(false)
-  const groups = useMemo(() => groupActivities(activities), [activities])
+interface ActivityPanelProps {
+  activities: ActivityPayload[]
+  filter: ActivityFilter
+  expanded: boolean
+  onFilterChange: (filter: ActivityFilter) => void
+  onExpandedChange: (expanded: boolean) => void
+}
+
+export function ActivityPanel({ activities, filter, expanded, onFilterChange, onExpandedChange }: ActivityPanelProps) {
+  const matching = useMemo(() => activities.filter((activity) => {
+    if (filter === 'agents') return activity.actor_kind === 'agent' || activity.actor_kind === 'ai'
+    if (filter === 'decisions') return DECISIONS.has(activity.action)
+    return true
+  }), [activities, filter])
+  const groups = useMemo(() => groupActivities(matching), [matching])
   const visible = expanded ? groups : groups.slice(0, VISIBLE_GROUPS)
   const hidden = groups.length - VISIBLE_GROUPS
 
@@ -82,10 +90,27 @@ export function ActivityPanel({ activities }: { activities: ActivityPayload[] })
       <header className="rail-heading">
         <h2>Activity</h2>
       </header>
+      <div className="activity-filters" role="group" aria-label="Filter activity">
+        {FILTERS.map((value) => (
+          <button key={value} type="button" aria-pressed={filter === value} onClick={() => onFilterChange(value)}>
+            {FILTER_LABELS[value]}
+          </button>
+        ))}
+      </div>
+      {activities.length > 0 && (
+        <p className="activity-summary">
+          {matching.length} of {activities.length} recent events
+        </p>
+      )}
       {activities.length === 0 && (
         <p className="rail-empty">
           Quiet so far. When agents or collaborators act — suggest, comment,
           join — it shows up here live.
+        </p>
+      )}
+      {activities.length > 0 && matching.length === 0 && (
+        <p className="rail-empty">
+          No {filter === 'agents' ? 'agent activity' : 'decisions'} in the {activities.length} most recent events.
         </p>
       )}
       <ul className="activity-list">
@@ -101,9 +126,11 @@ export function ActivityPanel({ activities }: { activities: ActivityPayload[] })
               key={group.oldestId}
               className={`activity-row activity-row--${newest.actor_kind}`}
             >
-              <span className="activity-glyph">{ACTION_GLYPHS[newest.action] ?? '·'}</span>
+              <span className="activity-dot" aria-hidden="true" />
               <span className="activity-text">
-                <strong>{newest.actor_name}</strong> {label}
+                <strong>{newest.actor_name}</strong>
+                <span className="activity-kind"> · {newest.actor_kind === 'ai' ? 'agent' : newest.actor_kind}</span>
+                {' '}{label}
                 {count === 1 && newest.detail && (
                   <em className="activity-detail"> — {newest.detail}</em>
                 )}
@@ -113,7 +140,7 @@ export function ActivityPanel({ activities }: { activities: ActivityPayload[] })
                   "1m ago"), the text mismatch makes React regenerate the
                   WHOLE tree — the entire page blinks. Suppress on this node
                   only; React patches the text in place instead. */}
-              <time className="activity-time" suppressHydrationWarning>
+              <time className="activity-time" dateTime={newest.created_at} suppressHydrationWarning>
                 {timeAgo(newest.created_at)}
               </time>
             </li>
@@ -121,8 +148,8 @@ export function ActivityPanel({ activities }: { activities: ActivityPayload[] })
         })}
       </ul>
       {hidden > 0 && (
-        <button className="activity-expander" onClick={() => setExpanded((v) => !v)}>
-          {expanded ? 'Show fewer' : `Show all (${activities.length})`}
+        <button type="button" className="activity-expander" aria-expanded={expanded} onClick={() => onExpandedChange(!expanded)}>
+          {expanded ? 'Show fewer' : `Show all ${groups.length} groups`}
         </button>
       )}
     </section>

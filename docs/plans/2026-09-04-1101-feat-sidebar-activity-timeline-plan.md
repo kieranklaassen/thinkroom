@@ -37,7 +37,7 @@ The user prefers the benchmark sidebar. Thinkroom currently places comments, the
 
 - R1. Render activity with consistent actor/type indicators, short action text, subdued timestamps, and a timeline hierarchy.
 - R2. Provide All, Agents, and Decisions filters with truthful empty states and counts for the loaded activity window.
-- R3. Incoming events must preserve the selected filter and expanded state without remounting existing rows or moving keyboard focus.
+- R3. Incoming events must preserve the selected filter and expanded state without remounting retained groups or moving keyboard focus. Groups whose oldest member leaves the loaded window may be replaced.
 
 **Workspace behavior**
 
@@ -65,14 +65,15 @@ Borrow the timeline and filtering. The visible Ask AI section is not part of thi
 
 ### Key Technical Decisions
 
-- KTD1. **Keep the current activity source and grouping.** Filter existing `ActivityPayload` rows before grouping. Retain stable oldest-member group keys to prevent the known replay/blink behavior. Governs R1-R3.
-- KTD2. **Use a bounded, explicit filter vocabulary.** Agents includes existing `agent` and legacy `ai` actor kinds. Decisions includes accepted/rejected suggestions and resolved comments currently emitted by Thinkroom. Do not invent review events or infer decisions from prose. The controller loads only 50 recent events; label counts accordingly. Governs R2.
-- KTD3. **Keep one page scroll surface.** Adapt the reference hierarchy without copying its nested-scrolling sidebar wholesale. Reuse `doc-rail`, shared activity content, and existing mobile/native surfaces. Governs R5-R6.
+- KTD1. **Keep the current activity source and grouping.** Filter existing `ActivityPayload` rows before grouping. Include actor kind in grouping so human and agent namesakes remain distinct. Retain stable oldest-member group keys to prevent the known replay/blink behavior. Governs R1-R3.
+- KTD2. **Use a bounded, explicit filter vocabulary.** Agents includes existing `agent` and legacy `ai` actor kinds. Decisions includes accepted/rejected suggestions and resolved comments currently emitted by Thinkroom. Do not invent review events or infer decisions from prose. Show matching raw events out of loaded recent events; expansion labels count groups. Empty-filter messages also name the recent window. The controller loads only 50 recent events. Governs R2.
+- KTD3. **Keep one page scroll surface.** The desktop rail grows in normal page flow, even when expanded beyond the viewport; it has no independent scrollbar. The existing mobile/native sheet scrolls while the page underneath is locked. Reuse both surfaces, with the same filter controls. Governs R5-R6.
 - KTD4. **Page-owned presentation preferences.** Retain `pruf_panel` and `pruf_focus`. Add validated cookie-backed filter/expansion props alongside current UI preferences so first paint and all mounted activity views agree. Expansion reuses the existing Show all / Show fewer control: six grouped rows when collapsed, all loaded matching groups when expanded. Governs R3-R4.
 
 ### Assumptions
 
 - The activity filter and expansion choice are browser-wide presentation preferences, not shared document state.
+- A saved filter remains selected on other documents even with no matching recent events; the visible pressed state and scoped empty message explain this. Rejected storage leaves current in-memory preferences usable but cannot guarantee persistence after refresh.
 - The reference's timeline and filters are desired; the exact sidebar width may adapt to Thinkroom's width controls.
 
 ### High-Level Technical Design
@@ -96,10 +97,13 @@ flowchart TD
 
 ### Sources and Risks
 
-Baseline: Thinkroom main `259fad051e62b0f03bcf34b1cd3dda1102e4ed28`.
+Baseline refreshed after the theme port: Thinkroom main `64708c8704e8a1a3e2d944de12af0f6910effff0` (PR #222).
 Reference: LFGBench run `01M1545XV8CV5PF3NGYS9CPPSA`, generated `app/frontend/components/sidebar.tsx`, `features/activity/activity_panel.tsx`, and `styles/sidebar.css`.
 `app/models/activity.rb` caps `recent` at 50; do not present a filtered count as lifetime history.
 `ActivityPanel` documents stable keys and hydration-safe relative timestamps; preserve both.
+`documents/show.tsx` mounts the same activity component in the desktop rail and mobile/native sheet. Its page-owned panel, focus, width, and theme preferences already establish the SSR-cookie pattern; use that ownership for both activity views. Keep existing keyboard routing in `lib/shortcuts.ts` unchanged.
+
+Filtering can bring formerly separated rows together. The oldest-member key remains stable while that member is in the loaded window; eviction at the 50-event boundary can legitimately replace a row.
 
 ---
 
@@ -124,8 +128,9 @@ Reference: LFGBench run `01M1545XV8CV5PF3NGYS9CPPSA`, generated `app/frontend/co
 3. At phone/tablet/desktop widths and 200% zoom, all tools remain reachable without obscuring prose.
 4. Read mode retains the highlight legend when highlights exist; review-only tools remain absent.
 5. With reduced motion enabled, entrance and connector transitions are suppressed while the timeline remains legible.
+6. With more rows than fit the viewport, desktop rail overflow remains visible and only the page scrolls; the compact sheet locks the page underneath.
 
-**Verification:** Before/after screenshots show the intended hierarchy; current collaboration and native-shell checks still pass.
+**Verification:** Before/after screenshots show hierarchy. Browser checks assert retained row-node identity and keyboard focus across an incoming event; collaboration and native-shell checks still pass.
 
 ### U2. Add activity filters and honest counts
 
@@ -143,6 +148,7 @@ Reference: LFGBench run `01M1545XV8CV5PF3NGYS9CPPSA`, generated `app/frontend/co
 2. Counts distinguish raw loaded events from displayed groups and never claim total history.
 3. An event arriving while Decisions is selected updates the matching feed without clearing the selection.
 4. No matching events show an empty-filter message, not an empty-document claim.
+5. Human and agent events sharing a display name stay separate, including after filtering; eviction from the recent window does not imply lifetime counts.
 
 **Verification:** Filtering performs no additional fetch and preserves the 50-event server window.
 
