@@ -1081,6 +1081,9 @@ try {
   await sketchB.keyboard.press('Delete')
   await sketchA.locator('.thinkroom-sketch').waitFor({ state: 'detached', timeout: 10000 })
   await sketchB.reload()
+  // The derived server preview can lag the already-persisted Yjs deletion.
+  // Check the hydrated editor, not a transient preview (or an empty shell).
+  await waitForLive(sketchB)
   if ((await sketchB.locator('.thinkroom-sketch').count()) === 0) {
     ok('deleting a sketch syncs and survives reload')
   } else {
