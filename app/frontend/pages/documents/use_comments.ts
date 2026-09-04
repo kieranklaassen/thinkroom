@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { router } from '@inertiajs/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { findCommentAnchorRange } from '../../editor/comment_anchors'
@@ -6,6 +6,8 @@ import { domRange, setHighlight, clearHighlight } from '../../lib/highlights'
 import type { CommentPayload } from '../../types/payloads'
 
 interface Options {
+  comments: CommentPayload[]
+  canComment: boolean
   slug: string
   identityName: string
   viewRef: RefObject<EditorView | null>
@@ -16,7 +18,23 @@ interface Options {
   docTick: number
 }
 
+export interface FailedComment {
+  body: string
+  anchor: string | null
+  message: string
+  uncertain: boolean
+  previousIds: number[]
+}
+
 export interface Comments {
+  failedComment: FailedComment | null
+  retryFailedComment: () => void
+  checkFailedComment: () => void
+  dismissFailedComment: () => void
+  checkingComment: boolean
+  commentNotice: string | null
+  clearCommentNotice: () => void
+  resolvingComments: Set<number>
   /** Anchor text for the open composer, or null when closed. */
   composerAnchor: string | null
   /** The desktop anchored composer card is open (mobile uses the sheet). */
@@ -33,6 +51,8 @@ export interface Comments {
 
 /** Comment submission/resolution and the anchored composer lifecycle. */
 export function useComments({
+  comments,
+  canComment,
   slug,
   identityName,
   viewRef,
@@ -40,6 +60,14 @@ export function useComments({
   isMobile,
   docTick,
 }: Options): Comments {
+  const [failedComment, setFailedComment] = useState<FailedComment | null>(null)
+  const [commentNotice, setCommentNotice] = useState<string | null>(null)
+  const [checkingComment, setCheckingComment] = useState(false)
+  const [resolvingComments, setResolvingComments] = useState(new Set<number>())
+  const postingRef = useRef(false)
+  const resolvingRef = useRef(new Set<number>())
+  const commentsRef = useRef(comments)
+  commentsRef.current = comments
   const [composerAnchor, setComposerAnchor] = useState<string | null>(null)
   const composerOpen = !isMobile && composerAnchor !== null
 
@@ -63,7 +91,16 @@ export function useComments({
 
   const submitComment = useCallback(
     (body: string, anchorText: string | null) => {
+      if (postingRef.current || !canComment || !body.trim()) return
+      postingRef.current = true
+      setFailedComment(null)
+      setCommentNotice(null)
       setComposerAnchor(null)
+      const previousIds = commentsRef.current.map((comment) => comment.id)
+      const failed = (message: string, uncertain = false) => {
+        setFailedComment({ body, anchor: anchorText, message, uncertain, previousIds })
+        return false
+      }
       const optimisticComment: CommentPayload = {
         id: -Date.now(),
         author_name: identityName,
@@ -80,17 +117,29 @@ export function useComments({
         .post(
           `/d/${slug}/comments`,
           { body, anchor_text: anchorText, author_name: identityName },
-          { preserveScroll: true, only: ['comments', 'activities'], async: true },
+          {
+            preserveScroll: true, only: ['comments', 'activities', 'ownership'], async: true,
+            onError: (errors) => { failed(String(errors.comment ?? 'Could not post this comment.')) },
+            onHttpException: (response) => failed(`Could not post this comment (${response.status}).`, response.status >= 500 || response.status === 408),
+            onNetworkError: () => failed('Connection lost. This comment may already be saved.', true),
+            onCancel: () => { failed('Posting was interrupted. Check whether the comment was saved.', true) },
+            onFinish: () => { postingRef.current = false },
+          },
         )
     },
-    [slug, identityName],
+    [slug, identityName, canComment],
   )
 
   const resolveComment = useCallback(
     (comment: CommentPayload) => {
       // Optimistic placeholders (negative id) have no server row yet — a
       // PATCH against them would 404 (the panel also hides the button).
-      if (comment.id < 0) return
+      const current = commentsRef.current.find((row) => row.id === comment.id)
+      if (comment.id <= 0 || !current || current.resolved || !canComment || resolvingRef.current.has(comment.id)) return
+      resolvingRef.current.add(comment.id)
+      setResolvingComments(new Set(resolvingRef.current))
+      setCommentNotice('Resolving comment…')
+      const failed = () => { setCommentNotice('Could not confirm resolution. Check your connection and try Resolve again if the comment is still open.'); return false }
       router
         .optimistic((props: { comments?: CommentPayload[] }) => ({
           comments: (props.comments ?? []).map((c) =>
@@ -100,15 +149,55 @@ export function useComments({
         .patch(
           `/comments/${comment.id}/resolve`,
           { by: identityName },
-          { preserveScroll: true, only: ['comments', 'activities'], async: true },
+          {
+            preserveScroll: true, only: ['comments', 'activities', 'ownership'], async: true,
+            onSuccess: () => { setCommentNotice(null) },
+            onError: () => { failed() },
+            onHttpException: failed,
+            onNetworkError: failed,
+            onCancel: () => { failed() },
+            onFinish: () => {
+              resolvingRef.current.delete(comment.id)
+              setResolvingComments(new Set(resolvingRef.current))
+              router.reload({ only: ['comments', 'ownership'] })
+            },
+          },
         )
     },
-    [identityName],
+    [identityName, canComment],
   )
 
   const openComposer = useCallback((anchorText: string) => {
+    if (postingRef.current || failedComment) return
     setComposerAnchor(anchorText)
-  }, [])
+  }, [failedComment])
+
+  const retryFailedComment = useCallback(() => {
+    if (!failedComment || failedComment.uncertain || !canComment) return
+    submitComment(failedComment.body, failedComment.anchor)
+  }, [failedComment, canComment, submitComment])
+
+  const checkFailedComment = useCallback(() => {
+    if (!failedComment || checkingComment) return
+    setCheckingComment(true)
+    router.reload({
+      only: ['comments', 'ownership'],
+      onSuccess: (page) => {
+        const rows = page.props.comments as CommentPayload[]
+        const saved = rows.some((row) => !failedComment.previousIds.includes(row.id) && row.id > 0 &&
+          row.author_kind === 'human' && row.body === failedComment.body && row.anchor_text === failedComment.anchor)
+        if (saved) {
+          setFailedComment(null)
+          setCommentNotice('A matching comment is already saved. It was not posted again.')
+        } else {
+          setFailedComment({ ...failedComment, message: 'No saved copy found yet. Your draft is kept below; check again when connected before posting it again.' })
+        }
+      },
+      onHttpException: () => false,
+      onNetworkError: () => false,
+      onFinish: () => setCheckingComment(false),
+    })
+  }, [failedComment, checkingComment])
 
   const cancelComposer = useCallback(() => {
     setComposerAnchor(null)
@@ -128,6 +217,14 @@ export function useComments({
   )
 
   return {
+    failedComment,
+    retryFailedComment,
+    checkFailedComment,
+    dismissFailedComment: () => setFailedComment(null),
+    checkingComment,
+    commentNotice,
+    clearCommentNotice: () => setCommentNotice(null),
+    resolvingComments,
     composerAnchor,
     composerOpen,
     openComposer,

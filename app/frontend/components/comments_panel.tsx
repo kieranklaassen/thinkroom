@@ -7,6 +7,9 @@ interface Props {
   comments: CommentPayload[]
   /** Linked open cards are rendered once in the desktop margin. */
   marginIds?: Set<number> | null
+  showResolved: boolean
+  onShowResolvedChange: (show: boolean) => void
+  resolvingComments: Set<number>
   composerAnchor: string | null
   /** Ids of open comments whose anchor text resolves in the document; null
    *  while unmeasured (editor not mounted yet) — no linked/stale states then. */
@@ -21,6 +24,9 @@ interface Props {
 export function CommentsPanel({
   comments,
   marginIds,
+  showResolved,
+  onShowResolvedChange,
+  resolvingComments,
   composerAnchor,
   anchoredIds,
   onSubmit,
@@ -30,7 +36,6 @@ export function CommentsPanel({
   onHover,
 }: Props) {
   const [body, setBody] = useState('')
-  const [showResolved, setShowResolved] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -100,7 +105,7 @@ export function CommentsPanel({
         {visibleOpen.map((comment) => (
           <li key={comment.id}>
             <CommentCard comment={comment} linked={anchoredIds?.has(comment.id) ?? false}
-              measured={anchoredIds !== null} onResolve={onResolve} onJumpTo={onJumpTo} onHover={onHover} />
+              measured={anchoredIds !== null} resolving={resolvingComments.has(comment.id)} onResolve={onResolve} onJumpTo={onJumpTo} onHover={onHover} />
           </li>
         ))}
       </ul>
@@ -108,7 +113,8 @@ export function CommentsPanel({
       {resolved.length > 0 && (
         <button
           className="comment-resolved-toggle"
-          onClick={() => setShowResolved((value) => !value)}
+          aria-expanded={showResolved}
+          onClick={() => onShowResolvedChange(!showResolved)}
         >
           {showResolved ? 'Hide' : 'Show'} {resolved.length} resolved
         </button>
@@ -118,7 +124,7 @@ export function CommentsPanel({
           {resolved.map((comment) => (
             <li key={comment.id}>
               <CommentCard comment={comment} linked={false} measured={anchoredIds !== null}
-                onResolve={onResolve} onJumpTo={onJumpTo} />
+                resolving={resolvingComments.has(comment.id)} onResolve={onResolve} onJumpTo={onJumpTo} />
             </li>
           ))}
         </ul>

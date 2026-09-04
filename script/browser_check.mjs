@@ -35,17 +35,22 @@ const modeOption = (page, label) =>
 
 try {
   // BEGIN comment-card contract (also runnable as a focused local slice).
+  const cardFetch = async (...args) => {
+    const response = await fetch(...args)
+    if (!response.ok) throw new Error(`comment fixture API failed: ${response.status} ${args[0]}`)
+    return response
+  }
   const cardHeaders = { 'X-Agent-Name': 'Review partner', 'Content-Type': 'application/json' }
-  const cardDoc = await (await fetch(`${BASE}/api/docs`, {
+  const cardDoc = await (await cardFetch(`${BASE}/api/docs`, {
     method: 'POST', headers: cardHeaders,
     body: JSON.stringify({ title: 'Comment card contract', content: '# Comment card contract\n\nA considered review starts with a clear question.\n\nRepeated phrase.\n\nRepeated phrase.' }),
   })).json()
   const cardApi = `${BASE}/api/docs/${cardDoc.slug}`
   const cardAnchor = 'A considered review starts with a clear question.'
   for (const [body, anchor_text] of [['A useful anchored note.', cardAnchor], ['A whole-document note.', null], ['A missing quote.', 'Text that is absent.'], ['An ambiguous quote.', 'Repeated phrase.']]) {
-    await fetch(`${cardApi}/comments`, { method: 'POST', headers: cardHeaders, body: JSON.stringify({ body, anchor_text }) })
+    await cardFetch(`${cardApi}/comments`, { method: 'POST', headers: cardHeaders, body: JSON.stringify({ body, anchor_text }) })
   }
-  await fetch(`${cardApi}/suggestions`, { method: 'POST', headers: cardHeaders, body: JSON.stringify({ body: 'A thoughtful review starts with a clear question.', anchor_text: cardAnchor, intent: 'clarity' }) })
+  await cardFetch(`${cardApi}/suggestions`, { method: 'POST', headers: cardHeaders, body: JSON.stringify({ body: 'A thoughtful review starts with a clear question.', anchor_text: cardAnchor, intent: 'clarity' }) })
   const cardsPage = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
   cardsPage.setDefaultTimeout(10000)
   await cardsPage.goto(`${BASE}/d/${cardDoc.slug}/comment`)
@@ -82,7 +87,7 @@ try {
   await cardsPage.setViewportSize({ width: 1600, height: 1000 })
   await marginNote.waitFor()
   for (let n = 1; n <= 8; n++) {
-    await fetch(`${cardApi}/comments`, { method: 'POST', headers: cardHeaders,
+    await cardFetch(`${cardApi}/comments`, { method: 'POST', headers: cardHeaders,
       body: JSON.stringify({ body: `Dense note ${n}. ${'A longer note remains readable. '.repeat(n)}`, anchor_text: cardAnchor }) })
   }
   await cardsPage.waitForFunction(() => document.querySelectorAll('.margin-comment').length === 9)
@@ -130,6 +135,77 @@ try {
   if (await cardsPage.locator('.comment-card--linked', { hasText: 'A useful anchored note.' }).count()) throw new Error('deleted bound quote jumped to its later duplicate')
   ok('remote edits track the original quote; deletion never rebinds to another occurrence')
   await cardsWriter.close()
+  const recoveryDoc = await (await cardFetch(`${BASE}/api/docs`, { method: 'POST', headers: cardHeaders,
+    body: JSON.stringify({ title: 'Comment recovery', content: '# Comment recovery\n\nKeep this quoted context.' }) })).json()
+  await cardsPage.goto(`${BASE}/d/${recoveryDoc.slug}/comment`)
+  await waitForLive(cardsPage)
+  const postDraft = async (body) => {
+    await cardsPage.locator('.doc-live-editor .ProseMirror p').first().click({ position: { x: 12, y: 10 } })
+    await cardsPage.getByRole('button', { name: 'Comment on this paragraph', exact: true }).click()
+    await cardsPage.getByPlaceholder('Say something about this…').fill(body)
+    await cardsPage.locator('.comment-composer .btn-accept').click()
+  }
+  let createAttempts = 0
+  await cardsPage.route(`**/d/${recoveryDoc.slug}/comments`, async (route) => {
+    createAttempts++
+    if (createAttempts === 1) await route.fulfill({ status: 422, contentType: 'text/plain', body: 'Rejected fixture request' })
+    else await route.continue()
+  })
+  await postDraft('Keep this failed draft.')
+  await cardsPage.getByRole('button', { name: 'Retry comment', exact: true }).waitFor()
+  if (await cardsPage.getByRole('textbox', { name: 'Unsent comment' }).inputValue() !== 'Keep this failed draft.') throw new Error('failed post lost its draft')
+  const draftEditor = await browser.newPage()
+  await draftEditor.goto(`${BASE}/d/${recoveryDoc.slug}/edit`)
+  await waitForLive(draftEditor)
+  await draftEditor.locator('.doc-live-editor .ProseMirror p').first().evaluate((paragraph) => {
+    paragraph.closest('.ProseMirror').focus()
+    const range = document.createRange(); range.selectNodeContents(paragraph)
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  await draftEditor.waitForTimeout(100)
+  await draftEditor.keyboard.type('The original quote has been revised.')
+  await cardsPage.locator('.comment-recovery', { hasText: 'Original text changed' }).waitFor()
+  await draftEditor.close()
+  await cardsPage.getByRole('button', { name: 'Retry comment', exact: true }).dblclick()
+  const recovered = cardsPage.locator('.comment-card', { hasText: 'Keep this failed draft.' })
+  await recovered.locator('.comment-resolve').waitFor()
+  if (await recovered.locator('.comment-jump').count()) throw new Error('retried stale quote acquired a jump')
+  if (createAttempts !== 2 || await recovered.count() !== 1) throw new Error('retry double-posted the draft')
+  let resolveAttempts = 0
+  await cardsPage.route('**/comments/*/resolve', async (route) => {
+    resolveAttempts++
+    if (resolveAttempts === 1) await route.fulfill({ status: 422, contentType: 'text/plain', body: 'Rejected fixture resolution' })
+    else await route.continue()
+  })
+  await recovered.locator('.comment-resolve').click()
+  await cardsPage.locator('.comment-recovery', { hasText: 'Could not confirm resolution' }).waitFor()
+  await recovered.locator('.comment-resolve').waitFor()
+  await recovered.locator('.comment-resolve').click()
+  await recovered.waitFor({ state: 'detached' })
+  await cardsPage.locator('.comment-resolved-toggle').click()
+  await cardsPage.reload()
+  await waitForLive(cardsPage)
+  await cardsPage.locator('.comment-card.is-resolved', { hasText: 'Keep this failed draft.' }).waitFor()
+  if (await cardsPage.locator('.comment-resolved-toggle').getAttribute('aria-expanded') !== 'true') throw new Error('resolved expansion was not restored')
+  await cardsPage.setViewportSize({ width: 390, height: 844 })
+  await cardsPage.locator('.mobile-dock button', { hasText: 'Comments' }).click()
+  await cardsPage.locator('.sheet .comment-card.is-resolved', { hasText: 'Keep this failed draft.' }).waitFor()
+  await cardsPage.locator('.sheet-close').click()
+  await cardsPage.setViewportSize({ width: 1600, height: 1000 })
+  ok('failed post and resolve recover; resolved expansion survives reload and mobile layout')
+  await cardsPage.unroute(`**/d/${recoveryDoc.slug}/comments`)
+  let lostPosts = 0
+  await cardsPage.route(`**/d/${recoveryDoc.slug}/comments`, async (route) => {
+    lostPosts++
+    await route.fetch() // the server commits; only its response is lost
+    await route.abort('failed')
+  })
+  await postDraft('Saved despite the lost response.')
+  await cardsPage.getByRole('button', { name: 'Check saved comments', exact: true }).click()
+  await cardsPage.locator('.comment-recovery', { hasText: 'already saved' }).waitFor()
+  if (lostPosts !== 1 || await cardsPage.locator('.comment-card', { hasText: 'Saved despite the lost response.' }).count() !== 1) throw new Error('lost response recovery duplicated the comment')
+  ok('lost response checks saved comments without posting twice')
   await cardsPage.close()
   // END comment-card contract.
 

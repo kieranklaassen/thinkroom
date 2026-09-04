@@ -224,3 +224,9 @@
 .margin-marker--comment::after { content: ''; display: block; width: 10px; height: 10px; margin: auto; border-radius: 50%; background: var(--accent); }
 .margin-marker--comment:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { .margin-comment.is-placed { transition: none; } }
+
+.comment-recovery { position: fixed; z-index: 70; bottom: 1rem; right: 1rem; width: min(24rem, calc(100vw - 2rem)); max-height: 65vh; overflow: auto; padding: 1rem; display: flex; flex-direction: column; gap: 0.65rem; border: 1px solid var(--accent); border-radius: 10px; background: var(--surface-raised); box-shadow: 0 8px 28px rgb(0 0 0 / 0.12); font-size: 0.82rem; overflow-wrap: anywhere; }
+.comment-recovery textarea { width: 100%; min-height: 5rem; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0.5rem; font: inherit; }
+.comment-recovery button { min-height: 44px; color: var(--accent); background: none; border: none; cursor: pointer; font: inherit; }
+.comment-recovery button:disabled { opacity: 0.5; cursor: default; }
+@media (max-width: 72rem) { .comment-recovery { bottom: 4.5rem; } }

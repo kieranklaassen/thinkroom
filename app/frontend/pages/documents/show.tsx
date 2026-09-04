@@ -1,3 +1,4 @@
+import { findCommentAnchorRange } from '../../editor/comment_anchors'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Head, Link, router, usePoll } from '@inertiajs/react'
 import { nativeHaptic } from '@ruby-native/react'
@@ -122,6 +123,7 @@ export interface DocumentProps {
     focus_mode: boolean
     activity_filter: ActivityFilter
     activity_expanded: boolean
+    comments_resolved: boolean
     mode: EditorMode
     document_width: number | null
     rich_content_width: number | null
@@ -205,6 +207,11 @@ export default function DocumentShow({
   const [panelOpen, setPanelOpen] = useState(ui.panel_open)
   const [focusMode, setFocusMode] = useState(ui.focus_mode)
   const [activityFilter, setActivityFilter] = useState(ui.activity_filter)
+  const [commentsResolved, setCommentsResolved] = useState(ui.comments_resolved)
+  const changeCommentsResolved = (value: boolean) => {
+    setCommentsResolved(value)
+    setCookieFlag('pruf_comments_resolved', value)
+  }
   const [activityExpanded, setActivityExpanded] = useState(ui.activity_expanded)
   const activityProps = {
     activities,
@@ -658,6 +665,8 @@ export default function DocumentShow({
   }, [])
 
   const {
+    failedComment, retryFailedComment, checkFailedComment, dismissFailedComment,
+    checkingComment, commentNotice, clearCommentNotice, resolvingComments,
     composerAnchor,
     composerOpen,
     openComposer,
@@ -667,6 +676,8 @@ export default function DocumentShow({
     submitAnchoredComment,
     resolveComment,
   } = useComments({
+    comments,
+    canComment: ownership.can_comment,
     slug: doc.slug,
     identityName: identity.name,
     viewRef,
@@ -935,6 +946,28 @@ export default function DocumentShow({
             </button>
           </div>
         )}
+        {(failedComment || commentNotice) && (
+          <section className="comment-recovery" aria-label="Comment status">
+            {failedComment ? <>
+              <p role="alert">{failedComment.message}</p>
+              {failedComment.anchor && <blockquote className="comment-quote">{failedComment.anchor}</blockquote>}
+              {failedComment.anchor && viewRef.current && !findCommentAnchorRange(viewRef.current.state.doc, failedComment.anchor) && (
+                <p className="comment-scope">Original text changed — retry keeps the quote as context.</p>
+              )}
+              <textarea aria-label="Unsent comment" readOnly value={failedComment.body} />
+              <div className="comment-actions">
+                {failedComment.uncertain
+                  ? <button type="button" disabled={checkingComment} onClick={checkFailedComment}>{checkingComment ? 'Checking…' : 'Check saved comments'}</button>
+                  : <button type="button" disabled={!ownership.can_comment} onClick={retryFailedComment}>Retry comment</button>}
+                <button type="button" onClick={dismissFailedComment}>Discard draft</button>
+              </div>
+              {!ownership.can_comment && <p className="comment-scope">Comment access is no longer available. You can copy your draft.</p>}
+            </> : <>
+              <p role="status">{commentNotice}</p>
+              <button type="button" onClick={clearCommentNotice}>Dismiss</button>
+            </>}
+          </section>
+        )}
         <main className="doc-body">
           <div className={`doc-canvas ${focusMode ? 'is-focus' : ''}`}>
             <article className="doc-main">
@@ -982,6 +1015,7 @@ export default function DocumentShow({
                   comments={marginComments}
                   anchorRanges={anchorRanges}
                   onResolveComment={resolveComment}
+                  resolvingComments={resolvingComments}
                   onJumpToComment={jumpToComment}
                   onHoverComment={hoverAnchor}
                   onCommentMarkerSelect={(comment) => {
@@ -1007,6 +1041,9 @@ export default function DocumentShow({
             <aside className="doc-rail">
               {!isReading && (
                 <CommentsPanel
+                  showResolved={commentsResolved}
+                  onShowResolvedChange={changeCommentsResolved}
+                  resolvingComments={resolvingComments}
                   comments={comments}
                   marginIds={focusMode ? null : anchoredIds}
                   // The desktop composer is the anchored card next to the
@@ -1111,6 +1148,9 @@ export default function DocumentShow({
         {!isReading && isMobile && activeSheet === 'comments' && (
           <MobileSheet title="Comments" onClose={() => setActiveSheet(null)}>
             <CommentsPanel
+                  showResolved={commentsResolved}
+                  onShowResolvedChange={changeCommentsResolved}
+                  resolvingComments={resolvingComments}
               comments={comments}
               composerAnchor={composerAnchor}
               anchoredIds={anchoredIds}

@@ -57,6 +57,14 @@ class DocumentUiPreferencesTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "resolved comment expansion is validated for first paint" do
+    [ nil, "", "0", "true", "1" ].each do |value|
+      cookies[:pruf_comments_resolved] = value
+      get document_page_path(@document.slug), headers: browser
+      assert_inertia_props { |props| props.dig(:ui, :comments_resolved) == (value == "1") }
+    end
+  end
+
   test "document width preference is clamped to safe bounds" do
     cookies[:pruf_width] = "20"
     get document_page_path(@document.slug), headers: browser
