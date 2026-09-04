@@ -190,9 +190,8 @@ export function useComments({
             onFinish: () => {
               resolvingRef.current.delete(comment.id)
               setResolvingComments(new Set(resolvingRef.current))
-              // A confirmed resolve already carries the fresh list in its own
-              // response; only an unconfirmed one needs server truth, and an
-              // extra GET can land stale over a concurrent comment post.
+              // A confirmed response already carries fresh comments. Reconcile
+              // uncertain outcomes; Inertia preserves any pending optimistic post.
               if (!confirmed) router.reload({ only: ['comments', 'ownership'], onHttpException: () => false, onNetworkError: () => false })
             },
           },

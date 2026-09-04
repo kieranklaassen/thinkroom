@@ -207,6 +207,7 @@ try {
   const recovered = cardsPage.locator('.comment-card', { hasText: 'Keep this failed draft.' })
   await recovered.locator('.comment-resolve').waitFor()
   if (await recovered.locator('.comment-jump').count()) throw new Error('retried stale quote acquired a jump')
+  if (await cardsPage.locator('.margin-comment').count() || await cardsPage.locator('.doc-rail').getByText('Other comments', { exact: true }).count()) throw new Error('fallback-only comments were labeled Other comments without any margin comments')
   if (createAttempts !== 2 || await recovered.count() !== 1) throw new Error('retry double-posted the draft')
   let resolveAttempts = 0
   await cardsPage.route('**/comments/*/resolve', async (route) => {
@@ -297,6 +298,33 @@ try {
   await cardsPage.waitForTimeout(1000)
   if (await cardsPage.getByRole('textbox', { name: 'Unsent comment' }).count()) throw new Error('late saved-check response restored a discarded draft')
   ok('discarded draft stays discarded after late check response')
+
+  // Inertia preserves pending optimistic props across a resolve's reload.
+  // Hold the POST until the reload has really finished, then lose its response.
+  await cardsPage.unroute(`**/d/${recoveryDoc.slug}/comments`)
+  await cardsPage.unroute(`**/d/${recoveryDoc.slug}/comment`)
+  await cardsPage.unroute('**/comments/*/resolve')
+  await cardsPage.route('**/comments/*/resolve', (route) => route.fulfill({ status: 422, contentType: 'text/plain', body: 'Unconfirmed resolution' }))
+  let finishHeldPost
+  const heldPost = new Promise((resolve) => { finishHeldPost = resolve })
+  await cardsPage.route(`**/d/${recoveryDoc.slug}/comments`, async (route) => {
+    await heldPost
+    await route.abort('failed')
+  })
+  await postDraft('Pending across a resolve reload.')
+  const pendingCard = cardsPage.locator('.comment-card', { hasText: 'Pending across a resolve reload.' })
+  await pendingCard.waitFor()
+  if (Number(await pendingCard.getAttribute('data-comment-id')) >= 0) throw new Error('fixture was not optimistic')
+  const reloadFinished = cardsPage.waitForResponse((response) => response.request().method() === 'GET' &&
+    response.url().includes(`/d/${recoveryDoc.slug}/comment`) && response.request().headers()['x-inertia-partial-data'] === 'comments,ownership')
+  await cardsPage.locator(`[data-comment-id="${concurrentIds[0]}"]`).getByRole('button', { name: 'Resolve', exact: true }).click()
+  await (await reloadFinished).finished()
+  await cardsPage.waitForTimeout(250)
+  if (await pendingCard.count() !== 1) throw new Error('resolve reload lost pending optimistic post')
+  finishHeldPost()
+  await cardsPage.getByRole('textbox', { name: 'Unsent comment' }).waitFor()
+  if (await cardsPage.getByRole('textbox', { name: 'Unsent comment' }).inputValue() !== 'Pending across a resolve reload.') throw new Error('lost response lost recoverable draft')
+  ok('resolve reload preserves an in-flight optimistic post and its lost-response recovery')
   await cardsPage.close()
   // END comment-card contract.
 
