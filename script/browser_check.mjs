@@ -46,6 +46,216 @@ const placeCaretAtEnd = async (paragraph) => {
 }
 
 try {
+  // BEGIN guided-review contract (also runnable as a focused local slice).
+  const reviewFetch = async (...args) => {
+    const response = await fetch(...args)
+    if (!response.ok) throw new Error(`review fixture API failed: ${response.status} ${args[0]}`)
+    return response
+  }
+  const reviewHeaders = { 'X-Agent-Name': 'Review partner', 'Content-Type': 'application/json' }
+  const attributed = (text, state = 'pending', author = 'Review partner', kind = 'ai') =>
+    `<span data-provenance data-kind="${kind}" data-author="${author}" data-state="${state}">${text}</span>`
+  const reviewDoc = await (await reviewFetch(`${BASE}/api/docs`, {
+    method: 'POST', headers: reviewHeaders,
+    body: JSON.stringify({ title: 'Guided review contract', content: [
+      `# ${attributed('Guided review contract', 'verbatim', 'Alex', 'human')}`,
+      attributed('First **careful** passage.') + attributed(' Reviewed neighbor.', 'reviewed'),
+      attributed('Second passage needs attention.', 'pending', 'Writing partner'),
+      attributed('Already endorsed.', 'endorsed'),
+      attributed('Repeated text.', 'pending', 'First author'),
+      attributed('Repeated text.', 'pending', 'Second author'),
+      attributed('Another human passage.', 'verbatim', 'Alex', 'human'),
+    ].join('\n\n') }),
+  })).json()
+  const reviewA = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
+  const reviewB = await browser.newPage({ viewport: { width: 1600, height: 1000 } })
+  for (const page of [reviewA, reviewB]) {
+    page.on('pageerror', (error) => fail(`guided review page error: ${error}`))
+    page.setDefaultTimeout(10000)
+    await page.goto(`${BASE}/d/${reviewDoc.slug}/edit`)
+    await waitForLive(page)
+  }
+  const reviewNav = (page, kind) => page.locator('.prov-summary:visible').getByRole('button', { name: new RegExp(`Find next ${kind} text`) })
+  const reviewCard = (page) => page.getByRole('dialog', { name: 'Review AI text' })
+  const selectedReviewText = (page) => page.evaluate(() => {
+    const selection = getSelection()
+    if (!selection?.rangeCount) return ''
+    const fragment = selection.getRangeAt(0).cloneContents()
+    fragment.querySelectorAll('.ProseMirror-widget').forEach((el) => el.remove())
+    return fragment.textContent
+  })
+  const reviewedNeighborText = (page) => page.locator('.doc-live-editor p').first().locator('.prov--reviewed').evaluate((el) => {
+    const clone = el.cloneNode(true)
+    clone.querySelectorAll('.ProseMirror-widget').forEach((widget) => widget.remove())
+    return clone.textContent
+  })
+  const assertReview = (condition, message) => { if (!condition) throw new Error(message); ok(message) }
+  const reviewStateSnapshot = (page) => page.locator('.doc-live-editor [data-provenance]').evaluateAll((els) => els.map((el) => {
+    const clone = el.cloneNode(true)
+    clone.querySelectorAll('.ProseMirror-widget').forEach((widget) => widget.remove())
+    return [el.dataset.kind, el.dataset.author, el.dataset.state, clone.textContent]
+  }))
+  const beforeHumanNavigation = await reviewStateSnapshot(reviewA)
+  await reviewNav(reviewA, 'human').focus()
+  await reviewA.keyboard.press('Enter')
+  await reviewA.getByRole('status').filter({ hasText: 'Human-written passage selected.' }).waitFor()
+  assertReview(await selectedReviewText(reviewA) === 'Guided review contract', 'Human navigation selects the exact human passage')
+  assertReview(await reviewCard(reviewA).count() === 0 && await reviewNav(reviewA, 'human').evaluate((el) => el === document.activeElement), 'Human navigation retains trigger focus without review guidance')
+  assertReview(JSON.stringify(await reviewStateSnapshot(reviewA)) === JSON.stringify(beforeHumanNavigation), 'Human navigation does not change provenance state')
+  await reviewNav(reviewA, 'unreviewed').click()
+  await reviewNav(reviewB, 'unreviewed').click()
+  await reviewCard(reviewA).waitFor({ state: 'visible' })
+  assertReview(await selectedReviewText(reviewA) === 'First careful passage.', 'navigation joins formatting fragments without including the reviewed neighbor')
+  assertReview(await reviewA.locator('.doc-live-editor .prov--endorsed').count() === 1, 'navigation does not approve or endorse text')
+  await reviewCard(reviewA).getByRole('button', { name: 'Mark reviewed', exact: true }).click()
+  await reviewCard(reviewB).getByRole('button', { name: 'Endorse', exact: true }).waitFor({ state: 'visible' })
+  assertReview((await reviewA.locator('.prov-summary:visible').innerText()) === (await reviewB.locator('.prov-summary:visible').innerText()), 'review percentages update across clients')
+  await reviewCard(reviewB).getByRole('button', { name: 'Endorse', exact: true }).click()
+  await reviewCard(reviewA).getByRole('button', { name: 'Done', exact: true }).waitFor({ state: 'visible' })
+  assertReview((await reviewedNeighborText(reviewA)) === ' Reviewed neighbor.', 'a remote state merge never expands the original endorsement interval')
+  await reviewCard(reviewA).getByRole('button', { name: 'Done', exact: true }).click()
+  assertReview(await reviewNav(reviewA, 'unreviewed').evaluate((el) => el === document.activeElement), 'Done returns focus to the summary trigger')
+  await reviewNav(reviewA, 'AI').click()
+  assertReview(await selectedReviewText(reviewA) === ' Reviewed neighbor.', 'adjacent AI ranges are not skipped at a selected interval boundary')
+  await reviewA.keyboard.press('Escape')
+  await reviewNav(reviewA, 'unreviewed').focus()
+  await reviewA.keyboard.press('Enter')
+  await reviewCard(reviewA).getByRole('button', { name: 'Mark reviewed', exact: true }).waitFor({ state: 'visible' })
+  assertReview(await reviewCard(reviewA).getByRole('button', { name: 'Mark reviewed', exact: true }).evaluate((el) => el === document.activeElement), 'keyboard navigation focuses the next review action')
+  await reviewNav(reviewA, 'unreviewed').focus()
+  await reviewA.keyboard.press('Enter')
+  await reviewCard(reviewA).getByRole('button', { name: 'Mark reviewed', exact: true }).waitFor({ state: 'visible' })
+  assertReview(await reviewCard(reviewA).getByRole('button', { name: 'Mark reviewed', exact: true }).evaluate((el) => el === document.activeElement), 'repeated keyboard navigation focuses the new passage action')
+  await reviewA.keyboard.press('Escape')
+  assertReview(await reviewNav(reviewA, 'unreviewed').evaluate((el) => el === document.activeElement), 'Escape returns focus without changing review state')
+  // Wrap once per activation, including a range at the beginning after reload.
+  const visitedReviewAuthors = []
+  for (let i = 0; i < 4; i++) {
+    await reviewNav(reviewA, 'unreviewed').click()
+    visitedReviewAuthors.push(await reviewCard(reviewA).locator('.review-popover-author').innerText())
+  }
+  assertReview(visitedReviewAuthors[0] === visitedReviewAuthors[3] && new Set(visitedReviewAuthors.slice(0, 3)).size === 3, 'pending navigation wraps once and distinguishes repeated text by attribution')
+  // Bind the second paragraph, then edit before and inside it from the other tab.
+  for (let i = 0; i < 4 && !(await selectedReviewText(reviewA))?.includes('Second passage'); i++) await reviewNav(reviewA, 'unreviewed').click()
+  const secondPassage = reviewB.locator('.doc-live-editor p').filter({ hasText: 'Second passage needs attention.' })
+  await secondPassage.evaluate((el) => {
+    el.closest('.ProseMirror').focus()
+    const range = document.createRange(); range.selectNodeContents(el); range.collapse(true)
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  await reviewB.waitForTimeout(100)
+  await reviewB.keyboard.type('Human prefix. ')
+  await reviewA.waitForFunction(() => document.querySelector('.doc-live-editor')?.textContent.includes('Human prefix. '))
+  assertReview(await reviewCard(reviewA).isVisible(), 'remote insertion before the target keeps guidance attached')
+  await secondPassage.locator('.prov--ai').evaluate((el) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, { acceptNode: node => node.parentElement.closest('.ProseMirror-widget') || node.textContent.length < 2 ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT })
+    const text = walker.nextNode()
+    el.closest('.ProseMirror').focus()
+    const range = document.createRange(); range.setStart(text, 1); range.setEnd(text, 2)
+    const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range)
+    document.dispatchEvent(new Event('selectionchange'))
+  })
+  await reviewB.waitForTimeout(100)
+  await reviewB.keyboard.type('X')
+  await reviewCard(reviewA).waitFor({ state: 'hidden' })
+  await reviewA.getByRole('status').filter({ hasText: 'That passage changed.' }).waitFor()
+  ok('remote text changes close guidance instead of reviewing unrelated text')
+  await reviewB.keyboard.press('ControlOrMeta+z')
+  await reviewB.waitForTimeout(250)
+  assertReview(!(await reviewCard(reviewA).count()), 'undo does not reopen an invalidated review target')
+  // Undo may group recent local mark/text operations under the existing
+  // Yjs capture window. Persistence must preserve the resulting state, not
+  // impose a different undo contract on this UI port.
+  const savedReviewState = await reviewStateSnapshot(reviewB)
+  await reviewA.waitForFunction((expected) => JSON.stringify([...document.querySelectorAll('.doc-live-editor [data-provenance]')].map((el) => {
+    const clone = el.cloneNode(true)
+    clone.querySelectorAll('.ProseMirror-widget').forEach((widget) => widget.remove())
+    return [el.dataset.kind, el.dataset.author, el.dataset.state, clone.textContent]
+  })) === JSON.stringify(expected), savedReviewState)
+  await reviewA.reload(); await waitForLive(reviewA)
+  assertReview(JSON.stringify(await reviewStateSnapshot(reviewA)) === JSON.stringify(savedReviewState), 'exact review state survives reload, including existing undo semantics')
+  for (const mode of ['suggest', 'comment']) {
+    await reviewA.goto(`${BASE}/d/${reviewDoc.slug}/${mode}`); await waitForLive(reviewA)
+    await reviewNav(reviewA, 'unreviewed').click()
+    await reviewCard(reviewA).waitFor({ state: 'visible' })
+    assertReview(await reviewCard(reviewA).getByRole('button', { name: /Mark reviewed|^Endorse$/ }).count() === 0, `${mode} mode offers explanation without a review mutation`)
+    await reviewCard(reviewA).getByRole('button', { name: 'Done', exact: true }).click()
+  }
+  await reviewA.goto(`${BASE}/d/${reviewDoc.slug}`); await waitForLive(reviewA)
+  assertReview(await reviewA.locator('.prov-summary:visible').count() === 0 && await reviewCard(reviewA).count() === 0, 'Read mode stays free of review chrome')
+  const completeDoc = await (await reviewFetch(`${BASE}/api/docs`, {
+    method: 'POST', headers: reviewHeaders,
+    body: JSON.stringify({ content: `# ${attributed('Human note', 'verbatim', 'Alex', 'human')}` }),
+  })).json()
+  await reviewA.setViewportSize({ width: 390, height: 844 })
+  await reviewA.goto(`${BASE}/d/${completeDoc.slug}/edit`); await waitForLive(reviewA)
+  const beforeComplete = await reviewA.locator('.doc-live-editor .ProseMirror').innerHTML()
+  await reviewNav(reviewA, 'unreviewed').click()
+  await reviewA.getByRole('status').filter({ hasText: 'All caught up' }).waitFor()
+  assertReview(await reviewCard(reviewA).count() === 0 && beforeComplete === await reviewA.locator('.doc-live-editor .ProseMirror').innerHTML(), 'phone all-reviewed state announces completion without mutation')
+  await reviewA.locator('.doc-live-editor .ProseMirror').focus()
+  await reviewA.keyboard.press('ControlOrMeta+a'); await reviewA.keyboard.press('Backspace')
+  await reviewNav(reviewA, 'AI').click()
+  await reviewA.getByRole('status').filter({ hasText: 'No AI text in this document.' }).waitFor()
+  assertReview(await reviewCard(reviewA).count() === 0, 'an empty document has a non-mutating no-match state')
+  const longReviewDoc = await (await reviewFetch(`${BASE}/api/docs`, {
+    method: 'POST', headers: reviewHeaders,
+    body: JSON.stringify({ content: `# ${attributed('Long review', 'verbatim', 'Alex', 'human')}\n\n${attributed('A thoughtful passage deserves careful reading. '.repeat(90))}` }),
+  })).json()
+  await reviewA.goto(`${BASE}/d/${longReviewDoc.slug}/edit`); await waitForLive(reviewA)
+  await reviewNav(reviewA, 'unreviewed').click()
+  await reviewCard(reviewA).waitFor({ state: 'visible' })
+  const longReviewBox = await reviewCard(reviewA).boundingBox()
+  assertReview(longReviewBox.y >= 0 && longReviewBox.y + longReviewBox.height <= 844, 'long phone passages keep review actions in the viewport')
+  await reviewA.setViewportSize({ width: 800, height: 400 })
+  await reviewA.goto(`${BASE}/d/${longReviewDoc.slug}/edit`); await waitForLive(reviewA)
+  await reviewNav(reviewA, 'unreviewed').click()
+  await reviewCard(reviewA).waitFor({ state: 'visible' })
+  const shortReviewBox = await reviewCard(reviewA).boundingBox()
+  const firstReviewLine = await reviewA.locator('.doc-live-editor .prov--ai').first().evaluate((el) => {
+    const rect = el.getClientRects()[0]
+    return { top: rect.top, bottom: rect.bottom }
+  })
+  assertReview(shortReviewBox.y >= 0 && shortReviewBox.y + shortReviewBox.height <= 400, 'long passages keep actions visible in a short viewport')
+  assertReview(firstReviewLine.top >= 52 && firstReviewLine.bottom <= 400 &&
+    (shortReviewBox.y + shortReviewBox.height <= firstReviewLine.top || shortReviewBox.y >= firstReviewLine.bottom), 'short-viewport guidance keeps the passage beginning readable')
+  await reviewA.setViewportSize({ width: 390, height: 844 })
+  const boundaryDoc = await (await reviewFetch(`${BASE}/api/docs`, {
+    method: 'POST', headers: reviewHeaders,
+    body: JSON.stringify({ content: [
+      `# ${attributed('Review boundaries', 'verbatim', 'Alex', 'human')}`,
+      `| ${attributed('Left', 'verbatim', 'Alex', 'human')} | ${attributed('Right', 'verbatim', 'Alex', 'human')} |\n| --- | --- |\n| ${attributed('First cell.')} | ${attributed('Second cell.')} |`,
+      `<ins data-suggestion-id="review-insertion" data-author="Review partner">${attributed('Not accepted yet.')}</ins>`,
+      `<del data-suggestion-id="review-deletion" data-author="Review partner">${attributed('Still part of the document.')}</del>`,
+    ].join('\n\n') }),
+  })).json()
+  await reviewA.setViewportSize({ width: 1600, height: 1000 })
+  for (const page of [reviewA, reviewB]) {
+    await page.goto(`${BASE}/d/${boundaryDoc.slug}/edit`); await waitForLive(page)
+  }
+  assertReview(await reviewA.locator('.doc-live-editor ins').count() > 0 && await reviewA.locator('.doc-live-editor del').count() > 0, 'boundary fixture retains pending insertion and deletion marks')
+  const boundaryTargets = []
+  for (let i = 0; i < 4; i++) {
+    await reviewNav(reviewA, 'unreviewed').click()
+    boundaryTargets.push(await selectedReviewText(reviewA))
+  }
+  assertReview(JSON.stringify(boundaryTargets) === JSON.stringify(['First cell.', 'Second cell.', 'Still part of the document.', 'First cell.']), 'navigation separates table cells, skips pending insertions, and retains deletion-marked text')
+  await reviewNav(reviewB, 'unreviewed').click()
+  await reviewB.locator('.doc-live-editor .ProseMirror').focus()
+  await reviewB.keyboard.press('Backspace')
+  await reviewCard(reviewA).waitFor({ state: 'hidden' })
+  await reviewA.getByRole('status').filter({ hasText: 'That passage changed.' }).waitFor()
+  ok('deleting the exact target in another client closes guidance safely')
+  await reviewNav(reviewA, 'unreviewed').click()
+  await reviewB.locator('.doc-live-editor .ProseMirror').focus()
+  await reviewB.keyboard.press('ControlOrMeta+a'); await reviewB.keyboard.type('A replacement document.')
+  await reviewCard(reviewA).waitFor({ state: 'hidden' })
+  await reviewA.getByRole('status').filter({ hasText: 'That passage changed.' }).waitFor()
+  ok('whole-document replacement invalidates the old review target')
+  await reviewA.close(); await reviewB.close()
+  // END guided-review contract.
+
   // BEGIN comment-card contract (also runnable as a focused local slice).
   const cardFetch = async (...args) => {
     const response = await fetch(...args)
@@ -1225,7 +1435,11 @@ try {
   } else {
     fail(`Thinkroom sketch styling did not return: ${JSON.stringify(thinkroomPreviewTheme)}`)
   }
-  const sketchFitsPaper = await sketchA.locator('.thinkroom-sketch').evaluate((node) => {
+  // The preview resizes after the viewport/theme change via ResizeObserver.
+  // Verify settled containment, not the first pre-observer frame.
+  const sketchFitsPaper = await sketchA.waitForFunction(() => {
+    const node = document.querySelector('.thinkroom-sketch')
+    if (!node) return false
     const paper = node.querySelector('svg[data-renderer="excalidraw"]')?.getBoundingClientRect()
     const drawing = node.querySelector('[data-excalidraw-scene]')?.getBoundingClientRect()
     return Boolean(
@@ -1235,7 +1449,7 @@ try {
       drawing.bottom <= paper.bottom + 0.1 &&
       drawing.left >= paper.left - 0.1
     )
-  })
+  }, null, { timeout: 5000 }).then(() => true).catch(() => false)
   if (sketchFitsPaper) ok('the complete sketch fits inside its fixed-width paper')
   else fail('the saved sketch preview clips content outside its paper')
   const closedSketchHeight = await sketchA.locator('.thinkroom-sketch').evaluate((node) =>
@@ -1759,10 +1973,9 @@ try {
   // Provenance review is a transient text-targeted affordance. Clicking
   // anywhere outside the document should dismiss it instead of leaving a
   // stale "Pending review" popover anchored to the last AI span.
-  const pendingSpanBox = await a.locator('.milkdown .prov--ai.prov--pending').first().boundingBox()
-  // The span wraps across lines: its box's top-left belongs to the preceding
-  // text, so click the bottom-left fragment, which is always span text.
-  await a.mouse.click(pendingSpanBox.x + 10, pendingSpanBox.y + pendingSpanBox.height - 10)
+  const pendingSpanBox = await a.locator('.milkdown .prov--ai.prov--pending').first().evaluate(el => [...el.getClientRects()].find(r => r.width > 0 && r.height > 0).toJSON())
+  // Click an actual inline fragment, not whitespace in its union box.
+  await a.mouse.click(pendingSpanBox.x + pendingSpanBox.width / 2, pendingSpanBox.y + pendingSpanBox.height / 2)
   await a.locator('.review-popover').waitFor({ state: 'visible', timeout: 5000 })
   await a.locator('.doc-title').click()
   const reviewDismissed = await a
@@ -1773,8 +1986,9 @@ try {
   if (reviewDismissed) ok('clicking outside the document dismisses provenance review')
   else fail('provenance review stayed open after an outside click')
   // Re-measure: live collaboration can shift the span between the clicks.
-  const reopenSpanBox = await a.locator('.milkdown .prov--ai.prov--pending').first().boundingBox()
-  await a.mouse.click(reopenSpanBox.x + 10, reopenSpanBox.y + reopenSpanBox.height - 10)
+  await a.waitForTimeout(600) // a deliberate single click, not PM's double/triple-click gesture
+  const reopenSpanBox = await a.locator('.milkdown .prov--ai.prov--pending').first().evaluate(el => [...el.getClientRects()].find(r => r.width > 0 && r.height > 0).toJSON())
+  await a.mouse.click(reopenSpanBox.x + reopenSpanBox.width / 2, reopenSpanBox.y + reopenSpanBox.height / 2)
   const reviewReopened = await a
     .locator('.review-popover')
     .waitFor({ state: 'visible', timeout: 3000 })
@@ -1804,7 +2018,7 @@ try {
   ok('typed text carries human provenance across clients')
 
   // Summary chip reflects mixed provenance
-  const summaryText = await a.locator('.prov-summary').textContent({ timeout: 5000 })
+  const summaryText = await a.locator('.prov-summary:visible').textContent({ timeout: 5000 })
   if (summaryText?.includes('% human') && summaryText.includes('% AI')) {
     ok(`provenance summary live: "${summaryText.trim()}"`)
   } else {
@@ -2029,7 +2243,13 @@ try {
     panelWasHidden,
     { timeout: 5000 },
   )
-  await a.waitForTimeout(250)
+  // ResizeObserver and the cursor clamp settle after the panel transition.
+  // Assert the resulting geometry rather than sampling a fixed animation frame.
+  await a.waitForFunction((agentName) => {
+    const label = [...document.querySelectorAll('.agent-cursor-label')].find((el) => el.textContent?.includes(agentName))
+    const rect = label?.getBoundingClientRect()
+    return rect && rect.left >= 8 && rect.right <= innerWidth - 8 && document.documentElement.scrollWidth <= innerWidth
+  }, overflowAgentName, { timeout: 10000 }).catch(() => null)
   const shiftedCursorBox = await a
     .locator('.agent-cursor-label', { hasText: overflowAgentName })
     .first()

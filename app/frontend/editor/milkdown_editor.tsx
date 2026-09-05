@@ -81,7 +81,7 @@ import { codeBlockView } from './code_block_view'
 import { configureCleanClipboard } from './clipboard'
 import { renderSoftBreaks } from './line_breaks'
 import { interactiveTaskListItems, taskPersistenceCtx } from './task_list_items'
-import { selectionCallbackCtx, selectionWatcher } from './selection_watcher'
+import { selectionCallbackCtx, selectionWatcher, type SelectionCallback } from './selection_watcher'
 import type { CollaboratorKind } from '../types/payloads'
 import {
   htmlDefaultValue,
@@ -153,7 +153,7 @@ export interface EditorProps {
   onReady?: (handle: EditorHandle) => void
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
-  onSelection?: (view: EditorView) => void
+  onSelection?: SelectionCallback
   onTitleChange?: (title: string) => void
 }
 
@@ -499,14 +499,19 @@ function CollabEditor({
         }
 
         ctx.set(selectionCallbackCtx.key, {
-          fn: (view) => callbacksRef.current.onSelection?.(view),
+          fn: (view, cause) => {
+            if (cause === 'document') {
+              callbacksRef.current.onSpans?.(collectSpans(view.state.doc, { excludePendingInsertions: true }))
+            }
+            callbacksRef.current.onSelection?.(view, cause)
+          },
         })
+        callbacksRef.current.onSpans?.(collectSpans(ctx.get(editorViewCtx).state.doc, { excludePendingInsertions: true }))
 
         ctx.get(listenerCtx).updated((_listenerCtx, doc) => {
-          // Chip path: display-only exclusion of pending insertions. The
-          // snapshot path below stays unfiltered — persisted provenance must
-          // remain complete while suggestions are pending.
-          callbacksRef.current.onSpans?.(collectSpans(doc, { excludePendingInsertions: true }))
+          // Live summary updates use the document watcher above: unlike this
+          // debounced listener it also sees remote and history-excluded edits.
+          // Persisted snapshots remain complete, including pending insertions.
           const title = firstHeadingTitle(doc)
           if (title) callbacksRef.current.onTitleChange?.(title)
           scheduleSnapshot()

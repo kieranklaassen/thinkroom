@@ -66,6 +66,11 @@
 }
 
 .presence-agent-name {
+  /* Preserve space for provenance navigation and header actions. The parent
+   * presence chip keeps the full agent name in its title. */
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 0.7rem;
   font-weight: 600;
   padding: 0.12rem 0.5rem;
