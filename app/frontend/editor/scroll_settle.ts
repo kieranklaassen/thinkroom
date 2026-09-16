@@ -42,13 +42,26 @@ const settleAfterScroll = (view: EditorView) => {
   })
 }
 
+// A block already on screen is rendered, so scrolling to it shifts nothing;
+// only jumps into unrendered territory need the settle passes. The block's
+// own box is laid out even while its contents are skipped, so this read does
+// not force the contents to render.
+const headBlockOnScreen = (view: EditorView): boolean => {
+  const { node } = view.domAtPos(view.state.selection.head)
+  const element = node instanceof Element ? node : node.parentElement
+  const block = element?.closest('.ProseMirror > *')
+  if (!block) return true
+  const rect = block.getBoundingClientRect()
+  return rect.bottom > 0 && rect.top < window.innerHeight
+}
+
 const scrollSettleProse = $prose(
   () =>
     new Plugin({
       key: scrollSettleKey,
       props: {
         handleScrollToSelection(view) {
-          settleAfterScroll(view)
+          if (!headBlockOnScreen(view)) settleAfterScroll(view)
           return false
         },
       },
