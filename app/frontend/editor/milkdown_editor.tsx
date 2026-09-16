@@ -78,6 +78,7 @@ import {
 } from './table_icons'
 import { agentCursors } from './agent_cursors'
 import { scrollSettle } from './scroll_settle'
+import { longDocument } from './long_document'
 import { codeBlockView } from './code_block_view'
 import { configureCleanClipboard } from './clipboard'
 import { renderSoftBreaks } from './line_breaks'
@@ -412,6 +413,7 @@ function CollabEditor({
         .use(agentCursors)
         .use(readPointers)
         .use(scrollSettle)
+        .use(longDocument)
         .use(collab),
     [],
   )

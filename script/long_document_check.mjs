@@ -8,7 +8,7 @@ import { chromium, request } from 'playwright'
 import { expectedBrowserNoise, waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
-const SECTIONS = 40
+const SECTIONS = 60
 const failures = []
 const startedAt = Date.now()
 // A frozen renderer must fail the check, never stall the CI loop.
@@ -105,12 +105,14 @@ try {
     const code = Array.from(prose.querySelectorAll(':scope > pre'))
     return {
       supported: 'contentVisibility' in document.documentElement.style,
+      longDocument: prose.classList.contains('is-long-document'),
       paragraphAuto: paragraphs.every((node) => style(node) === 'auto'),
       codeVisible: code.every((node) => style(node) === 'visible'),
       lastParagraphRendered: paragraphs.at(-1).getBoundingClientRect().height > 0,
     }
   })
   check(visibility.supported, 'the browser supports content-visibility')
+  check(visibility.longDocument, 'the editor root is marked as a long document')
   check(visibility.paragraphAuto, 'offscreen-capable paragraphs use content-visibility: auto')
   check(visibility.codeVisible, 'breakout code blocks stay fully rendered (their width handle overflows the block)')
   check(visibility.lastParagraphRendered, 'skipped blocks keep a placeholder height so the document keeps its length')
