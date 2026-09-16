@@ -123,7 +123,10 @@ class DocumentsController < InertiaController
       # the expensive parts entirely — preview HTML rendering and the Base64
       # Yjs state encode only run when the document prop is actually sent.
       document: -> { document.slice(:id, :slug, :title, :content_format).merge(
-        seed_content: document.seed_content,
+        # Only the client that won the seed claim applies the template; on
+        # every other load (every load of a live document) the seed is dead
+        # weight the size of the document, so it rides with the grant only.
+        seed_content: (document.seed_content if seed_granted),
         seed_version: document.updated_at.iso8601(6),
         seed_granted: seed_granted,
         seed_author_kind: document.seed_author_kind,
@@ -144,7 +147,7 @@ class DocumentsController < InertiaController
         # First-H1 title derived on the server so the header reads correctly on
         # first paint, before the editor mounts and derives the same title.
         display_title: document.display_title,
-        **(document.content_format == "markdown" ? { seed_markdown: document.seed_content } : {})
+        **(seed_granted && document.content_format == "markdown" ? { seed_markdown: document.seed_content } : {})
       ) },
       # Ownership rides its own lazy prop so claim events reload cheaply —
       # never re-shipping the Yjs state embedded in the document prop above.
