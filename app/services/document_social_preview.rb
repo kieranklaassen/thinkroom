@@ -67,8 +67,12 @@ class DocumentSocialPreview
   end
 
   def bound(text, maximum)
-    graphemes = text.scan(/\X/)
-    return text if graphemes.length <= maximum
+    # Grapheme-scan only what can matter: a whole long document's plain text
+    # would cost more than the rest of the page render. Four code points per
+    # grapheme comfortably covers the clusters that appear in prose.
+    prefix = text[0, maximum * 4]
+    graphemes = prefix.scan(/\X/)
+    return text if prefix.length == text.length && graphemes.length <= maximum
 
     clipped = graphemes.first(maximum - 1).join.rstrip
     word_boundary = clipped.sub(/\s+\S*\z/, "").presence

@@ -63,6 +63,17 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "a page load without the grant ships no seed template" do
+    get document_page_path(@document.slug), headers: browser
+    get document_page_path(@document.slug), headers: browser
+
+    assert_inertia_props do |props|
+      props[:document][:seed_granted] == false &&
+        props[:document][:seed_content].nil? &&
+        !props[:document].key?(:seed_markdown)
+    end
+  end
+
   test "a stale claim is reclaimable by a later page load" do
     get document_page_path(@document.slug), headers: browser
 

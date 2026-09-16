@@ -122,8 +122,16 @@ class DocumentsController < InertiaController
       # Lambda so partial reloads (suggestions/comments/presences polls) skip
       # the expensive parts entirely — preview HTML rendering and the Base64
       # Yjs state encode only run when the document prop is actually sent.
-      document: -> { document.slice(:id, :slug, :title, :content_format).merge(
-        seed_content: document.seed_content,
+      document: -> {
+        content_html = document.preview_html(
+          editable: preview_editable,
+          sketch_interactive: preview_sketch_interactive
+        )
+        document.slice(:id, :slug, :title, :content_format).merge(
+        # Only the client that won the seed claim applies the template; on
+        # every other load (every load of a live document) the seed is dead
+        # weight the size of the document, so it rides with the grant only.
+        seed_content: (document.seed_content if seed_granted),
         seed_version: document.updated_at.iso8601(6),
         seed_granted: seed_granted,
         seed_author_kind: document.seed_author_kind,
@@ -131,11 +139,11 @@ class DocumentsController < InertiaController
         has_state: document.yjs_state.present?,
         yjs_state_b64: (Base64.strict_encode64(document.yjs_state) if document.yjs_state.present?),
         # Server-rendered prose for an instant first paint; the live editor
-        # swaps in over it once Milkdown binds the hydrated Yjs state.
-        content_html: document.preview_html(
-          editable: preview_editable,
-          sketch_interactive: preview_sketch_interactive
-        ),
+        # swaps in over it once Milkdown binds the hydrated Yjs state. The
+        # block count lets the preview adopt the long-document rendering the
+        # editor will use, so the two layers keep the same geometry.
+        content_html:,
+        content_blocks: DocumentPreviewHtml.block_count(content_html),
         # Client-measured render geometry (Mermaid figure heights) persisted
         # from earlier snapshots; the editor pre-sizes its diagram figures from
         # the same hints the preview skeletons used, so neither layer jumps
@@ -144,8 +152,9 @@ class DocumentsController < InertiaController
         # First-H1 title derived on the server so the header reads correctly on
         # first paint, before the editor mounts and derives the same title.
         display_title: document.display_title,
-        **(document.content_format == "markdown" ? { seed_markdown: document.seed_content } : {})
-      ) },
+        **(seed_granted && document.content_format == "markdown" ? { seed_markdown: document.seed_content } : {})
+      )
+      },
       # Ownership rides its own lazy prop so claim events reload cheaply —
       # never re-shipping the Yjs state embedded in the document prop above.
       ownership: -> { document.ownership_props(owner_token, viewer_user: current_user) },

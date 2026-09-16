@@ -112,6 +112,7 @@ export interface DocumentProps {
     has_state: boolean
     yjs_state_b64: string | null
     content_html: string
+    content_blocks: number
     display_title: string
     // Persisted render geometry (Mermaid figure heights by source hash):
     // the server sized the content_html skeletons from these, and the editor
@@ -1075,6 +1076,7 @@ export default function DocumentShow({
               <StagedDocumentEditor
                 key={editorSessionKey}
                 contentHtml={doc.content_html}
+                contentBlocks={doc.content_blocks}
                 isClient={isClient}
                 onHandle={setHandle}
                 slug={doc.slug}

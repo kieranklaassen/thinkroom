@@ -15,6 +15,7 @@ const VIEWPORT_LINE = 0.42
 const MIN_VISIBLE_LINE = 0.08
 const MAX_VISIBLE_LINE = 0.92
 const MAX_OFFSET_SCREENS = 2
+const MAX_SETTLE_PASSES = 4
 
 const editorViewFor = (editor: Editor): EditorView | null => {
   let view: EditorView | null = null
@@ -108,6 +109,12 @@ export function bindViewportFollow(
   if (!view) return () => undefined
 
   let frame: number | null = null
+  // Offscreen blocks are unrendered placeholders (content-visibility) until
+  // they scroll into view, so one scroll lands near the anchor and the blocks
+  // that then render around it shift it. Re-align over a few frames until
+  // the anchor holds still.
+  let settlePasses = 0
+  let released = false
   const follow = () => {
     frame = null
     const remoteState = awareness.getStates().get(clientId) as ViewportAwarenessState | undefined
@@ -134,23 +141,43 @@ export function bindViewportFollow(
     try {
       const coordinates = view.coordsAtPos(boundedPosition)
       const delta = coordinates.top + offset - window.innerHeight * line
-      if (Math.abs(delta) > 1) window.scrollBy({ top: delta, behavior: 'auto' })
+      if (Math.abs(delta) > 1) {
+        window.scrollBy({ top: delta, behavior: 'auto' })
+        if (settlePasses < MAX_SETTLE_PASSES) {
+          settlePasses += 1
+          frame = requestAnimationFrame(follow)
+        }
+      }
     } catch {
       // The document can remap between awareness receipt and this animation
       // frame. The next viewport update will resolve against the new mapping.
     }
   }
   const schedule = () => {
+    if (released) return
+    settlePasses = 0
     if (frame === null) frame = requestAnimationFrame(follow)
+  }
+  // A scroll gesture releases follow through React state, so this binding
+  // outlives the release by at least a frame. Stop aligning right away, or a
+  // queued frame scrolls the viewport back to the collaborator.
+  const release = () => {
+    released = true
+    if (frame !== null) cancelAnimationFrame(frame)
+    frame = null
   }
 
   awareness.on('change', schedule)
   window.addEventListener('resize', schedule, { passive: true })
+  window.addEventListener('wheel', release, { passive: true })
+  window.addEventListener('touchmove', release, { passive: true })
   queueMicrotask(schedule)
 
   return () => {
     awareness.off('change', schedule)
     window.removeEventListener('resize', schedule)
+    window.removeEventListener('wheel', release)
+    window.removeEventListener('touchmove', release)
     if (frame !== null) cancelAnimationFrame(frame)
   }
 }

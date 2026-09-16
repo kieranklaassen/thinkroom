@@ -50,11 +50,13 @@ export function useFollowPresence(handle: EditorHandle | null): {
     }
 
     window.addEventListener('wheel', release, { passive: true })
+    window.addEventListener('touchmove', releaseOutsidePresence, { passive: true })
     window.addEventListener('touchstart', releaseOutsidePresence, { passive: true })
     window.addEventListener('pointerdown', releaseOutsidePresence, { passive: true })
     window.addEventListener('keydown', releaseOnNavigationKey)
     return () => {
       window.removeEventListener('wheel', release)
+      window.removeEventListener('touchmove', releaseOutsidePresence)
       window.removeEventListener('touchstart', releaseOutsidePresence)
       window.removeEventListener('pointerdown', releaseOutsidePresence)
       window.removeEventListener('keydown', releaseOnNavigationKey)

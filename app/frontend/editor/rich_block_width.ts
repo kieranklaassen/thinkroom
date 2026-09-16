@@ -61,14 +61,14 @@ const clampWidth = (block: HTMLElement, width: number, maximum?: number) => {
   return Math.round(Math.min(Math.max(width, bounds.minimum), maximum ?? bounds.maximum))
 }
 
-const syncHandleValue = (handle: HTMLButtonElement) => {
-  const block = handle.closest<HTMLElement>(BLOCK_SELECTOR)
-  if (!block) return
-
+const syncHandleValue = (
+  handle: HTMLButtonElement,
+  block: HTMLElement,
+  bounds: { minimum: number; maximum: number },
+) => {
   const width = Math.round(block.getBoundingClientRect().width)
-  const { minimum, maximum } = widthBounds(block)
-  handle.setAttribute('aria-valuemin', String(minimum))
-  handle.setAttribute('aria-valuemax', String(maximum))
+  handle.setAttribute('aria-valuemin', String(bounds.minimum))
+  handle.setAttribute('aria-valuemax', String(bounds.maximum))
   handle.setAttribute('aria-valuenow', String(width))
   handle.setAttribute('aria-valuetext', `${width} pixels. Press Home or double-click to reset.`)
 }
@@ -153,7 +153,7 @@ const buildHandle = (block: HTMLElement) => {
   handle.addEventListener('pointercancel', finishDrag)
 
   block.append(handle)
-  syncHandleValue(handle)
+  return handle
 }
 
 const richBlockWidthControlsProse = $prose(
@@ -162,45 +162,72 @@ const richBlockWidthControlsProse = $prose(
       key: richBlockWidthKey,
       view: (view) => {
         let frame: number | null = null
+        const handles = new Map<HTMLElement, HTMLButtonElement>()
 
-        const sync = () => {
+        // The aria values need block geometry. Reading it after every content
+        // change forced a layout per code block, the editor's largest boot
+        // cost on long documents. A ResizeObserver delivers block sizes after
+        // layout has already run, so measuring inside its callback reads
+        // clean geometry and forces nothing; it also fires for every cause
+        // of a width change (window, shared width, page mode, new block).
+        const measureBlocks = (blocks: HTMLElement[]) => {
+          const [first] = blocks
+          if (!first) return
+          // Bounds derive from the editor root and page mode, so they are
+          // the same for every block in one pass.
+          const bounds = widthBounds(first)
+          blocks.forEach((block) => {
+            const handle = handles.get(block)
+            if (handle) syncHandleValue(handle, block, bounds)
+          })
+        }
+        const sizeObserver = typeof ResizeObserver === 'undefined'
+          ? null
+          : new ResizeObserver((entries) => {
+              measureBlocks(entries.map((entry) => entry.target as HTMLElement))
+            })
+
+        // Content changes only reconcile which blocks carry a handle — DOM
+        // writes, no reads.
+        const reconcile = () => {
           frame = null
           view.dom.querySelectorAll<HTMLElement>(BLOCK_QUERY).forEach((block) => {
-            if (!block.querySelector(':scope > .rich-block-width-handle')) buildHandle(block)
+            if (handles.has(block)) return
+            handles.set(block, buildHandle(block))
+            sizeObserver?.observe(block)
           })
-          view.dom.querySelectorAll<HTMLButtonElement>('.rich-block-width-handle').forEach((handle) => {
+          handles.forEach((handle, block) => {
             // A block can leave the breakout set in place (e.g. a code block
-            // whose language becomes mermaid): drop its now-orphaned handle.
-            if (!handle.closest(BLOCK_SELECTOR)) {
-              handle.remove()
-              return
-            }
-            syncHandleValue(handle)
+            // whose language becomes mermaid) or leave the document: drop its
+            // now-orphaned handle.
+            if (block.isConnected && handle.closest(BLOCK_SELECTOR) === block) return
+            sizeObserver?.unobserve(block)
+            handle.remove()
+            handles.delete(block)
           })
+          if (!sizeObserver) measureBlocks(Array.from(handles.keys()))
         }
-        const scheduleSync = () => {
+        const scheduleReconcile = () => {
           if (frame !== null) return
-          frame = requestAnimationFrame(sync)
+          frame = requestAnimationFrame(reconcile)
         }
+        // A window resize can move the bounds without changing a block's
+        // width (a block already at its minimum), which the size observer
+        // never sees.
+        const measureAll = () => measureBlocks(Array.from(handles.keys()))
 
-        sync()
-        const mutationObserver = new MutationObserver(scheduleSync)
+        reconcile()
+        const mutationObserver = new MutationObserver(scheduleReconcile)
         mutationObserver.observe(view.dom, { childList: true, subtree: true })
-        const resizeObserver = typeof ResizeObserver === 'undefined'
-          ? null
-          : new ResizeObserver(scheduleSync)
-        resizeObserver?.observe(view.dom)
-        window.addEventListener('resize', scheduleSync)
-        window.addEventListener(RICH_BLOCK_WIDTH_EVENT, scheduleSync)
+        window.addEventListener('resize', measureAll)
 
         return {
-          update: scheduleSync,
+          update: scheduleReconcile,
           destroy: () => {
             if (frame !== null) cancelAnimationFrame(frame)
             mutationObserver.disconnect()
-            resizeObserver?.disconnect()
-            window.removeEventListener('resize', scheduleSync)
-            window.removeEventListener(RICH_BLOCK_WIDTH_EVENT, scheduleSync)
+            sizeObserver?.disconnect()
+            window.removeEventListener('resize', measureAll)
           },
         }
       },

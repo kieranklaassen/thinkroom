@@ -17,6 +17,14 @@
 #   - Sketches render as the real sketch figure (border/caption/tape) with a
 #     server-drawn SVG of the scene — not a gray placeholder.
 class DocumentPreviewHtml
+  # A long document's preview costs hundreds of milliseconds to render
+  # (Commonmarker, the sanitizer and several Nokogiri passes over the whole
+  # source) and is requested on every page load, yet only changes with its
+  # inputs. Recent renders stay in a bounded in-process LRU keyed by a digest
+  # of every input; uncompressed so a hit is a hash lookup, not an inflate.
+  CACHE = ActiveSupport::Cache::MemoryStore.new(size: 64.megabytes, compress: false)
+  CACHE_VERSION = 1
+
   class << self
     # editable: whether the editor will mount with contenteditable (Edit or
     #   Suggest mode for a writer) — controls Mermaid source visibility.
@@ -27,6 +35,66 @@ class DocumentPreviewHtml
       source = content.to_s
       return "" if source.blank?
 
+      key = cache_key(format:, source:, editable:, sketch_interactive:, render_hints:)
+      CACHE.fetch(key) { render(format:, source:, editable:, sketch_interactive:, render_hints:) }
+    end
+
+    # Top-level blocks in a rendered preview: the same count the editor sees
+    # as doc.childCount, so the server preview and the live editor agree on
+    # whether a document is long (editor/long_document.ts). Two structural
+    # differences keep the raw element count from matching, and both can flip
+    # a document across the threshold on one layer only.
+    def block_count(html)
+      return 0 if html.blank?
+
+      CACHE.fetch([ "document-preview-blocks", CACHE_VERSION, Digest::SHA256.hexdigest(html) ]) do
+        children = Nokogiri::HTML5.fragment(html).element_children
+        count = children.count { |node| !mermaid_widget_figure?(node) }
+        count += 1 if trailing_paragraph?(children.last)
+        count
+      end
+    end
+
+    def cache_key(format:, source:, editable:, sketch_interactive:, render_hints:)
+      [
+        "document-preview-html", CACHE_VERSION, format, editable, sketch_interactive,
+        Digest::SHA256.hexdigest(source), Digest::SHA256.hexdigest(render_hints.to_json)
+      ]
+    end
+
+    # FNV-1a over UTF-16 code units, matching sourceHash in
+    # app/frontend/editor/mermaid.ts so persisted render hints line up with
+    # the hashes the editor computes for its diagram figures.
+    def mermaid_source_hash(source)
+      hash = source.encode(Encoding::UTF_16LE).unpack("v*").reduce(2_166_136_261) do |acc, unit|
+        ((acc ^ unit) * 16_777_619) & 0xFFFFFFFF
+      end
+      hash.to_s(36)
+    end
+
+    private
+
+    # An editable preview keeps the Mermaid source <pre> and puts the loading
+    # figure beside it (replace_mermaid), but the editor builds that figure as
+    # a widget decoration on the code_block (editor/mermaid.ts) — so the pair
+    # is a single block to doc.childCount.
+    def mermaid_widget_figure?(node)
+      return false unless node.name == "figure" && node["class"].to_s.split.include?("mermaid-diagram")
+
+      sibling = node.next_element
+      sibling&.name == "pre" && sibling["data-language"].to_s.casecmp?("mermaid")
+    end
+
+    # Milkdown's trailing plugin appends an empty paragraph whenever the last
+    # block is neither a paragraph nor a heading, so the editor holds one block
+    # more than the preview emitted.
+    TRAILING_EXEMPT_BLOCKS = %w[p h1 h2 h3 h4 h5 h6].freeze
+
+    def trailing_paragraph?(last_child)
+      last_child.present? && TRAILING_EXEMPT_BLOCKS.exclude?(last_child.name)
+    end
+
+    def render(format:, source:, editable:, sketch_interactive:, render_hints:)
       html = if format == "html"
         source
       else
@@ -64,18 +132,6 @@ class DocumentPreviewHtml
       replace_mermaid(fragment, editable:, hints:)
       fragment.to_html
     end
-
-    # FNV-1a over UTF-16 code units, matching sourceHash in
-    # app/frontend/editor/mermaid.ts so persisted render hints line up with
-    # the hashes the editor computes for its diagram figures.
-    def mermaid_source_hash(source)
-      hash = source.encode(Encoding::UTF_16LE).unpack("v*").reduce(2_166_136_261) do |acc, unit|
-        ((acc ^ unit) * 16_777_619) & 0xFFFFFFFF
-      end
-      hash.to_s(36)
-    end
-
-    private
 
     # Block containers whose children are block elements; the whitespace between
     # those children is the markdown renderer's pretty-printing, never content.
