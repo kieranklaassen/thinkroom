@@ -59,6 +59,20 @@ class DocumentSocialPreviewTest < ActiveSupport::TestCase
     assert preview.description.end_with?("…")
   end
 
+  test "bounds a very long document's description without scanning all of it" do
+    document = Document.create!(
+      title: "Long read",
+      seed_content: "# Long read\n\n#{"#{'word ' * 80}\n\n" * 400}"
+    )
+
+    preview = DocumentSocialPreview.new(document)
+
+    assert_operator preview.description.scan(/\X/).length, :<=,
+                    DocumentSocialPreview::DESCRIPTION_MAX_GRAPHEMES
+    assert preview.description.start_with?("word word")
+    assert preview.description.end_with?("…")
+  end
+
   test "falls back to the title for a title-only document" do
     document = Document.create!(title: "Only title", seed_content: "")
 
