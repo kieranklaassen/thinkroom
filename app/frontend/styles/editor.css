@@ -478,3 +478,14 @@
 .milkdown .ProseMirror ::selection {
   background: var(--accent-soft);
 }
+
+/* Offscreen top-level blocks skip style, layout and paint, so a long document
+   costs what is on screen; `auto` remembers each block's rendered size once it
+   has been seen. Breakout blocks (code, tables, sketches, diagrams) stay out:
+   their width handles overflow the block and paint containment would clip
+   them. So does any block holding a collaborator cursor, whose name label sits
+   above the line (marked by editor/cursor_blocks.ts). */
+.milkdown .ProseMirror > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, hr):not([data-holds-cursor]) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 4rem;
+}
