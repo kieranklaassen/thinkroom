@@ -35,11 +35,15 @@ class DocumentPreviewHtml
       source = content.to_s
       return "" if source.blank?
 
-      key = [
+      key = cache_key(format:, source:, editable:, sketch_interactive:, render_hints:)
+      CACHE.fetch(key) { render(format:, source:, editable:, sketch_interactive:, render_hints:) }
+    end
+
+    def cache_key(format:, source:, editable:, sketch_interactive:, render_hints:)
+      [
         "document-preview-html", CACHE_VERSION, format, editable, sketch_interactive,
         Digest::SHA256.hexdigest(source), Digest::SHA256.hexdigest(render_hints.to_json)
       ]
-      CACHE.fetch(key) { render(format:, source:, editable:, sketch_interactive:, render_hints:) }
     end
 
     # FNV-1a over UTF-16 code units, matching sourceHash in
