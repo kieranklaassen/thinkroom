@@ -17,6 +17,14 @@
 #   - Sketches render as the real sketch figure (border/caption/tape) with a
 #     server-drawn SVG of the scene — not a gray placeholder.
 class DocumentPreviewHtml
+  # A long document's preview costs hundreds of milliseconds to render
+  # (Commonmarker, the sanitizer and several Nokogiri passes over the whole
+  # source) and is requested on every page load, yet only changes with its
+  # inputs. Recent renders stay in a bounded in-process LRU keyed by a digest
+  # of every input; uncompressed so a hit is a hash lookup, not an inflate.
+  CACHE = ActiveSupport::Cache::MemoryStore.new(size: 64.megabytes, compress: false)
+  CACHE_VERSION = 1
+
   class << self
     # editable: whether the editor will mount with contenteditable (Edit or
     #   Suggest mode for a writer) — controls Mermaid source visibility.
@@ -27,6 +35,26 @@ class DocumentPreviewHtml
       source = content.to_s
       return "" if source.blank?
 
+      key = [
+        "document-preview-html", CACHE_VERSION, format, editable, sketch_interactive,
+        Digest::SHA256.hexdigest(source), Digest::SHA256.hexdigest(render_hints.to_json)
+      ]
+      CACHE.fetch(key) { render(format:, source:, editable:, sketch_interactive:, render_hints:) }
+    end
+
+    # FNV-1a over UTF-16 code units, matching sourceHash in
+    # app/frontend/editor/mermaid.ts so persisted render hints line up with
+    # the hashes the editor computes for its diagram figures.
+    def mermaid_source_hash(source)
+      hash = source.encode(Encoding::UTF_16LE).unpack("v*").reduce(2_166_136_261) do |acc, unit|
+        ((acc ^ unit) * 16_777_619) & 0xFFFFFFFF
+      end
+      hash.to_s(36)
+    end
+
+    private
+
+    def render(format:, source:, editable:, sketch_interactive:, render_hints:)
       html = if format == "html"
         source
       else
@@ -64,18 +92,6 @@ class DocumentPreviewHtml
       replace_mermaid(fragment, editable:, hints:)
       fragment.to_html
     end
-
-    # FNV-1a over UTF-16 code units, matching sourceHash in
-    # app/frontend/editor/mermaid.ts so persisted render hints line up with
-    # the hashes the editor computes for its diagram figures.
-    def mermaid_source_hash(source)
-      hash = source.encode(Encoding::UTF_16LE).unpack("v*").reduce(2_166_136_261) do |acc, unit|
-        ((acc ^ unit) * 16_777_619) & 0xFFFFFFFF
-      end
-      hash.to_s(36)
-    end
-
-    private
 
     # Block containers whose children are block elements; the whitespace between
     # those children is the markdown renderer's pretty-printing, never content.
