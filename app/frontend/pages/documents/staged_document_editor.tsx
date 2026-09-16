@@ -4,6 +4,7 @@ import {
   type EditorHandle,
   type EditorProps,
 } from '../../editor/milkdown_editor'
+import { LONG_DOCUMENT_BLOCKS, LONG_DOCUMENT_CLASS } from '../../editor/long_document'
 
 // Resolves once every image in the live editor has finished loading (or
 // errored — a broken image settles at its broken-glyph size either way), or
@@ -36,6 +37,9 @@ interface Props extends Omit<EditorProps, 'onReady'> {
   /** Server-rendered prose that carries first paint and holds layout height
    *  until the live editor swaps in. */
   contentHtml: string
+  /** Top-level blocks in contentHtml, so the preview can adopt the editor's
+   *  long-document rendering (content-visibility) and keep its geometry. */
+  contentBlocks: number
   /** SSR/hydration island flag — the live editor mounts only client-side. */
   isClient: boolean
   /** The staged handle: set once the editor is ready AND its images have
@@ -64,7 +68,7 @@ interface Props extends Omit<EditorProps, 'onReady'> {
  * preview), then ProseMirror gets two frames to paint before the preview
  * is dropped.
  */
-export function StagedDocumentEditor({ contentHtml, isClient, onHandle, ...editorProps }: Props) {
+export function StagedDocumentEditor({ contentHtml, contentBlocks, isClient, onHandle, ...editorProps }: Props) {
   const [handle, setHandle] = useState<EditorHandle | null>(null)
   const [swapped, setSwapped] = useState(false)
 
@@ -83,7 +87,7 @@ export function StagedDocumentEditor({ contentHtml, isClient, onHandle, ...edito
       {!swapped && contentHtml && (
         <div className="doc-static-preview milkdown" aria-hidden="true">
           <div
-            className="ProseMirror"
+            className={contentBlocks >= LONG_DOCUMENT_BLOCKS ? `ProseMirror ${LONG_DOCUMENT_CLASS}` : 'ProseMirror'}
             dangerouslySetInnerHTML={{ __html: contentHtml }}
           />
         </div>

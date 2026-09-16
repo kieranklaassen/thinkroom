@@ -39,6 +39,17 @@ class DocumentPreviewHtml
       CACHE.fetch(key) { render(format:, source:, editable:, sketch_interactive:, render_hints:) }
     end
 
+    # Top-level blocks in a rendered preview: the same count the editor sees
+    # as doc.childCount, so the server preview and the live editor agree on
+    # whether a document is long (editor/long_document.ts).
+    def block_count(html)
+      return 0 if html.blank?
+
+      CACHE.fetch([ "document-preview-blocks", CACHE_VERSION, Digest::SHA256.hexdigest(html) ]) do
+        Nokogiri::HTML5.fragment(html).element_children.size
+      end
+    end
+
     def cache_key(format:, source:, editable:, sketch_interactive:, render_hints:)
       [
         "document-preview-html", CACHE_VERSION, format, editable, sketch_interactive,
