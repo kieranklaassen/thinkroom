@@ -114,6 +114,7 @@ export function bindViewportFollow(
   // that then render around it shift it. Re-align over a few frames until
   // the anchor holds still.
   let settlePasses = 0
+  let released = false
   const follow = () => {
     frame = null
     const remoteState = awareness.getStates().get(clientId) as ViewportAwarenessState | undefined
@@ -153,17 +154,30 @@ export function bindViewportFollow(
     }
   }
   const schedule = () => {
+    if (released) return
     settlePasses = 0
     if (frame === null) frame = requestAnimationFrame(follow)
+  }
+  // A scroll gesture releases follow through React state, so this binding
+  // outlives the release by at least a frame. Stop aligning right away, or a
+  // queued frame scrolls the viewport back to the collaborator.
+  const release = () => {
+    released = true
+    if (frame !== null) cancelAnimationFrame(frame)
+    frame = null
   }
 
   awareness.on('change', schedule)
   window.addEventListener('resize', schedule, { passive: true })
+  window.addEventListener('wheel', release, { passive: true })
+  window.addEventListener('touchmove', release, { passive: true })
   queueMicrotask(schedule)
 
   return () => {
     awareness.off('change', schedule)
     window.removeEventListener('resize', schedule)
+    window.removeEventListener('wheel', release)
+    window.removeEventListener('touchmove', release)
     if (frame !== null) cancelAnimationFrame(frame)
   }
 }

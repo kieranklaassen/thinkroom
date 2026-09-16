@@ -52,10 +52,11 @@ const headBlockOnScreen = (view: EditorView): boolean => {
     const element = node instanceof Element ? node : node.parentElement
     const block = element?.closest('.ProseMirror > *')
     if (!block) return true
-    // Blocks within a screen of the viewport are already rendered, so only a
-    // farther jump can land on placeholders.
+    // Only a block crossing the viewport is certainly rendered. A block
+    // outside it may still be a placeholder, and this box is the placeholder
+    // geometry, so anything beyond the edge counts as a jump.
     const rect = block.getBoundingClientRect()
-    return rect.bottom > -window.innerHeight && rect.top < window.innerHeight * 2
+    return rect.bottom > 0 && rect.top < window.innerHeight
   } catch {
     // A position the DOM cannot resolve yet (mid-redraw) is not a jump; the
     // transaction must go through untouched.
