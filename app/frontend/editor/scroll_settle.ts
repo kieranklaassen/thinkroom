@@ -47,12 +47,20 @@ const settleAfterScroll = (view: EditorView) => {
 // own box is laid out even while its contents are skipped, so this read does
 // not force the contents to render.
 const headBlockOnScreen = (view: EditorView): boolean => {
-  const { node } = view.domAtPos(view.state.selection.head)
-  const element = node instanceof Element ? node : node.parentElement
-  const block = element?.closest('.ProseMirror > *')
-  if (!block) return true
-  const rect = block.getBoundingClientRect()
-  return rect.bottom > 0 && rect.top < window.innerHeight
+  try {
+    const { node } = view.domAtPos(view.state.selection.head)
+    const element = node instanceof Element ? node : node.parentElement
+    const block = element?.closest('.ProseMirror > *')
+    if (!block) return true
+    // Blocks within a screen of the viewport are already rendered, so only a
+    // farther jump can land on placeholders.
+    const rect = block.getBoundingClientRect()
+    return rect.bottom > -window.innerHeight && rect.top < window.innerHeight * 2
+  } catch {
+    // A position the DOM cannot resolve yet (mid-redraw) is not a jump; the
+    // transaction must go through untouched.
+    return true
+  }
 }
 
 const scrollSettleProse = $prose(
