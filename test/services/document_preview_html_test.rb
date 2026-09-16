@@ -250,6 +250,31 @@ class DocumentPreviewHtmlTest < ActiveSupport::TestCase
     assert_includes html, "Review" # the text element is drawn into the SVG
   end
 
+  test "counts blocks the way the editor counts doc.childCount" do
+    content = "# Title\n\nOne\n\nTwo"
+
+    # Three blocks, last one a paragraph: nothing for the trailing plugin to add.
+    assert_equal 3, DocumentPreviewHtml.block_count(DocumentPreviewHtml.call(format: "markdown", content: content))
+  end
+
+  test "counts an editable Mermaid figure and its source as the editor's single block" do
+    content = "Intro\n\n```mermaid\nflowchart LR\n  A --> B\n```\n\nAfter"
+
+    # The editor renders that figure as a widget decoration on the code_block,
+    # so both previews are three blocks however the source is displayed.
+    editable = DocumentPreviewHtml.call(format: "markdown", content: content, editable: true)
+    hidden = DocumentPreviewHtml.call(format: "markdown", content: content, editable: false)
+
+    assert_equal 3, DocumentPreviewHtml.block_count(editable)
+    assert_equal 3, DocumentPreviewHtml.block_count(hidden)
+  end
+
+  test "counts the paragraph the trailing plugin appends after a non-paragraph block" do
+    html = DocumentPreviewHtml.call(format: "markdown", content: "Intro\n\n- one\n- two")
+
+    assert_equal 3, DocumentPreviewHtml.block_count(html)
+  end
+
   test "serves a repeat render with identical inputs from the cache" do
     content = "# Cached #{SecureRandom.hex(4)}\n\nA paragraph that is expensive to render at scale."
     key = DocumentPreviewHtml.cache_key(

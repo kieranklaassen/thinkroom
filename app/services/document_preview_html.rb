@@ -41,12 +41,17 @@ class DocumentPreviewHtml
 
     # Top-level blocks in a rendered preview: the same count the editor sees
     # as doc.childCount, so the server preview and the live editor agree on
-    # whether a document is long (editor/long_document.ts).
+    # whether a document is long (editor/long_document.ts). Two structural
+    # differences keep the raw element count from matching, and both can flip
+    # a document across the threshold on one layer only.
     def block_count(html)
       return 0 if html.blank?
 
       CACHE.fetch([ "document-preview-blocks", CACHE_VERSION, Digest::SHA256.hexdigest(html) ]) do
-        Nokogiri::HTML5.fragment(html).element_children.size
+        children = Nokogiri::HTML5.fragment(html).element_children
+        count = children.count { |node| !mermaid_widget_figure?(node) }
+        count += 1 if trailing_paragraph?(children.last)
+        count
       end
     end
 
@@ -68,6 +73,26 @@ class DocumentPreviewHtml
     end
 
     private
+
+    # An editable preview keeps the Mermaid source <pre> and puts the loading
+    # figure beside it (replace_mermaid), but the editor builds that figure as
+    # a widget decoration on the code_block (editor/mermaid.ts) — so the pair
+    # is a single block to doc.childCount.
+    def mermaid_widget_figure?(node)
+      return false unless node.name == "figure" && node["class"].to_s.split.include?("mermaid-diagram")
+
+      sibling = node.next_element
+      sibling&.name == "pre" && sibling["data-language"].to_s.casecmp?("mermaid")
+    end
+
+    # Milkdown's trailing plugin appends an empty paragraph whenever the last
+    # block is neither a paragraph nor a heading, so the editor holds one block
+    # more than the preview emitted.
+    TRAILING_EXEMPT_BLOCKS = %w[p h1 h2 h3 h4 h5 h6].freeze
+
+    def trailing_paragraph?(last_child)
+      last_child.present? && TRAILING_EXEMPT_BLOCKS.exclude?(last_child.name)
+    end
 
     def render(format:, source:, editable:, sketch_interactive:, render_hints:)
       html = if format == "html"
