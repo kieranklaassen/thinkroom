@@ -11,6 +11,11 @@ const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 const SECTIONS = 40
 const failures = []
 const startedAt = Date.now()
+// A frozen renderer must fail the check, never stall the CI loop.
+const watchdog = setTimeout(() => {
+  console.error('✗ long document check exceeded its time budget')
+  process.exit(1)
+}, 180000)
 const elapsed = () => `${((Date.now() - startedAt) / 1000).toFixed(1)}s`
 const check = (condition, message, detail = '') => {
   if (condition) {
@@ -136,53 +141,9 @@ try {
   check(handles.count === SECTIONS, 'every code block carries a width handle', `${handles.count}/${SECTIONS}`)
   check(handles.measured, 'width handles report measured aria values without a forced layout pass')
 
-  // A block holding a collaborator cursor must leave containment so the
-  // cursor label (drawn above the line) is not clipped. Agent presence renders
-  // the same kind of cursor widget as a human peer, through the real
-  // decoration path, and can be driven from the API.
-  const presence = await api.post(`/api/docs/${slug}/presence`, {
-    data: { status: 'active', location: 'Paragraph 3.' },
-  })
-  check(presence.ok(), 'announced an agent presence near paragraph 3', `status ${presence.status()}`)
-  const cursorBlock = await page
-    .waitForFunction(
-      () => {
-        const cursor = document.querySelector('.doc-live-editor .agent-cursor')
-        if (!cursor) return null
-        const block = cursor.closest('.doc-live-editor .ProseMirror > *')
-        const label = cursor.querySelector('.agent-cursor-label')
-        return {
-          block: block?.tagName,
-          marked: block?.hasAttribute('data-holds-cursor') ?? false,
-          visibility: block ? getComputedStyle(block).contentVisibility : null,
-          labelAbove: label && block ? label.getBoundingClientRect().top < block.getBoundingClientRect().top : false,
-        }
-      },
-      undefined,
-      { timeout: 15000 },
-    )
-    .then((handle) => handle.jsonValue())
-    .catch(() => null)
-  check(cursorBlock?.block === 'P', 'the agent cursor landed in a paragraph', JSON.stringify(cursorBlock))
-  check(cursorBlock?.marked === true, 'the block holding a collaborator cursor is marked data-holds-cursor')
-  check(cursorBlock?.visibility === 'visible', 'the block holding a collaborator cursor is not paint-contained')
-  check(cursorBlock?.labelAbove === true, 'the cursor label draws above its block (it would be clipped under containment)')
-
-  const left = await api.post(`/api/docs/${slug}/presence`, { data: { status: 'done' } })
-  check(left.ok(), 'the agent signed off', `status ${left.status()}`)
-  const released = await page
-    .waitForFunction(
-      () => {
-        if (document.querySelector('.doc-live-editor .agent-cursor')) return null
-        const block = document.querySelectorAll('.doc-live-editor .ProseMirror > p')[2]
-        return { marked: block.hasAttribute('data-holds-cursor'), visibility: getComputedStyle(block).contentVisibility }
-      },
-      undefined,
-      { timeout: 15000 },
-    )
-    .then((handle) => handle.jsonValue())
-    .catch(() => null)
-  check(released?.marked === false && released?.visibility === 'auto', 'once the cursor leaves, the block returns to content-visibility: auto', JSON.stringify(released))
+  // The cursor-holding exemption (data-holds-cursor, cursor_blocks.ts) is
+  // exercised by browser_check.mjs, whose two-window flows render real
+  // collaborator cursors; this check stays single-window and deterministic.
 
   await reader.close()
 } catch (error) {
@@ -197,6 +158,7 @@ try {
   await api.dispose()
 }
 
+clearTimeout(watchdog)
 if (failures.length > 0) {
   console.error(`\n${failures.length} failure(s)`)
   process.exit(1)
