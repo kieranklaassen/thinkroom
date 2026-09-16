@@ -141,7 +141,7 @@ try {
   check(handles.count === SECTIONS, 'every code block carries a width handle', `${handles.count}/${SECTIONS}`)
   check(handles.measured, 'width handles report measured aria values without a forced layout pass')
 
-  // The cursor-holding exemption (data-holds-cursor, cursor_blocks.ts) is
+  // The cursor-holding exemption (:not(:has(...)) in editor.css) is
   // exercised by browser_check.mjs, whose two-window flows render real
   // collaborator cursors; this check stays single-window and deterministic.
 
