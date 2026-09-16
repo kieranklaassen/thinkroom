@@ -77,6 +77,7 @@ import {
   trashIcon,
 } from './table_icons'
 import { agentCursors } from './agent_cursors'
+import { scrollSettle } from './scroll_settle'
 import { codeBlockView } from './code_block_view'
 import { configureCleanClipboard } from './clipboard'
 import { renderSoftBreaks } from './line_breaks'
@@ -410,6 +411,7 @@ function CollabEditor({
         .use(selectionWatcher)
         .use(agentCursors)
         .use(readPointers)
+        .use(scrollSettle)
         .use(collab),
     [],
   )
