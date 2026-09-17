@@ -1,7 +1,7 @@
 # Operator tasks for a document's live Yjs (CRDT) state. In production:
 #
-#   bin/kamal app exec 'bin/rails "yjs:compact[SLUG]"'
-#   bin/kamal app exec 'bin/rails "yjs:reset[SLUG]"'
+#   bin/kamal app exec --reuse 'bin/rails "yjs:compact[SLUG]"'
+#   bin/kamal app exec --reuse 'bin/rails "yjs:reset[SLUG]"'
 namespace :yjs do
   desc "Fold and re-encode a document's stored Yjs state (content unchanged): yjs:compact[slug]"
   task :compact, [ :slug ] => :environment do |_task, args|
