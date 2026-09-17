@@ -208,6 +208,56 @@ class YjsPersistence
       end
     end
 
+    # Operator-driven rewrite of the stored state (rake yjs:compact): fold
+    # any tail, load the blob into a fresh doc, and persist its canonical
+    # re-encoding — deleted content garbage-collected, vector and checksum
+    # re-derived. Content never changes: the re-encoded doc is the same
+    # CRDT. The pre-compaction blob is kept as a checkpoint archive so a
+    # rewrite is recoverable, and a second run is a byte-for-byte no-op.
+    #
+    # => { before_bytes:, after_bytes:, changed:, outcome: }
+    def compact!(document)
+      ActiveSupport::Notifications.instrument("compact.yjs", document_id: document.id) do |payload|
+        lock_for(document.id).synchronize do
+          document.with_lock do
+            document.reload
+            perform_fold(document) if document.yjs_document_updates.exists?
+
+            before = document.yjs_state
+            if before.blank?
+              payload[:outcome] = "empty"
+              next { before_bytes: 0, after_bytes: 0, changed: false, outcome: "empty" }
+            end
+
+            ydoc = load_or_heal_ydoc(document)
+            blob = ydoc.full_diff.pack("C*")
+            result = { before_bytes: before.bytesize, after_bytes: blob.bytesize, changed: false }
+            payload[:before_bytes] = result[:before_bytes]
+            payload[:after_bytes] = result[:after_bytes]
+
+            if blob == document.yjs_state && document.yjs_state_vector.present? && document.yjs_state_checksum.present?
+              payload[:outcome] = "unchanged"
+              next result.merge(outcome: "unchanged")
+            end
+            unless blob_loadable?(blob)
+              payload[:outcome] = "invalid_encode"
+              next result.merge(outcome: "invalid_encode")
+            end
+
+            YjsStateArchive.record!(document, kind: YjsStateArchive::CHECKPOINT)
+            document.update_columns(
+              yjs_state: blob,
+              yjs_state_vector: ydoc.state.pack("C*"),
+              yjs_state_checksum: state_checksum(blob),
+              updated_at: Time.current
+            )
+            payload[:outcome] = "compacted"
+            result.merge(changed: true, outcome: "compacted")
+          end
+        end
+      end
+    end
+
     private
 
     def monotonic_ms

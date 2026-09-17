@@ -790,6 +790,96 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal "ordered independently", doc.reload.content_snapshot
   end
 
+  # --- Compaction -------------------------------------------------------------
+
+  test "compact! folds the tail and re-encodes without changing content" do
+    doc = Document.create!(title: "Compacted")
+    client = Y::Doc.new
+    YjsPersistence.merge(doc, b64_update_for("first ", from_doc: client))
+    YjsPersistence.merge(doc, b64_update_for("second", from_doc: client))
+    assert doc.yjs_document_updates.exists?
+
+    result = nil
+    event = assert_notification("compact.yjs") { result = YjsPersistence.compact!(doc) }
+    doc.reload
+
+    assert_not doc.yjs_document_updates.exists?, "compaction folds the tail"
+    assert_equal "first second", text_of(doc)
+    assert_equal Digest::SHA256.hexdigest(doc.yjs_state), doc.yjs_state_checksum
+    assert_equal doc_from(doc).state, doc.yjs_state_vector.unpack("C*")
+    assert_equal doc.yjs_state.bytesize, result[:after_bytes]
+    assert_equal result[:outcome], event.payload[:outcome]
+  end
+
+  test "compact! is a byte-for-byte no-op the second time" do
+    doc = Document.create!(title: "Idempotent")
+    YjsPersistence.merge(doc, b64_update_for("stable"))
+    YjsPersistence.compact!(doc)
+    blob, vector, checksum = doc.reload.values_at(:yjs_state, :yjs_state_vector, :yjs_state_checksum)
+
+    result = YjsPersistence.compact!(doc)
+    doc.reload
+
+    assert_equal "unchanged", result[:outcome]
+    assert_not result[:changed]
+    assert_equal [ blob, vector, checksum ], doc.values_at(:yjs_state, :yjs_state_vector, :yjs_state_checksum)
+    assert_not doc.yjs_state_archives.where(kind: YjsStateArchive::CHECKPOINT).exists?,
+               "an unchanged compaction must not archive"
+  end
+
+  test "compact! rewrites a blob that is not in canonical form and keeps the old one as a checkpoint" do
+    doc = Document.create!(title: "Recanonicalized")
+    client = Y::Doc.new
+    YjsPersistence.merge(doc, b64_update_for("hello world", from_doc: client))
+    YjsPersistence.fold!(doc)
+
+    # A blob assembled as a concatenation-free re-encode of the same state
+    # through a different path (here: the client's own encoding, which
+    # yrs may lay out differently from the fold's) is still the same CRDT.
+    doc.reload
+    alternate = client.full_diff.pack("C*")
+    doc.update_columns(yjs_state: alternate, yjs_state_vector: nil, yjs_state_checksum: nil)
+
+    result = YjsPersistence.compact!(doc)
+    doc.reload
+
+    assert_equal "compacted", result[:outcome]
+    assert result[:changed]
+    assert_equal "hello world", text_of(doc)
+    assert doc.yjs_state_vector.present?
+    assert_equal Digest::SHA256.hexdigest(doc.yjs_state), doc.yjs_state_checksum
+    checkpoint = doc.yjs_state_archives.where(kind: YjsStateArchive::CHECKPOINT).sole
+    assert_equal alternate, checkpoint.yjs_state, "the pre-compaction blob is archived"
+
+    assert_equal "unchanged", YjsPersistence.compact!(doc)[:outcome]
+  end
+
+  test "compact! garbage-collects deleted content" do
+    doc = Document.create!(title: "Tombstones")
+    client = Y::Doc.new
+    YjsPersistence.merge(doc, b64_update_for("x" * 5000, from_doc: client))
+    YjsPersistence.fold!(doc)
+    before = doc.reload.yjs_state.bytesize
+
+    before_delete = client.state
+    client.get_text("t").slice!(0, 4990)
+    YjsPersistence.merge(doc, Base64.strict_encode64(client.diff(before_delete).pack("C*")))
+
+    result = YjsPersistence.compact!(doc)
+
+    assert_equal "x" * 10, text_of(doc)
+    assert_operator result[:after_bytes], :<, before, "deleted content must not survive compaction"
+  end
+
+  test "compact! on a document with no state reports empty and writes nothing" do
+    doc = Document.create!(title: "Blank")
+
+    result = YjsPersistence.compact!(doc)
+
+    assert_equal({ before_bytes: 0, after_bytes: 0, changed: false, outcome: "empty" }, result)
+    assert_nil doc.reload.yjs_state
+  end
+
   # --- Instrumentation --------------------------------------------------------
 
   test "merge emits an appended event" do
