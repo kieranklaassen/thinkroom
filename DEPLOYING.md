@@ -135,6 +135,14 @@ Both print before/after sizes and fail on an unknown slug. See
 `docs/solutions/data-integrity/oversized-document-crdt-state.md` for when
 each applies.
 
+Run them on an idle document where possible: the task runs in its own
+process, so only the row lock serializes it against live edits, and a
+compaction of a multi-megabyte state holds that lock for its duration (live
+frames that time out are dropped and logged as `merge failed`). The reset logs
+a `reset_document` activity and reloads open editors through Action Cable;
+that reload reaches other processes only with the database-backed cable
+adapter production uses, not the development `async` adapter.
+
 ## Back up the SQLite database with Litestream
 
 The CRDT blobs in `storage/production.sqlite3` are the only copy of every

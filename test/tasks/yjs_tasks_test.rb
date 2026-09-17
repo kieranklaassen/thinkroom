@@ -64,6 +64,9 @@ class YjsTasksTest < ActiveSupport::TestCase
     archive = doc.yjs_state_archives.where(kind: YjsStateArchive::REPLACEMENT).sole
     assert_equal generation, archive.content_generation
     assert archive.yjs_state.present?, "the wiped state is recoverable from the archive"
+    activity = doc.activities.where(action: "reset_document").sole
+    assert_equal "system", activity.actor_kind
+    assert_match(/#{archive.yjs_state.bytesize} bytes archived/, activity.detail)
   end
 
   test "yjs:reset falls back to the seed when no snapshot was ever accepted" do
