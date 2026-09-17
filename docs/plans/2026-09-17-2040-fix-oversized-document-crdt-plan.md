@@ -13,7 +13,7 @@ execution: code
 ## Goal Capsule
 
 - **Objective:** A document can no longer grow, through the live editor, past what the server accepts as its canonical source; a document that already did can be compacted or reset from the server; the page never embeds a multi-megabyte Yjs state in its HTML; `bin/kamal config` works on a clean `main` with an unset `WEBMCP_ORIGIN_TRIAL_TOKEN`.
-- **Means:** A ProseMirror `filterTransaction` size guard for local edits, a visible notice when the durable snapshot is refused, a byte cap on `yjs_state_b64` in `documents#show`, `yjs:compact` and `yjs:reset` rake tasks over the existing `YjsPersistence` and `Document#replace_content!` paths, and `.to_json` on the string env values in `config/deploy.yml`.
+- **Means:** A ProseMirror `filterTransaction` size guard for local edits, a visible notice when the durable snapshot is refused, a sync-reply that is sent only when the client holds something the server lacks, a byte cap on `yjs_state_b64` in `documents#show`, `yjs:compact` and `yjs:reset` rake tasks over the existing `YjsPersistence` and `Document#replace_content!` paths, and `.to_json` on the string env values in `config/deploy.yml`.
 - **Authority:** Requirements govern behavior; technical decisions govern mechanism; `AGENTS.md`, `STRATEGY.md`, `docs/plans/2026-07-02-006-feat-yjs-durability-stack-plan.md` and `docs/plans/2026-07-02-007-feat-yjs-update-log-plan.md` remain authoritative for the persistence layer.
 - **Execution profile:** Behavior-preserving for every document under the caps; the only new user-visible behavior is the refused-edit notice and the snapshot-refused notice.
 - **Stop conditions:** Escalate anything that would change Markdown serialization, provenance semantics, or reject a remote (y-sync) transaction.
@@ -26,7 +26,9 @@ execution: code
 
 Live document `9FQ2F6xpMt` (server id 1150) carries a 10.8 MB Yjs state while its stored source is the 72-byte template. Decoding the state shows the mechanism: it is not mark churn. One browser client (`clientID 4142641551`, every provenance mark `human / Kieran Klaassen`) pasted a 4.2 million character Cursor agent transcript, 12,131 top-level blocks and 34,203 text runs. Each pasted text run carries one provenance mark, which Yjs stores as an open/close pair of format items, hence the ~66k `provenance` strings. The only other client in the state is the seeder (71 clock units, the template). Re-encoding the state through a fresh `Y.Doc` yields the identical 10,872,124 bytes: there is nothing redundant to squash.
 
-The stored source stayed the template because the editor's durable snapshot (`POST /d/:slug/snapshot`) is capped at `MAX_SNAPSHOT_BYTES = 2 MB` and answers 413 for this document, while the CRDT path (SyncChannel) has no cap, so the document outgrew the server's own source limit without anyone being told. Opening a document without editing already writes nothing durable (the joiner's sync-reply is the empty update and is a `noop`; awareness is relay-only); this plan keeps that true and adds a check for it.
+The stored source stayed the template because the editor's durable snapshot (`POST /d/:slug/snapshot`) is capped at `MAX_SNAPSHOT_BYTES = 2 MB` and answers 413 for this document, while the CRDT path (SyncChannel) has no cap, so the document outgrew the server's own source limit without anyone being told.
+
+Opening a document without editing does write something today, though never content: `Y.encodeStateAsUpdate(doc, serverVector)` always appends the document's entire delete set, so a joiner's sync-reply on any document with deletion history is a zero-struct, delete-set-only frame. `YjsPersistence.merge` only short-circuits the exactly-empty update, so it appends a row per open, and the next handshake folds it away with a full O(document) load and re-encode. For the incident document that is a 10.8 MB decode per open. Captured locally: a 10-byte `sync-reply` (`[0, 1, <client>, 12, 1]`, one deleted item) on every open of a freshly seeded document.
 
 ### Problem Frame
 
@@ -58,7 +60,8 @@ Three defects follow from that mechanism, plus one deploy-config defect:
 
 **Open without editing**
 
-- R9. Opening a document with existing state in the browser, waiting for the live editor, and closing it sends no Yjs update frame with content; the stored state, vector and checksum are byte-identical afterwards.
+- R9. Opening a document with existing state in the browser, waiting for the live editor, and closing it sends no `update` or `sync-reply` frame at all; the stored state, vector and checksum are byte-identical afterwards and no `yjs_document_updates` row is appended.
+- R9a. A client that does hold changes the server lacks (edits made before the first handshake such as the seed template, edits made while disconnected, an `update` frame lost in flight before a disconnect) still sends them in its sync-reply on the next handshake.
 
 **Deploy configuration**
 
@@ -80,7 +83,8 @@ No change to `MAX_CONTENT_BYTES` or `MAX_SNAPSHOT_BYTES`, no cap on SyncChannel 
 - KTD4. **Compaction reuses `YjsPersistence.fold!` and the load/encode helpers; it does not reimplement folding.** A public `YjsPersistence.compact!(document)` acquires the same locks, folds, loads through `load_or_heal_ydoc`, encodes `full_diff`, and writes through the same columns and checksum as a fold. The pre-compaction blob is recorded as a `checkpoint` archive so a bad rewrite is recoverable. Governs R6.
 - KTD5. **Reset is `replace_content!(source: current_content)`.** That path already archives the wiped state, bumps the generation, broadcasts `content_reset`, and auto-rejects stale suggestions. Governs R7.
 - KTD6. **`.to_json` on ERB string values in `config/deploy.yml`.** `"".to_json` is `""` (a YAML string), `"abc".to_json` is `"abc"`. Governs R10.
-- KTD7. **Open-idempotence is checked in the browser, in the CI `browser_checks` loop.** Playwright intercepts SyncChannel WebSocket frames sent by the page and asserts that after the handshake only awareness frames and the empty sync-reply go out, and that `yjs_state_b64` read from the page props is identical across two opens. Governs R9.
+- KTD7. **The sync-reply is sent only when the client owes the server something.** `CableProvider` tracks local doc updates that happened while unsynced (`pendingLocalChanges`; the page's server-rendered hydration is tagged `server-hydrate` and does not count) and inspects the encoded diff's leading varUint (zero clients with structs means delete-set only). It replies when either says so; a client that only hydrated sends nothing. The server keeps its fold-time handling of delete-set echoes for older clients. Governs R9, R9a.
+- KTD8. **Open-idempotence and the size guard are checked in the browser, in the CI `browser_checks` loop (`script/document_size_check.mjs`).** Playwright intercepts SyncChannel WebSocket frames sent by the page and asserts that a read-only open sends no `update`/`sync-reply` frame and that `yjs_state_b64` read from the page is identical across two opens; then dispatches a synthetic 2 MB paste and asserts the notice, the unchanged document and the absence of Yjs frames, followed by an ordinary paste that lands. Governs R1, R9.
 
 ### Assumptions
 
@@ -89,7 +93,7 @@ No change to `MAX_CONTENT_BYTES` or `MAX_SNAPSHOT_BYTES`, no cap on SyncChannel 
 
 ### Sequencing
 
-U1 (deploy config) and U4 (tasks) are independent of the editor work. U2 (size guard and notices) and U3 (embedding cap) are independent of each other. U5 adds coverage for all of them and runs last.
+U1 (deploy config) and U4 (tasks) are independent of the editor work. U2 (size guard and notices), U3 (embedding cap) and U5 (sync-reply discipline) are independent of each other. U6 adds coverage and runs last.
 
 ---
 
@@ -115,9 +119,14 @@ U1 (deploy config) and U4 (tasks) are independent of the editor work. U2 (size g
 - **Cites:** R6, R7, R8, KTD4, KTD5
 - **Done when:** `compact!` on a document with tombstones shrinks the blob, keeps the text identical, records a checkpoint, and is a no-op on the second run; `yjs:reset` archives the state, advances the generation and leaves the seed at the current content; both tasks raise on an unknown slug.
 
-### U5. Open-idempotence browser check
-- **Files:** `script/open_idempotence_check.mjs`, `.github/workflows/ci.yml`
-- **Cites:** R9, KTD7
+### U5. Sync-reply discipline
+- **Files:** `app/frontend/editor/cable_provider.ts`, `app/frontend/editor/collab_session.ts`
+- **Cites:** R9, R9a, KTD7
+- **Done when:** a read-only open sends no `sync-reply`; a seeded first open and a reconnect with offline edits still do.
+
+### U6. Browser check
+- **Files:** `script/document_size_check.mjs`, `.github/workflows/ci.yml`
+- **Cites:** R1, R9, KTD8
 - **Done when:** the check passes locally against `bin/dev` and runs in the CI loop.
 
 ---
@@ -127,7 +136,7 @@ U1 (deploy config) and U4 (tasks) are independent of the editor work. U2 (size g
 - `npm run check`
 - `bin/rubocop`
 - `bin/rails test`
-- `BASE_URL=http://localhost:3000 node script/open_idempotence_check.mjs` against a running dev server
+- `BASE_URL=http://localhost:3000 node script/document_size_check.mjs` against a running dev server
 - `ruby -ryaml -rerb -rjson -e 'puts YAML.safe_load(ERB.new(File.read("config/deploy.yml")).result)["env"]["clear"].inspect'` with the required `KAMAL_*` variables set and the two optional ones unset
 
 ## Definition of Done
