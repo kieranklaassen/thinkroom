@@ -36,10 +36,12 @@ env:
   clear:
     # SQLite and the database-backed Cable adapter share one persistent volume.
     WEB_CONCURRENCY: "1"
+    # Quoted via to_json: a bare empty value is YAML nil, which Kamal rejects
+    # ("should be a string") whenever the variable is unset in deploy.env.
     # Empty disables Riffrec automation. Use a comma-separated allowlist.
-    RIFFREC_AUTOMATION_EMAILS: <%= ENV.fetch("RIFFREC_AUTOMATION_EMAILS", "") %>
+    RIFFREC_AUTOMATION_EMAILS: <%= ENV.fetch("RIFFREC_AUTOMATION_EMAILS", "").to_json %>
     # Public Chrome origin-trial token for WebMCP. Empty emits no meta tag.
-    WEBMCP_ORIGIN_TRIAL_TOKEN: <%= ENV.fetch("WEBMCP_ORIGIN_TRIAL_TOKEN", "") %>
+    WEBMCP_ORIGIN_TRIAL_TOKEN: <%= ENV.fetch("WEBMCP_ORIGIN_TRIAL_TOKEN", "").to_json %>
 
 aliases:
   console: app exec --interactive --reuse "bin/rails console"
