@@ -93,10 +93,12 @@ export class CableProvider {
   private destroyed = false
   private updateSequence = 0
   private serverStateVector: Uint8Array | null = null
-  // True once a local transaction has changed the doc while no handshake
-  // was live (before the first sync, or across a disconnect). Only then
-  // does the next handshake owe the server a sync-reply. A client that
-  // merely hydrated has nothing to send — and Y.encodeStateAsUpdate always
+  // True once a local transaction has changed the doc since the last
+  // handshake, whether or not it was live: an `update` sent on a live
+  // connection can still be lost before the disconnect, and a delete-only
+  // change leaves no structs for `hasStructs` to notice. Only then does the
+  // next handshake owe the server a sync-reply. A client that merely
+  // hydrated has nothing to send — and Y.encodeStateAsUpdate always
   // appends the document's entire delete set, so replying anyway makes
   // every open of a document with deletion history persist a redundant
   // delete-set frame that the server then has to fold away.
@@ -279,11 +281,10 @@ export class CableProvider {
         if (typeof data.generation === 'number') this.generation = data.generation
         if (this.canWrite) {
           const missing = Y.encodeStateAsUpdate(this.doc, serverVector)
-          // Reply when the server lacks structs we hold (a frame lost in
-          // flight before a disconnect, or local edits made offline), or
-          // when a local change happened while unsynced (which may be a
-          // delete-only edit the struct count cannot see). A client that
-          // only hydrated owes nothing.
+          // Reply when any local change happened since the last handshake
+          // (its `update` may have been lost in flight, and a delete-only
+          // edit leaves no structs the count can see), or when the server
+          // lacks structs we hold. A client that only hydrated owes nothing.
           if (this.pendingLocalChanges || hasStructs(missing)) {
             this.sendUpdate('sync-reply', missing)
           }
@@ -338,11 +339,12 @@ export class CableProvider {
     // Updates we applied from the wire carry `this` as origin — don't echo
     // them; the page's server-rendered hydration is server state too.
     if (origin === this || origin === SERVER_HYDRATE_ORIGIN || !this.canWrite) return
-    if (!this.synced) {
-      // Buffered in the doc until the next handshake's sync-reply.
-      this.pendingLocalChanges = true
-      return
-    }
+    // Recorded for every local change, not only the unsynced ones: the frame
+    // sent below can be lost before a disconnect, and if the change was a
+    // delete the next handshake's struct count cannot tell it is missing.
+    this.pendingLocalChanges = true
+    // Unsynced changes stay buffered in the doc until the next sync-reply.
+    if (!this.synced) return
     this.sendUpdate('update', update)
   }
 

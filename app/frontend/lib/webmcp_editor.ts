@@ -16,6 +16,13 @@ export const EDITOR_LOADING_ERROR = 'editor is still loading; retry in a moment'
 export const EMPTY_CONTENT_ERROR = 'refused: new content is empty; the document was not changed'
 export const NO_PROVENANCE_ERROR =
   'this editor cannot attribute agent text; the document was not changed'
+export const TOO_LARGE_ERROR =
+  'refused: new content would push this document past its 2 MB limit; the document was not changed'
+const REPLACE_REFUSALS = {
+  empty: EMPTY_CONTENT_ERROR,
+  no_provenance: NO_PROVENANCE_ERROR,
+  too_large: TOO_LARGE_ERROR,
+} as const
 const PERSISTENCE_LAG_NOTE = 'snapshot not persisted yet; reads may lag until the next snapshot'
 
 export interface EditorToolContext {
@@ -70,9 +77,7 @@ export async function executeEditorTool(
       author,
     })
     if ('error' in outcome) {
-      return refuse({
-        error: outcome.error === 'empty' ? EMPTY_CONTENT_ERROR : NO_PROVENANCE_ERROR,
-      })
+      return refuse({ error: REPLACE_REFUSALS[outcome.error] })
     }
 
     // Dispatched: from here on nothing is rolled back, including on abort.
