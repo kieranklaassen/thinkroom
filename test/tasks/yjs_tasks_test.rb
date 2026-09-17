@@ -76,6 +76,16 @@ class YjsTasksTest < ActiveSupport::TestCase
     assert_nil doc.yjs_state
   end
 
+  test "yjs:reset seeds the default template when the document has neither snapshot nor seed" do
+    doc = Document.create!(title: "Legacy", seed_markdown: nil)
+    YjsPersistence.merge(doc, update_for("only ever lived in the CRDT"))
+
+    run_task("yjs:reset", doc.slug)
+
+    assert_equal Document::DEFAULT_SEED, doc.reload.seed_content
+    assert_nil doc.yjs_state
+  end
+
   test "both tasks fail loudly on an unknown slug" do
     assert_raises(ActiveRecord::RecordNotFound) { run_task("yjs:compact", "missing") }
     assert_raises(ActiveRecord::RecordNotFound) { run_task("yjs:reset", "missing") }

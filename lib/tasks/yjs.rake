@@ -17,7 +17,9 @@ namespace :yjs do
     YjsPersistence.fold!(document)
     document.reload
     before_bytes = document.yjs_state&.bytesize || 0
-    source = document.current_content
+    # The last accepted snapshot, else the seed; a legacy row with neither
+    # gets the default template rather than an empty seed.
+    source = document.current_content.presence || document.default_seed
 
     document.replace_content!(source:)
     DocumentMetaChannel.broadcast_event(document, :content_reset)
