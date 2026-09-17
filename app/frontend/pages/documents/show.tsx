@@ -193,9 +193,10 @@ export default function DocumentShow({
   const { identity, guest, handleRenamed } = useDocumentIdentity(viewer)
   // Optimistic: a hydrated or freshly-seeded doc is functionally live the
   // moment it paints — the websocket only confirms it. Starting at 'live'
-  // avoids the connecting→live dot flash on every load.
+  // avoids the connecting→live dot flash on every load. A document whose
+  // state was too large to embed really is waiting on the handshake.
   const [status, setStatus] = useState<ConnectionStatus>(
-    doc.has_state || doc.seed_granted ? 'live' : 'connecting',
+    doc.yjs_state_b64 || doc.seed_granted ? 'live' : 'connecting',
   )
   // Server-derived first-H1 title so the header reads correctly on first paint;
   // the editor keeps it live via onTitleChange once it mounts.
@@ -213,6 +214,9 @@ export default function DocumentShow({
   const reviewTrigger = useRef<HTMLElement | null>(null)
   const navigatingReview = useRef(false)
   const [reviewNotice, setReviewNotice] = useState('')
+  // Editor-originated notices (refused oversized edit, snapshot refused as
+  // too large); share the doc-notice slot with suggestion notices.
+  const [editorNotice, setEditorNotice] = useState<string | null>(null)
   // Hydration-safe init from server-rendered prefs: cookies supply panel/focus/
   // width while the URL supplies mode, so SSR and the first client render agree.
   const [panelOpen, setPanelOpen] = useState(ui.panel_open)
@@ -1026,13 +1030,16 @@ export default function DocumentShow({
         {!isReading && (
           <ClaimBanner slug={doc.slug} ownership={ownership} claimerName={identity.name} />
         )}
-        {!isReading && suggestionNotice && (
+        {!isReading && (suggestionNotice || editorNotice) && (
           <div className="doc-notice" role="status">
-            <span>{suggestionNotice}</span>
+            <span>{suggestionNotice ?? editorNotice}</span>
             <button
               type="button"
               aria-label="Dismiss notice"
-              onClick={() => setSuggestionNotice(null)}
+              onClick={() => {
+                setSuggestionNotice(null)
+                setEditorNotice(null)
+              }}
             >
               Dismiss
             </button>
@@ -1098,6 +1105,7 @@ export default function DocumentShow({
                 onSpans={setSpans}
                 onSelection={isReading ? undefined : handleSelection}
                 onTitleChange={setDocumentTitle}
+                onNotice={setEditorNotice}
               />
             </article>
             <DocumentWidthHandle

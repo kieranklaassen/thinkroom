@@ -98,6 +98,7 @@ import {
   mermaidRenderHintsCtx,
 } from './mermaid'
 import { richBlockWidthControls } from './rich_block_width'
+import { documentSizeGuard, documentSizeGuardCtx } from './document_size_guard'
 
 export interface EditorHandle {
   editor: Editor
@@ -157,7 +158,16 @@ export interface EditorProps {
   onSpans?: (spans: ProvenanceSpan[]) => void
   onSelection?: SelectionCallback
   onTitleChange?: (title: string) => void
+  /** User-facing notices the editor cannot render itself: an edit refused
+   *  for pushing the document past its size limit, a durable snapshot the
+   *  server refused as too large. */
+  onNotice?: (message: string) => void
 }
+
+const REFUSED_EDIT_NOTICE =
+  'That edit was not applied: it would push this document past its 2 MB limit.'
+const SNAPSHOT_TOO_LARGE_NOTICE =
+  'This document is over the 2 MB source limit, so its saved copy is stale. Shorten it to keep agents and previews current.'
 
 interface ActiveSketch {
   data: SketchData
@@ -294,13 +304,14 @@ function CollabEditor({
   onSpans,
   onSelection,
   onTitleChange,
+  onNotice,
 }: EditorProps) {
   const [sketchDraft, setSketchDraft] = useState<ActiveSketch | undefined>(undefined)
   const insertSketchRef = useRef<() => void>(() => undefined)
   const saveSketchRef = useRef<(data: SketchData) => void>(() => undefined)
   const deleteSketchRef = useRef<(id: string) => void>(() => undefined)
-  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange })
-  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange }
+  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onNotice })
+  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onNotice }
   // Ref so the editable() closure always reads the live value; the effect
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
@@ -322,6 +333,10 @@ function CollabEditor({
           ctx.set(rootCtx, root)
           ctx.set(provenanceIdentityCtx.key, { name: identity.name })
           ctx.set(mermaidRenderHintsCtx.key, renderHints?.mermaid ?? {})
+          ctx.update(documentSizeGuardCtx.key, (prev) => ({
+            ...prev,
+            onRefused: () => callbacksRef.current.onNotice?.(REFUSED_EDIT_NOTICE),
+          }))
           ctx.set(sketchControlsCtx.key, {
             edit: (data, mount, wrapper) => setSketchDraft({ data, mount, wrapper }),
             save: (data) => saveSketchRef.current(data),
@@ -409,6 +424,7 @@ function CollabEditor({
         // already-attributed text (KTD 6 registration order).
         .use(suggestState)
         .use(suggestGuard)
+        .use(documentSizeGuard)
         .use(selectionWatcher)
         .use(agentCursors)
         .use(readPointers)
@@ -440,6 +456,7 @@ function CollabEditor({
       slug,
       contentFormat,
       canWrite: () => canWriteRef.current,
+      onTooLarge: () => callbacksRef.current.onNotice?.(SNAPSHOT_TOO_LARGE_NOTICE),
     })
     const scheduleSnapshot = snapshots.schedule
 
