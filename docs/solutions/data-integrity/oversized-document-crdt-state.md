@@ -41,7 +41,7 @@ A second, smaller write surfaced while checking that "open without editing write
 
 **2. When a write path fails permanently, tell the user, not the console.** A 413 on the durable snapshot now raises a visible notice through the editor's `onNotice` callback: the saved copy is stale until the document is shortened.
 
-**3. A joiner owes the server nothing unless it has something.** `CableProvider` replies to the handshake only when a local change happened while unsynced (`pendingLocalChanges`; hydration from the page's `yjs_state_b64` is tagged `server-hydrate` and does not count) or the encoded diff carries structs (an `update` frame lost before a disconnect). The server keeps its fold-time classification of delete-set echoes for older clients.
+**3. A joiner owes the server nothing unless it has something.** `CableProvider` replies to the handshake only when a local change happened since the last handshake (`pendingLocalChanges`; hydration from the page's `yjs_state_b64` is tagged `server-hydrate` and does not count, and an `update` sent live can still be lost before a disconnect while a delete-only edit leaves no structs to notice) or the encoded diff carries structs. The server keeps its fold-time classification of delete-set echoes for older clients.
 
 **4. Do not embed what the browser cannot use.** `documents#show` omits `yjs_state_b64` above `MAX_EMBEDDED_STATE_BYTES` (1 MB); the editor takes the handshake path it already has for a document with no embedded state.
 
