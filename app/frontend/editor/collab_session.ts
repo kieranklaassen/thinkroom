@@ -1,5 +1,5 @@
 import * as Y from 'yjs'
-import { CableProvider } from './cable_provider'
+import { CableProvider, SERVER_HYDRATE_ORIGIN } from './cable_provider'
 import type { UserIdentity } from './identity'
 
 export interface CollabSession {
@@ -49,7 +49,7 @@ export function acquireSession(
         Y.applyUpdate(
           ydoc,
           Uint8Array.from(atob(initialStateB64), (c) => c.charCodeAt(0)),
-          'server-hydrate',
+          SERVER_HYDRATE_ORIGIN,
         )
       } catch {
         // corrupt/stale prop — fall back to the wait-for-synced path
