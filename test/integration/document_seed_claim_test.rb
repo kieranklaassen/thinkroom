@@ -153,6 +153,33 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "the page embeds the Yjs state when it is under the cap" do
+    ydoc = Y::Doc.new
+    ydoc.get_text("t") << "small state"
+    YjsPersistence.merge(@document, Base64.strict_encode64(ydoc.diff.pack("C*")))
+    YjsPersistence.fold!(@document)
+
+    get document_page_path(@document.slug), headers: browser
+
+    assert_inertia_props do |props|
+      props[:document][:has_state] == true &&
+        props[:document][:yjs_state_b64] == Base64.strict_encode64(@document.reload.yjs_state)
+    end
+  end
+
+  test "the page omits a Yjs state larger than the embed cap and leaves it to the handshake" do
+    oversized = "\x00".b * (DocumentsController::MAX_EMBEDDED_STATE_BYTES + 1)
+    @document.update_columns(yjs_state: oversized, seed_state: "seeded")
+
+    get document_page_path(@document.slug), headers: browser
+
+    assert_inertia_props do |props|
+      props[:document][:has_state] == true &&
+        props[:document][:yjs_state_b64].nil? &&
+        props[:document][:seed_granted] == false
+    end
+  end
+
   test "read-only viewers never burn the seed claim" do
     # A viewer without write access can't send the applied template anywhere
     # (every client write path is canWrite-gated), so granting them the seed

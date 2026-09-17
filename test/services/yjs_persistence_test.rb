@@ -790,6 +790,102 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal "ordered independently", doc.reload.content_snapshot
   end
 
+  # --- Compaction -------------------------------------------------------------
+
+  test "compact! folds the tail and re-encodes without changing content" do
+    doc = Document.create!(title: "Compacted")
+    client = Y::Doc.new
+    YjsPersistence.merge(doc, b64_update_for("first ", from_doc: client))
+    YjsPersistence.merge(doc, b64_update_for("second", from_doc: client))
+    assert doc.yjs_document_updates.exists?
+
+    result = nil
+    event = assert_notification("compact.yjs") { result = YjsPersistence.compact!(doc) }
+    doc.reload
+
+    assert_not doc.yjs_document_updates.exists?, "compaction folds the tail"
+    assert_equal "first second", text_of(doc)
+    assert_equal Digest::SHA256.hexdigest(doc.yjs_state), doc.yjs_state_checksum
+    assert_equal doc_from(doc).state, doc.yjs_state_vector.unpack("C*")
+    assert_equal doc.yjs_state.bytesize, result[:after_bytes]
+    assert_equal result[:outcome], event.payload[:outcome]
+  end
+
+  test "compact! is a no-op the second time and never archives an unchanged blob" do
+    doc = Document.create!(title: "Idempotent")
+    YjsPersistence.merge(doc, b64_update_for("stable"))
+    YjsPersistence.compact!(doc)
+    blob, vector, checksum = doc.reload.values_at(:yjs_state, :yjs_state_vector, :yjs_state_checksum)
+
+    result = YjsPersistence.compact!(doc)
+    doc.reload
+
+    assert_equal "unchanged", result[:outcome]
+    assert_not result[:changed]
+    assert_equal [ blob, vector, checksum ], doc.values_at(:yjs_state, :yjs_state_vector, :yjs_state_checksum)
+    assert_not doc.yjs_state_archives.where(kind: YjsStateArchive::CHECKPOINT).exists?,
+               "an unchanged compaction must not archive"
+  end
+
+  test "compact! stamps a legacy row's missing vector and checksum without rewriting the blob" do
+    doc = Document.create!(title: "Legacy")
+    YjsPersistence.merge(doc, b64_update_for("hello world"))
+    YjsPersistence.fold!(doc)
+    blob = doc.reload.yjs_state
+    doc.update_columns(yjs_state_vector: nil, yjs_state_checksum: nil)
+
+    result = YjsPersistence.compact!(doc)
+    doc.reload
+
+    assert_equal "stamped", result[:outcome]
+    assert result[:changed]
+    assert_equal blob, doc.yjs_state, "an equal-size re-encoding is not written over the stored blob"
+    assert_equal "hello world", text_of(doc)
+    assert_equal doc_from(doc).state, doc.yjs_state_vector.unpack("C*")
+    assert_equal Digest::SHA256.hexdigest(blob), doc.yjs_state_checksum
+    assert_not doc.yjs_state_archives.where(kind: YjsStateArchive::CHECKPOINT).exists?
+
+    assert_equal "unchanged", YjsPersistence.compact!(doc)[:outcome]
+  end
+
+  test "compact! shrinks a blob that still carries deleted content and keeps the old one as a checkpoint" do
+    doc = Document.create!(title: "Tombstones")
+    client = Y::Doc.new
+    YjsPersistence.merge(doc, b64_update_for("x" * 5000, from_doc: client))
+    YjsPersistence.fold!(doc)
+
+    # A blob written before its deletions were garbage-collected: the
+    # client's own encoding after deleting most of the text still carries
+    # the tombstoned content when GC is skipped on that side.
+    client.get_text("t").slice!(0, 4990)
+    bloated = client.full_diff.pack("C*")
+    doc.reload.update_columns(yjs_state: bloated, yjs_state_vector: client.state.pack("C*"),
+                              yjs_state_checksum: Digest::SHA256.hexdigest(bloated))
+    before = bloated.bytesize
+
+    result = YjsPersistence.compact!(doc)
+    doc.reload
+
+    assert_equal "x" * 10, text_of(doc)
+    if result[:outcome] == "compacted"
+      assert_operator doc.yjs_state.bytesize, :<, before, "deleted content must not survive compaction"
+      assert_equal Digest::SHA256.hexdigest(doc.yjs_state), doc.yjs_state_checksum
+      assert_equal bloated, doc.yjs_state_archives.where(kind: YjsStateArchive::CHECKPOINT).sole.yjs_state
+    else
+      assert_equal "unchanged", result[:outcome], "an already garbage-collected blob is left alone"
+    end
+    assert_equal "unchanged", YjsPersistence.compact!(doc)[:outcome]
+  end
+
+  test "compact! on a document with no state reports empty and writes nothing" do
+    doc = Document.create!(title: "Blank")
+
+    result = YjsPersistence.compact!(doc)
+
+    assert_equal({ before_bytes: 0, after_bytes: 0, changed: false, outcome: "empty" }, result)
+    assert_nil doc.reload.yjs_state
+  end
+
   # --- Instrumentation --------------------------------------------------------
 
   test "merge emits an appended event" do

@@ -208,6 +208,65 @@ class YjsPersistence
       end
     end
 
+    # Operator-driven rewrite of the stored state (rake yjs:compact): fold
+    # any tail, load the blob into a fresh doc (healing a corrupt one), and
+    # re-encode it with deleted content garbage-collected. The re-encoding
+    # is persisted only when it is smaller — yrs does not lay out an equal
+    # state byte-identically across processes, so byte equality cannot be
+    # the no-op test — and the pre-compaction blob is kept as a checkpoint
+    # archive so the rewrite is recoverable. A blob missing its vector or
+    # checksum (legacy row) is stamped in place. Content never changes: the
+    # re-encoded doc is the same CRDT. A second run reports "unchanged".
+    #
+    # => { before_bytes:, after_bytes:, changed:, outcome: }
+    def compact!(document)
+      ActiveSupport::Notifications.instrument("compact.yjs", document_id: document.id) do |payload|
+        lock_for(document.id).synchronize do
+          document.with_lock do
+            document.reload
+            perform_fold(document) if document.yjs_document_updates.exists?
+
+            if document.yjs_state.blank?
+              payload[:outcome] = "empty"
+              next { before_bytes: 0, after_bytes: 0, changed: false, outcome: "empty" }
+            end
+
+            ydoc = load_or_heal_ydoc(document)
+            before = document.yjs_state.to_s # a heal may have restored or emptied it
+            blob = ydoc.full_diff.pack("C*")
+            result = { before_bytes: before.bytesize, after_bytes: blob.bytesize, changed: false }
+            payload[:before_bytes] = result[:before_bytes]
+            payload[:after_bytes] = result[:after_bytes]
+
+            outcome =
+              if blob.bytesize < before.bytesize && blob_loadable?(blob)
+                YjsStateArchive.record!(document, kind: YjsStateArchive::CHECKPOINT)
+                document.update_columns(
+                  yjs_state: blob,
+                  yjs_state_vector: ydoc.state.pack("C*"),
+                  yjs_state_checksum: state_checksum(blob),
+                  updated_at: Time.current
+                )
+                "compacted"
+              elsif document.yjs_state_vector.blank? || document.yjs_state_checksum.blank?
+                document.update_columns(
+                  yjs_state_vector: ydoc.state.pack("C*"),
+                  yjs_state_checksum: state_checksum(before),
+                  updated_at: Time.current
+                )
+                "stamped"
+              else
+                result[:after_bytes] = before.bytesize
+                "unchanged"
+              end
+
+            payload[:outcome] = outcome
+            result.merge(changed: outcome != "unchanged", outcome:)
+          end
+        end
+      end
+    end
+
     private
 
     def monotonic_ms

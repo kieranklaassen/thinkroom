@@ -113,6 +113,28 @@ bin/kamal deploy
 DNS for every `KAMAL_PROXY_HOSTS` entry must point to a configured host before
 the first TLS-enabled deploy.
 
+## Repair a document's live state
+
+Two rake tasks operate on one document's Yjs (CRDT) state by slug. Run them in
+the deployed container, from the same shell that sourced `.kamal/deploy.env`:
+
+```bash
+# Fold the update tail and rewrite the stored state in canonical form.
+# Content is unchanged; the previous blob is kept as a checkpoint archive.
+# Safe to repeat: a second run reports "unchanged".
+bin/kamal app exec --reuse 'bin/rails "yjs:compact[SLUG]"'
+
+# Replace the live state with the document's saved source (the last accepted
+# snapshot, or the seed). The wiped state is archived as a "replacement" row
+# in yjs_state_archives, the content generation advances, and open editors
+# reload. Use this when the live state has outgrown what the editor can load.
+bin/kamal app exec --reuse 'bin/rails "yjs:reset[SLUG]"'
+```
+
+Both print before/after sizes and fail on an unknown slug. See
+`docs/solutions/data-integrity/oversized-document-crdt-state.md` for when
+each applies.
+
 ## Back up the SQLite database with Litestream
 
 The CRDT blobs in `storage/production.sqlite3` are the only copy of every

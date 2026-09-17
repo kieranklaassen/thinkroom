@@ -137,7 +137,7 @@ class DocumentsController < InertiaController
         seed_author_kind: document.seed_author_kind,
         seed_author_name: document.seed_author_name,
         has_state: document.yjs_state.present?,
-        yjs_state_b64: (Base64.strict_encode64(document.yjs_state) if document.yjs_state.present?),
+        yjs_state_b64: embedded_yjs_state_b64(document),
         # Server-rendered prose for an instant first paint; the live editor
         # swaps in over it once Milkdown binds the hydrated Yjs state. The
         # block count lets the preview adopt the long-document rendering the
@@ -343,6 +343,13 @@ class DocumentsController < InertiaController
                   inertia: { errors: { document: "Delete failed — please try again" } }
   end
 
+  # The Yjs state rides in the page HTML (base64) so the editor binds an
+  # already-populated doc on first paint. Past this size the embed costs more
+  # than it saves — a 10 MB blob is 14 MB of HTML before any script runs — so
+  # the prop is omitted and the editor takes the SyncChannel handshake path
+  # it already uses for a document with no embedded state.
+  MAX_EMBEDDED_STATE_BYTES = 1.megabyte
+
   # Editor clients debounce-push a derived snapshot { content, spans } so the
   # Agent API can read document state without a Yjs client.
   MAX_SNAPSHOT_BYTES = 2.megabytes
@@ -457,6 +464,13 @@ class DocumentsController < InertiaController
 
   def broadcast_title(document)
     DocumentMetaChannel.broadcast_event(document, :title, title: document.title)
+  end
+
+  def embedded_yjs_state_b64(document)
+    state = document.yjs_state
+    return nil if state.blank? || state.bytesize > MAX_EMBEDDED_STATE_BYTES
+
+    Base64.strict_encode64(state)
   end
 
   # A browser-driven agent replacement (the WebMCP `thinkroom_update_document`

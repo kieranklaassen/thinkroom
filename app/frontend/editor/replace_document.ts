@@ -7,6 +7,7 @@ import { SKIP_PROVENANCE } from './provenance'
 import { SUGGESTION_MARK_NAMES } from './suggest_changes/marks'
 import { serializeHtml, sourceParser, type DocumentFormat } from './document_format'
 import { firstHeadingTitle } from './document_title'
+import { documentSizeGuardCtx, exceedsDocumentSize } from './document_size_guard'
 
 export interface ReplaceDocumentOptions {
   /** Complete new source in the document's own format. */
@@ -23,7 +24,7 @@ export type ReplaceDocumentOutcome =
       /** First level-1 heading of the new document, or null. */
       title: string | null
     }
-  | { error: 'empty' | 'no_provenance' }
+  | { error: 'empty' | 'no_provenance' | 'too_large' }
 
 /** Inline leaves that carry no content of their own. */
 const STRUCTURAL_LEAVES = new Set(['hardbreak'])
@@ -104,6 +105,12 @@ export function replaceDocumentContent(
     tr.setMeta(SKIP_PROVENANCE, true)
     tr.setMeta(suggestChangesKey, { skip: true })
     tr.setSelection(TextSelection.near(tr.doc.resolve(0)))
+    // The size guard would drop this dispatch without a word, leaving the
+    // caller to report a replacement that never reached the document.
+    if (exceedsDocumentSize(tr, state, ctx.get(documentSizeGuardCtx.key).limit)) {
+      outcome = { error: 'too_large' }
+      return
+    }
     view.dispatch(tr)
 
     outcome = { previous, title: firstHeadingTitle(tr.doc) }

@@ -56,7 +56,15 @@ const toBase64 = (u8: Uint8Array): string => {
 const fromBase64 = (b64: string): Uint8Array =>
   Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
 
+/** A v1 update opens with the varUint count of clients carrying structs;
+ *  a single zero byte means the update is a delete set only. */
+const hasStructs = (update: Uint8Array): boolean => update.length > 0 && update[0] !== 0
+
 export type ProviderEvent = 'synced' | 'seed' | 'rejected' | 'write-denied' | 'stale'
+
+/** Origin tag for the page's server-rendered Yjs state applied at session
+ *  creation (collab_session.ts). It is server state, never a local change. */
+export const SERVER_HYDRATE_ORIGIN = 'server-hydrate'
 
 /**
  * Yjs provider over Rails ActionCable. Speaks the SyncChannel protocol:
@@ -85,6 +93,16 @@ export class CableProvider {
   private destroyed = false
   private updateSequence = 0
   private serverStateVector: Uint8Array | null = null
+  // True once a local transaction has changed the doc since the last
+  // handshake, whether or not it was live: an `update` sent on a live
+  // connection can still be lost before the disconnect, and a delete-only
+  // change leaves no structs for `hasStructs` to notice. Only then does the
+  // next handshake owe the server a sync-reply. A client that merely
+  // hydrated has nothing to send — and Y.encodeStateAsUpdate always
+  // appends the document's entire delete set, so replying anyway makes
+  // every open of a document with deletion history persist a redundant
+  // delete-set frame that the server then has to fold away.
+  private pendingLocalChanges = false
   // Learned from each "sync" message and echoed back on outgoing
   // update/sync-reply frames so the server can detect a client whose local
   // Yjs doc predates an owner CLI replacement (Document#replace_content!)
@@ -262,7 +280,15 @@ export class CableProvider {
         this.updateSequence = 0
         if (typeof data.generation === 'number') this.generation = data.generation
         if (this.canWrite) {
-          this.sendUpdate('sync-reply', Y.encodeStateAsUpdate(this.doc, serverVector))
+          const missing = Y.encodeStateAsUpdate(this.doc, serverVector)
+          // Reply when any local change happened since the last handshake
+          // (its `update` may have been lost in flight, and a delete-only
+          // edit leaves no structs the count can see), or when the server
+          // lacks structs we hold. A client that only hydrated owes nothing.
+          if (this.pendingLocalChanges || hasStructs(missing)) {
+            this.sendUpdate('sync-reply', missing)
+          }
+          this.pendingLocalChanges = false
         }
         const seedContent = data.seed_content ?? data.seed_markdown
         if (data.seed && seedContent) {
@@ -310,8 +336,15 @@ export class CableProvider {
   }
 
   private handleDocUpdate = (update: Uint8Array, origin: unknown): void => {
-    // Updates we applied from the wire carry `this` as origin — don't echo them.
-    if (origin === this || !this.synced || !this.canWrite) return
+    // Updates we applied from the wire carry `this` as origin — don't echo
+    // them; the page's server-rendered hydration is server state too.
+    if (origin === this || origin === SERVER_HYDRATE_ORIGIN || !this.canWrite) return
+    // Recorded for every local change, not only the unsynced ones: the frame
+    // sent below can be lost before a disconnect, and if the change was a
+    // delete the next handshake's struct count cannot tell it is missing.
+    this.pendingLocalChanges = true
+    // Unsynced changes stay buffered in the doc until the next sync-reply.
+    if (!this.synced) return
     this.sendUpdate('update', update)
   }
 
