@@ -14,6 +14,7 @@ import {
   type SourceParser,
 } from './document_format'
 import type { SuggestionPayload } from '../types/payloads'
+import { documentSizeGuardCtx, exceedsDocumentSize } from './document_size_guard'
 
 /**
  * First within-block occurrence of `search` as a doc position range.
@@ -386,6 +387,9 @@ export function applySuggestion(
     tr.setMeta(SKIP_PROVENANCE, true)
     tr.setSelection(TextSelection.near(tr.doc.resolve(insertTo)))
     tr.scrollIntoView()
+    // The size guard would drop this dispatch silently and the caller would
+    // record a merge that never landed; refuse here so it can reopen instead.
+    if (exceedsDocumentSize(tr, state, ctx.get(documentSizeGuardCtx.key).limit)) return
     view.dispatch(tr)
     applied = { from: insertFrom, to: insertTo }
   })

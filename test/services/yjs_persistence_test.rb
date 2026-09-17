@@ -886,6 +886,42 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_nil doc.reload.yjs_state
   end
 
+  test "compact! reports a corrupt blob as healed instead of stamping the emptied state" do
+    doc = Document.create!(title: "Corrupt")
+    YjsPersistence.merge(doc, b64_update_for("content"))
+    YjsPersistence.fold!(doc)
+    doc.reload.update_columns(yjs_state: "garbage-bytes", yjs_state_checksum: Digest::SHA256.hexdigest("garbage-bytes"))
+
+    result = assert_notification("recovered.yjs", restored_from: "empty") { YjsPersistence.compact!(doc) }
+      .then { YjsPersistence.compact!(doc) }
+    doc.reload
+
+    assert_equal "empty", result[:outcome], "a second run on the emptied document is empty"
+    assert_nil doc.yjs_state
+    assert_nil doc.yjs_state_vector, "no vector may be stamped onto a document with no state"
+    assert_nil doc.yjs_state_checksum
+    assert doc.yjs_state_archives.where(kind: YjsStateArchive::QUARANTINE).exists?
+  end
+
+  test "compact! reports healed when the load restored a checkpoint" do
+    doc = Document.create!(title: "Restored")
+    YjsPersistence.merge(doc, b64_update_for("checkpointed"))
+    YjsPersistence.fold!(doc)
+    YjsPersistence.merge(doc, b64_update_for(" and more"))
+    YjsPersistence.fold!(doc) # a checkpoint of the first fold's blob exists now
+    doc.reload.update_columns(yjs_state: "garbage-bytes-of-a-different-length",
+                              yjs_state_checksum: Digest::SHA256.hexdigest("garbage-bytes-of-a-different-length"))
+
+    result = YjsPersistence.compact!(doc)
+    doc.reload
+
+    assert_equal "healed", result[:outcome]
+    assert result[:changed]
+    assert_equal "garbage-bytes-of-a-different-length".bytesize, result[:before_bytes]
+    assert_equal doc.yjs_state.bytesize, result[:after_bytes]
+    assert_includes text_of(doc), "checkpointed"
+  end
+
   # --- Instrumentation --------------------------------------------------------
 
   test "merge emits an appended event" do

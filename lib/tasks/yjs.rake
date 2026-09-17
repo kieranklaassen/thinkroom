@@ -22,6 +22,11 @@ namespace :yjs do
     source = document.current_content.presence || document.default_seed
 
     document.replace_content!(source:)
+    Activity.log!(
+      document:, actor_name: "Thinkroom", actor_kind: "system",
+      action: "reset_document",
+      detail: "An operator reset the live document state to its saved source (#{before_bytes} bytes archived)"
+    )
     DocumentMetaChannel.broadcast_event(document, :content_reset)
 
     puts "yjs:reset #{document.slug} (id #{document.id}): archived #{before_bytes} bytes of state, " \

@@ -217,6 +217,8 @@ class YjsPersistence
     # archive so the rewrite is recoverable. A blob missing its vector or
     # checksum (legacy row) is stamped in place. Content never changes: the
     # re-encoded doc is the same CRDT. A second run reports "unchanged".
+    # A corrupt blob is healed by the load (quarantined, checkpoint restored
+    # or emptied) and reported as "healed" without further rewriting.
     #
     # => { before_bytes:, after_bytes:, changed:, outcome: }
     def compact!(document)
@@ -226,20 +228,28 @@ class YjsPersistence
             document.reload
             perform_fold(document) if document.yjs_document_updates.exists?
 
-            if document.yjs_state.blank?
+            stored_bytes = document.yjs_state.to_s.bytesize
+            if stored_bytes.zero?
               payload[:outcome] = "empty"
               next { before_bytes: 0, after_bytes: 0, changed: false, outcome: "empty" }
             end
 
             ydoc = load_or_heal_ydoc(document)
-            before = document.yjs_state.to_s # a heal may have restored or emptied it
+            # A corrupt blob was quarantined and a checkpoint restored (or the
+            # document emptied) by the load; report that rather than
+            # compacting or stamping the restored state as if nothing happened.
+            healed = document.yjs_state.to_s.bytesize != stored_bytes || document.yjs_state.blank?
+            before = document.yjs_state.to_s
             blob = ydoc.full_diff.pack("C*")
-            result = { before_bytes: before.bytesize, after_bytes: blob.bytesize, changed: false }
-            payload[:before_bytes] = result[:before_bytes]
+            result = { before_bytes: stored_bytes, after_bytes: before.bytesize, changed: false }
+            payload[:before_bytes] = stored_bytes
             payload[:after_bytes] = result[:after_bytes]
 
             outcome =
-              if blob.bytesize < before.bytesize && blob_loadable?(blob)
+              if healed
+                "healed"
+              elsif blob.bytesize < before.bytesize && blob_loadable?(blob)
+                result[:after_bytes] = blob.bytesize
                 YjsStateArchive.record!(document, kind: YjsStateArchive::CHECKPOINT)
                 document.update_columns(
                   yjs_state: blob,
@@ -256,7 +266,6 @@ class YjsPersistence
                 )
                 "stamped"
               else
-                result[:after_bytes] = before.bytesize
                 "unchanged"
               end
 
