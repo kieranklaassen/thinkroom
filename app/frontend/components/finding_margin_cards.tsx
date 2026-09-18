@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { editorViewCtx } from '@milkdown/kit/core'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import type { EditorHandle } from '../editor/milkdown_editor'
@@ -21,6 +21,11 @@ interface Props {
   onMarkerSelect?: (paragraph: AnchoredParagraph) => void
 }
 
+/** Rows shown before a card folds the rest behind "Show N more". A live pass
+ *  can put a dozen findings on one paragraph; the highlights already show
+ *  where they are, so the card stays a summary until asked. */
+const VISIBLE_ROWS = 3
+
 /**
  * One card per paragraph with findings, in the document's right margin at
  * the paragraph's vertical position (same measured stack as comments and
@@ -29,7 +34,15 @@ interface Props {
  */
 export function FindingMarginCards({ paragraphs, reviewers, handle, compact, canWrite, onJumpTo, onHover, onDismiss, onMarkerSelect }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
   const byKey = new Map(reviewers.map((reviewer) => [reviewer.key, reviewer]))
+  const toggleExpanded = (pos: number) =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(pos)) next.delete(pos)
+      else next.add(pos)
+      return next
+    })
 
   let layoutElement: HTMLElement | null = null
   try { layoutElement = handle?.editor.action((ctx) => ctx.get(editorViewCtx).dom) ?? null } catch { /* editor unmount */ }
@@ -53,7 +66,7 @@ export function FindingMarginCards({ paragraphs, reviewers, handle, compact, can
       }
       return { key: paragraph.pos, top: Math.max(0, top) }
     })
-  }, [paragraphs, handle, compact], layoutElement)
+  }, [paragraphs, handle, compact, expanded], layoutElement)
 
   return (
     <div className="margin-annotations compound-margin" style={{ minHeight: height }} ref={containerRef} aria-label="Writing findings">
@@ -70,11 +83,14 @@ export function FindingMarginCards({ paragraphs, reviewers, handle, compact, can
               onClick={() => (onMarkerSelect ? onMarkerSelect(paragraph) : onJumpTo(paragraph.findings[0]))} />
           )
         }
+        const isExpanded = expanded.has(key)
+        const rows = isExpanded ? paragraph.findings : paragraph.findings.slice(0, VISIBLE_ROWS)
+        const hidden = paragraph.findings.length - rows.length
         return (
           <article key={key} ref={setCardRef(key)} className={`compound-card ${placed.has(key) ? 'is-placed' : ''}`}
             style={{ top: tops.get(key) ?? 0 }} aria-label={label}>
             <ul className="compound-card-list">
-              {paragraph.findings.map((finding) => {
+              {rows.map((finding) => {
                 const reviewer = byKey.get(finding.reviewer_key)
                 return (
                   <li key={finding.id} className="compound-card-row"
@@ -97,6 +113,11 @@ export function FindingMarginCards({ paragraphs, reviewers, handle, compact, can
                 )
               })}
             </ul>
+            {(hidden > 0 || isExpanded) && (
+              <button type="button" className="compound-card-more" onClick={() => toggleExpanded(key)} aria-expanded={isExpanded}>
+                {isExpanded ? 'Show fewer' : `Show ${hidden} more`}
+              </button>
+            )}
           </article>
         )
       })}

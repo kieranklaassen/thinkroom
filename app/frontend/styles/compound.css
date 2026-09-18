@@ -471,6 +471,25 @@
   margin-top: 0.15rem;
 }
 
+.compound-card-more {
+  font: inherit;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  background: none;
+  border: none;
+  border-top: 1px solid var(--line);
+  width: 100%;
+  padding: 0.35rem 0.4rem 0.15rem;
+  margin-top: 0.15rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.compound-card-more:hover {
+  color: var(--ink);
+}
+
 .margin-marker--finding {
   width: 24px;
   height: 44px;
