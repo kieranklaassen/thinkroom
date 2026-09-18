@@ -19,7 +19,6 @@ module CompoundWriting
 
     Reviewer = Data.define(:key, :name, :blurb, :color, :source, :questions, :lexicon) do
       def question(id) = questions.find { |question| question.id == id }
-      def scopes = questions.map(&:scope).uniq
 
       def as_props
         {
@@ -172,19 +171,18 @@ module CompoundWriting
     ].freeze
 
     BY_KEY = ALL.index_by(&:key).freeze
-    KEYS = BY_KEY.keys.freeze
+    PROPS = ALL.map(&:as_props).freeze
 
     module_function
 
     def all = ALL
-    def keys = KEYS
     def find(key) = BY_KEY[key.to_s]
     def find!(key) = BY_KEY.fetch(key.to_s) { raise ArgumentError, "unknown reviewer #{key.inspect}" }
     def known?(key) = BY_KEY.key?(key.to_s)
-    def as_props = ALL.map(&:as_props)
+    def as_props = PROPS
 
     # Keys the client asked for, deduplicated and validated.
-    def select(keys)
+    def normalize_keys(keys)
       Array(keys).map(&:to_s).uniq.tap do |list|
         unknown = list.reject { |key| known?(key) }
         raise ArgumentError, "unknown reviewers #{unknown.join(', ')}" if unknown.any?

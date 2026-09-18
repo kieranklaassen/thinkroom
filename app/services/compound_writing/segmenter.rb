@@ -16,7 +16,7 @@ module CompoundWriting
     MAX_N = 3
     SENTENCE_BREAK = /[.!?]+["'”’)\]]*(?=\s+["'“‘(\[]?[\p{Lu}\p{N}])/
     WORD = /[\p{L}\p{N}][\p{L}\p{N}'’\-]*/
-    PHRASE_BREAK = /[,;:—–\-\(\)\[\]"“”]|\s-\s|\n/
+    PHRASE_BREAK = /[,;:—–\-\(\)\[\]"“”\n]/
 
     module_function
 

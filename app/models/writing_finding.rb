@@ -13,17 +13,15 @@ class WritingFinding < ApplicationRecord
 
   scope :active, -> { where(dismissed_at: nil) }
 
+  # A ParagraphReview::Finding's fields are exactly these columns.
   def self.from_review(finding, pass:)
-    new(
-      document_id: pass.document_id, writing_pass: pass,
-      reviewer_key: finding.reviewer_key, question_id: finding.question_id, scope: finding.scope,
-      paragraph_index: finding.paragraph_index, paragraph_text: finding.paragraph_text,
-      quote: finding.quote, quote_offset: finding.quote_offset, probability: finding.probability
-    )
+    new(finding.to_h.merge(document_id: pass.document_id, writing_pass: pass))
   end
 
   def dismiss!
-    update!(dismissed_at: Time.current) if dismissed_at.nil?
+    return if dismissed_at
+
+    update!(dismissed_at: Time.current)
     DocumentMetaChannel.broadcast_event_after_commit(document, :writing_pass)
   end
 

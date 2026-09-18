@@ -42,7 +42,7 @@ import { HighlightLegendPanel } from '../../components/highlight_legend_panel'
 import { ReviewPopover } from '../../components/review_popover'
 import { MarginAnnotations } from '../../components/margin_annotations'
 import { FindingMarginCards } from '../../components/finding_margin_cards'
-import { CompoundPanel } from '../../components/compound_panel'
+import { CompoundPanel, type CompoundPanelProps } from '../../components/compound_panel'
 import { CommentsPanel } from '../../components/comments_panel'
 import { AnchoredComposer } from '../../components/anchored_composer'
 import { SelectionToolbar } from '../../components/selection_toolbar'
@@ -371,6 +371,7 @@ export default function DocumentShow({
     canWrite: ownership.can_write,
     handle,
     identityName: identity.name,
+    docTick,
   })
   const visibleReviewerKeys = useMemo(
     () => new Set(writingReviewers.filter((reviewer) => !writing.off.has(reviewer.key)).map((reviewer) => reviewer.key)),
@@ -396,6 +397,26 @@ export default function DocumentShow({
       async: true,
     })
   }, [])
+  // One prop bag for the desktop rail and the compact sheet.
+  const compoundPanelProps: CompoundPanelProps = {
+    reviewers: writingReviewers,
+    pass: writingPass,
+    enabled: writingEnabled,
+    canWrite: ownership.can_write,
+    off: writing.off,
+    onToggle: writing.toggleReviewer,
+    onRun: writing.run,
+    canRun: writing.canRun,
+    requesting: writing.requesting,
+    textChanged: writing.textChanged,
+    error: writing.error,
+    onDismissError: writing.clearError,
+    anchoredIds: findingAnchors.anchoredIds,
+    changedIds: findingAnchors.changedIds,
+    onJumpTo: findingAnchors.jumpToFinding,
+    onHover: findingAnchors.hoverFinding,
+    onDismiss: dismissFinding,
+  }
 
   const exportMarkdown = useCallback(async () => {
     const live = handleRef.current
@@ -1221,24 +1242,7 @@ export default function DocumentShow({
           </div>
           {!isMobile && isCompound && (
             <aside className="doc-rail">
-              <CompoundPanel
-                reviewers={writingReviewers}
-                pass={writingPass}
-                enabled={writingEnabled}
-                canWrite={ownership.can_write}
-                off={writing.off}
-                onToggle={writing.toggleReviewer}
-                onRun={writing.run}
-                canRun={writing.canRun}
-                busy={writing.busy}
-                error={writing.error}
-                onDismissError={writing.clearError}
-                anchoredIds={findingAnchors.anchoredIds}
-                changedIds={findingAnchors.changedIds}
-                onJumpTo={findingAnchors.jumpToFinding}
-                onHover={findingAnchors.hoverFinding}
-                onDismiss={dismissFinding}
-              />
+              <CompoundPanel {...compoundPanelProps} />
             </aside>
           )}
           {!isMobile && !isCompound && (!isReading || highlightGroups.length > 0) && (
@@ -1340,29 +1344,15 @@ export default function DocumentShow({
         {isCompound && isMobile && activeSheet === 'reviewers' && (
           <MobileSheet title="Reviewers" onClose={() => setActiveSheet(null)}>
             <CompoundPanel
-              reviewers={writingReviewers}
-              pass={writingPass}
-              enabled={writingEnabled}
-              canWrite={ownership.can_write}
-              off={writing.off}
-              onToggle={writing.toggleReviewer}
-              onRun={writing.run}
-              canRun={writing.canRun}
-              busy={writing.busy}
-              error={writing.error}
-              onDismissError={writing.clearError}
-              anchoredIds={findingAnchors.anchoredIds}
-              changedIds={findingAnchors.changedIds}
+              {...compoundPanelProps}
               onJumpTo={(finding) => {
                 findingAnchors.jumpToFinding(finding)
                 setActiveSheet(null)
               }}
-              onHover={findingAnchors.hoverFinding}
-              onDismiss={dismissFinding}
             />
           </MobileSheet>
         )}
-        {!isReading && isMobile && activeSheet === 'suggestions' && (
+        {!isReading && !isCompound && isMobile && activeSheet === 'suggestions' && (
           <MobileSheet
             title={`Suggestions${reviewItems.length > 0 ? ` · ${reviewItems.length}` : ''}`}
             onClose={() => {
@@ -1378,7 +1368,7 @@ export default function DocumentShow({
             />
           </MobileSheet>
         )}
-        {!isReading && isMobile && activeSheet === 'comments' && (
+        {!isReading && !isCompound && isMobile && activeSheet === 'comments' && (
           <MobileSheet title="Comments" onClose={() => setActiveSheet(null)}>
             <CommentsPanel
                   showResolved={commentsResolved}

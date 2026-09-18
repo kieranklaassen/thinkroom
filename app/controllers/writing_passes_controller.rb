@@ -33,6 +33,6 @@ class WritingPassesController < InertiaController
   private
 
   def pass_params
-    params.permit(reviewers: [], paragraphs: %i[index kind text])
+    params.permit(:slug, :requested_by_name, reviewers: [], paragraphs: %i[index kind text])
   end
 end

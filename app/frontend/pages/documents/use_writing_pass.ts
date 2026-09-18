@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { router } from '@inertiajs/react'
 import { editorViewCtx } from '@milkdown/kit/core'
 import type { EditorHandle } from '../../editor/milkdown_editor'
-import { paragraphPayload, projectParagraphs } from '../../editor/paragraph_projection'
+import { paragraphDigest, paragraphPayload, projectParagraphs } from '../../editor/paragraph_projection'
 import { setCookie } from '../../lib/cookies'
 import type { WritingPassPayload, WritingReviewerPayload } from '../../types/payloads'
 
@@ -20,19 +20,23 @@ interface Options {
   canWrite: boolean
   handle: EditorHandle | null
   identityName: string
+  /** Re-fingerprints the live text on local and remote document changes. */
+  docTick: number
 }
 
 export interface WritingPassControls {
   off: Set<string>
   toggleReviewer: (key: string) => void
-  /** Keys that run on the next pass, registry order. */
-  activeKeys: string[]
   run: () => void
-  /** A run request is in flight, or the pass is still being judged. */
-  busy: boolean
+  /** The run request is in flight. A pass still being judged does not block
+   *  a new run: the new pass replaces it, which is also the recovery path for
+   *  a pass a restart left behind. */
+  requesting: boolean
   canRun: boolean
   error: string | null
   clearError: () => void
+  /** The live paragraphs no longer match the ones the pass judged. */
+  textChanged: boolean
   /** Reload the pass prop (cable event or entering compound mode). */
   reloadPass: () => void
 }
@@ -45,7 +49,7 @@ const OFF_COOKIE = 'pruf_cw_off'
  * (paragraphs projected from the live editor, reviewers, the viewer's name),
  * and reloading the `writing_pass` prop, which other modes never fetch.
  */
-export function useWritingPass({ slug, pass, reviewers, initialOff, active, enabled, canWrite, handle, identityName }: Options): WritingPassControls {
+export function useWritingPass({ slug, pass, reviewers, initialOff, active, enabled, canWrite, handle, identityName, docTick }: Options): WritingPassControls {
   const [off, setOff] = useState(() => new Set(initialOff))
   const [error, setError] = useState<string | null>(null)
   const [requesting, setRequesting] = useState(false)
@@ -53,16 +57,30 @@ export function useWritingPass({ slug, pass, reviewers, initialOff, active, enab
   activeRef.current = active
 
   const toggleReviewer = useCallback((key: string) => {
-    setOff((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      setCookie(OFF_COOKIE, [...next].join(','))
-      return next
-    })
-  }, [])
+    const next = new Set(off)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    setOff(next)
+    setCookie(OFF_COOKIE, [...next].join(','))
+  }, [off])
 
   const activeKeys = useMemo(() => reviewers.filter((reviewer) => !off.has(reviewer.key)).map((reviewer) => reviewer.key), [reviewers, off])
+
+  const projected = useCallback(() => {
+    if (!handle) return null
+    try {
+      return handle.editor.action((ctx) => projectParagraphs(ctx.get(editorViewCtx).state.doc))
+    } catch {
+      return null // editor torn down mid-navigation
+    }
+  }, [handle])
+
+  const textChanged = useMemo(() => {
+    void docTick
+    if (!active || !pass) return false
+    const paragraphs = projected()
+    return paragraphs !== null && paragraphDigest(paragraphs.map((paragraph) => paragraph.text)) !== pass.paragraphs_digest
+  }, [active, pass, projected, docTick])
 
   // A running pass broadcasts once per paragraph per reviewer; coalesce the
   // burst into one reload per window, like useMetaChannel does for its props.
@@ -87,15 +105,10 @@ export function useWritingPass({ slug, pass, reviewers, initialOff, active, enab
   }, [active, pass, reloadPass])
 
   const run = useCallback(() => {
-    if (!handle || requesting) return
-    let paragraphs: ReturnType<typeof paragraphPayload> = []
-    try {
-      handle.editor.action((ctx) => {
-        paragraphs = paragraphPayload(projectParagraphs(ctx.get(editorViewCtx).state.doc))
-      })
-    } catch {
-      return // editor torn down mid-navigation
-    }
+    if (requesting) return
+    const projection = projected()
+    if (!projection) return
+    const paragraphs = paragraphPayload(projection)
     if (paragraphs.length === 0) {
       setError('There is no prose to review yet.')
       return
@@ -115,22 +128,29 @@ export function useWritingPass({ slug, pass, reviewers, initialOff, active, enab
       preserveScroll: true,
       only: ['writing_pass', 'activities'],
       async: true,
-      onError: (errors) => setError(typeof errors.writing_pass === 'string' ? errors.writing_pass : 'The reviewers could not start.'),
+      onError: (errors) => {
+        const message = errors.writing_pass ?? errors.document
+        setError(typeof message === 'string' ? message : 'The reviewers could not start.')
+      },
+      // A plain-text response (the write rate limit's 429) would otherwise
+      // open Inertia's raw error modal over the editor.
+      onHttpException: (response) => {
+        setError(response.status === 429 ? 'Too many runs from this address; try again in a few minutes.' : 'The reviewers could not start.')
+        return false
+      },
       onFinish: () => setRequesting(false),
     })
-  }, [handle, requesting, activeKeys, slug, identityName])
-
-  const judging = pass?.status === 'queued' || pass?.status === 'running'
+  }, [requesting, projected, activeKeys, slug, identityName])
 
   return {
     off,
     toggleReviewer,
-    activeKeys,
     run,
-    busy: requesting || Boolean(judging),
+    requesting,
     canRun: enabled && canWrite && Boolean(handle) && !requesting,
     error,
     clearError: () => setError(null),
+    textChanged,
     reloadPass,
   }
 }

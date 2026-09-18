@@ -79,7 +79,7 @@ export interface WritingFindingPayload {
   note: string | null
 }
 
-/** WritingPass::RUN_STATUSES. */
+/** WritingPass::STATUSES, shared by the pass and each reviewer's run. */
 export type WritingRunStatus = 'queued' | 'running' | 'finished' | 'failed'
 
 /** WritingPass#as_props. */
@@ -90,6 +90,8 @@ export interface WritingPassPayload {
   reviewer_runs: Record<string, { status: WritingRunStatus; error?: string; findings_count?: number; finished_at?: string }>
   word_count: number
   paragraph_count: number
+  /** CompoundWriting::ParagraphDigest of the judged paragraphs (see paragraphDigest). */
+  paragraphs_digest: string
   created_at: string
   finished_at: string | null
   findings: WritingFindingPayload[]

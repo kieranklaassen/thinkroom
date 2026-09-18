@@ -3,7 +3,7 @@ import { editorViewCtx } from '@milkdown/kit/core'
 import type { Node } from '@milkdown/kit/prose/model'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import type { EditorHandle } from '../../editor/milkdown_editor'
-import { paragraphRange, projectParagraphs, type ProjectedParagraph } from '../../editor/paragraph_projection'
+import { codepointOffsetToIndex, paragraphRange, projectParagraphs, type ProjectedParagraph } from '../../editor/paragraph_projection'
 import { clearHighlight, domRange, setHighlight } from '../../lib/highlights'
 import type { WritingFindingPayload } from '../../types/payloads'
 
@@ -32,7 +32,6 @@ export interface FindingAnchors {
   anchoredIds: Set<number> | null
   /** Anchored findings whose paragraph text no longer matches the stored copy. */
   changedIds: Set<number>
-  ranges: Map<number, FindingRange>
   /** Visible anchored findings grouped by their current paragraph. */
   paragraphs: AnchoredParagraph[]
   hoverFinding: (finding: WritingFindingPayload | null) => void
@@ -71,31 +70,31 @@ function occurrences(haystack: string, needle: string): number[] {
 }
 
 /**
- * Three-step resolution (plan KTD3): an identical paragraph (preferring the
- * stored index) maps the stored offset; else the block at the stored index
- * or a neighbour re-anchors the quote when it occurs there exactly once;
- * else the finding is changed. Never guess among repeated quotes.
+ * Three-step resolution (plan KTD3): an identical paragraph maps the stored
+ * offset (a repeated paragraph must sit at the stored index, or the finding
+ * is changed rather than guessed); else the block at the stored index
+ * re-anchors the quote when it occurs there exactly once; else the finding
+ * is changed. A finding never moves to another paragraph.
  */
 export function resolveFinding(
   doc: Node,
   finding: WritingFindingPayload,
 ): { range: FindingRange; paragraph: ProjectedParagraph } | null {
   if (finding.paragraph_text === null || finding.quote === null || finding.quote_offset === null) return null
-  const paragraphs = projectParagraphs(doc)
-  const identical = indexByText(doc).get(finding.paragraph_text)
-  if (identical?.length) {
-    const paragraph = identical.find((candidate) => candidate.index === finding.paragraph_index) ?? identical[0]
-    const range = paragraphRange(paragraph, finding.quote_offset, finding.quote.length)
-    if (range && doc.textBetween(range.from, range.to, '\n') === finding.quote) return { range, paragraph }
+  const verify = (paragraph: ProjectedParagraph, offset: number) => {
+    const range = paragraphRange(paragraph, offset, finding.quote!.length)
+    return range && doc.textBetween(range.from, range.to, '\n') === finding.quote ? { range, paragraph } : null
   }
-  const index = finding.paragraph_index ?? -1
-  for (const candidate of [index, index - 1, index + 1]) {
-    const paragraph = paragraphs[candidate]
-    if (!paragraph) continue
-    const hits = occurrences(paragraph.text, finding.quote)
-    if (hits.length !== 1) continue
-    const range = paragraphRange(paragraph, hits[0], finding.quote.length)
-    if (range && doc.textBetween(range.from, range.to, '\n') === finding.quote) return { range, paragraph }
+  const identical = indexByText(doc).get(finding.paragraph_text) ?? []
+  const same = identical.length === 1 ? identical[0] : identical.find((candidate) => candidate.index === finding.paragraph_index)
+  if (same) {
+    const resolved = verify(same, codepointOffsetToIndex(same.text, finding.quote_offset))
+    if (resolved) return resolved
+  }
+  const atIndex = finding.paragraph_index === null ? undefined : projectParagraphs(doc)[finding.paragraph_index]
+  if (atIndex) {
+    const hits = occurrences(atIndex.text, finding.quote)
+    if (hits.length === 1) return verify(atIndex, hits[0])
   }
   return null
 }
@@ -108,7 +107,6 @@ export function resolveFinding(
  */
 export function useFindingAnchors({ findings, handle, docTick, visibleKeys, active }: Options): FindingAnchors {
   const domRangesRef = useRef(new Map<number, Range>())
-  const [ranges, setRanges] = useState(new Map<number, FindingRange>())
   const [paragraphs, setParagraphs] = useState<AnchoredParagraph[]>([])
   const [anchoredIds, setAnchoredIds] = useState<Set<number> | null>(null)
   const hoveredIdRef = useRef<number | null>(null)
@@ -122,9 +120,9 @@ export function useFindingAnchors({ findings, handle, docTick, visibleKeys, acti
   }, [])
 
   useLayoutEffect(() => {
-    if (!handle) {
+    if (!handle || !active) {
+      // Other modes neither paint nor measure: findings resolve again on entry.
       domRangesRef.current.clear()
-      setRanges(new Map())
       setParagraphs([])
       setAnchoredIds(null)
       clearAll()
@@ -137,34 +135,37 @@ export function useFindingAnchors({ findings, handle, docTick, visibleKeys, acti
       return // editor torn down mid-navigation
     }
     const doc = view.state.doc
-    const nextRanges = new Map<number, FindingRange>()
+    const nextIds = new Set<number>()
     const nextDom = new Map<number, Range>()
     const grouped = new Map<number, AnchoredParagraph>()
     const painted: Array<{ finding: WritingFindingPayload; range: FindingRange; dom: Range }> = []
+    // Two identical paragraphs judged separately collapse onto one when the
+    // other is deleted; show that reviewer's verdict once, not twice.
+    const shown = new Set<string>()
     for (const finding of findings) {
       if (finding.scope === 'text') continue
       const resolved = resolveFinding(doc, finding)
       if (!resolved) continue
-      nextRanges.set(finding.id, resolved.range)
+      nextIds.add(finding.id)
       const dom = domRange(view, resolved.range.from, resolved.range.to)
       if (dom) nextDom.set(finding.id, dom)
       if (!visibleKeys.has(finding.reviewer_key)) continue
+      const shownKey = `${finding.reviewer_key}|${finding.question_id}|${resolved.range.from}|${resolved.range.to}`
+      if (shown.has(shownKey)) continue
+      shown.add(shownKey)
       const group = grouped.get(resolved.paragraph.pos) ?? { pos: resolved.paragraph.pos, index: resolved.paragraph.index, findings: [] }
       group.findings.push(finding)
       grouped.set(resolved.paragraph.pos, group)
       if (dom && finding.scope !== 'paragraph') painted.push({ finding, range: resolved.range, dom })
     }
     domRangesRef.current = nextDom
-    setRanges(nextRanges)
     setParagraphs([...grouped.values()].sort((a, b) => a.pos - b.pos))
     setAnchoredIds((prev) => {
-      const next = new Set(nextRanges.keys())
-      if (prev && prev.size === next.size && [...next].every((id) => prev.has(id))) return prev
-      return next
+      if (prev && prev.size === nextIds.size && [...nextIds].every((id) => prev.has(id))) return prev
+      return nextIds
     })
 
     clearAll()
-    if (!active) return
     // Fill wins by probability; an overlapped lower phrase becomes an underline.
     const fills: FindingRange[] = []
     const byName = new Map<string, Range[]>()
@@ -201,12 +202,12 @@ export function useFindingAnchors({ findings, handle, docTick, visibleKeys, acti
 
   const changedIds = useMemo(() => {
     const changed = new Set<number>()
-    if (anchoredIds === null) return changed
+    if (anchoredIds === null || !active) return changed
     for (const finding of findings) {
       if (finding.scope !== 'text' && !anchoredIds.has(finding.id)) changed.add(finding.id)
     }
     return changed
-  }, [findings, anchoredIds])
+  }, [findings, anchoredIds, active])
 
   const hoverFinding = useCallback((finding: WritingFindingPayload | null) => {
     hoveredIdRef.current = finding === null ? null : finding.id
@@ -233,5 +234,5 @@ export function useFindingAnchors({ findings, handle, docTick, visibleKeys, acti
     }, 900))
   }, [])
 
-  return { anchoredIds, changedIds, ranges, paragraphs, hoverFinding, jumpToFinding }
+  return { anchoredIds, changedIds, paragraphs, hoverFinding, jumpToFinding }
 }

@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { timeAgo } from '../lib/time'
 import { truncate } from '../lib/truncate'
 import type { WritingFindingPayload, WritingPassPayload, WritingReviewerPayload, WritingRunStatus } from '../types/payloads'
 
-interface Props {
+export interface CompoundPanelProps {
   reviewers: WritingReviewerPayload[]
   pass: WritingPassPayload | null | undefined
   enabled: boolean
@@ -12,7 +12,10 @@ interface Props {
   onToggle: (key: string) => void
   onRun: () => void
   canRun: boolean
-  busy: boolean
+  /** The run request is in flight (a judging pass never blocks a new run). */
+  requesting: boolean
+  /** The live text no longer matches what the pass judged. */
+  textChanged: boolean
   error: string | null
   onDismissError: () => void
   /** Null until the editor measured once; then the ids that still resolve. */
@@ -30,15 +33,17 @@ const RUN_LABELS: Record<WritingRunStatus, string> = {
   failed: 'Failed',
 }
 
-function statusLine(pass: WritingPassPayload | null | undefined, changed: number): string {
+function statusLine(pass: WritingPassPayload | null | undefined, changed: number, textChanged: boolean): string {
   if (pass === undefined) return 'Loading…'
   if (pass === null) return 'Run the reviewers to see their findings in the text.'
   const runs = Object.values(pass.reviewer_runs)
   const done = runs.filter((run) => run.status === 'finished' || run.status === 'failed').length
-  if (pass.status === 'queued' || pass.status === 'running') return `Reviewing ${done} of ${runs.length} done…`
+  if (pass.status === 'queued' || pass.status === 'running') return `Reviewing, ${done} of ${runs.length} done…`
   const when = pass.finished_at ? timeAgo(pass.finished_at) : timeAgo(pass.created_at)
-  const changedNote = changed > 0 ? ` · ${changed} finding${changed === 1 ? '' : 's'} changed since the last run` : ''
-  return `${pass.status === 'failed' ? 'Failed' : 'Finished'} ${when}${changedNote}`
+  const notes: string[] = []
+  if (textChanged) notes.push('text changed since the last run')
+  if (changed > 0) notes.push(`${changed} finding${changed === 1 ? '' : 's'} changed`)
+  return `${pass.status === 'failed' ? 'Failed' : 'Finished'} ${when}${notes.length ? ` · ${notes.join(', ')}` : ''}`
 }
 
 /**
@@ -48,9 +53,9 @@ function statusLine(pass: WritingPassPayload | null | undefined, changed: number
  * reviewer lists its findings for jumping; changed ones cannot jump.
  */
 export function CompoundPanel({
-  reviewers, pass, enabled, canWrite, off, onToggle, onRun, canRun, busy, error, onDismissError,
+  reviewers, pass, enabled, canWrite, off, onToggle, onRun, canRun, requesting, textChanged, error, onDismissError,
   anchoredIds, changedIds, onJumpTo, onHover, onDismiss,
-}: Props) {
+}: CompoundPanelProps) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const findings = pass?.findings ?? []
   const byReviewer = new Map<string, WritingFindingPayload[]>()
@@ -68,10 +73,10 @@ export function CompoundPanel({
           type="button"
           className="compound-run"
           onClick={onRun}
-          disabled={!canRun || busy}
-          title={!enabled ? 'Reviewers are not configured on this server' : !canWrite ? 'Only writers can run reviewers' : 'Run every reviewer that is on'}
+          disabled={!canRun}
+          title={!enabled ? 'Reviewers are not configured on this server' : !canWrite ? 'Only writers can run reviewers' : 'Run every reviewer that is on; a new run replaces the last one'}
         >
-          {busy ? 'Running…' : 'Run all'}
+          {requesting ? 'Starting…' : pass ? 'Run again' : 'Run all'}
         </button>
       </header>
       {!enabled && (
@@ -85,7 +90,7 @@ export function CompoundPanel({
           <button type="button" className="compound-notice-dismiss" onClick={onDismissError} aria-label="Dismiss">×</button>
         </p>
       )}
-      <p className="compound-status" role="status" aria-live="polite">{statusLine(pass, changedIds.size)}</p>
+      <p className="compound-status" role="status" aria-live="polite">{statusLine(pass, changedIds.size, textChanged)}</p>
       <ul className="compound-reviewers">
         {reviewers.map((reviewer) => {
           const isOff = off.has(reviewer.key)
@@ -93,7 +98,7 @@ export function CompoundPanel({
           const list = byReviewer.get(reviewer.key) ?? []
           const isExpanded = expanded === reviewer.key
           return (
-            <li key={reviewer.key} className={`compound-reviewer ${isOff ? 'is-off' : ''}`} style={{ '--cw-color': `var(--cw-${reviewer.color})` } as React.CSSProperties}>
+            <li key={reviewer.key} className={`compound-reviewer ${isOff ? 'is-off' : ''}`} style={{ '--cw-color': `var(--cw-${reviewer.color})` } as CSSProperties}>
               <div className="compound-reviewer-row">
                 <button
                   type="button"

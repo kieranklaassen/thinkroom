@@ -21,7 +21,7 @@ export interface ParagraphPayload {
   text: string
 }
 
-const SKIPPED_BLOCKS = new Set(['code_block', 'table', 'table_row', 'table_cell', 'table_header'])
+const SKIPPED_BLOCKS = new Set(['code_block', 'table'])
 
 // ProseMirror documents are immutable: one projection per version.
 const projections = new WeakMap<Node, ProjectedParagraph[]>()
@@ -29,8 +29,11 @@ const projections = new WeakMap<Node, ProjectedParagraph[]>()
 /**
  * The document's textblocks (paragraphs, headings, list items, quotes) with
  * their text-node text. Code blocks and tables are skipped: reviewers judge
- * prose. The same projection anchors findings back, so a stored offset means
- * the same characters on both sides (see use_finding_anchors.ts).
+ * prose. Inline leaves (hard breaks, images) contribute a newline so words on
+ * either side never merge; the server treats "\n" as a phrase boundary and
+ * an anchored span never crosses one (paragraphRange needs text nodes at
+ * both ends). The same projection anchors findings back, so a stored offset
+ * means the same characters on both sides (see use_finding_anchors.ts).
  */
 export function projectParagraphs(doc: Node): ProjectedParagraph[] {
   const cached = projections.get(doc)
@@ -43,7 +46,11 @@ export function projectParagraphs(doc: Node): ProjectedParagraph[] {
     const chunks: string[] = []
     let length = 0
     node.forEach((child, offset) => {
-      if (!child.isText) return
+      if (!child.isText) {
+        chunks.push('\n')
+        length += 1
+        return
+      }
       const text = child.text ?? ''
       segments.push({ start: length, end: length + text.length, pos: pos + 1 + offset })
       chunks.push(text)
@@ -84,7 +91,32 @@ export function paragraphRange(
   return { from: first.pos + offset - first.start, to: last.pos + end - last.start }
 }
 
-/** Words in a projection, for the "too long to review" guard on the client. */
-export function projectedWordCount(paragraphs: ProjectedParagraph[]): number {
-  return paragraphs.reduce((sum, paragraph) => sum + (paragraph.text.match(/[\p{L}\p{N}][\p{L}\p{N}'’-]*/gu)?.length ?? 0), 0)
+/** Server offsets count codepoints (Ruby String#index); JavaScript strings
+ *  count UTF-16 units. Convert so an emoji before a quote does not shift it. */
+export function codepointOffsetToIndex(text: string, codepoints: number): number {
+  let index = 0
+  let seen = 0
+  while (seen < codepoints && index < text.length) {
+    const code = text.codePointAt(index) ?? 0
+    index += code > 0xffff ? 2 : 1
+    seen += 1
+  }
+  return index
+}
+
+/**
+ * FNV-1a 32-bit over the codepoints of every paragraph with a unit separator
+ * between them: the same fingerprint CompoundWriting::ParagraphDigest computes
+ * for a pass, so the panel can say the text changed since the last run.
+ */
+export function paragraphDigest(texts: string[]): string {
+  let hash = 0x811c9dc5
+  const mix = (value: number) => {
+    hash = Math.imul(hash ^ value, 0x01000193) >>> 0
+  }
+  texts.forEach((text, index) => {
+    if (index > 0) mix(0x1f)
+    for (const character of text) mix(character.codePointAt(0) ?? 0)
+  })
+  return hash.toString(16).padStart(8, '0')
 }

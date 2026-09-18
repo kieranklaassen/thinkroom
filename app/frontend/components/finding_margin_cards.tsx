@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type CSSProperties } from 'react'
 import { editorViewCtx } from '@milkdown/kit/core'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import type { EditorHandle } from '../editor/milkdown_editor'
@@ -94,7 +94,7 @@ export function FindingMarginCards({ paragraphs, reviewers, handle, compact, can
                 const reviewer = byKey.get(finding.reviewer_key)
                 return (
                   <li key={finding.id} className="compound-card-row"
-                    style={{ '--cw-color': `var(--cw-${reviewer?.color ?? 0})` } as React.CSSProperties}
+                    style={{ '--cw-color': `var(--cw-${reviewer?.color ?? 0})` } as CSSProperties}
                     onMouseEnter={() => onHover(finding)}
                     onMouseLeave={() => onHover(null)}>
                     <button type="button" className="compound-card-main" onClick={() => onJumpTo(finding)} title="Show in document">

@@ -26,9 +26,9 @@ class CompoundWriting::ReviewersTest < ActiveSupport::TestCase
     assert_equal %i[id scope note], props[:questions].first.keys
   end
 
-  test "select validates and deduplicates keys" do
-    assert_equal %w[hemingway mom], CompoundWriting::Reviewers.select(%w[hemingway mom hemingway])
-    assert_raises(ArgumentError) { CompoundWriting::Reviewers.select(%w[hemingway nope]) }
+  test "normalize_keys validates and deduplicates keys" do
+    assert_equal %w[hemingway mom], CompoundWriting::Reviewers.normalize_keys(%w[hemingway mom hemingway])
+    assert_raises(ArgumentError) { CompoundWriting::Reviewers.normalize_keys(%w[hemingway nope]) }
   end
 
   test "an unknown scope is rejected at definition time" do
