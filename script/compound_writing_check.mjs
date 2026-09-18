@@ -125,12 +125,17 @@ try {
   })
   check(!overlapping, 'phrase fills never overlap')
 
-  // Read mode clears every cw-* highlight; coming back restores them.
-  await page.keyboard.press('Meta+4')
-  await page.waitForFunction((path) => location.pathname === path, `/d/${slug}`)
+  // Read mode clears every cw-* highlight; coming back restores them. The
+  // shortcut needs focus outside a form control, so park it in the copy first.
+  const switchMode = async (digit, path) => {
+    await page.locator('.doc-live-editor p').first().click()
+    await page.keyboard.press(`Meta+${digit}`)
+    await page.waitForFunction((expected) => location.pathname === expected, path)
+  }
+  await switchMode(4, `/d/${slug}`)
   await page.waitForFunction(() => ![...CSS.highlights.keys()].some((name) => name.startsWith('cw-')))
   ok('Read mode clears the compound highlights')
-  await page.keyboard.press('Meta+5')
+  await switchMode(5, `/d/${slug}/compound`)
   await page.waitForFunction(() => CSS.highlights?.has('cw-ai_check-fill'))
   ok('returning to Compound mode restores them')
 
@@ -138,9 +143,10 @@ try {
   const other = await openPage(`/d/${slug}/compound`)
   await waitForLive(other)
   await other.locator('.compound-card').first().waitFor()
-  const before = await other.locator('.compound-card-row').count()
+  const totalCount = () => other.locator('.compound-count').evaluateAll((els) => els.reduce((sum, el) => sum + Number(el.textContent), 0))
+  const before = await totalCount()
   await page.locator('.compound-card-row').first().locator('.compound-finding-dismiss').click()
-  await other.waitForFunction((count) => document.querySelectorAll('.compound-card-row').length < count, before)
+  await other.waitForFunction((count) => [...document.querySelectorAll('.compound-count')].reduce((sum, el) => sum + Number(el.textContent), 0) < count, before)
   ok('dismissing a finding removes it in another window')
 
   // AE3: editing the flagged word marks the finding changed; editing elsewhere in the paragraph keeps the rest.

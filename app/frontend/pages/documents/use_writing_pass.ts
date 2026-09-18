@@ -64,10 +64,21 @@ export function useWritingPass({ slug, pass, reviewers, initialOff, active, enab
 
   const activeKeys = useMemo(() => reviewers.filter((reviewer) => !off.has(reviewer.key)).map((reviewer) => reviewer.key), [reviewers, off])
 
+  // A running pass broadcasts once per paragraph per reviewer; coalesce the
+  // burst into one reload per window, like useMetaChannel does for its props.
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reloadPass = useCallback(() => {
     if (!activeRef.current) return
-    // async: a background reload must never cancel an in-flight run request.
-    router.reload({ only: ['writing_pass'], async: true })
+    if (reloadTimer.current) clearTimeout(reloadTimer.current)
+    reloadTimer.current = setTimeout(() => {
+      reloadTimer.current = null
+      if (!activeRef.current) return
+      // async: a background reload must never cancel an in-flight run request.
+      router.reload({ only: ['writing_pass'], async: true })
+    }, 150)
+  }, [])
+  useEffect(() => () => {
+    if (reloadTimer.current) clearTimeout(reloadTimer.current)
   }, [])
 
   // The prop is optional outside compound mode; fetch it once on entry.
