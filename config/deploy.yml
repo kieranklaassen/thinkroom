@@ -33,6 +33,9 @@ env:
     - GOOGLE_CLIENT_ID
     - GOOGLE_CLIENT_SECRET
 <% end %>
+<% if ENV["KAMAL_COMPOUND_WRITING"] == "1" %>
+    - TYPESAFE_API_KEY
+<% end %>
   clear:
     # SQLite and the database-backed Cable adapter share one persistent volume.
     WEB_CONCURRENCY: "1"

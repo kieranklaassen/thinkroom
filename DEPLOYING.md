@@ -44,6 +44,22 @@ Captured Riffrec ZIPs are private Active Storage attachments. Cursor receives a
 purpose-scoped bundle URL that expires after 24 hours; generated pull requests
 are never merged or deployed automatically.
 
+### Compound writing mode (TypeSafe Jev)
+
+The compound writing mode (`/d/:slug/compound`, Cmd+5) asks TypeSafe's Jev
+model the Compound Writing reviewers' questions over a document. It needs a
+TypeSafe API key from <https://console.typesafe.ai>. Add it to `.kamal/secrets`
+as `TYPESAFE_API_KEY=$TYPESAFE_API_KEY` and set `KAMAL_COMPOUND_WRITING=1` in
+`.kamal/deploy.env`; without the flag the container receives no key and the
+mode shows a "not configured" notice instead of running reviewers.
+`TYPESAFE_MODEL` (default `jev-latest`) may be set in `env.clear` if needed.
+
+For local development put the key in an untracked `.env` at the repo root;
+`bin/dev` (overmind or foreman) loads it. `bin/rails console` and
+`bin/rails test` do not read `.env`. To exercise the mode without a key, run
+with `COMPOUND_WRITING_FAKE_JUDGE=1`, which substitutes a deterministic
+lexicon judge outside production.
+
 Create a Google OAuth web application with these production redirect URIs:
 
 ```text

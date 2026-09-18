@@ -28,8 +28,9 @@ Inspired by [Proof](https://proofeditor.ai) from Dan Shipper.
 
 - Real-time collaborative Markdown and semantic HTML editing
 - Human and AI authorship provenance
-- Read, edit, comment, and suggest modes
+- Read, edit, comment, suggest, and compound writing modes
 - Reviewable suggestions, anchored comments, and task checkboxes
+- Compound Writing reviewers (Hemingway, AI check, Mom, Nemesis, and more) answered by TypeSafe's Jev and painted into the text
 - Inline Excalidraw sketches with touch, Apple Pencil, and SVG export
 - Agent presence, activity, and a discoverable HTTP API
 - Local-first Yjs state synchronized through Action Cable
@@ -96,6 +97,12 @@ port you use, for example:
 http://localhost:3000/auth/google_oauth2/callback
 http://localhost:3001/auth/google_oauth2/callback
 ```
+
+The compound writing mode (Cmd+5) runs the Compound Writing reviewers through
+[TypeSafe's Jev](https://docs.typesafe.ai). Put `TYPESAFE_API_KEY=...` in an
+untracked `.env` at the repo root before `bin/dev`, or start with
+`COMPOUND_WRITING_FAKE_JUDGE=1 bin/dev` to try the mode with a deterministic
+offline judge. See `DEPLOYING.md` for production.
 
 ## Verify
 
