@@ -83,7 +83,9 @@ export function resolveFinding(
   if (finding.paragraph_text === null || finding.quote === null || finding.quote_offset === null) return null
   const verify = (paragraph: ProjectedParagraph, offset: number) => {
     const range = paragraphRange(paragraph, offset, finding.quote!.length)
-    return range && doc.textBetween(range.from, range.to, '\n') === finding.quote ? { range, paragraph } : null
+    // leafText matches the projection: inline leaves (hard breaks, images)
+    // stand in as a newline, which the stored quote may include.
+    return range && doc.textBetween(range.from, range.to, '\n', '\n') === finding.quote ? { range, paragraph } : null
   }
   const identical = indexByText(doc).get(finding.paragraph_text) ?? []
   const same = identical.length === 1 ? identical[0] : identical.find((candidate) => candidate.index === finding.paragraph_index)
