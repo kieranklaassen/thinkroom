@@ -1,5 +1,4 @@
 require "test_helper"
-require "minitest/mock"
 
 class WritingPassFlowTest < ActionDispatch::IntegrationTest
   include ActiveJob::TestHelper
@@ -89,11 +88,15 @@ class WritingPassFlowTest < ActionDispatch::IntegrationTest
   end
 
   test "an unconfigured server refuses to run and says so" do
-    CompoundWriting.stub(:enabled?, false) do
-      assert_no_difference -> { WritingPass.count } do
-        post document_writing_passes_path(@document.slug), params: { reviewers: %w[mom], paragraphs: PARAGRAPHS }
-      end
+    previous = ENV.to_h.slice("COMPOUND_WRITING_FAKE_JUDGE", "TYPESAFE_API_KEY")
+    ENV.delete("COMPOUND_WRITING_FAKE_JUDGE")
+    ENV.delete("TYPESAFE_API_KEY")
+    assert_not CompoundWriting.enabled?
+
+    assert_no_difference -> { WritingPass.count } do
+      post document_writing_passes_path(@document.slug), params: { reviewers: %w[mom], paragraphs: PARAGRAPHS }
     end
+    ENV.update(previous)
     assert_response :redirect
     assert_equal "Reviewers are not configured on this server", session[:inertia_errors][:writing_pass]
   end
