@@ -9,6 +9,20 @@ module CompoundWriting
     REQUEST_TOKEN_BUDGET = 48_000
     NOUL_OVERHEAD_TOKENS = 8
 
+    # One process-wide gate on in-flight TypeSafe requests, shared by every
+    # reviewer job of every pass (Limits.max_concurrent_jev_calls). Sized at
+    # boot from the environment; a running process keeps its size.
+    SEMAPHORE = Concurrent::Semaphore.new(Limits.max_concurrent_jev_calls)
+
+    def self.with_slot
+      SEMAPHORE.acquire
+      begin
+        yield
+      ensure
+        SEMAPHORE.release
+      end
+    end
+
     def initialize(model: CompoundWriting.model, chat: nil)
       @model = model
       @chat = chat
@@ -60,7 +74,7 @@ module CompoundWriting
           builder.noul "q#{position}", instructions: noul.instruction, criteria: noul.criteria
         end
       end
-      response = chat.with_schema(schema).ask(state.to_json)
+      response = self.class.with_slot { chat.with_schema(schema).ask(state.to_json) }
       answers = response.parsed
       raise JudgeError.new("TypeSafe answered without an answer map", reviewer_key: nouls.first.reviewer_key) unless answers.is_a?(Hash)
 

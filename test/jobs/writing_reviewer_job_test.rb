@@ -19,9 +19,12 @@ class WritingReviewerJobTest < ActiveJob::TestCase
 
   teardown { CompoundWriting.judge = nil }
 
-  def start(*keys)
-    WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: keys, paragraphs: PARAGRAPHS)
+  def start(*keys, now: Time.current)
+    WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: keys, paragraphs: PARAGRAPHS, now:)
   end
+
+  # A running pass may only be replaced once it has stalled past the limit.
+  def stalled = Time.current + CompoundWriting::Limits.stall_seconds + 1
 
   test "persists the reviewer's findings with paragraph anchors and finishes its run" do
     pass = start("ai_check", "mom")
@@ -74,7 +77,7 @@ class WritingReviewerJobTest < ActiveJob::TestCase
 
   test "a job for a replaced pass exits without raising or broadcasting" do
     old = start("ai_check")
-    start("ai_check")
+    start("ai_check", now: stalled)
 
     assert_no_broadcasts(DocumentMetaChannel.broadcasting_for(@document)) do
       WritingReviewerJob.perform_now(old.id, "ai_check")
@@ -86,7 +89,8 @@ class WritingReviewerJobTest < ActiveJob::TestCase
     fresh = nil
     replacing_judge = Object.new
     replacing_judge.define_singleton_method(:judge) do |state:, nouls:|
-      fresh ||= WritingPass.start!(document: pass.document, requested_by_name: "B", reviewer_keys: %w[mom], paragraphs: PARAGRAPHS)
+      fresh ||= WritingPass.start!(document: pass.document, requested_by_name: "B", reviewer_keys: %w[mom], paragraphs: PARAGRAPHS,
+                                   now: Time.current + CompoundWriting::Limits.stall_seconds + 1)
       Array.new(nouls.size, 0.9)
     end
     CompoundWriting.judge = replacing_judge

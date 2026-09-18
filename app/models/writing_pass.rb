@@ -12,6 +12,17 @@ class WritingPass < ApplicationRecord
   PARAGRAPH_KINDS = %w[paragraph heading].freeze
 
   class TooLarge < StandardError; end
+  # A pass is running, or the document's cooldown has not elapsed.
+  class Throttled < StandardError; end
+  # The text and reviewers match the finished pass; nothing to spend.
+  class Unchanged < StandardError
+    attr_reader :pass
+
+    def initialize(pass)
+      @pass = pass
+      super("Nothing has changed since the last run; the findings are current.")
+    end
+  end
 
   belongs_to :document
   has_many :findings, class_name: "WritingFinding", dependent: :delete_all
@@ -42,17 +53,25 @@ class WritingPass < ApplicationRecord
     [ paragraphs, words ]
   end
 
-  # The single entry point for a run: replaces the document's earlier passes,
-  # logs the activity, and enqueues one job per reviewer after commit.
-  def self.start!(document:, requested_by_name:, reviewer_keys:, paragraphs:)
+  # The single entry point for a run: refuses a pass that would repeat, crowd,
+  # or overspend (Throttled, Unchanged, PassBudget::Exceeded), then replaces
+  # the document's earlier passes, logs the activity, and enqueues one job per
+  # reviewer after commit.
+  def self.start!(document:, requested_by_name:, reviewer_keys:, paragraphs:, now: Time.current)
     keys = CompoundWriting::Reviewers.normalize_keys(reviewer_keys)
     raise ArgumentError, "choose at least one reviewer" if keys.empty?
 
     paragraphs, words = prepare_paragraphs(paragraphs)
+    digest = CompoundWriting::ParagraphDigest.of(paragraphs.map { |paragraph| paragraph["text"] })
+    previous = document.writing_passes.order(created_at: :desc).first
+    previous&.refuse_replacement!(keys, digest, now:)
+    estimate = CompoundWriting::PassBudget.check!(paragraphs, keys.map { |key| CompoundWriting::Reviewers.find!(key) })
+
     pass = transaction do
       document.writing_passes.destroy_all
       created = document.writing_passes.create!(
-        requested_by_name:, reviewer_keys: keys, paragraphs:, word_count: words,
+        requested_by_name:, reviewer_keys: keys, paragraphs:, word_count: words, paragraphs_digest: digest,
+        estimated_nouls: estimate.nouls, estimated_calls: estimate.calls,
         reviewer_runs: keys.to_h { |key| [ key, { "status" => "queued" } ] }
       )
       Activity.log!(
@@ -69,6 +88,26 @@ class WritingPass < ApplicationRecord
     end
     pass
   end
+
+  # Raises when this pass must not be replaced yet: it is still being judged
+  # (unless it has stalled past Limits.stall_seconds), the document is inside
+  # its cooldown, or the request repeats a finished pass exactly.
+  def refuse_replacement!(keys, digest, now: Time.current)
+    age = now - created_at
+    if !finished? && age < CompoundWriting::Limits.stall_seconds
+      raise Throttled, "A pass is already running on this document; wait for it to finish."
+    end
+    if finished? && paragraphs_digest == digest && reviewer_keys == keys
+      raise Unchanged, self
+    end
+    since_last = now - (finished_at || created_at)
+    cooldown = CompoundWriting::Limits.cooldown_seconds
+    return if since_last >= cooldown
+
+    raise Throttled, "Wait #{(cooldown - since_last).ceil} more second#{(cooldown - since_last).ceil == 1 ? '' : 's'} before running the reviewers again."
+  end
+
+  def finished? = status.in?(%w[finished failed])
 
   # Updates one reviewer's entry under a row lock and re-derives the pass
   # status, so concurrent reviewer jobs never lose each other's writes.
@@ -101,7 +140,7 @@ class WritingPass < ApplicationRecord
       paragraph_count: paragraphs.size,
       # The client hashes its live projection the same way to say "text
       # changed since the last run" even where no finding was touched.
-      paragraphs_digest: CompoundWriting::ParagraphDigest.of(paragraphs.map { |paragraph| paragraph["text"] }),
+      paragraphs_digest:,
       created_at: created_at.iso8601, finished_at: finished_at&.iso8601,
       findings: findings.active.order(:paragraph_index, :quote_offset, :id).map(&:as_props)
     }

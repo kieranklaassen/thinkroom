@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_18_200001) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_18_230001) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -221,8 +221,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_18_200001) do
   create_table "writing_passes", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.integer "document_id", null: false
+    t.integer "estimated_calls", default: 0, null: false
+    t.integer "estimated_nouls", default: 0, null: false
     t.datetime "finished_at"
     t.json "paragraphs", default: [], null: false
+    t.string "paragraphs_digest", limit: 8
     t.string "requested_by_name", null: false
     t.json "reviewer_keys", default: [], null: false
     t.json "reviewer_runs", default: {}, null: false

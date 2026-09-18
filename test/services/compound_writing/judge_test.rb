@@ -77,6 +77,35 @@ class CompoundWriting::JudgeTest < ActiveSupport::TestCase
     end
   end
 
+  test "in-flight requests share one process-wide slot limit" do
+    limit = CompoundWriting::Limits.max_concurrent_jev_calls
+    active = Concurrent::AtomicFixnum.new(0)
+    peak = Concurrent::AtomicFixnum.new(0)
+    threads = Array.new(limit * 3) do
+      Thread.new do
+        CompoundWriting::Judge.with_slot do
+          now = active.increment
+          peak.update { |value| [ value, now ].max }
+          sleep 0.02
+          active.decrement
+        end
+      end
+    end
+    threads.each(&:join)
+
+    assert_equal limit, CompoundWriting::Judge::SEMAPHORE.available_permits
+    assert peak.value <= limit, "#{peak.value} requests were in flight; the limit is #{limit}"
+    assert peak.value > 1, "the gate should still allow parallel requests"
+  end
+
+  test "a request releases its slot even when the provider raises" do
+    chat = ChatDouble.new(error: RubyLLM::ServerError.new("boom"))
+    before = CompoundWriting::Judge::SEMAPHORE.available_permits
+
+    assert_raises(CompoundWriting::JudgeError) { CompoundWriting::Judge.new(chat:).judge(state: { paragraph: "x" }, nouls: nouls(1)) }
+    assert_equal before, CompoundWriting::Judge::SEMAPHORE.available_permits
+  end
+
   test "the fake judge flags a reviewer's lexicon and nothing else" do
     fake = CompoundWriting::FakeJudge.new
     hit = CompoundWriting::Prompts.phrase(question, reviewer, "utilize")

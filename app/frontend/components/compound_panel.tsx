@@ -17,6 +17,7 @@ export interface CompoundPanelProps {
   /** The live text no longer matches what the pass judged. */
   textChanged: boolean
   error: string | null
+  notice: string | null
   onDismissError: () => void
   /** Null until the editor measured once; then the ids that still resolve. */
   anchoredIds: Set<number> | null
@@ -53,7 +54,7 @@ function statusLine(pass: WritingPassPayload | null | undefined, changed: number
  * reviewer lists its findings for jumping; changed ones cannot jump.
  */
 export function CompoundPanel({
-  reviewers, pass, enabled, canWrite, off, onToggle, onRun, canRun, requesting, textChanged, error, onDismissError,
+  reviewers, pass, enabled, canWrite, off, onToggle, onRun, canRun, requesting, textChanged, error, notice, onDismissError,
   anchoredIds, changedIds, onJumpTo, onHover, onDismiss,
 }: CompoundPanelProps) {
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -87,6 +88,12 @@ export function CompoundPanel({
       {error && (
         <p className="compound-notice compound-notice--error" role="alert">
           {error}
+          <button type="button" className="compound-notice-dismiss" onClick={onDismissError} aria-label="Dismiss">×</button>
+        </p>
+      )}
+      {notice && !error && (
+        <p className="compound-notice" role="status">
+          {notice}
           <button type="button" className="compound-notice-dismiss" onClick={onDismissError} aria-label="Dismiss">×</button>
         </p>
       )}

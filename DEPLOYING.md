@@ -54,6 +54,21 @@ as `TYPESAFE_API_KEY=$TYPESAFE_API_KEY` and set `KAMAL_COMPOUND_WRITING=1` in
 mode shows a "not configured" notice instead of running reviewers.
 `TYPESAFE_MODEL` (default `jev-latest`) may be set in `env.clear` if needed.
 
+Every pass spends against that shared key, so passes are bounded. Anyone with
+write access to a document can start one, but only one pass runs per document
+at a time, a document waits `COMPOUND_WRITING_COOLDOWN_SECONDS` (60) between
+passes, and a rerun with the same text and reviewers returns the finished pass
+instead of spending. Daily caps answer 429: `COMPOUND_WRITING_DOCUMENT_DAILY_PASSES`
+(40 per document) and `COMPOUND_WRITING_IP_DAILY_PASSES` (100 per client
+address). A pass is refused up front when its estimate exceeds
+`COMPOUND_WRITING_MAX_NOULS_PER_PASS` (20,000 questions) or
+`COMPOUND_WRITING_MAX_JEV_CALLS_PER_PASS` (1,500 TypeSafe requests), and the
+process never has more than `COMPOUND_WRITING_MAX_CONCURRENT_JEV_CALLS` (4)
+requests in flight. A pass still running after `COMPOUND_WRITING_STALL_SECONDS`
+(600) is treated as abandoned and may be replaced. Set any of these in
+`env.clear` to tune a deployment. Restricting passes to signed-in owners rather
+than any writer is a product decision that is still open.
+
 For local development put the key in an untracked `.env` at the repo root;
 `bin/dev` (overmind or foreman) loads it. `bin/rails console` and
 `bin/rails test` do not read `.env`. To exercise the mode without a key, run

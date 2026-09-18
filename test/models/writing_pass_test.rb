@@ -29,14 +29,84 @@ class WritingPassTest < ActiveSupport::TestCase
     assert_equal "Hemingway and AI check", activity.detail
   end
 
-  test "start! replaces the document's earlier pass and its findings" do
-    old = WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: %w[mom], paragraphs: PARAGRAPHS)
+  def start(keys: %w[mom], paragraphs: PARAGRAPHS, now: Time.current)
+    WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: keys, paragraphs:, now:)
+  end
+
+  def finish(pass, at: Time.current)
+    pass.reviewer_keys.each { |key| pass.record_run!(key, status: "finished", findings_count: 0) }
+    pass.update!(finished_at: at, created_at: at - 1.second)
+    pass
+  end
+
+  def after_cooldown = Time.current + CompoundWriting::Limits.cooldown_seconds + 1
+
+  test "start! replaces the document's finished pass and its findings after the cooldown" do
+    old = finish(start)
     old.findings.create!(document: @document, reviewer_key: "mom", question_id: "insider", scope: "sentence", probability: 0.9)
 
-    fresh = WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: %w[mom], paragraphs: PARAGRAPHS)
+    fresh = start(keys: %w[nemesis], now: after_cooldown)
 
     assert_equal [ fresh ], @document.writing_passes.reload.to_a
     assert_equal 0, WritingFinding.where(document: @document).count
+  end
+
+  test "start! refuses to replace a pass that is still running until it has stalled" do
+    running = start
+
+    error = assert_raises(WritingPass::Throttled) { start(keys: %w[nemesis], now: Time.current + 30) }
+    assert_match(/already running/, error.message)
+    assert_equal [ running ], @document.writing_passes.reload.to_a
+
+    stalled = start(keys: %w[nemesis], now: Time.current + CompoundWriting::Limits.stall_seconds + 1)
+    assert_equal [ stalled ], @document.writing_passes.reload.to_a
+  end
+
+  test "start! enforces a cooldown between passes on one document" do
+    finish(start)
+
+    error = assert_raises(WritingPass::Throttled) { start(keys: %w[nemesis], now: Time.current + 10) }
+    assert_match(/Wait \d+ more seconds? before running/, error.message)
+
+    assert_nothing_raised { start(keys: %w[nemesis], now: after_cooldown) }
+  end
+
+  test "start! returns the finished pass unchanged when text and reviewers repeat" do
+    finished = finish(start)
+
+    error = assert_raises(WritingPass::Unchanged) { start(now: after_cooldown) }
+    assert_equal finished, error.pass
+    assert_equal [ finished ], @document.writing_passes.reload.to_a
+
+    changed_text = PARAGRAPHS.map { |paragraph| paragraph.merge(text: "#{paragraph[:text]} And more.") }
+    assert_nothing_raised { start(paragraphs: changed_text, now: after_cooldown) }
+  end
+
+  test "start! records the estimated spend and refuses a pass over the question budget" do
+    pass = start
+
+    assert pass.estimated_nouls.positive?
+    assert pass.estimated_calls.positive?
+    assert_equal CompoundWriting::ParagraphDigest.of(PARAGRAPHS.map { |paragraph| paragraph[:text] }), pass.paragraphs_digest
+
+    finish(pass)
+    with_env("COMPOUND_WRITING_MAX_NOULS_PER_PASS" => "3") do
+      error = assert_raises(CompoundWriting::PassBudget::Exceeded) { start(keys: %w[ai_check], now: after_cooldown) }
+      assert_match(/the limit is 3 passages/, error.message)
+    end
+    with_env("COMPOUND_WRITING_MAX_JEV_CALLS_PER_PASS" => "1") do
+      assert_raises(CompoundWriting::PassBudget::Exceeded) { start(keys: %w[ai_check], now: after_cooldown) }
+    end
+    assert_equal [ pass ], @document.writing_passes.reload.to_a
+  end
+
+  def with_env(values)
+    previous = ENV.to_h.slice(*values.keys)
+    values.each { |key, value| ENV[key] = value }
+    yield
+  ensure
+    values.each_key { |key| ENV.delete(key) }
+    ENV.update(previous)
   end
 
   test "start! refuses unknown reviewers, no reviewers, and oversized documents" do

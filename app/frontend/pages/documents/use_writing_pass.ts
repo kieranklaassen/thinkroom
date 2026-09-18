@@ -34,6 +34,8 @@ export interface WritingPassControls {
   requesting: boolean
   canRun: boolean
   error: string | null
+  /** The server declined to spend because nothing changed; findings stand. */
+  notice: string | null
   clearError: () => void
   /** The live paragraphs no longer match the ones the pass judged. */
   textChanged: boolean
@@ -52,6 +54,7 @@ const OFF_COOKIE = 'pruf_cw_off'
 export function useWritingPass({ slug, pass, reviewers, initialOff, active, enabled, canWrite, handle, identityName, docTick }: Options): WritingPassControls {
   const [off, setOff] = useState(() => new Set(initialOff))
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [requesting, setRequesting] = useState(false)
   const activeRef = useRef(active)
   activeRef.current = active
@@ -118,6 +121,7 @@ export function useWritingPass({ slug, pass, reviewers, initialOff, active, enab
       return
     }
     setError(null)
+    setNotice(null)
     setRequesting(true)
     router.post(`/d/${encodeURIComponent(slug)}/writing_passes`, {
       reviewers: activeKeys,
@@ -129,13 +133,19 @@ export function useWritingPass({ slug, pass, reviewers, initialOff, active, enab
       only: ['writing_pass', 'activities'],
       async: true,
       onError: (errors) => {
+        if (typeof errors.writing_pass_notice === 'string') {
+          setNotice(errors.writing_pass_notice)
+          return
+        }
         const message = errors.writing_pass ?? errors.document
         setError(typeof message === 'string' ? message : 'The reviewers could not start.')
       },
-      // A plain-text response (the write rate limit's 429) would otherwise
-      // open Inertia's raw error modal over the editor.
+      // A plain-text response (a 429 from the daily caps or the write rate
+      // limit) would otherwise open Inertia's raw error modal over the editor;
+      // the server's short message is the one to show.
       onHttpException: (response) => {
-        setError(response.status === 429 ? 'Too many runs from this address; try again in a few minutes.' : 'The reviewers could not start.')
+        const text = typeof response.data === 'string' ? response.data.trim() : ''
+        setError(response.status === 429 && text.length > 0 && text.length < 240 ? text : 'The reviewers could not start.')
         return false
       },
       onFinish: () => setRequesting(false),
@@ -149,7 +159,11 @@ export function useWritingPass({ slug, pass, reviewers, initialOff, active, enab
     requesting,
     canRun: enabled && canWrite && Boolean(handle) && !requesting,
     error,
-    clearError: () => setError(null),
+    notice,
+    clearError: () => {
+      setError(null)
+      setNotice(null)
+    },
     textChanged,
     reloadPass,
   }

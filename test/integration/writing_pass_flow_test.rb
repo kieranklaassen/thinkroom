@@ -101,6 +101,83 @@ class WritingPassFlowTest < ActionDispatch::IntegrationTest
     assert_equal "Reviewers are not configured on this server", session[:inertia_errors][:writing_pass]
   end
 
+  def post_pass(reviewers: %w[mom], paragraphs: PARAGRAPHS, slug: @document.slug)
+    post document_writing_passes_path(slug), params: { reviewers:, paragraphs: }, as: :json
+  end
+
+  def with_env(values)
+    previous = ENV.to_h.slice(*values.keys)
+    values.each { |key, value| ENV[key] = value }
+    yield
+  ensure
+    values.each_key { |key| ENV.delete(key) }
+    ENV.update(previous)
+  end
+
+  test "a second run while the first is still being judged is refused with a message" do
+    post_pass
+    assert_response :see_other
+
+    assert_no_difference -> { WritingPass.count } do
+      post_pass(reviewers: %w[nemesis])
+    end
+    assert_response :redirect
+    assert_match(/already running/, session[:inertia_errors][:writing_pass])
+  end
+
+  test "an identical rerun of a finished pass is a notice, not a new pass" do
+    post_pass
+    pass = @document.writing_passes.last
+    pass.record_run!("mom", status: "finished", findings_count: 0)
+    pass.update!(finished_at: 2.minutes.ago, created_at: 3.minutes.ago)
+
+    assert_no_difference -> { WritingPass.count } do
+      post_pass
+    end
+    assert_response :redirect
+    assert_equal "Nothing has changed since the last run; the findings are current.", session[:inertia_errors][:writing_pass_notice]
+    assert_equal pass, @document.writing_passes.reload.last
+  end
+
+  test "the per-document daily cap answers 429 with a message and counts every attempt" do
+    with_env("COMPOUND_WRITING_DOCUMENT_DAILY_PASSES" => "1") do
+      post_pass
+      assert_response :see_other
+
+      post_pass(reviewers: %w[nemesis])
+      assert_response :too_many_requests
+      assert_equal "This document has reached today's limit of 1 reviewer runs. Try again tomorrow.", response.body
+
+      other = Document.create!(title: "Other", seed_markdown: "# Other")
+      post_pass(slug: other.slug)
+      assert_response :see_other, "another document has its own daily counter"
+    end
+  end
+
+  test "the per-address daily cap answers 429 with a message across documents" do
+    with_env("COMPOUND_WRITING_IP_DAILY_PASSES" => "1") do
+      post_pass
+      assert_response :see_other
+
+      other = Document.create!(title: "Other", seed_markdown: "# Other")
+      assert_no_difference -> { WritingPass.count } do
+        post_pass(slug: other.slug)
+      end
+      assert_response :too_many_requests
+      assert_equal "This address has reached today's limit of 1 reviewer runs. Try again tomorrow.", response.body
+    end
+  end
+
+  test "a pass over the question budget is refused before anything is enqueued" do
+    with_env("COMPOUND_WRITING_MAX_NOULS_PER_PASS" => "2") do
+      assert_no_enqueued_jobs only: WritingReviewerJob do
+        post_pass(reviewers: %w[ai_check])
+      end
+    end
+    assert_response :redirect
+    assert_match(/Switch off some reviewers or review a shorter document/, session[:inertia_errors][:writing_pass])
+  end
+
   test "dismissing a finding hides it; a view-only viewer cannot" do
     pass = WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: %w[mom], paragraphs: PARAGRAPHS)
     finding = pass.findings.create!(document: @document, reviewer_key: "mom", question_id: "insider", scope: "sentence", probability: 0.9)

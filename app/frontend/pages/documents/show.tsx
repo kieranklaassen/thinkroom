@@ -410,6 +410,7 @@ export default function DocumentShow({
     requesting: writing.requesting,
     textChanged: writing.textChanged,
     error: writing.error,
+    notice: writing.notice,
     onDismissError: writing.clearError,
     anchoredIds: findingAnchors.anchoredIds,
     changedIds: findingAnchors.changedIds,
