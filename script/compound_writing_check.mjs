@@ -46,6 +46,9 @@ try {
         '# Compound writing check',
         'We should utilize the robust report to leverage synergies across the whole team this quarter, obviously.',
         'Plain words carry the second paragraph without any trouble at all for anyone.',
+        // Two trailing spaces: a hard break inside one sentence, so the
+        // sentence quote spans an inline leaf (projected as "\n").
+        'We utilize this line before the break  \nand the sentence continues after it.',
         '```\nutilize inside code stays unreviewed\n```',
       ].join('\n\n'),
     }),
@@ -56,9 +59,24 @@ try {
   // AE1: Cmd+5 from Edit lands on /compound with the reviewers panel.
   const page = await openPage(`/d/${slug}/edit`)
   await waitForLive(page)
-  await page.locator('.doc-live-editor p').first().click()
-  await page.keyboard.press('Meta+5')
-  await page.waitForFunction((path) => location.pathname === path, `/d/${slug}/compound`)
+  // Focus the copy first: the shortcut ignores form controls. A keypress that
+  // lands while the just-mounted editor is still settling its selection is
+  // retried once, as a person would.
+  const switchMode = async (digit, path) => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await page.locator('.doc-live-editor p').first().click()
+      await page.keyboard.press(`Meta+${digit}`)
+      try {
+        await page.waitForFunction((expected) => location.pathname === expected, path, { timeout: attempt === 0 ? 5000 : 15000 })
+        return
+      } catch {
+        if (attempt === 1) {
+          throw new Error(`Cmd+${digit} did not reach ${path}; still at ${await page.evaluate(() => location.pathname)} with focus on ${await page.evaluate(() => document.activeElement?.tagName)}`)
+        }
+      }
+    }
+  }
+  await switchMode(5, `/d/${slug}/compound`)
   check(await page.locator('.mode-control-trigger').innerText() === 'Compound mode ▾' || (await page.locator('.mode-control-trigger').innerText()).includes('Compound'), 'Cmd+5 switches to Compound mode')
   await page.locator('.compound-panel').waitFor()
   check((await page.locator('.compound-reviewer').count()) >= 13, 'the panel lists every reviewer')
@@ -79,10 +97,12 @@ try {
   const payload = request.postDataJSON()
   check(!payload.reviewers.includes('nemesis') && payload.reviewers.includes('ai_check'), 'the run posts only the reviewers that are on')
   check(payload.paragraphs.every((paragraph) => !paragraph.text.includes('inside code')), 'code blocks are not sent for review')
+  check(payload.paragraphs.some((paragraph) => paragraph.text === 'We utilize this line before the break\nand the sentence continues after it.'), 'a hard break projects as a newline inside the paragraph')
   check(payload.paragraphs[0].kind === 'heading' && payload.paragraphs[1].text.startsWith('We should utilize'), 'paragraphs carry their kind and text in document order')
 
   // AE2: findings stream in as highlights and a margin card.
   await page.waitForFunction(() => CSS.highlights?.has('cw-ai_check-fill'), undefined, { timeout: 20000 })
+    .catch(() => { throw new Error('no cw-ai_check-fill highlight arrived within 20s of the run') })
   ok('AI check paints a fill highlight for its phrase findings')
   const utilizeCard = page.locator('.compound-card').filter({ hasText: 'utilize' })
   await utilizeCard.first().waitFor()
@@ -99,6 +119,17 @@ try {
   // R9: the sentence question underlines while the phrase question fills.
   const names = await highlightNames(page)
   check(names.includes('cw-ai_check-fill') && names.includes('cw-ai_check-under'), 'phrase fills and sentence underlines are both registered')
+
+  // A sentence quote that spans a hard break still anchors (its stored text
+  // carries the projection's "\n") and paints an underline across both lines.
+  const acrossBreak = await page.evaluate(() => {
+    const texts = []
+    for (const range of CSS.highlights.get('cw-ai_check-under') ?? []) texts.push(range.toString())
+    return texts.find((text) => text.includes('before the break') && text.includes('continues after it')) ?? null
+  })
+  check(acrossBreak !== null, 'a sentence finding across a hard break anchors and underlines both lines')
+  check((await page.locator('.compound-card').filter({ hasText: 'before the break' }).count()) === 1, 'the hard-break paragraph gets its margin card')
+  check(!(await page.locator('.compound-status').innerText()).includes('changed'), 'unchanged text with a hard break reports no changed findings')
 
   // R11: AI check and Line edit both flag "robust"; one keeps the fill and
   // the other is demoted to its underline, so no two fills overlap.
@@ -125,18 +156,12 @@ try {
   })
   check(!overlapping, 'phrase fills never overlap')
 
-  // Read mode clears every cw-* highlight; coming back restores them. The
-  // shortcut needs focus outside a form control, so park it in the copy first.
-  const switchMode = async (digit, path) => {
-    await page.locator('.doc-live-editor p').first().click()
-    await page.keyboard.press(`Meta+${digit}`)
-    await page.waitForFunction((expected) => location.pathname === expected, path)
-  }
+  // Read mode clears every cw-* highlight; coming back restores them.
   await switchMode(4, `/d/${slug}`)
-  await page.waitForFunction(() => ![...CSS.highlights.keys()].some((name) => name.startsWith('cw-')))
+  await page.waitForFunction(() => ![...CSS.highlights.keys()].some((name) => name.startsWith('cw-'))).catch(() => { throw new Error('Read mode left cw-* highlights registered') })
   ok('Read mode clears the compound highlights')
   await switchMode(5, `/d/${slug}/compound`)
-  await page.waitForFunction(() => CSS.highlights?.has('cw-ai_check-fill'))
+  await page.waitForFunction(() => CSS.highlights?.has('cw-ai_check-fill')).catch(() => { throw new Error('Compound mode did not restore the highlights') })
   ok('returning to Compound mode restores them')
 
   // Dismiss reaches a second window through the broadcast.
@@ -147,6 +172,7 @@ try {
   const before = await totalCount()
   await page.locator('.compound-card-row').first().locator('.compound-finding-dismiss').click()
   await other.waitForFunction((count) => [...document.querySelectorAll('.compound-count')].reduce((sum, el) => sum + Number(el.textContent), 0) < count, before)
+    .catch(() => { throw new Error('the second window never saw the dismissed finding disappear') })
   ok('dismissing a finding removes it in another window')
 
   // AE3: editing the flagged word marks the finding changed; editing elsewhere in the paragraph keeps the rest.
@@ -157,6 +183,13 @@ try {
     return count
   })
   check(leverageCountBefore === 1, 'the "leverage" fill is present before the edit')
+  const utilizeFills = () => page.evaluate(() => {
+    let count = 0
+    for (const range of CSS.highlights.get('cw-ai_check-fill') ?? []) if (range.toString() === 'utilize') count++
+    return count
+  })
+  const utilizeBefore = await utilizeFills()
+  check(utilizeBefore === 2, `"utilize" is filled in both paragraphs before the edit (${utilizeBefore})`)
   await paragraph.evaluate((element) => {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
     let node
@@ -177,15 +210,16 @@ try {
   })
   await page.waitForTimeout(100)
   await page.keyboard.type('use')
-  await page.waitForFunction(() => {
-    for (const range of CSS.highlights.get('cw-ai_check-fill') ?? []) if (range.toString() === 'utilize') return false
-    return true
-  })
-  ok('editing the flagged word removes its highlight')
+  await page.waitForFunction((before) => {
+    let count = 0
+    for (const range of CSS.highlights.get('cw-ai_check-fill') ?? []) if (range.toString() === 'utilize') count++
+    return count === before - 1
+  }, utilizeBefore).catch(() => { throw new Error('editing the flagged word did not remove its highlight') })
+  ok('editing the flagged word removes its highlight and leaves the other paragraph\'s')
   await page.waitForFunction(() => {
     for (const range of CSS.highlights.get('cw-ai_check-fill') ?? []) if (range.toString() === 'leverage') return true
     return false
-  })
+  }).catch(() => { throw new Error('the "leverage" fill in the edited paragraph was lost') })
   ok('the other findings in the same paragraph keep their highlights')
   await page.locator('.compound-status').filter({ hasText: /changed since the last run/ }).waitFor()
   ok('the panel counts the changed finding')

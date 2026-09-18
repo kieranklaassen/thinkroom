@@ -76,8 +76,12 @@ export function paragraphPayload(paragraphs: ProjectedParagraph[]): ParagraphPay
   return paragraphs.map(({ index, kind, text }) => ({ index, kind, text }))
 }
 
-/** ProseMirror range for [offset, offset + length) inside a projected block,
- *  or null when the span leaves the block's text nodes. */
+/**
+ * ProseMirror range for [offset, offset + length) inside a projected block,
+ * or null when the span holds no text. A span may start or end on a projected
+ * leaf (the `\n` of a hard break or image): the range snaps inward to the
+ * first and last text characters it covers, since a leaf has no text to paint.
+ */
 export function paragraphRange(
   paragraph: ProjectedParagraph,
   offset: number,
@@ -85,10 +89,19 @@ export function paragraphRange(
 ): { from: number; to: number } | null {
   const end = offset + length
   if (offset < 0 || end > paragraph.text.length || length <= 0) return null
-  const first = paragraph.segments.find((segment) => offset >= segment.start && offset < segment.end)
-  const last = paragraph.segments.find((segment) => end > segment.start && end <= segment.end)
+  const first = paragraph.segments.find((segment) => offset < segment.end)
+  const last = [...paragraph.segments].reverse().find((segment) => end > segment.start)
   if (!first || !last) return null
-  return { from: first.pos + offset - first.start, to: last.pos + end - last.start }
+  const from = first.pos + Math.max(offset, first.start) - first.start
+  const to = last.pos + Math.min(end, last.end) - last.start
+  return from < to ? { from, to } : null
+}
+
+/** The projected characters a stored quote must still match. The projection
+ *  is what the server judged, so comparing against it (not against
+ *  `textBetween`, which skips inline leaves) keeps both sides identical. */
+export function paragraphSlice(paragraph: ProjectedParagraph, offset: number, length: number): string {
+  return paragraph.text.slice(offset, offset + length)
 }
 
 /** Server offsets count codepoints (Ruby String#index); JavaScript strings

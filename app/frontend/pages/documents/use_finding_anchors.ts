@@ -3,7 +3,13 @@ import { editorViewCtx } from '@milkdown/kit/core'
 import type { Node } from '@milkdown/kit/prose/model'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import type { EditorHandle } from '../../editor/milkdown_editor'
-import { codepointOffsetToIndex, paragraphRange, projectParagraphs, type ProjectedParagraph } from '../../editor/paragraph_projection'
+import {
+  codepointOffsetToIndex,
+  paragraphRange,
+  paragraphSlice,
+  projectParagraphs,
+  type ProjectedParagraph,
+} from '../../editor/paragraph_projection'
 import { clearHighlight, domRange, setHighlight } from '../../lib/highlights'
 import type { WritingFindingPayload } from '../../types/payloads'
 
@@ -81,11 +87,14 @@ export function resolveFinding(
   finding: WritingFindingPayload,
 ): { range: FindingRange; paragraph: ProjectedParagraph } | null {
   if (finding.paragraph_text === null || finding.quote === null || finding.quote_offset === null) return null
+  const quote = finding.quote
+  // Verify against the projection, the text the server judged: a quote that
+  // spans a hard break or image carries the projection's `\n`, and the
+  // projection is also what textBetween's leafText would have to reproduce.
   const verify = (paragraph: ProjectedParagraph, offset: number) => {
-    const range = paragraphRange(paragraph, offset, finding.quote!.length)
-    // leafText matches the projection: inline leaves (hard breaks, images)
-    // stand in as a newline, which the stored quote may include.
-    return range && doc.textBetween(range.from, range.to, '\n', '\n') === finding.quote ? { range, paragraph } : null
+    if (paragraphSlice(paragraph, offset, quote.length) !== quote) return null
+    const range = paragraphRange(paragraph, offset, quote.length)
+    return range ? { range, paragraph } : null
   }
   const identical = indexByText(doc).get(finding.paragraph_text) ?? []
   const same = identical.length === 1 ? identical[0] : identical.find((candidate) => candidate.index === finding.paragraph_index)
