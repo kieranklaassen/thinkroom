@@ -51,6 +51,52 @@ export interface ActivityPayload {
   created_at: string
 }
 
+/** CompoundWriting::Reviewers::SCOPES. */
+export type WritingScope = 'phrase' | 'sentence' | 'paragraph' | 'text'
+
+/** CompoundWriting::Reviewers::Reviewer#as_props. */
+export interface WritingReviewerPayload {
+  key: string
+  name: string
+  blurb: string
+  /** Colour slot (0-12) mapped to --cw-<slot> custom properties. */
+  color: number
+  source: string
+  questions: Array<{ id: string; scope: WritingScope; note: string }>
+}
+
+/** WritingFinding#as_props. Text-scope findings carry null anchors. */
+export interface WritingFindingPayload {
+  id: number
+  reviewer_key: string
+  question_id: string
+  scope: WritingScope
+  paragraph_index: number | null
+  paragraph_text: string | null
+  quote: string | null
+  quote_offset: number | null
+  probability: number
+  note: string | null
+}
+
+/** WritingPass::STATUSES, shared by the pass and each reviewer's run. */
+export type WritingRunStatus = 'queued' | 'running' | 'finished' | 'failed'
+
+/** WritingPass#as_props. */
+export interface WritingPassPayload {
+  id: number
+  status: WritingRunStatus
+  reviewer_keys: string[]
+  reviewer_runs: Record<string, { status: WritingRunStatus; error?: string; findings_count?: number; finished_at?: string }>
+  word_count: number
+  paragraph_count: number
+  /** CompoundWriting::ParagraphDigest of the judged paragraphs (see paragraphDigest). */
+  paragraphs_digest: string
+  created_at: string
+  finished_at: string | null
+  findings: WritingFindingPayload[]
+}
+
 /** AgentPresence#as_props (status domain: Api::PresencesController). */
 export interface AgentPresencePayload {
   id: number

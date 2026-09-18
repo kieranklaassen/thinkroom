@@ -12,6 +12,7 @@ const ACTION_LABELS: Record<string, string> = {
   rejected_suggestion: 'rejected a suggestion',
   auto_rejected_suggestion: 'auto-rejected a suggestion',
   resolved_comment: 'resolved a comment',
+  ran_writing_reviewers: 'ran the writing reviewers',
 }
 
 const PLURAL_LABELS: Record<string, (n: number) => string> = {

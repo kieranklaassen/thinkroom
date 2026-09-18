@@ -41,6 +41,8 @@ import { ProvenanceSummaryChip } from '../../components/provenance_summary'
 import { HighlightLegendPanel } from '../../components/highlight_legend_panel'
 import { ReviewPopover } from '../../components/review_popover'
 import { MarginAnnotations } from '../../components/margin_annotations'
+import { FindingMarginCards } from '../../components/finding_margin_cards'
+import { CompoundPanel, type CompoundPanelProps } from '../../components/compound_panel'
 import { CommentsPanel } from '../../components/comments_panel'
 import { AnchoredComposer } from '../../components/anchored_composer'
 import { SelectionToolbar } from '../../components/selection_toolbar'
@@ -67,6 +69,8 @@ import { useDocumentIdentity } from './use_document_identity'
 import { useFollowPresence } from './use_follow_presence'
 import { useComments } from './use_comments'
 import { useCommentAnchors } from './use_comment_anchors'
+import { useWritingPass } from './use_writing_pass'
+import { useFindingAnchors } from './use_finding_anchors'
 import { useFloatingChrome, type TextTarget } from './use_floating_chrome'
 import { NativeDocBridge } from './native_doc_bridge'
 import { StagedDocumentEditor } from './staged_document_editor'
@@ -87,6 +91,9 @@ import type {
   CommentPayload,
   OwnershipPayload,
   SuggestionPayload,
+  WritingFindingPayload,
+  WritingPassPayload,
+  WritingReviewerPayload,
 } from '../../types/payloads'
 import { setCookie, setCookieFlag } from '../../lib/cookies'
 import { applyTheme, type ThemeName } from '../../lib/theme'
@@ -130,6 +137,8 @@ export interface DocumentProps {
     activity_filter: ActivityFilter
     activity_expanded: boolean
     comments_resolved: boolean
+    /** Compound writing reviewers switched off (validated pruf_cw_off cookie). */
+    compound_reviewers_off: string[]
     mode: EditorMode
     document_width: number | null
     rich_content_width: number | null
@@ -141,6 +150,12 @@ export interface DocumentProps {
   presences: AgentPresencePayload[]
   /** Persisted highlighter legend names ({ yellow: 'Urgent' }). */
   highlight_names: Record<string, string>
+  /** Compound writing: the server's reviewer registry and judge availability. */
+  writing_reviewers: WritingReviewerPayload[]
+  writing_enabled: boolean
+  /** Optional outside compound mode (undefined until fetched); null when the
+   *  document has never been reviewed. */
+  writing_pass?: WritingPassPayload | null
   // WebMCP tool manifest (AgentGuide.webmcp_tools) — lazy prop, registered on
   // document.modelContext once per slug after hydration.
   webmcp: WebmcpManifest
@@ -156,7 +171,7 @@ const documentModePath = (slug: string, mode: EditorMode) =>
   `/d/${encodeURIComponent(slug)}${mode === 'read' ? '' : `/${mode}`}`
 
 const availableDocumentModes = (canWrite: boolean, canComment: boolean): EditorMode[] => {
-  if (canWrite) return ['edit', 'suggest', 'comment', 'read']
+  if (canWrite) return ['edit', 'suggest', 'comment', 'read', 'compound']
   if (canComment) return ['comment', 'read']
   return ['read']
 }
@@ -182,6 +197,9 @@ export default function DocumentShow({
   activities,
   presences,
   highlight_names: highlightNames,
+  writing_reviewers: writingReviewers,
+  writing_enabled: writingEnabled,
+  writing_pass: writingPass,
   webmcp,
   nativeApp,
 }: DocumentProps) {
@@ -289,6 +307,7 @@ export default function DocumentShow({
     })
   }, [availableModes, doc.slug, mode, modeLocked])
   const isReading = effectiveMode === 'read'
+  const isCompound = effectiveMode === 'compound'
   const connectionIdentity = viewer.account ? `account:${viewer.account.id}` : 'guest'
   const editorSessionKey = `${doc.slug}:${ownership.can_write ? 'write' : 'read'}`
   // Live handle for code that runs after awaits or inside stable callbacks —
@@ -338,6 +357,67 @@ export default function DocumentShow({
   })
   const reviewItemsRef = useRef(reviewItems)
   reviewItemsRef.current = reviewItems
+
+  // Compound writing: reviewer toggles, the run request, and the pass prop
+  // (fetched only in compound mode); findings anchor back into the live doc
+  // and paint through the Custom Highlight API while the mode is active.
+  const writing = useWritingPass({
+    slug: doc.slug,
+    pass: writingPass,
+    reviewers: writingReviewers,
+    initialOff: ui.compound_reviewers_off,
+    active: isCompound,
+    enabled: writingEnabled,
+    canWrite: ownership.can_write,
+    handle,
+    identityName: identity.name,
+    docTick,
+  })
+  const visibleReviewerKeys = useMemo(
+    () => new Set(writingReviewers.filter((reviewer) => !writing.off.has(reviewer.key)).map((reviewer) => reviewer.key)),
+    [writingReviewers, writing.off],
+  )
+  const writingFindings = useMemo(() => writingPass?.findings ?? [], [writingPass])
+  const findingAnchors = useFindingAnchors({
+    findings: writingFindings,
+    handle,
+    docTick,
+    visibleKeys: visibleReviewerKeys,
+    active: isCompound,
+  })
+  const visibleFindingCount = useMemo(
+    () => writingFindings.filter((finding) => visibleReviewerKeys.has(finding.reviewer_key)).length,
+    [writingFindings, visibleReviewerKeys],
+  )
+  const dismissFinding = useCallback((finding: WritingFindingPayload) => {
+    router.patch(`/writing_findings/${finding.id}/dismiss`, {}, {
+      preserveState: true,
+      preserveScroll: true,
+      only: ['writing_pass'],
+      async: true,
+    })
+  }, [])
+  // One prop bag for the desktop rail and the compact sheet.
+  const compoundPanelProps: CompoundPanelProps = {
+    reviewers: writingReviewers,
+    pass: writingPass,
+    enabled: writingEnabled,
+    canWrite: ownership.can_write,
+    off: writing.off,
+    onToggle: writing.toggleReviewer,
+    onRun: writing.run,
+    canRun: writing.canRun,
+    requesting: writing.requesting,
+    textChanged: writing.textChanged,
+    error: writing.error,
+    notice: writing.notice,
+    onDismissError: writing.clearError,
+    anchoredIds: findingAnchors.anchoredIds,
+    changedIds: findingAnchors.changedIds,
+    onJumpTo: findingAnchors.jumpToFinding,
+    onHover: findingAnchors.hoverFinding,
+    onDismiss: dismissFinding,
+  }
 
   const exportMarkdown = useCallback(async () => {
     const live = handleRef.current
@@ -548,6 +628,7 @@ export default function DocumentShow({
     onVersionAvailable: () => setNewVersionAvailable(true),
     onEditingLock: reloadEditingAccess,
     onContentReset: reloadAfterContentReset,
+    onWritingPass: writing.reloadPass,
     connectionIdentity,
   })
 
@@ -1098,7 +1179,7 @@ export default function DocumentShow({
                 seedGranted={doc.seed_granted}
                 seedAuthorKind={doc.seed_author_kind}
                 seedAuthorName={doc.seed_author_name}
-                editable={ownership.can_write && (effectiveMode === 'edit' || effectiveMode === 'suggest')}
+                editable={ownership.can_write && (effectiveMode === 'edit' || effectiveMode === 'suggest' || isCompound)}
                 suggesting={ownership.can_write && effectiveMode === 'suggest'}
                 taskInteractive={ownership.can_write && effectiveMode !== 'comment'}
                 onStatus={setStatus}
@@ -1117,7 +1198,22 @@ export default function DocumentShow({
                 setCookie('pruf_width', 'default')
               }}
             />
-            {!isReading && (
+            {isCompound && (
+              <div className="margin-gutter">
+                <FindingMarginCards
+                  paragraphs={findingAnchors.paragraphs}
+                  reviewers={writingReviewers}
+                  handle={handle}
+                  compact={focusMode || isMobile}
+                  canWrite={ownership.can_write}
+                  onJumpTo={findingAnchors.jumpToFinding}
+                  onHover={findingAnchors.hoverFinding}
+                  onDismiss={dismissFinding}
+                  onMarkerSelect={isMobile ? () => setActiveSheet('reviewers') : undefined}
+                />
+              </div>
+            )}
+            {!isReading && !isCompound && (
               <div className="margin-gutter">
                 <MarginAnnotations
                   comments={marginComments}
@@ -1145,7 +1241,12 @@ export default function DocumentShow({
               </div>
             )}
           </div>
-          {!isMobile && (!isReading || highlightGroups.length > 0) && (
+          {!isMobile && isCompound && (
+            <aside className="doc-rail">
+              <CompoundPanel {...compoundPanelProps} />
+            </aside>
+          )}
+          {!isMobile && !isCompound && (!isReading || highlightGroups.length > 0) && (
             <aside className="doc-rail">
               {!isReading && (
                 <CommentsPanel
@@ -1236,11 +1337,23 @@ export default function DocumentShow({
           <MobileDock
             suggestionCount={reviewItems.length}
             commentCount={comments.filter((c) => !c.resolved).length}
+            reviewerFindingCount={isCompound ? visibleFindingCount : undefined}
             active={activeSheet}
             onOpen={(kind) => setActiveSheet((current) => (current === kind ? null : kind))}
           />
         )}
-        {!isReading && isMobile && activeSheet === 'suggestions' && (
+        {isCompound && isMobile && activeSheet === 'reviewers' && (
+          <MobileSheet title="Reviewers" onClose={() => setActiveSheet(null)}>
+            <CompoundPanel
+              {...compoundPanelProps}
+              onJumpTo={(finding) => {
+                findingAnchors.jumpToFinding(finding)
+                setActiveSheet(null)
+              }}
+            />
+          </MobileSheet>
+        )}
+        {!isReading && !isCompound && isMobile && activeSheet === 'suggestions' && (
           <MobileSheet
             title={`Suggestions${reviewItems.length > 0 ? ` · ${reviewItems.length}` : ''}`}
             onClose={() => {
@@ -1256,7 +1369,7 @@ export default function DocumentShow({
             />
           </MobileSheet>
         )}
-        {!isReading && isMobile && activeSheet === 'comments' && (
+        {!isReading && !isCompound && isMobile && activeSheet === 'comments' && (
           <MobileSheet title="Comments" onClose={() => setActiveSheet(null)}>
             <CommentsPanel
                   showResolved={commentsResolved}

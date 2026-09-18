@@ -40,6 +40,8 @@ class Document < ApplicationRecord
   has_many :suggestions, dependent: :destroy
   has_many :comments, dependent: :destroy
   has_many :activities, dependent: :destroy
+  has_many :writing_passes, dependent: :destroy
+  has_many :writing_findings, dependent: :delete_all
   has_many :agent_presences, dependent: :destroy
   has_many :document_assets, dependent: :destroy
   has_many :yjs_state_archives, dependent: :destroy

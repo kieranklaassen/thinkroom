@@ -17,13 +17,17 @@ export function domRange(view: EditorView, from: number, to: number): Range | nu
   }
 }
 
-export function setHighlight(name: string, ranges: Range[]): void {
+export function setHighlight(name: string, ranges: Range[], priority = 0): void {
   if (!supportsHighlights) return
   if (ranges.length === 0) {
     CSS.highlights.delete(name)
     return
   }
-  CSS.highlights.set(name, new Highlight(...ranges))
+  const highlight = new Highlight(...ranges)
+  // Overlapping highlights resolve conflicting properties by priority; the
+  // default 0 keeps every existing caller's behaviour.
+  if (priority) highlight.priority = priority
+  CSS.highlights.set(name, highlight)
 }
 
 export function clearHighlight(name: string): void {

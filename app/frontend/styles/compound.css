@@ -1,0 +1,514 @@
+/* ------------------------- Compound writing mode -------------------------- */
+/* Thirteen reviewer colours (one slot per CompoundWriting::Reviewers entry),
+ * tuned to read on both themes' light surfaces. The rgb triplets feed the
+ * ::highlight() fills and underlines below; --cw-N is the opaque swatch. */
+:root {
+  --cw-0-rgb: 214 92 60;   /* hemingway: brick */
+  --cw-1-rgb: 120 84 214;  /* ai_check: violet */
+  --cw-2-rgb: 40 140 160;  /* line_edit: teal */
+  --cw-3-rgb: 160 120 40;  /* tracks: ochre */
+  --cw-4-rgb: 210 70 140;  /* mom: rose */
+  --cw-5-rgb: 60 120 210;  /* reader: blue */
+  --cw-6-rgb: 170 40 40;   /* nemesis: crimson */
+  --cw-7-rgb: 60 160 90;   /* sorkin: green */
+  --cw-8-rgb: 220 140 30;  /* sedaris: amber */
+  --cw-9-rgb: 90 90 90;    /* vonnegut: graphite */
+  --cw-10-rgb: 120 60 20;  /* hitchcock: umber */
+  --cw-11-rgb: 40 100 120; /* dev_edit: slate */
+  --cw-12-rgb: 190 60 200; /* bluf: magenta */
+  --cw-0: rgb(var(--cw-0-rgb));
+  --cw-1: rgb(var(--cw-1-rgb));
+  --cw-2: rgb(var(--cw-2-rgb));
+  --cw-3: rgb(var(--cw-3-rgb));
+  --cw-4: rgb(var(--cw-4-rgb));
+  --cw-5: rgb(var(--cw-5-rgb));
+  --cw-6: rgb(var(--cw-6-rgb));
+  --cw-7: rgb(var(--cw-7-rgb));
+  --cw-8: rgb(var(--cw-8-rgb));
+  --cw-9: rgb(var(--cw-9-rgb));
+  --cw-10: rgb(var(--cw-10-rgb));
+  --cw-11: rgb(var(--cw-11-rgb));
+  --cw-12: rgb(var(--cw-12-rgb));
+}
+
+/* Phrase findings fill; sentence findings (and demoted overlaps) underline.
+ * Highlight pseudo-elements inherit custom properties from the root. */
+::highlight(cw-hemingway-fill) { background-color: rgb(var(--cw-0-rgb) / 0.26); }
+::highlight(cw-hemingway-under) { text-decoration: underline 2px rgb(var(--cw-0-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-ai_check-fill) { background-color: rgb(var(--cw-1-rgb) / 0.24); }
+::highlight(cw-ai_check-under) { text-decoration: underline 2px rgb(var(--cw-1-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-line_edit-fill) { background-color: rgb(var(--cw-2-rgb) / 0.26); }
+::highlight(cw-line_edit-under) { text-decoration: underline 2px rgb(var(--cw-2-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-tracks-fill) { background-color: rgb(var(--cw-3-rgb) / 0.28); }
+::highlight(cw-tracks-under) { text-decoration: underline 2px rgb(var(--cw-3-rgb) / 0.75); text-underline-offset: 3px; }
+::highlight(cw-mom-fill) { background-color: rgb(var(--cw-4-rgb) / 0.22); }
+::highlight(cw-mom-under) { text-decoration: underline 2px rgb(var(--cw-4-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-reader-fill) { background-color: rgb(var(--cw-5-rgb) / 0.22); }
+::highlight(cw-reader-under) { text-decoration: underline 2px rgb(var(--cw-5-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-nemesis-fill) { background-color: rgb(var(--cw-6-rgb) / 0.22); }
+::highlight(cw-nemesis-under) { text-decoration: underline 2px rgb(var(--cw-6-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-sorkin-fill) { background-color: rgb(var(--cw-7-rgb) / 0.26); }
+::highlight(cw-sorkin-under) { text-decoration: underline 2px rgb(var(--cw-7-rgb) / 0.75); text-underline-offset: 3px; }
+::highlight(cw-sedaris-fill) { background-color: rgb(var(--cw-8-rgb) / 0.3); }
+::highlight(cw-sedaris-under) { text-decoration: underline 2px rgb(var(--cw-8-rgb) / 0.8); text-underline-offset: 3px; }
+::highlight(cw-vonnegut-fill) { background-color: rgb(var(--cw-9-rgb) / 0.22); }
+::highlight(cw-vonnegut-under) { text-decoration: underline 2px rgb(var(--cw-9-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-hitchcock-fill) { background-color: rgb(var(--cw-10-rgb) / 0.24); }
+::highlight(cw-hitchcock-under) { text-decoration: underline 2px rgb(var(--cw-10-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-dev_edit-fill) { background-color: rgb(var(--cw-11-rgb) / 0.24); }
+::highlight(cw-dev_edit-under) { text-decoration: underline 2px rgb(var(--cw-11-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-bluf-fill) { background-color: rgb(var(--cw-12-rgb) / 0.22); }
+::highlight(cw-bluf-under) { text-decoration: underline 2px rgb(var(--cw-12-rgb) / 0.7); text-underline-offset: 3px; }
+
+/* Hovering a finding (panel row or margin card) spotlights its text. */
+::highlight(cw-hot) {
+  background-color: rgb(var(--cw-9-rgb) / 0.32);
+}
+
+/* ------------------------------ Rail panel -------------------------------- */
+.compound-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.compound-run {
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--surface-raised);
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.compound-run:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.compound-notice {
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  margin: 0 0 0.5rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.compound-notice code {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+}
+
+.compound-notice--error {
+  border-color: rgb(var(--cw-6-rgb) / 0.5);
+  color: var(--cw-6);
+}
+
+.compound-notice-dismiss,
+.compound-finding-dismiss {
+  font: inherit;
+  line-height: 1;
+  border: none;
+  background: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  padding: 0 0.2rem;
+  margin-left: auto;
+}
+
+.compound-notice-dismiss:hover,
+.compound-finding-dismiss:hover {
+  color: var(--ink);
+}
+
+.compound-status {
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+  margin: 0 0 0.6rem;
+}
+
+.compound-reviewers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.compound-reviewer-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.compound-reviewer-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  padding: 0.4rem 0.35rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.compound-reviewer-main:hover {
+  background: var(--surface);
+}
+
+.compound-reviewer-main:focus-visible,
+.compound-switch input:focus-visible + .compound-switch-track,
+.compound-finding-main:focus-visible,
+.compound-card-main:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.compound-swatch {
+  flex: none;
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 50%;
+  background: var(--cw-color, var(--accent));
+}
+
+.compound-reviewer.is-off .compound-swatch {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--cw-color, var(--accent));
+}
+
+.compound-reviewer.is-off .compound-reviewer-copy {
+  color: var(--ink-faint);
+}
+
+.compound-reviewer-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.compound-reviewer-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.compound-reviewer-blurb {
+  font-size: 0.68rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compound-reviewer-state {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: none;
+}
+
+.compound-count {
+  font-size: 0.68rem;
+  font-weight: 600;
+  min-width: 1.4rem;
+  text-align: center;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--cw-color, var(--accent)) 18%, transparent);
+  color: var(--ink);
+}
+
+.compound-run-state {
+  font-size: 0.66rem;
+  color: var(--ink-soft);
+}
+
+.compound-run-state--running::after {
+  content: '';
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-left: 0.3rem;
+  border-radius: 50%;
+  border: 1.5px solid var(--ink-faint);
+  border-top-color: transparent;
+  vertical-align: middle;
+  animation: compound-spin 900ms linear infinite;
+}
+
+@keyframes compound-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compound-run-state--running::after { animation: none; }
+}
+
+.compound-run-state--failed {
+  color: var(--cw-6);
+}
+
+.compound-run-error {
+  font-size: 0.68rem;
+  color: var(--cw-6);
+  margin: 0 0 0.3rem 1.55rem;
+}
+
+/* iOS-style switch built on a real checkbox so keyboard and screen readers
+ * get the native control. */
+.compound-switch {
+  position: relative;
+  flex: none;
+  width: 1.9rem;
+  height: 1.1rem;
+  cursor: pointer;
+}
+
+.compound-switch input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.compound-switch-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: var(--line);
+  transition: background 140ms ease;
+  /* Clicks fall through to the invisible checkbox underneath. */
+  pointer-events: none;
+}
+
+.compound-switch-track::after {
+  content: '';
+  position: absolute;
+  top: 0.12rem;
+  left: 0.12rem;
+  width: 0.86rem;
+  height: 0.86rem;
+  border-radius: 50%;
+  background: var(--surface-raised);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  transition: transform 140ms ease;
+}
+
+.compound-switch input:checked + .compound-switch-track {
+  background: var(--cw-color, var(--accent));
+}
+
+.compound-switch input:checked + .compound-switch-track::after {
+  transform: translateX(0.8rem);
+}
+
+.compound-findings {
+  list-style: none;
+  margin: 0.1rem 0 0.4rem 1.55rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.compound-empty {
+  font-size: 0.7rem;
+  color: var(--ink-faint);
+  padding: 0.2rem 0.35rem;
+}
+
+.compound-finding {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.2rem;
+  border-radius: 6px;
+}
+
+.compound-finding:hover {
+  background: var(--surface);
+}
+
+.compound-finding-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: none;
+  border-left: 2px solid var(--cw-color, var(--accent));
+  border-radius: 0;
+  padding: 0.25rem 0.4rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.compound-finding-main:disabled {
+  cursor: default;
+}
+
+.compound-finding.is-changed .compound-finding-main {
+  border-left-color: var(--line);
+  color: var(--ink-faint);
+}
+
+.compound-finding-note,
+.compound-card-note {
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.compound-finding-quote,
+.compound-card-quote {
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+  font-style: italic;
+  overflow-wrap: anywhere;
+}
+
+.compound-finding-meta {
+  font-size: 0.64rem;
+  color: var(--ink-faint);
+}
+
+/* ------------------------------ Margin cards ------------------------------ */
+.compound-card {
+  position: absolute;
+  left: 0.9rem;
+  right: 0.4rem;
+  pointer-events: auto;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.35rem 0.4rem;
+  animation: card-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.compound-card.is-placed {
+  transition: top 160ms ease;
+}
+
+.compound-card-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.compound-card-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.1rem;
+  border-radius: 6px;
+}
+
+.compound-card-row:hover {
+  background: var(--surface);
+}
+
+.compound-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  font: inherit;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.3rem 0.35rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.compound-card-main .compound-swatch {
+  margin-top: 0.22rem;
+}
+
+.compound-card-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.compound-card-reviewer {
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--cw-color, var(--accent));
+  font-weight: 700;
+}
+
+.compound-card-probability {
+  flex: none;
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  margin-top: 0.15rem;
+}
+
+.compound-card-more {
+  font: inherit;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  background: none;
+  border: none;
+  border-top: 1px solid var(--line);
+  width: 100%;
+  padding: 0.35rem 0.4rem 0.15rem;
+  margin-top: 0.15rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.compound-card-more:hover {
+  color: var(--ink);
+}
+
+.margin-marker--finding {
+  width: 24px;
+  height: 44px;
+  margin-left: -12px;
+  border-radius: 6px;
+  background: none;
+}
+
+.margin-marker--finding::after {
+  content: '';
+  display: block;
+  width: 10px;
+  height: 10px;
+  margin: auto;
+  border-radius: 50%;
+  background: var(--cw-1);
+}
+
+.margin-marker--finding:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

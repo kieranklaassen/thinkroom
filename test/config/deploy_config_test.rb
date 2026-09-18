@@ -41,6 +41,19 @@ class DeployConfigTest < ActiveSupport::TestCase
     end
   end
 
+  test "TYPESAFE_API_KEY rides in env.secret only behind KAMAL_COMPOUND_WRITING" do
+    env = REQUIRED
+    secrets = lambda do |flag|
+      with_env(env.merge(flag), cleared: OPTIONAL + (flag.empty? ? %w[KAMAL_COMPOUND_WRITING] : [])) do
+        rendered = ERB.new(File.read(Rails.root.join("config/deploy.yml"))).result
+        YAML.safe_load(rendered, aliases: true).fetch("env").fetch("secret")
+      end
+    end
+
+    assert_not_includes secrets.call({}), "TYPESAFE_API_KEY"
+    assert_includes secrets.call("KAMAL_COMPOUND_WRITING" => "1"), "TYPESAFE_API_KEY"
+  end
+
   test "set optional variables render verbatim" do
     clear = render_clear_env(
       "WEBMCP_ORIGIN_TRIAL_TOKEN" => "AbC123+/=",

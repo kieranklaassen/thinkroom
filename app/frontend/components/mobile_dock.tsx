@@ -5,18 +5,20 @@ import {
   type ReviewableSuggestion,
 } from './suggestion_card'
 
-export type SheetKind = 'suggestions' | 'comments' | 'activity' | 'theme'
+export type SheetKind = 'suggestions' | 'comments' | 'activity' | 'theme' | 'reviewers'
 
 interface DockProps {
   suggestionCount: number
   commentCount: number
+  /** Compound mode swaps the suggestions and comments items for Reviewers. */
+  reviewerFindingCount?: number
   active: SheetKind | null
   onOpen: (kind: SheetKind) => void
 }
 
 /** Compact bottom action bar — the mobile home for everything the desktop
  *  rail and margin gutter carry. Each item opens a bottom sheet. */
-export function MobileDock({ suggestionCount, commentCount, active, onOpen }: DockProps) {
+export function MobileDock({ suggestionCount, commentCount, reviewerFindingCount, active, onOpen }: DockProps) {
   const item = (kind: SheetKind, label: ReactNode, count: number) => (
     <button
       className={`dock-item ${active === kind ? 'is-active' : ''}`}
@@ -30,8 +32,14 @@ export function MobileDock({ suggestionCount, commentCount, active, onOpen }: Do
 
   return (
     <nav className="mobile-dock" aria-label="Document tools">
-      {item('suggestions', 'Suggestions', suggestionCount)}
-      {item('comments', 'Comments', commentCount)}
+      {reviewerFindingCount === undefined ? (
+        <>
+          {item('suggestions', 'Suggestions', suggestionCount)}
+          {item('comments', 'Comments', commentCount)}
+        </>
+      ) : (
+        item('reviewers', 'Reviewers', reviewerFindingCount)
+      )}
       {item('activity', 'Activity', 0)}
     </nav>
   )
