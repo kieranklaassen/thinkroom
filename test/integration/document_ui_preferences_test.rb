@@ -45,6 +45,18 @@ class DocumentUiPreferencesTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "compound reviewer toggles keep known keys and drop the rest" do
+    cookies[:pruf_cw_off] = "nemesis,unknown,mom,mom,<script>"
+    get document_page_path(@document.slug), headers: browser
+
+    assert_inertia_props { |props| props.dig(:ui, :compound_reviewers_off) == %w[nemesis mom] }
+
+    cookies[:pruf_cw_off] = nil
+    get document_page_path(@document.slug), headers: browser
+
+    assert_inertia_props { |props| props.dig(:ui, :compound_reviewers_off) == [] }
+  end
+
   test "missing and invalid activity preferences use safe defaults" do
     [ nil, "", "unknown", "<script>" ].each do |value|
       cookies[:pruf_activity_filter] = value

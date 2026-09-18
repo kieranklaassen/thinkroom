@@ -24,7 +24,7 @@ Rails.application.routes.draw do
   get "og.png", to: "site_og_images#show", as: :site_og_image
   get "d/:slug/og.png", to: "document_og_images#show", as: :document_og_image
   get "d/:slug/:mode", to: "documents#show", as: :document_mode,
-                       constraints: { mode: /edit|suggest|comment|read/ }
+                       constraints: { mode: /edit|suggest|comment|read|compound/ }
   get "d/:slug", to: "documents#show", as: :document_page
   post "d/:slug/claim", to: "documents#claim", as: :claim_document
   patch "d/:slug/tags", to: "documents#update_tags", as: :document_tags
@@ -43,6 +43,9 @@ Rails.application.routes.draw do
 
   post "d/:slug/comments", to: "comments#create", as: :document_comments
   patch "comments/:id/resolve", to: "comments#resolve", as: :resolve_comment
+
+  post "d/:slug/writing_passes", to: "writing_passes#create", as: :document_writing_passes
+  patch "writing_findings/:id/dismiss", to: "writing_findings#dismiss", as: :dismiss_writing_finding
 
   post "/rails/active_storage/direct_uploads", to: "api/direct_uploads#create"
 
