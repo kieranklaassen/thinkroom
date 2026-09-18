@@ -296,6 +296,8 @@
   border-radius: 999px;
   background: var(--line);
   transition: background 140ms ease;
+  /* Clicks fall through to the invisible checkbox underneath. */
+  pointer-events: none;
 }
 
 .compound-switch-track::after {

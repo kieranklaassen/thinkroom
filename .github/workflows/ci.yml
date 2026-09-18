@@ -151,6 +151,8 @@ jobs:
         env:
           THINKROOM_DOC_CREATION_BURST: "500"
           THINKROOM_DOC_CREATION_DAILY: "500"
+          # compound_writing_check runs the reviewers against the offline lexicon judge.
+          COMPOUND_WRITING_FAKE_JUDGE: "1"
         run: |
           bin/vite dev &
           bin/rails server &

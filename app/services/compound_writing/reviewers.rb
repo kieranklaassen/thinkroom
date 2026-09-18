@@ -57,7 +57,7 @@ module CompoundWriting
       Reviewer.new(
         key: "line_edit", name: "Line edit", color: 2, source: "skills/cw-line-edit/SKILL.md",
         blurb: "Sentence-level cuts that keep the voice.",
-        lexicon: %w[perhaps maybe might arguably studies\ show some\ say synergy paradigm stakeholders],
+        lexicon: %w[perhaps maybe might arguably studies\ show some\ say synergy paradigm stakeholders robust],
         questions: [
           Question.new(id: "weak", scope: "phrase", note: "Hedge, weasel word, intensifier, cliché, or jargon",
                        question: "Is this phrase a hedge such as perhaps or somewhat, a weasel attribution such as some people say or studies show, an empty intensifier, a cliché metaphor, or business or academic jargon a line editor would cut or replace?"),
