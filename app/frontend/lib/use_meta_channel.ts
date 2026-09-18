@@ -17,6 +17,9 @@ interface MetaChannelOptions {
   onEditingLock?: (locked: boolean) => void
   /** Fired when an owner replaces the document source outside the live editor. */
   onContentReset?: () => void
+  /** Fired when a compound writing pass changes. Not a cable-fed prop: only a
+   *  client in compound mode reloads it (the rows are dead weight elsewhere). */
+  onWritingPass?: () => void
   /** Recreate the shared socket when guest/account authentication changes. */
   connectionIdentity?: string
 }
@@ -53,6 +56,8 @@ export function useMetaChannel(slug: string, options?: MetaChannelOptions): void
   onEditingLockRef.current = options?.onEditingLock
   const onContentResetRef = useRef(options?.onContentReset)
   onContentResetRef.current = options?.onContentReset
+  const onWritingPassRef = useRef(options?.onWritingPass)
+  onWritingPassRef.current = options?.onWritingPass
   const loadedVersionRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -124,6 +129,10 @@ export function useMetaChannel(slug: string, options?: MetaChannelOptions): void
           }
           if (event === 'content_reset') {
             onContentResetRef.current?.()
+            return
+          }
+          if (event === 'writing_pass') {
+            onWritingPassRef.current?.()
             return
           }
           pending.add(event)

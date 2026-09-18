@@ -4,7 +4,7 @@ import { nativeHaptic } from '@ruby-native/react'
 import { useDismissable } from '../lib/use_dismissable'
 import { useMediaQuery } from '../lib/use_media_query'
 
-export type EditorMode = 'edit' | 'suggest' | 'comment' | 'read'
+export type EditorMode = 'edit' | 'suggest' | 'comment' | 'read' | 'compound'
 
 const MODE_OPTIONS: ReadonlyArray<{
   value: EditorMode
@@ -31,6 +31,12 @@ const MODE_OPTIONS: ReadonlyArray<{
     hint: 'Clean reading view — links and checkboxes stay interactive',
     shortcut: 4,
   },
+  {
+    value: 'compound',
+    label: 'Compound',
+    hint: 'Run writing reviewers and see their findings in the text',
+    shortcut: 5,
+  },
 ]
 
 export const MODE_SHORTCUTS = Object.fromEntries(
@@ -50,7 +56,7 @@ interface Props {
 
 /**
  * Google-Docs-style mode switcher: a compact header dropdown showing the
- * current mode, opening to the four modes with hints. Per-visitor UI state
+ * current mode, opening to the five modes with hints. Per-visitor UI state
  * only — switching never affects other collaborators.
  */
 export function ModeControl({
