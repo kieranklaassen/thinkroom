@@ -82,6 +82,18 @@ class WritingPassTest < ActiveSupport::TestCase
     assert_nothing_raised { start(paragraphs: changed_text, now: after_cooldown) }
   end
 
+  test "start! reruns a failed pass with the same text and reviewers" do
+    failed = start
+    failed.record_run!("mom", status: "failed", error: "RateLimitError: slow down")
+    failed.update!(finished_at: Time.current, created_at: 1.second.ago)
+    assert_equal "failed", failed.reload.status
+
+    fresh = start(now: after_cooldown)
+
+    assert_not_equal failed.id, fresh.id
+    assert_equal [ fresh ], @document.writing_passes.reload.to_a
+  end
+
   test "start! records the estimated spend and refuses a pass over the question budget" do
     pass = start
 

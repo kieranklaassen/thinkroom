@@ -58,9 +58,11 @@ Every pass spends against that shared key, so passes are bounded. Anyone with
 write access to a document can start one, but only one pass runs per document
 at a time, a document waits `COMPOUND_WRITING_COOLDOWN_SECONDS` (60) between
 passes, and a rerun with the same text and reviewers returns the finished pass
-instead of spending. Daily caps answer 429: `COMPOUND_WRITING_DOCUMENT_DAILY_PASSES`
-(40 per document) and `COMPOUND_WRITING_IP_DAILY_PASSES` (100 per client
-address). A pass is refused up front when its estimate exceeds
+instead of spending; a failed pass can always be rerun. Daily caps answer 429
+and count only passes that actually started, per fixed UTC day:
+`COMPOUND_WRITING_DOCUMENT_DAILY_PASSES` (40 per document) and
+`COMPOUND_WRITING_IP_DAILY_PASSES` (100 per client address). A pass is refused
+up front when its estimate exceeds
 `COMPOUND_WRITING_MAX_NOULS_PER_PASS` (20,000 questions) or
 `COMPOUND_WRITING_MAX_JEV_CALLS_PER_PASS` (1,500 TypeSafe requests), and the
 process never has more than `COMPOUND_WRITING_MAX_CONCURRENT_JEV_CALLS` (4)

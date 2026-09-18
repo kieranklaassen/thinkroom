@@ -91,13 +91,15 @@ class WritingPass < ApplicationRecord
 
   # Raises when this pass must not be replaced yet: it is still being judged
   # (unless it has stalled past Limits.stall_seconds), the document is inside
-  # its cooldown, or the request repeats a finished pass exactly.
+  # its cooldown, or the request repeats a pass that finished with every
+  # reviewer done. A failed pass never short-circuits: rerunning it is the
+  # point.
   def refuse_replacement!(keys, digest, now: Time.current)
     age = now - created_at
     if !finished? && age < CompoundWriting::Limits.stall_seconds
       raise Throttled, "A pass is already running on this document; wait for it to finish."
     end
-    if finished? && paragraphs_digest == digest && reviewer_keys == keys
+    if status == "finished" && paragraphs_digest == digest && reviewer_keys == keys
       raise Unchanged, self
     end
     since_last = now - (finished_at || created_at)

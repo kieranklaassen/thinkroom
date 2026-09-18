@@ -139,19 +139,73 @@ class WritingPassFlowTest < ActionDispatch::IntegrationTest
     assert_equal pass, @document.writing_passes.reload.last
   end
 
-  test "the per-document daily cap answers 429 with a message and counts every attempt" do
+  def document_cap_key(document = @document) = "writing-pass-document-daily:#{Time.now.utc.to_date.iso8601}:#{document.id}"
+
+  test "the per-document daily cap answers 429 with a message and counts only started passes" do
     with_env("COMPOUND_WRITING_DOCUMENT_DAILY_PASSES" => "1") do
       post_pass
       assert_response :see_other
+      assert_equal 1, WriteRateLimited::STORE.read(document_cap_key)
 
       post_pass(reviewers: %w[nemesis])
       assert_response :too_many_requests
       assert_equal "This document has reached today's limit of 1 reviewer runs. Try again tomorrow.", response.body
+      assert_equal 1, WriteRateLimited::STORE.read(document_cap_key), "a refused attempt is not counted"
 
       other = Document.create!(title: "Other", seed_markdown: "# Other")
       post_pass(slug: other.slug)
       assert_response :see_other, "another document has its own daily counter"
     end
+  end
+
+  test "the daily window is a fixed UTC day, so a refused attempt cannot extend the lockout" do
+    with_env("COMPOUND_WRITING_DOCUMENT_DAILY_PASSES" => "1") do
+      post_pass
+      assert_response :see_other
+      post_pass(reviewers: %w[nemesis])
+      assert_response :too_many_requests
+
+      travel_to Time.now.utc.end_of_day + 1.minute do
+        @document.writing_passes.destroy_all
+        post_pass(reviewers: %w[nemesis])
+        assert_response :see_other, "the next UTC day starts a fresh counter"
+      end
+    end
+  end
+
+  test "attempts refused for access or configuration do not count against the caps" do
+    with_env("COMPOUND_WRITING_DOCUMENT_DAILY_PASSES" => "1") do
+      @document.update!(owner_token: "someone-else", owner_name: "Owner", link_access: "view")
+      2.times { post_pass }
+      assert_response :locked
+      assert_nil WriteRateLimited::STORE.read(document_cap_key)
+
+      @document.update!(owner_token: nil, owner_name: nil, link_access: "edit")
+      previous = ENV.to_h.slice("COMPOUND_WRITING_FAKE_JUDGE", "TYPESAFE_API_KEY")
+      ENV.delete("COMPOUND_WRITING_FAKE_JUDGE")
+      ENV.delete("TYPESAFE_API_KEY")
+      post_pass
+      ENV.update(previous)
+      assert_response :redirect
+      assert_nil WriteRateLimited::STORE.read(document_cap_key)
+
+      post_pass
+      assert_response :see_other, "the writer still has today's budget"
+      assert_equal 1, WriteRateLimited::STORE.read(document_cap_key)
+    end
+  end
+
+  test "a failed pass can be rerun with the same text and reviewers" do
+    post_pass
+    pass = @document.writing_passes.last
+    pass.record_run!("mom", status: "failed", error: "boom")
+    pass.update!(finished_at: 2.minutes.ago, created_at: 3.minutes.ago)
+
+    assert_difference -> { WritingPass.count }, 0 do # replaced, not added
+      post_pass
+    end
+    assert_response :see_other
+    assert_not_equal pass.id, @document.writing_passes.reload.last.id
   end
 
   test "the per-address daily cap answers 429 with a message across documents" do
