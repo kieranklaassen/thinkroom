@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_21_000001) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_18_200001) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -199,6 +199,40 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_21_000001) do
     t.index ["google_uid"], name: "index_users_on_google_uid", unique: true
   end
 
+  create_table "writing_findings", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "dismissed_at"
+    t.integer "document_id", null: false
+    t.integer "paragraph_index"
+    t.text "paragraph_text"
+    t.float "probability", null: false
+    t.string "question_id", null: false
+    t.text "quote"
+    t.integer "quote_offset"
+    t.string "reviewer_key", null: false
+    t.string "scope", null: false
+    t.datetime "updated_at", null: false
+    t.integer "writing_pass_id", null: false
+    t.index ["document_id"], name: "index_writing_findings_on_document_id"
+    t.index ["writing_pass_id"], name: "index_writing_findings_on_writing_pass_id"
+    t.check_constraint "scope IN ('phrase', 'sentence', 'paragraph', 'text')", name: "writing_findings_scope_check"
+  end
+
+  create_table "writing_passes", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "document_id", null: false
+    t.datetime "finished_at"
+    t.json "paragraphs", default: [], null: false
+    t.string "requested_by_name", null: false
+    t.json "reviewer_keys", default: [], null: false
+    t.json "reviewer_runs", default: {}, null: false
+    t.string "status", default: "queued", null: false
+    t.datetime "updated_at", null: false
+    t.integer "word_count", default: 0, null: false
+    t.index ["document_id"], name: "index_writing_passes_on_document_id"
+    t.check_constraint "status IN ('queued', 'running', 'finished', 'failed')", name: "writing_passes_status_check"
+  end
+
   create_table "yjs_document_updates", force: :cascade do |t|
     t.integer "content_generation", null: false
     t.datetime "created_at", null: false
@@ -230,6 +264,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_21_000001) do
   add_foreign_key "documents", "users"
   add_foreign_key "feedback_runs", "users"
   add_foreign_key "suggestions", "documents"
+  add_foreign_key "writing_findings", "documents"
+  add_foreign_key "writing_findings", "writing_passes"
+  add_foreign_key "writing_passes", "documents"
   add_foreign_key "yjs_document_updates", "documents"
   add_foreign_key "yjs_state_archives", "documents"
 end
