@@ -1,21 +1,24 @@
-/* ------------------------- Compound writing mode -------------------------- */
-/* Thirteen reviewer colours (one slot per CompoundWriting::Reviewers entry),
- * tuned to read on both themes' light surfaces. The rgb triplets feed the
- * ::highlight() fills and underlines below; --cw-N is the opaque swatch. */
+/* ------------------------- Compound writing (reviewers) ------------------- */
+/* Sixteen colour slots for reviewer lenses: a lens carries a slot, and the
+ * ::highlight() rules below are per slot because they must be static CSS.
+ * The rgb triplets feed fills and underlines; --cw-N is the opaque swatch. */
 :root {
-  --cw-0-rgb: 214 92 60;   /* hemingway: brick */
-  --cw-1-rgb: 120 84 214;  /* ai_check: violet */
-  --cw-2-rgb: 40 140 160;  /* line_edit: teal */
-  --cw-3-rgb: 160 120 40;  /* tracks: ochre */
-  --cw-4-rgb: 210 70 140;  /* mom: rose */
-  --cw-5-rgb: 60 120 210;  /* reader: blue */
-  --cw-6-rgb: 170 40 40;   /* nemesis: crimson */
-  --cw-7-rgb: 60 160 90;   /* sorkin: green */
-  --cw-8-rgb: 220 140 30;  /* sedaris: amber */
-  --cw-9-rgb: 90 90 90;    /* vonnegut: graphite */
-  --cw-10-rgb: 120 60 20;  /* hitchcock: umber */
-  --cw-11-rgb: 40 100 120; /* dev_edit: slate */
-  --cw-12-rgb: 190 60 200; /* bluf: magenta */
+  --cw-0-rgb: 214 92 60; /* brick */
+  --cw-1-rgb: 120 84 214; /* violet */
+  --cw-2-rgb: 40 140 160; /* teal */
+  --cw-3-rgb: 160 120 40; /* ochre */
+  --cw-4-rgb: 210 70 140; /* rose */
+  --cw-5-rgb: 60 120 210; /* blue */
+  --cw-6-rgb: 170 40 40; /* crimson */
+  --cw-7-rgb: 60 160 90; /* green */
+  --cw-8-rgb: 220 140 30; /* amber */
+  --cw-9-rgb: 90 90 90; /* graphite */
+  --cw-10-rgb: 120 60 20; /* umber */
+  --cw-11-rgb: 40 100 120; /* slate */
+  --cw-12-rgb: 190 60 200; /* magenta */
+  --cw-13-rgb: 30 150 140; /* jade */
+  --cw-14-rgb: 200 100 60; /* copper */
+  --cw-15-rgb: 100 60 160; /* indigo */
   --cw-0: rgb(var(--cw-0-rgb));
   --cw-1: rgb(var(--cw-1-rgb));
   --cw-2: rgb(var(--cw-2-rgb));
@@ -29,36 +32,45 @@
   --cw-10: rgb(var(--cw-10-rgb));
   --cw-11: rgb(var(--cw-11-rgb));
   --cw-12: rgb(var(--cw-12-rgb));
+  --cw-13: rgb(var(--cw-13-rgb));
+  --cw-14: rgb(var(--cw-14-rgb));
+  --cw-15: rgb(var(--cw-15-rgb));
 }
 
 /* Phrase findings fill; sentence findings (and demoted overlaps) underline.
  * Highlight pseudo-elements inherit custom properties from the root. */
-::highlight(cw-hemingway-fill) { background-color: rgb(var(--cw-0-rgb) / 0.26); }
-::highlight(cw-hemingway-under) { text-decoration: underline 2px rgb(var(--cw-0-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-ai_check-fill) { background-color: rgb(var(--cw-1-rgb) / 0.24); }
-::highlight(cw-ai_check-under) { text-decoration: underline 2px rgb(var(--cw-1-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-line_edit-fill) { background-color: rgb(var(--cw-2-rgb) / 0.26); }
-::highlight(cw-line_edit-under) { text-decoration: underline 2px rgb(var(--cw-2-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-tracks-fill) { background-color: rgb(var(--cw-3-rgb) / 0.28); }
-::highlight(cw-tracks-under) { text-decoration: underline 2px rgb(var(--cw-3-rgb) / 0.75); text-underline-offset: 3px; }
-::highlight(cw-mom-fill) { background-color: rgb(var(--cw-4-rgb) / 0.22); }
-::highlight(cw-mom-under) { text-decoration: underline 2px rgb(var(--cw-4-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-reader-fill) { background-color: rgb(var(--cw-5-rgb) / 0.22); }
-::highlight(cw-reader-under) { text-decoration: underline 2px rgb(var(--cw-5-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-nemesis-fill) { background-color: rgb(var(--cw-6-rgb) / 0.22); }
-::highlight(cw-nemesis-under) { text-decoration: underline 2px rgb(var(--cw-6-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-sorkin-fill) { background-color: rgb(var(--cw-7-rgb) / 0.26); }
-::highlight(cw-sorkin-under) { text-decoration: underline 2px rgb(var(--cw-7-rgb) / 0.75); text-underline-offset: 3px; }
-::highlight(cw-sedaris-fill) { background-color: rgb(var(--cw-8-rgb) / 0.3); }
-::highlight(cw-sedaris-under) { text-decoration: underline 2px rgb(var(--cw-8-rgb) / 0.8); text-underline-offset: 3px; }
-::highlight(cw-vonnegut-fill) { background-color: rgb(var(--cw-9-rgb) / 0.22); }
-::highlight(cw-vonnegut-under) { text-decoration: underline 2px rgb(var(--cw-9-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-hitchcock-fill) { background-color: rgb(var(--cw-10-rgb) / 0.24); }
-::highlight(cw-hitchcock-under) { text-decoration: underline 2px rgb(var(--cw-10-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-dev_edit-fill) { background-color: rgb(var(--cw-11-rgb) / 0.24); }
-::highlight(cw-dev_edit-under) { text-decoration: underline 2px rgb(var(--cw-11-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-bluf-fill) { background-color: rgb(var(--cw-12-rgb) / 0.22); }
-::highlight(cw-bluf-under) { text-decoration: underline 2px rgb(var(--cw-12-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-0-fill) { background-color: rgb(var(--cw-0-rgb) / 0.25); }
+::highlight(cw-0-under) { text-decoration: underline 2px rgb(var(--cw-0-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-1-fill) { background-color: rgb(var(--cw-1-rgb) / 0.25); }
+::highlight(cw-1-under) { text-decoration: underline 2px rgb(var(--cw-1-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-2-fill) { background-color: rgb(var(--cw-2-rgb) / 0.25); }
+::highlight(cw-2-under) { text-decoration: underline 2px rgb(var(--cw-2-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-3-fill) { background-color: rgb(var(--cw-3-rgb) / 0.25); }
+::highlight(cw-3-under) { text-decoration: underline 2px rgb(var(--cw-3-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-4-fill) { background-color: rgb(var(--cw-4-rgb) / 0.25); }
+::highlight(cw-4-under) { text-decoration: underline 2px rgb(var(--cw-4-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-5-fill) { background-color: rgb(var(--cw-5-rgb) / 0.25); }
+::highlight(cw-5-under) { text-decoration: underline 2px rgb(var(--cw-5-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-6-fill) { background-color: rgb(var(--cw-6-rgb) / 0.25); }
+::highlight(cw-6-under) { text-decoration: underline 2px rgb(var(--cw-6-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-7-fill) { background-color: rgb(var(--cw-7-rgb) / 0.25); }
+::highlight(cw-7-under) { text-decoration: underline 2px rgb(var(--cw-7-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-8-fill) { background-color: rgb(var(--cw-8-rgb) / 0.25); }
+::highlight(cw-8-under) { text-decoration: underline 2px rgb(var(--cw-8-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-9-fill) { background-color: rgb(var(--cw-9-rgb) / 0.25); }
+::highlight(cw-9-under) { text-decoration: underline 2px rgb(var(--cw-9-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-10-fill) { background-color: rgb(var(--cw-10-rgb) / 0.25); }
+::highlight(cw-10-under) { text-decoration: underline 2px rgb(var(--cw-10-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-11-fill) { background-color: rgb(var(--cw-11-rgb) / 0.25); }
+::highlight(cw-11-under) { text-decoration: underline 2px rgb(var(--cw-11-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-12-fill) { background-color: rgb(var(--cw-12-rgb) / 0.25); }
+::highlight(cw-12-under) { text-decoration: underline 2px rgb(var(--cw-12-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-13-fill) { background-color: rgb(var(--cw-13-rgb) / 0.25); }
+::highlight(cw-13-under) { text-decoration: underline 2px rgb(var(--cw-13-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-14-fill) { background-color: rgb(var(--cw-14-rgb) / 0.25); }
+::highlight(cw-14-under) { text-decoration: underline 2px rgb(var(--cw-14-rgb) / 0.7); text-underline-offset: 3px; }
+::highlight(cw-15-fill) { background-color: rgb(var(--cw-15-rgb) / 0.25); }
+::highlight(cw-15-under) { text-decoration: underline 2px rgb(var(--cw-15-rgb) / 0.7); text-underline-offset: 3px; }
 
 /* Hovering a finding (panel row or margin card) spotlights its text. */
 ::highlight(cw-hot) {
@@ -135,6 +147,113 @@
   font-size: 0.72rem;
   color: var(--ink-soft);
   margin: 0 0 0.6rem;
+}
+
+.compound-pack + .compound-pack {
+  margin-top: 0.7rem;
+}
+
+.compound-pack-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.2rem 0.35rem 0.3rem;
+}
+
+.compound-pack-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.compound-pack-name {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-soft);
+}
+
+.compound-pack-meta {
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compound-pack-remove,
+.compound-add-pack-toggle,
+.compound-add-pack-submit {
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--ink-soft);
+  cursor: pointer;
+  flex: none;
+}
+
+.compound-pack-remove:hover,
+.compound-add-pack-toggle:hover,
+.compound-add-pack-submit:hover {
+  color: var(--ink);
+  border-color: var(--ink-faint);
+}
+
+.compound-pack-remove:disabled,
+.compound-add-pack-toggle:disabled,
+.compound-add-pack-submit:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.compound-packs-footer {
+  margin-top: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.compound-add-pack {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.compound-add-pack-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.74rem;
+  font-family: var(--font-mono);
+  padding: 0.3rem 0.5rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+.compound-add-pack-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.compound-packs-help {
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.compound-packs-help code,
+.compound-empty code {
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
 }
 
 .compound-reviewers {

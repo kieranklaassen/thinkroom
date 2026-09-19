@@ -29,6 +29,9 @@ interface Options {
   docTick: number
   /** Reviewer keys whose findings paint; others stay resolved but hidden. */
   visibleKeys: Set<string>
+  /** Colour slot per reviewer key (from the pass's lens snapshot). Highlight
+   *  names are per slot because ::highlight() rules are static CSS. */
+  colorSlots: Map<string, number>
   /** Compound mode paints; other modes clear every cw-* highlight. */
   active: boolean
 }
@@ -114,9 +117,10 @@ export function resolveFinding(
  * Connects writing findings to the text they judge and paints them with the
  * CSS Custom Highlight API: phrase findings fill, sentence findings underline,
  * and when two phrase findings overlap the lower probability demotes to its
- * reviewer's underline so both stay legible (plan KTD6).
+ * reviewer's underline so both stay legible. Highlight names carry the
+ * reviewer's colour slot (`cw-<slot>-fill`), never its key.
  */
-export function useFindingAnchors({ findings, handle, docTick, visibleKeys, active }: Options): FindingAnchors {
+export function useFindingAnchors({ findings, handle, docTick, visibleKeys, colorSlots, active }: Options): FindingAnchors {
   const domRangesRef = useRef(new Map<number, Range>())
   const [paragraphs, setParagraphs] = useState<AnchoredParagraph[]>([])
   const [anchoredIds, setAnchoredIds] = useState<Set<number> | null>(null)
@@ -187,11 +191,12 @@ export function useFindingAnchors({ findings, handle, docTick, visibleKeys, acti
     }
     painted.sort((a, b) => b.finding.probability - a.finding.probability)
     for (const { finding, range, dom } of painted) {
+      const slot = colorSlots.get(finding.reviewer_key) ?? 0
       if (finding.scope === 'phrase' && !fills.some((fill) => fill.from < range.to && range.from < fill.to)) {
         fills.push(range)
-        paint(`cw-${finding.reviewer_key}-fill`, dom)
+        paint(`cw-${slot}-fill`, dom)
       } else {
-        paint(`cw-${finding.reviewer_key}-under`, dom)
+        paint(`cw-${slot}-under`, dom)
       }
     }
     for (const [name, list] of byName) {
@@ -201,7 +206,7 @@ export function useFindingAnchors({ findings, handle, docTick, visibleKeys, acti
     const hovered = hoveredIdRef.current === null ? undefined : nextDom.get(hoveredIdRef.current)
     if (hovered) setHighlight(HOT, [hovered], HOT_PRIORITY)
     // docTick re-resolves anchors after document changes.
-  }, [findings, handle, visibleKeys, active, docTick, clearAll])
+  }, [findings, handle, visibleKeys, colorSlots, active, docTick, clearAll])
 
   useEffect(() => {
     const timers = flashTimers.current

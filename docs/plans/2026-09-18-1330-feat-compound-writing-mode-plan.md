@@ -10,6 +10,8 @@ execution: code
 
 # Compound Writing Mode Powered by Jev - Plan
 
+> Superseded in part by `2026-09-19-0915-refactor-compound-writing-packs-plan.md`: the fifth mode and Cmd+5 are gone (compound writing lives in Comment mode for featured accounts), and the Ruby reviewer registry became packs of lenses. The judging pipeline, anchoring, throttles, caps, and budget below still stand.
+
 ## Goal Capsule
 
 - **Objective:** A writer opens a fifth editor mode, runs Compound Writing reviewers over the document, and sees every finding as an inline highlight and a margin annotation that survives reload.
