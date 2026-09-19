@@ -99,22 +99,26 @@ the offline bootstrap.
 
 ## Accounts, packs, and lenses
 
-Compound writing is gated by the `compound_writing` account feature
-(`Features`, stored in `users.features`). Operators grant it without a deploy:
+Compound writing is gated by the `compound_writing` Flipper flag, checked
+through `CompoundWriting.available_to?(user)` (`Flipper.enabled?(:compound_writing,
+user)` for a signed-in account). Enable it per account in Flipper UI at
+`/admin/flipper` (admin accounts) or from a shell:
 
 ```bash
-bin/rails "features:grant[someone@example.com,compound_writing]"
+bin/rails "flags:enable[compound_writing,someone@example.com]"
 bin/rails "compound_writing:install[EveryInc/compound-writing,someone@example.com]"
 bin/rails "compound_writing:install[acme/lenses@main,someone@example.com,acme-lenses]"   # named plugin
-bin/rails "features:list[compound_writing]"
+bin/rails "flags:list[compound_writing]"
 bin/rails compound_writing:list
 ```
 
-The boot migration and `db:seed` grant the feature and subscribe the first pack
-for the accounts in `COMPOUND_WRITING_INITIAL_ACCOUNTS`, building the pack
-offline from the curated set at the SHA it was written against.
+An enabled account is subscribed to the first pack lazily, on its first
+Comment-mode visit (`CompoundWriting::FirstPack.seed!`), once:
+`users.compound_writing_seeded_at` records it so a later removal is respected.
+`db:seed` builds the pack version offline from the curated set at the SHA it
+was written against.
 
-In the app, a featured account opens a document in Comment mode: the Reviewers
+In the app, an enabled account opens a document in Comment mode: the Reviewers
 panel lists each subscribed pack (marketplace, version, and short commit SHA,
 with the full SHA on hover) with its lenses and a switch per lens, "Add pack"
 installs a marketplace by locator, and "Remove" drops the subscription (the

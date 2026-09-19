@@ -1,6 +1,4 @@
 class User < ApplicationRecord
-  include Features
-
   MINIMUM_PASSWORD_LENGTH = 10
   MAXIMUM_PASSWORD_BYTES = 72
 

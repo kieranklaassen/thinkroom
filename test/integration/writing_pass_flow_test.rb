@@ -59,6 +59,22 @@ class WritingPassFlowTest < ActionDispatch::IntegrationTest
     assert_inertia_props { |props| props[:writing_available] == false && !props.key?(:writing_reviewers) }
   end
 
+  test "an enabled account with no packs yet is subscribed to the first pack on its first Comment-mode visit, once" do
+    fresh = User.create!(name: "Fresh", email: "fresh@example.com", password: PASSWORD)
+    Flipper.enable(CompoundWriting::FLAG, fresh)
+    sign_in_as(fresh)
+
+    get document_mode_path(@document.slug, "comment"), headers: browser
+
+    assert_response :ok
+    assert_inertia_props { |props| props[:writing_packs].one? && props[:writing_packs].first[:source_sha] == "8fd0ec88c00976cf0274cb76552dc7ad9405ca92" }
+    assert fresh.reload.compound_writing_seeded_at.present?
+
+    fresh.user_writing_packs.destroy_all
+    get document_mode_path(@document.slug, "comment"), headers: browser
+    assert_inertia_props { |props| props[:writing_packs].empty? && props[:writing_reviewers].empty? }
+  end
+
   test "a featured account in Comment mode gets the lens set, its packs, and the pass" do
     sign_in_as(@user)
 

@@ -13,7 +13,7 @@ class DeployConfigTest < ActiveSupport::TestCase
     "KAMAL_STORAGE_VOLUME" => "thinkroom_storage"
   }.freeze
 
-  OPTIONAL = %w[WEBMCP_ORIGIN_TRIAL_TOKEN RIFFREC_AUTOMATION_EMAILS COMPOUND_WRITING_INITIAL_ACCOUNTS].freeze
+  OPTIONAL = %w[WEBMCP_ORIGIN_TRIAL_TOKEN RIFFREC_AUTOMATION_EMAILS THINKROOM_ADMIN_EMAILS].freeze
 
   def render_clear_env(overrides = {})
     env = REQUIRED.merge(overrides)
