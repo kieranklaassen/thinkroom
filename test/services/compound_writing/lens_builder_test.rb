@@ -71,13 +71,14 @@ class CompoundWriting::LensBuilderTest < ActiveSupport::TestCase
     files = {
       "skills/Wandering Sentences/SKILL.md" => skill("Wandering Sentences"),
       "skills/wandering-sentences/SKILL.md" => skill("wandering-sentences", "A second skill whose folder slugs the same."),
+      "skills/wandering-sentences-2/SKILL.md" => skill("wandering-sentences-2", "A third folder named like the suffix."),
       "skills/BLUF  Check/SKILL.md" => skill("BLUF Check", "Leads with the point."),
       "skills/BLUF  Check/jev.yml" => SIDECAR
     }
 
     lenses = CompoundWriting::LensBuilder.build(files, pack_name: "Acme Lenses", marketplace: "acme/lenses")
 
-    assert_equal %w[acme-lenses/bluf-check acme-lenses/wandering-sentences acme-lenses/wandering-sentences-2], lenses.map(&:key)
+    assert_equal %w[acme-lenses/bluf-check acme-lenses/wandering-sentences acme-lenses/wandering-sentences-2 acme-lenses/wandering-sentences-2-2], lenses.map(&:key)
     assert_equal "skills/BLUF  Check/SKILL.md", lenses.first.skill_path, "the path keeps the directory as written"
     assert_equal "Wanderer", lenses.first.name, "the sidecar's display name is untouched"
     assert_equal "Wandering Sentences", lenses[1].name, "the frontmatter name is untouched"

@@ -18,7 +18,7 @@ module CompoundWriting
       @files = files
       @pack_slug = Lens.slug(pack_name)
       @curated = CuratedLenses.for_marketplace(marketplace)
-      @used_slugs = Hash.new(0)
+      @used_slugs = Set.new
     end
 
     def build
@@ -68,8 +68,10 @@ module CompoundWriting
     # `skill_path` keeps the directory as written.
     def unique_slug(skill_name)
       slug = Lens.slug(skill_name)
-      count = (@used_slugs[slug] += 1)
-      count == 1 ? slug : "#{slug}-#{count}"
+      candidate = slug
+      suffix = 1
+      candidate = "#{slug}-#{suffix += 1}" until @used_slugs.add?(candidate)
+      candidate
     end
 
     def from_definition(definition, base, fallback_name:)
