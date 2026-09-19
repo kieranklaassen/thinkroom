@@ -572,10 +572,11 @@ class DocumentsController < InertiaController
     return {} unless compound_writing_available?
 
     pass = -> { document.writing_passes.order(created_at: :desc).first&.as_props }
+    lens_set = -> { @lens_set ||= CompoundWriting::LensSet.for(current_user) }
     {
       writing_enabled: -> { CompoundWriting.enabled? },
-      writing_reviewers: -> { CompoundWriting::LensSet.for(current_user).as_props },
-      writing_packs: -> { CompoundWriting::LensSet.for(current_user).packs_props },
+      writing_reviewers: -> { lens_set.call.as_props },
+      writing_packs: -> { lens_set.call.packs_props },
       writing_pass: mode == "comment" ? pass : InertiaRails.optional(&pass)
     }
   end

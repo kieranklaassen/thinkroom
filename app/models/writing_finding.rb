@@ -5,7 +5,7 @@
 # until the next pass.
 class WritingFinding < ApplicationRecord
   belongs_to :document
-  belongs_to :writing_pass
+  belongs_to :writing_pass, inverse_of: :findings
 
   validates :reviewer_key, :question_id, presence: true
   validates :scope, inclusion: { in: CompoundWriting::Lens::SCOPES }

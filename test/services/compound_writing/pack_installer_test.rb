@@ -79,6 +79,14 @@ class CompoundWriting::PackInstallerTest < ActiveSupport::TestCase
     assert_equal "acme-lenses", CompoundWriting::PackInstaller.install!("acme/lenses", plugin: "acme-lenses", fetcher:).plugin_name
   end
 
+  test "archive and hosted-URL plugin sources are refused" do
+    marketplace = MARKETPLACE.merge("plugins" => [ { "name" => "acme-lenses", "source" => { "source" => "url", "url" => "https://evil.test/plugin.tar.gz" } } ])
+    fetcher = FetcherDouble.new(sha: "a" * 40, marketplace:, files:)
+
+    error = assert_raises(CompoundWriting::PackInstaller::Error) { CompoundWriting::PackInstaller.install!("acme/lenses", fetcher:) }
+    assert_match(/no installable plugins/, error.message)
+  end
+
   test "an invalid manifest or an empty plugin is an installer error" do
     assert_raises(CompoundWriting::PackInstaller::Error) do
       CompoundWriting::PackInstaller.install!("acme/lenses", fetcher: FetcherDouble.new(sha: "a" * 40, marketplace: { "name" => "x" }, files:))

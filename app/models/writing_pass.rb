@@ -25,7 +25,7 @@ class WritingPass < ApplicationRecord
   end
 
   belongs_to :document
-  has_many :findings, class_name: "WritingFinding", dependent: :delete_all
+  has_many :findings, class_name: "WritingFinding", inverse_of: :writing_pass, dependent: :delete_all
 
   validates :status, inclusion: { in: STATUSES }
   validates :requested_by_name, presence: true

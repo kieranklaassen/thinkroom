@@ -51,9 +51,14 @@ module CompoundWriting
       )
     end
 
+    # Plugins that live in the marketplace repository itself or in another
+    # GitHub repository. Archive and hosted-URL sources would have the server
+    # fetch an address the marketplace author chose, so they are refused.
+    SOURCE_KINDS = %w[relative github].freeze
+
     def pick_plugin(catalog)
-      supported = catalog.plugins.select(&:supported?)
-      raise Error, "#{parsed.locator} lists no installable plugins" if supported.empty?
+      supported = catalog.plugins.select { |entry| entry.supported? && SOURCE_KINDS.include?(entry.source.kind) }
+      raise Error, "#{parsed.locator} lists no installable plugins (sources must live in the repository or on GitHub)" if supported.empty?
       return supported.first if @plugin.blank? && supported.one?
       raise Error, "#{parsed.locator} has #{supported.size} plugins; name one: #{supported.map(&:name).join(', ')}" if @plugin.blank?
 

@@ -60,6 +60,9 @@ module CompoundWriting
       config.max_files = 2_000
       config.max_skills = 200
       config.user_agent = "thinkroom-compound-writing (+https://github.com/kieranklaassen/thinkroom)"
+      # PackInstaller only follows repository sources, so no author-supplied
+      # URL should ever reach the fetcher; refuse any that does.
+      config.url_guard = ->(uri) { raise RubyLLM::Skills::Marketplace::FetchError, "refusing to fetch #{uri.host}: packs come from repositories only" }
     end
   end
 end
