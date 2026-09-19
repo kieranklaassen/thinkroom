@@ -245,7 +245,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_160003) do
     t.string "source_sha", null: false
     t.datetime "updated_at", null: false
     t.string "version"
-    t.index ["source_locator", "plugin_name"], name: "index_writing_packs_on_source_locator_and_plugin_name", unique: true
+    t.index ["source_locator", "plugin_name", "source_sha"], name: "index_writing_packs_on_version", unique: true
   end
 
   create_table "writing_passes", force: :cascade do |t|

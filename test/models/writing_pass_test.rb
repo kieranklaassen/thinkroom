@@ -45,7 +45,11 @@ class WritingPassTest < ActiveSupport::TestCase
 
   test "a pass keeps judging from its own lens snapshot when the pack changes" do
     pass = start(keys: %w[cw-mom])
-    compound_pack.update!(lenses: compound_pack.lenses.map { |lens| lens.merge("name" => "Renamed") })
+    # Simulate drift the model forbids (versions are immutable) to prove the
+    # pass reads its own snapshot rather than the pack.
+    renamed = compound_pack.lenses.map { |lens| lens.merge("name" => "Renamed") }
+    WritingPack.where(id: compound_pack.id).update_all([ "lenses = ?", renamed.to_json ])
+    assert_equal "Renamed", WritingPack.find(compound_pack.id).lens("compound-writing/cw-mom").name
 
     assert_equal "Mom", pass.reload.lens("compound-writing/cw-mom").name
   end

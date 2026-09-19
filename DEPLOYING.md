@@ -73,10 +73,21 @@ bin/kamal app exec --reuse 'bin/rails "features:list[compound_writing]"'
 
 Packs are fetched through `ruby_llm-skills`' marketplace layer over HTTPS
 (api.github.com, raw.githubusercontent.com, codeload.github.com; no `git` in
-the image is needed) and pinned to the commit the ref resolved to. Set
-`MARKETPLACE_GITHUB_TOKEN` (or `GITHUB_TOKEN`) in `env.clear` to lift GitHub's
-anonymous rate limit or reach private marketplaces. How a pack's `SKILL.md`
-files become lenses is in `docs/compound-writing-packs.md`.
+the image is needed). Each install is an immutable version row keyed by
+locator, plugin, and the commit the ref resolved to; re-adding a locator moves
+only the requester's subscription, never another account's. A plugin must live
+in the marketplace repository itself (a relative source, or a `github` source
+naming the same owner/repo); archives, hosted URLs, and other repositories are
+refused. Pack-authored text is bounded before it is stored (lenses per pack,
+questions per lens, field lengths, single-line printable text), and a pack
+that breaks a bound fails to install.
+
+`MARKETPLACE_GITHUB_TOKEN` (optional, `env.clear`) is sent with marketplace
+fetches to lift GitHub's anonymous rate limit. Use a token with public read
+access only (a fine-grained token with no repository access, or a classic
+token with no scopes): it travels with every fetch a featured account
+triggers, and the code never falls back to a broader `GITHUB_TOKEN`. How a
+pack's `SKILL.md` files become lenses is in `docs/compound-writing-packs.md`.
 
 Every pass spends against that shared key, so passes are bounded. A featured
 account with write access to a document can start one, but only one pass runs

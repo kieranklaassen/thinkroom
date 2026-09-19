@@ -115,6 +115,28 @@ class CompoundWriting::LensBuilderTest < ActiveSupport::TestCase
     assert_equal (0..15).to_a + [ 0, 1 ], lenses.map(&:color)
   end
 
+  test "a plugin with more than forty lens-yielding skills is refused" do
+    files = (1..41).to_h { |index| [ "skills/s#{format('%02d', index)}/SKILL.md", skill("s#{index}") ] }
+
+    error = assert_raises(CompoundWriting::LensBuilder::Invalid) { CompoundWriting::LensBuilder.build(files, pack_name: "acme", marketplace: "acme/lenses") }
+    assert_match(/41 lenses \(maximum 40\)/, error.message)
+  end
+
+  test "a generated lens reduces a multi-line description with format characters to one bounded line" do
+    # A literal block scalar keeps its line breaks; the zero-width space is a
+    # format character YAML accepts but a lens field must not carry.
+    description = "Finds\u200B sentences that\n  wander " + ("far " * 120)
+    files = { "skills/wander/SKILL.md" => "---\nname: wander\ndescription: |\n  #{description.gsub("\n", "\n  ")}\n---\n# wander\n" }
+
+    lens = CompoundWriting::LensBuilder.build(files, pack_name: "acme", marketplace: "acme/lenses").first
+
+    question = lens.question("sentence").question
+    assert_match(/\AIs|\ADoes/, question)
+    assert_no_match(/[\u200B\n]/, question)
+    assert_operator question.length, :<=, CompoundWriting::Lens::MAX_QUESTION_LENGTH
+    assert_match(/Finds sentences that wander/, question)
+  end
+
   test "a malformed sidecar is a readable error" do
     files = { "skills/wander/SKILL.md" => skill("wander"), "skills/wander/jev.yml" => "questions:\n  - id: x\n    scope: word\n    question: Q?\n" }
 

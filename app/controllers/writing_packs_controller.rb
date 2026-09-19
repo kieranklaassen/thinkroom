@@ -1,23 +1,19 @@
 # An account's compound writing packs: add one by marketplace locator
-# (installed or refreshed through CompoundWriting::PackInstaller and
-# subscribed), change which of its lenses are on, or drop the subscription.
-# The pack row itself is shared and stays for other subscribers.
+# (installed as an immutable version through CompoundWriting::PackInstaller
+# and subscribed), change which of its lenses are on, or drop the
+# subscription. Pack versions are shared rows that stay for other
+# subscribers.
 class WritingPacksController < InertiaController
   include CompoundWritingAccess
   rate_limit_contributions
   before_action :require_compound_writing
 
+  # Installs the version the locator resolves to (an existing row when that
+  # commit is already known) and moves only this account's subscription to
+  # it; other subscribers keep the version they chose.
   def create
     pack = CompoundWriting::PackInstaller.install!(pack_params[:locator], plugin: pack_params[:plugin].presence)
-    subscription = current_user.user_writing_packs.find_or_initialize_by(writing_pack: pack)
-    if subscription.new_record?
-      subscription.position = (current_user.user_writing_packs.maximum(:position) || -1) + 1
-      subscription.disabled_lens_keys = []
-    else
-      # A refresh keeps the account's choices for lenses that still exist.
-      subscription.disabled_lens_keys &= pack.lens_keys
-    end
-    subscription.save!
+    UserWritingPack.subscribe!(current_user, pack)
 
     redirect_back fallback_location: root_path, status: :see_other
   rescue CompoundWriting::PackInstaller::Error, ActiveRecord::RecordInvalid => e

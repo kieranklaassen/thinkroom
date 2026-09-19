@@ -55,19 +55,68 @@ class CompoundWriting::PackInstallerTest < ActiveSupport::TestCase
     assert pack.fetched_at.present?
   end
 
-  test "reinstalling refreshes the same row and keeps a subscriber's choices for surviving lenses" do
+  test "a version is immutable: the same commit returns the same row untouched, a new commit is a new row" do
     first = CompoundWriting::PackInstaller.install!("acme/lenses", fetcher: FetcherDouble.new(sha: "a" * 40, marketplace: MARKETPLACE, files:))
-    user = User.create!(name: "U", email: "packs@example.com", password: PASSWORD)
-    subscription = UserWritingPack.create!(user:, writing_pack: first, disabled_lens_keys: %w[acme-lenses/wander acme-lenses/bluff])
-
     fewer = files.except("skills/bluff/SKILL.md")
-    second = CompoundWriting::PackInstaller.install!("acme/lenses", fetcher: FetcherDouble.new(sha: "b" * 40, marketplace: MARKETPLACE, files: fewer))
 
-    assert_equal first.id, second.id
+    same = CompoundWriting::PackInstaller.install!("acme/lenses@main", fetcher: FetcherDouble.new(sha: "a" * 40, marketplace: MARKETPLACE, files: fewer))
+    assert_equal first.id, same.id
+    assert_equal %w[acme-lenses/bluff acme-lenses/wander], same.reload.lens_keys, "an existing version's lenses are never rewritten"
+
+    second = CompoundWriting::PackInstaller.install!("acme/lenses", fetcher: FetcherDouble.new(sha: "b" * 40, marketplace: MARKETPLACE, files: fewer))
+    assert_not_equal first.id, second.id
     assert_equal "b" * 40, second.source_sha
     assert_equal %w[acme-lenses/wander], second.lens_keys
-    subscription.reload.update_disabled!(subscription.disabled_lens_keys)
-    assert_equal %w[acme-lenses/wander], subscription.reload.disabled_lens_keys
+    assert_equal %w[acme-lenses/bluff acme-lenses/wander], first.reload.lens_keys
+    assert_equal [ second, first ], WritingPack.versions_of("acme/lenses", "acme-lenses").to_a
+  end
+
+  test "a pack row cannot be rewritten after it is created" do
+    pack = CompoundWriting::PackInstaller.install!("acme/lenses", fetcher: FetcherDouble.new(sha: "a" * 40, marketplace: MARKETPLACE, files:))
+
+    assert_raises(ActiveRecord::ReadonlyAttributeError) { pack.update!(lenses: []) }
+    assert_raises(ActiveRecord::ReadonlyAttributeError) { pack.update!(source_sha: "c" * 40) }
+  end
+
+  test "re-adding a locator moves only the requester's subscription and keeps choices for surviving lenses" do
+    first = CompoundWriting::PackInstaller.install!("acme/lenses", fetcher: FetcherDouble.new(sha: "a" * 40, marketplace: MARKETPLACE, files:))
+    requester = User.create!(name: "R", email: "requester@example.com", password: PASSWORD)
+    bystander = User.create!(name: "B", email: "bystander@example.com", password: PASSWORD)
+    UserWritingPack.subscribe!(requester, first).subscription.update_disabled!(%w[acme-lenses/wander acme-lenses/bluff])
+    UserWritingPack.subscribe!(bystander, first)
+
+    second = CompoundWriting::PackInstaller.install!("acme/lenses", fetcher: FetcherDouble.new(sha: "b" * 40, marketplace: MARKETPLACE, files: files.except("skills/bluff/SKILL.md")))
+    outcome = UserWritingPack.subscribe!(requester, second)
+
+    assert outcome.moved?
+    assert_equal [ second ], requester.writing_packs.reload.to_a
+    assert_equal %w[acme-lenses/wander], outcome.subscription.reload.disabled_lens_keys
+    assert_equal [ first ], bystander.writing_packs.reload.to_a, "the other subscriber keeps the version it chose"
+    assert UserWritingPack.subscribe!(requester, second).unchanged?
+  end
+
+  test "github plugin sources must name the marketplace repository itself" do
+    same_repo = MARKETPLACE.merge("plugins" => [ { "name" => "acme-lenses", "source" => { "source" => "github", "repo" => "Acme/Lenses" } } ])
+    pack = CompoundWriting::PackInstaller.install!("acme/lenses", fetcher: FetcherDouble.new(sha: "a" * 40, marketplace: same_repo, files:))
+    assert_equal "acme-lenses", pack.plugin_name
+
+    other_repo = MARKETPLACE.merge("plugins" => [ { "name" => "acme-lenses", "source" => { "source" => "github", "repo" => "someone-else/private-repo" } } ])
+    error = assert_raises(CompoundWriting::PackInstaller::Error) do
+      CompoundWriting::PackInstaller.install!("acme/lenses@v2", fetcher: FetcherDouble.new(sha: "b" * 40, marketplace: other_repo, files:))
+    end
+    assert_match(/must live in the marketplace repository itself/, error.message)
+    assert_nil WritingPack.find_by(source_sha: "b" * 40)
+  end
+
+  test "a pack whose lens content breaks a bound fails to install" do
+    # The YAML double-quoted `\n` escape keeps a real line break in the question.
+    bad = files.merge("skills/wander/jev.yml" => %(blurb: Wandering.\nquestions:\n  - { id: w, scope: sentence, question: "Line one\\nLine two?" }\n))
+
+    error = assert_raises(CompoundWriting::PackInstaller::Error) do
+      CompoundWriting::PackInstaller.install!("acme/lenses", fetcher: FetcherDouble.new(sha: "a" * 40, marketplace: MARKETPLACE, files: bad))
+    end
+    assert_match(/question contains a line break/, error.message)
+    assert_nil WritingPack.find_by(source_locator: "acme/lenses")
   end
 
   test "a marketplace with several plugins needs a plugin name" do

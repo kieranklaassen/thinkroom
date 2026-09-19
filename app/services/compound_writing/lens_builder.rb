@@ -25,6 +25,7 @@ module CompoundWriting
       slugs = assign_slugs(dirs)
       lenses = dirs.filter_map.with_index { |dir, index| lens_for(dir, slugs.fetch(dir), index) }
       raise Invalid, "the plugin has no skills that yield a lens" if lenses.empty?
+      raise Invalid, "the plugin yields #{lenses.size} lenses (maximum #{Lens::MAX_LENSES_PER_PACK})" if lenses.size > Lens::MAX_LENSES_PER_PACK
 
       lenses.each_with_index.map { |lens, index| lens.with(color: index % Lens::COLOR_SLOTS) }
     end
@@ -100,20 +101,26 @@ module CompoundWriting
       )
     end
 
+    # The description feeds a generated question, so it is reduced to one
+    # printable line first and capped well under the question length.
+    GENERATED_FOCUS_LENGTH = 240
+
     # Weak by design and labelled so: two literal questions built from the
     # skill's own description. Pack authors get sharper lenses with a sidecar.
     def generated(frontmatter, base)
-      description = frontmatter["description"].to_s.squish
+      description = frontmatter["description"].to_s.gsub(Lens::UNPRINTABLE, " ").squish
       raise ArgumentError, "SKILL.md has no description to generate a lens from" if description.blank?
 
-      focus = description.truncate(240, separator: " ")
+      focus = description.truncate(GENERATED_FOCUS_LENGTH, separator: " ")
+      name = frontmatter["name"].to_s.gsub(Lens::UNPRINTABLE, " ").squish.presence || base[:key].split("/").last
+      name = name.truncate(Lens::MAX_NAME_LENGTH, separator: " ")
       Lens.from_h(
         base.merge(
-          name: frontmatter["name"].to_s.presence || base[:key].split("/").last, blurb: focus.truncate(90, separator: " "), origin: "generated",
+          name:, blurb: focus.truncate(90, separator: " "), origin: "generated",
           questions: [
-            { id: "sentence", scope: "sentence", note: "Flagged by #{frontmatter['name']}",
+            { id: "sentence", scope: "sentence", note: "Flagged by #{name}".truncate(Lens::MAX_NOTE_LENGTH, separator: " "),
               question: "Does this sentence show the problem this reviewer looks for: #{focus}?" },
-            { id: "paragraph", scope: "paragraph", note: "Flagged by #{frontmatter['name']}",
+            { id: "paragraph", scope: "paragraph", note: "Flagged by #{name}".truncate(Lens::MAX_NOTE_LENGTH, separator: " "),
               question: "Does this paragraph as a whole show the problem this reviewer looks for: #{focus}?" }
           ],
           lexicon: []

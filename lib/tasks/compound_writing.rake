@@ -9,10 +9,8 @@ namespace :compound_writing do
 
     user = User.find_by(email: args[:email].to_s.strip.downcase) or abort "No account with email #{args[:email].inspect}"
     user.grant_feature!(Features::COMPOUND_WRITING)
-    subscription = user.user_writing_packs.find_or_create_by!(writing_pack: pack) do |row|
-      row.position = (user.user_writing_packs.maximum(:position) || -1) + 1
-    end
-    puts "Subscribed #{user.email} (#{subscription.enabled_lenses.size} lenses on)"
+    outcome = UserWritingPack.subscribe!(user, pack)
+    puts "#{outcome.change.to_s.capitalize} subscription for #{user.email} (#{outcome.subscription.enabled_lenses.size} lenses on)"
   end
 
   desc "Grant the feature, build the first pack offline, and subscribe accounts: compound_writing:bootstrap[email1;email2]"
@@ -26,8 +24,8 @@ namespace :compound_writing do
 
   desc "List packs and their lenses"
   task list: :environment do
-    WritingPack.order(:name).each do |pack|
-      puts "#{pack.name} #{pack.version} #{pack.source_locator}@#{pack.short_sha} (#{pack.users.count} accounts)"
+    WritingPack.order(:name, created_at: :desc).each do |pack|
+      puts "#{pack.name} #{pack.version} #{pack.source_locator}@#{pack.short_sha} (#{pack.users.count} accounts, version created #{pack.created_at.to_date})"
       pack.lens_structs.each { |lens| puts "  #{lens.key} [#{lens.origin}] #{lens.questions.size} questions" }
     end
   end

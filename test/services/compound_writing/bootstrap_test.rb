@@ -13,6 +13,21 @@ class CompoundWriting::BootstrapTest < ActiveSupport::TestCase
     assert_equal "compound-writing/cw-hemingway", pack.lens_structs.first.key
     assert pack.lens_structs.all? { |lens| lens.origin == "curated" && lens.lexicon.any? }
     assert_equal pack, CompoundWriting::Bootstrap.ensure_pack!, "idempotent"
+    assert_equal 1, WritingPack.versions_of("EveryInc/compound-writing", "compound-writing").count
+  end
+
+  test "run! leaves an account that already holds a version of the plugin on that version" do
+    user = User.create!(name: "K", email: "pinned@example.com", password: "thoughtful-passphrase")
+    newer = WritingPack.create!(
+      name: "compound-writing", display_name: "Compound Writing", source_locator: "EveryInc/compound-writing", plugin_name: "compound-writing",
+      source_sha: "f" * 40, lenses: CompoundWriting::Bootstrap.ensure_pack!.lenses.first(1)
+    )
+    UserWritingPack.subscribe!(user, newer)
+
+    CompoundWriting::Bootstrap.run!(emails: [ user.email ], logger: nil)
+
+    assert_equal [ newer ], user.writing_packs.reload.to_a, "bootstrap never moves a version an account chose"
+    assert_equal 1, user.user_writing_packs.count
   end
 
   test "run! grants and subscribes existing accounts, reports missing ones, and is idempotent" do

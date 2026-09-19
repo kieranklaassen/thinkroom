@@ -1,7 +1,8 @@
 class CreateWritingPacks < ActiveRecord::Migration[8.1]
   def change
-    # One plugin from a Claude Code plugin marketplace, pinned to a commit and
-    # stored with the lenses derived from its skills.
+    # One plugin from a Claude Code plugin marketplace at one commit, stored
+    # with the lenses derived from its skills. A row is immutable: a new
+    # commit is a new row, and subscriptions point at a specific version.
     create_table :writing_packs do |t|
       t.string :name, null: false
       t.string :display_name, null: false
@@ -16,9 +17,10 @@ class CreateWritingPacks < ActiveRecord::Migration[8.1]
       t.datetime :fetched_at
       t.timestamps
     end
-    add_index :writing_packs, %i[source_locator plugin_name], unique: true
+    add_index :writing_packs, %i[source_locator plugin_name source_sha], unique: true, name: "index_writing_packs_on_version"
 
-    # An account's subscription to a pack, with the lenses it switched off.
+    # An account's subscription to one pack version, with the lenses it
+    # switched off.
     create_table :user_writing_packs do |t|
       t.references :user, null: false, foreign_key: true, index: true
       t.references :writing_pack, null: false, foreign_key: true, index: true

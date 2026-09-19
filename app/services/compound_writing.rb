@@ -50,11 +50,13 @@ module CompoundWriting
   end
 
   # Hands ruby_llm-skills' marketplace layer the token and caps before a
-  # fetch. GITHUB_TOKEN is the gem's own default; MARKETPLACE_GITHUB_TOKEN
-  # overrides it for deployments that keep a dedicated read token.
+  # fetch. Only MARKETPLACE_GITHUB_TOKEN is used (a public-read token, to
+  # lift GitHub's anonymous rate limit); the gem's own GITHUB_TOKEN default
+  # is overridden with nil so a broad token in the environment never travels
+  # with a marketplace fetch.
   def configure_marketplaces!(env: ENV)
     RubyLLM::Skills::Marketplace.configure do |config|
-      config.github_token = env["MARKETPLACE_GITHUB_TOKEN"].presence || env["GITHUB_TOKEN"].presence
+      config.github_token = env["MARKETPLACE_GITHUB_TOKEN"].presence
       config.max_archive_bytes = 32 * 1024 * 1024
       config.max_file_bytes = 4 * 1024 * 1024
       config.max_files = 2_000

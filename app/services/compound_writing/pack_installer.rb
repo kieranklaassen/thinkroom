@@ -1,10 +1,14 @@
 module CompoundWriting
-  # Installs or refreshes a WritingPack from a marketplace locator such as
+  # Installs a WritingPack version from a marketplace locator such as
   # `EveryInc/compound-writing`, `owner/repo@main`, or `owner/repo@<sha>`,
   # through ruby_llm-skills' marketplace layer: the ref resolves to a commit
   # (`head.sha`, the pin), `.claude-plugin/marketplace.json` names the
   # plugins, the plugin tree arrives as a tarball over HTTPS, and LensBuilder
-  # derives the lenses. Nothing here runs git; the pack row is the lock.
+  # derives the lenses. Nothing here runs git. A version that already exists
+  # (same locator, plugin, and commit) is returned as it is; a new commit is a
+  # new row. Subscribing the requester is the caller's step
+  # (UserWritingPack.subscribe!), so installing never changes what another
+  # account already holds.
   class PackInstaller
     LOCATOR = %r{\A(?<repo>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)(?:@(?<ref>[A-Za-z0-9_./-]{1,120}))?\z}
     class Error < StandardError; end
@@ -34,6 +38,9 @@ module CompoundWriting
       head = fetcher.head
       catalog = RubyLLM::Skills::Marketplace::Manifest.discover(fetcher.catalog_files(head))
       entry = pick_plugin(catalog)
+      existing = WritingPack.find_by(source_locator: parsed.locator, plugin_name: entry.name, source_sha: head.sha)
+      return existing if existing
+
       fetched = fetcher.source_tree(entry.source, head:)
       lenses = LensBuilder.build(fetched.files, pack_name: catalog.name, marketplace: parsed.locator)
       persist!(catalog, entry, fetched.sha, lenses)
@@ -51,30 +58,45 @@ module CompoundWriting
       )
     end
 
-    # Plugins that live in the marketplace repository itself or in another
-    # GitHub repository. Archive and hosted-URL sources would have the server
-    # fetch an address the marketplace author chose, so they are refused.
-    SOURCE_KINDS = %w[relative github].freeze
+    # A plugin must live in the marketplace repository itself: a relative
+    # source, or a github source naming the same owner/repo. Any other
+    # repository, archive, or hosted URL would make this server fetch (and
+    # send its token to) an address the marketplace author chose.
+    def installable?(entry)
+      return false unless entry.supported?
+
+      case entry.source.kind
+      when "relative" then true
+      when "github" then entry.source.repo.to_s.casecmp?(parsed.locator)
+      else false
+      end
+    end
 
     def pick_plugin(catalog)
-      supported = catalog.plugins.select { |entry| entry.supported? && SOURCE_KINDS.include?(entry.source.kind) }
-      raise Error, "#{parsed.locator} lists no installable plugins (sources must live in the repository or on GitHub)" if supported.empty?
+      supported = catalog.plugins.select { |entry| installable?(entry) }
+      if supported.empty?
+        raise Error, "#{parsed.locator} lists no installable plugins: a plugin must live in the marketplace repository itself " \
+                     "(a relative source, or a github source naming #{parsed.locator})"
+      end
       return supported.first if @plugin.blank? && supported.one?
       raise Error, "#{parsed.locator} has #{supported.size} plugins; name one: #{supported.map(&:name).join(', ')}" if @plugin.blank?
 
-      supported.find { |candidate| candidate.name == @plugin } || raise(Error, "#{parsed.locator} has no plugin named #{@plugin}")
+      supported.find { |candidate| candidate.name == @plugin } || raise(Error, "#{parsed.locator} has no installable plugin named #{@plugin}")
     end
 
     def persist!(catalog, entry, sha, lenses)
-      pack = WritingPack.find_or_initialize_by(source_locator: parsed.locator, plugin_name: entry.name)
-      pack.assign_attributes(
+      WritingPack.create!(
         name: catalog.name, display_name: catalog.display_name.presence || catalog.name,
         description: entry.description.presence || catalog.description,
-        source_kind: "github", source_ref: parsed.ref, source_sha: sha, version: entry.version.presence || catalog.version,
+        source_kind: "github", source_locator: parsed.locator, source_ref: parsed.ref, source_sha: sha, plugin_name: entry.name,
+        version: entry.version.presence || catalog.version,
         lenses: lenses.map(&:to_h), fetched_at: Time.current
       )
-      pack.save!
-      pack
+    rescue ActiveRecord::RecordNotUnique
+      # Two installs of the same commit raced; the first one's row is the version.
+      WritingPack.find_by!(source_locator: parsed.locator, plugin_name: entry.name, source_sha: sha)
+    rescue ActiveRecord::RecordInvalid => e
+      raise Error, e.record.errors.full_messages.to_sentence
     end
   end
 end

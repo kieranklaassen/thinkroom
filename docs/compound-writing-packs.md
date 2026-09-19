@@ -18,8 +18,21 @@ marketplace file, codeload.github.com for the plugin tarball; HTTPS only, no
 (the only one, or the one named), and hands the plugin's files to
 `CompoundWriting::LensBuilder`. The result is a `WritingPack` row: marketplace
 name, plugin name, version, the commit SHA it was fetched at, and the lenses.
-The row is the lock: installing the same locator again refreshes it to the
-requested ref, and subscribers keep their choices for lenses that still exist.
+
+A row is one immutable version, keyed by (locator, plugin, SHA). Installing a
+locator again resolves the ref: the same commit returns the existing row
+untouched; a new commit is a new row. `UserWritingPack.subscribe!` then moves
+only the requester's subscription to that version (keeping its choices for
+lenses that still exist), so no install can change what another account has
+already installed. A malicious or broken pack version therefore reaches only
+the accounts that chose to install that exact version. Old versions nobody
+subscribes to can be pruned later.
+
+A plugin must live in the marketplace repository itself: a relative source, or
+a `github` source naming the same owner/repo as the locator. Other
+repositories, archives, and hosted URLs are refused with an install error, so
+the server (and its optional `MARKETPLACE_GITHUB_TOKEN`) only ever fetches the
+repository the user typed.
 
 Thinkroom does not use the gem's filesystem `Registry` or `skills-lock.json`
 because a pack belongs to accounts in the database and the container's
@@ -61,6 +74,16 @@ questions:
     question: Is this phrase an adverb, an empty qualifier such as very or quite, or an inflated phrase that could be cut without changing the meaning?
 ```
 
+Pack-authored text becomes Jev instructions, so `CompoundWriting::Lens`
+bounds it and a pack that breaks a bound fails to install: at most 40 lenses
+per pack and 8 questions per lens; names up to 60 characters, blurbs 160,
+notes 80, questions 500, question ids 40, lexicon up to 40 words of 40
+characters; every field one line of printable text (control and format
+characters, line and paragraph separators are rejected; surrounding
+whitespace is trimmed and nothing else is rewritten). The generated path
+first reduces the SKILL.md description to one printable line and caps it at
+240 characters.
+
 Scopes decide what Jev is asked about: `phrase` runs over 1-3 word n-grams
 inside a sentence (findings fill the text), `sentence` over each sentence
 (findings underline), `paragraph` over each paragraph of at least 15 words, and
@@ -92,9 +115,10 @@ for the accounts in `COMPOUND_WRITING_INITIAL_ACCOUNTS`, building the pack
 offline from the curated set at the SHA it was written against.
 
 In the app, a featured account opens a document in Comment mode: the Reviewers
-panel lists each subscribed pack with its lenses and a switch per lens, "Add
-pack" installs a marketplace by locator, and "Remove" drops the subscription
-(the pack row stays for other subscribers). A run posts the lenses that are on;
+panel lists each subscribed pack (marketplace, version, and short commit SHA,
+with the full SHA on hover) with its lenses and a switch per lens, "Add pack"
+installs a marketplace by locator, and "Remove" drops the subscription (the
+version row stays for other subscribers). A run posts the lenses that are on;
 the pass snapshots their definitions, so its findings keep their names and
 colours even after the pack changes.
 
