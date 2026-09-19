@@ -135,6 +135,18 @@ GEM
     ffi (1.17.4-x86_64-darwin)
     ffi (1.17.4-x86_64-linux-gnu)
     ffi (1.17.4-x86_64-linux-musl)
+    flipper (1.4.2)
+      concurrent-ruby (< 2)
+    flipper-active_record (1.4.2)
+      activerecord (>= 4.2, < 9)
+      flipper (~> 1.4.2)
+    flipper-ui (1.4.2)
+      erubi (>= 1.0.0, < 2.0.0)
+      flipper (~> 1.4.2)
+      rack (>= 1.4, < 4)
+      rack-protection (>= 1.5.3, < 5.0.0)
+      rack-session (>= 1.0.2, < 3.0.0)
+      sanitize (< 8)
     globalid (1.4.0)
       activesupport (>= 6.1)
     hashie (5.1.0)
@@ -376,6 +388,9 @@ GEM
       jwt (>= 2.0, < 4)
       rails (>= 7.1)
       rqrcode (~> 3.0)
+    sanitize (7.0.0)
+      crass (~> 1.0.2)
+      nokogiri (>= 1.16.8)
     schematist (1.1.0)
     securerandom (0.4.1)
     snaky_hash (2.0.6)
@@ -479,6 +494,9 @@ DEPENDENCIES
   bundler-audit
   commonmarker (~> 2.10)
   debug
+  flipper (~> 1.3)
+  flipper-active_record (~> 1.3)
+  flipper-ui (~> 1.3)
   inertia_rails (~> 3.22)
   kamal (~> 2.12.0)
   omniauth-google-oauth2 (~> 1.2)
@@ -559,6 +577,9 @@ CHECKSUMS
   ffi (1.17.4-x86_64-darwin) sha256=aa70390523cf3235096cf64962b709b4cfbd5c082a2cb2ae714eb0fe2ccda496
   ffi (1.17.4-x86_64-linux-gnu) sha256=9d3db14c2eae074b382fa9c083fe95aec6e0a1451da249eab096c34002bc752d
   ffi (1.17.4-x86_64-linux-musl) sha256=3fdf9888483de005f8ef8d1cf2d3b20d86626af206cbf780f6a6a12439a9c49e
+  flipper (1.4.2) sha256=dca7d65b5ec660b525b6c599e727219ac4994073c855b41b6656b2d91a9cb304
+  flipper-active_record (1.4.2) sha256=ab70aeb78a44d59c690b5538fc269b08d1c2918abb720fe82832ac77fb1dfcd1
+  flipper-ui (1.4.2) sha256=d7b2fd886e922ba5e0c8240cbabd27163125b011a6c42e6dba509a1715540dee
   globalid (1.4.0) sha256=037f12fbf1d9d7a014d501c2d5c77356fd4ddd96d7a7991d6700bba96706f427
   hashie (5.1.0) sha256=c266471896f323c446ea8207f8ffac985d2718df0a0ba98651a3057096ca3870
   i18n (1.15.2) sha256=00f9eb62412fe593b2a65a97daa75300d37abb8f7202ec748e94b6d46a9dd1b5
@@ -642,6 +663,7 @@ CHECKSUMS
   ruby_llm-skills (0.5.0.pre1) sha256=a80603b3de28e39109cbb2821962fe9d45d0446cb258e57b197e89be7cf502d0
   ruby_llm-typesafe (0.1.0) sha256=70dbe2cc5d716e2ff2df7533be40c8f302e3351bf1afd675043454ee17691386
   ruby_native (0.15.0) sha256=f6509360303f164f432252e21d2104d70e1aaadcc2db2d071fb9dd7ade0d6176
+  sanitize (7.0.0) sha256=269d1b9d7326e69307723af5643ec032ff86ad616e72a3b36d301ac75a273984
   schematist (1.1.0) sha256=905d8f0286830926e77e0d631bee325ee741c4b99640bc99735593b40ba73e7b
   securerandom (0.4.1) sha256=cc5193d414a4341b6e225f0cb4446aceca8e50d5e1888743fac16987638ea0b1
   snaky_hash (2.0.6) sha256=3663cae48cdef582b517025cf8a39d8789996eaf0b4ed89e2f0624836505654a

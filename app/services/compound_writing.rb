@@ -41,12 +41,15 @@ module CompoundWriting
     @judge = judge
   end
 
+  FLAG = :compound_writing
+
   # The account gate: compound writing exists only for signed-in accounts
-  # holding the feature (Features::COMPOUND_WRITING). Independent of whether a
-  # judge is configured, so a featured account still sees the panel and its
+  # with the :compound_writing Flipper flag enabled (per actor, or through
+  # the admins group or a full enable). Independent of whether a judge is
+  # configured, so an enabled account still sees the panel and its
   # not-configured notice.
   def available_to?(user)
-    user.present? && user.feature?(Features::COMPOUND_WRITING)
+    user.present? && Flipper.enabled?(FLAG, user)
   end
 
   # Hands ruby_llm-skills' marketplace layer the token and caps before a

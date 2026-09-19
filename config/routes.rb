@@ -48,6 +48,12 @@ Rails.application.routes.draw do
   patch "writing_findings/:id/dismiss", to: "writing_findings#dismiss", as: :dismiss_writing_finding
   resources :writing_packs, only: %i[create update destroy]
 
+  # Admin-only tools, as in Cora's admin namespace: a request from anyone
+  # else falls through to 404.
+  constraints(AdminConstraint.new) do
+    mount Flipper::UI.app(Flipper) => "/admin/flipper", as: :flipper_ui
+  end
+
   post "/rails/active_storage/direct_uploads", to: "api/direct_uploads#create"
 
   namespace :api do

@@ -30,6 +30,11 @@ module Proof
                                                .reject(&:blank?)
     config.x.cursor_client = nil
 
+    # As in Cora: no preload of every flag on every request (a join over the
+    # flipper tables); per-request memoization of the flags actually checked
+    # stays on.
+    config.flipper.preload = false
+
     # Don't generate system test files.
     config.generators.system_tests = nil
   end

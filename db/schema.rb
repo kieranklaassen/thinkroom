@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_19_160003) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_19_191807) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -172,6 +172,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_160003) do
     t.check_constraint "status IN ('uploaded', 'running', 'finished', 'failed')", name: "feedback_runs_status_check"
   end
 
+  create_table "flipper_features", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "key", null: false
+    t.datetime "updated_at", null: false
+    t.index ["key"], name: "index_flipper_features_on_key", unique: true
+  end
+
+  create_table "flipper_gates", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "feature_key", null: false
+    t.string "key", null: false
+    t.datetime "updated_at", null: false
+    t.text "value"
+    t.index ["feature_key", "key", "value"], name: "index_flipper_gates_on_feature_key_and_key_and_value", unique: true
+  end
+
   create_table "suggestions", force: :cascade do |t|
     t.text "anchor_text"
     t.string "author_kind", default: "ai", null: false
@@ -201,9 +217,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_160003) do
   end
 
   create_table "users", force: :cascade do |t|
+    t.boolean "admin", default: false, null: false
+    t.datetime "compound_writing_seeded_at"
     t.datetime "created_at", null: false
     t.string "email", limit: 320, null: false
-    t.json "features", default: {}, null: false
     t.string "google_uid"
     t.string "name", limit: 255, null: false
     t.string "password_digest"

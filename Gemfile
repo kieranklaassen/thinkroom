@@ -62,6 +62,13 @@ gem "ruby_llm-typesafe", "~> 0.1"
 # pinned exactly; CompoundWriting::PackInstaller is its only caller.
 gem "ruby_llm-skills", "0.5.0.pre1"
 
+# Feature flags, the same shape as Cora: flags and gates in the database
+# (flipper_features, flipper_gates), checked with Flipper.enabled?(:flag,
+# user), managed in Flipper UI under /admin for admin accounts.
+gem "flipper", "~> 1.3"
+gem "flipper-active_record", "~> 1.3"
+gem "flipper-ui", "~> 1.3"
+
 gem "vite_rails", "~> 3.11"
 
 gem "y-rb", "~> 0.7.0"

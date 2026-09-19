@@ -44,32 +44,50 @@ Captured Riffrec ZIPs are private Active Storage attachments. Cursor receives a
 purpose-scoped bundle URL that expires after 24 hours; generated pull requests
 are never merged or deployed automatically.
 
-### Compound writing (TypeSafe Jev, featured accounts)
+### Feature flags (Flipper)
 
-Compound writing lives in Comment mode for accounts that hold the
-`compound_writing` feature: their reviewers panel runs the lenses of the packs
-they subscribed to, and TypeSafe's Jev answers each lens's yes/no questions
-over the document. Everyone else sees no panel, no props, and the pass and
-pack endpoints refuse them. It needs a TypeSafe API key from
+Feature flags work as they do in Cora: [Flipper](https://www.flippercloud.io/docs)
+with the ActiveRecord adapter (`flipper_features`, `flipper_gates`), plain
+`Flipper.enabled?(:flag, user)` checks in code, and Flipper UI for managing
+them. `config/flipper_flag_defaults.yml` lists every flag with its purpose;
+flags listed there that do not exist yet are registered at boot, disabled in
+production whatever the YAML says, so a new flag is always opt-in.
+
+Flipper UI is mounted at `/admin/flipper` behind `AdminConstraint`: only a
+signed-in account with `users.admin` reaches it; everyone else gets 404.
+`THINKROOM_ADMIN_EMAILS` (comma-separated, in `.kamal/deploy.env`, passed
+through `env.clear`) names the accounts the `MoveCompoundWritingFeatureToFlipper`
+migration promotes; later promotions need no deploy:
+
+```bash
+bin/kamal app exec --reuse 'bin/rails "admin:grant[someone@example.com]"'
+bin/kamal app exec --reuse 'bin/rails "flags:enable[compound_writing,someone@example.com]"'
+bin/kamal app exec --reuse 'bin/rails "flags:list[compound_writing]"'
+```
+
+(`flags:*` and `admin:*` are thin wrappers for the console-less container;
+Flipper itself has no CLI. Flipper UI is the primary way to enable a flag for
+an account, a group such as `admins`, a percentage, or everyone.) Every
+enable, disable, add, and remove is logged with its target.
+
+### Compound writing (TypeSafe Jev, flagged accounts)
+
+Compound writing lives in Comment mode for accounts with the
+`compound_writing` flag enabled: their reviewers panel runs the lenses of the
+packs they subscribed to, and TypeSafe's Jev answers each lens's yes/no
+questions over the document. Everyone else sees no panel, no props, and the
+pass and pack endpoints refuse them. It needs a TypeSafe API key from
 <https://console.typesafe.ai>. Add it to `.kamal/secrets` as
 `TYPESAFE_API_KEY=$TYPESAFE_API_KEY` and set `KAMAL_COMPOUND_WRITING=1` in
 `.kamal/deploy.env`; without the flag the container receives no key and the
 panel shows a "not configured" notice instead of running reviewers.
 `TYPESAFE_MODEL` (default `jev-latest`) may be set in `env.clear` if needed.
 
-Grants are data, not code. `COMPOUND_WRITING_INITIAL_ACCOUNTS` (comma-separated
-emails in `.kamal/deploy.env`, passed through `env.clear`) names the accounts
-the boot migration and `db:seed` grant the feature and subscribe to the first
-pack, `EveryInc/compound-writing` at commit
-`8fd0ec88c00976cf0274cb76552dc7ad9405ca92`, built offline from
-`config/compound_writing/lenses/everyinc--compound-writing.yml`. Later grants
-need no deploy:
-
-```bash
-bin/kamal app exec --reuse 'bin/rails "features:grant[someone@example.com,compound_writing]"'
-bin/kamal app exec --reuse 'bin/rails "compound_writing:install[EveryInc/compound-writing,someone@example.com]"'
-bin/kamal app exec --reuse 'bin/rails "features:list[compound_writing]"'
-```
+An enabled account is subscribed to the first pack, `EveryInc/compound-writing`
+at commit `8fd0ec88c00976cf0274cb76552dc7ad9405ca92` (built offline from
+`config/compound_writing/lenses/everyinc--compound-writing.yml`), on its first
+Comment-mode visit, once; removing it later sticks. Other packs are added from
+the panel or with `bin/rails "compound_writing:install[owner/repo,someone@example.com]"`.
 
 Packs are fetched through `ruby_llm-skills`' marketplace layer over HTTPS
 (api.github.com, raw.githubusercontent.com, codeload.github.com; no `git` in
@@ -89,7 +107,7 @@ token with no scopes): it travels with every fetch a featured account
 triggers, and the code never falls back to a broader `GITHUB_TOKEN`. How a
 pack's `SKILL.md` files become lenses is in `docs/compound-writing-packs.md`.
 
-Every pass spends against that shared key, so passes are bounded. A featured
+Every pass spends against that shared key, so passes are bounded. An enabled
 account with write access to a document can start one, but only one pass runs
 per document at a time, a document waits `COMPOUND_WRITING_COOLDOWN_SECONDS`
 (60) between passes, and a rerun with the same text and reviewers returns the

@@ -59,8 +59,8 @@ end
 
 puts "Seeded demo document: /d/#{doc.slug}"
 
-# Compound writing: the first pack (offline, from the curated set) and the
-# feature for the accounts in COMPOUND_WRITING_INITIAL_ACCOUNTS, if any exist.
-bootstrap = CompoundWriting::Bootstrap.run!
-puts "Seeded compound writing pack: #{bootstrap.pack.name}@#{bootstrap.pack.short_sha} " \
-     "(granted #{bootstrap.granted.size}, missing #{bootstrap.missing.size})"
+# Compound writing: the first pack (offline, from the curated set). Accounts
+# get it on their first Comment-mode visit once the :compound_writing flag is
+# enabled for them (Flipper UI at /admin/flipper, or `bin/rails flags:enable`).
+pack = CompoundWriting::FirstPack.ensure_pack!
+puts "Seeded compound writing pack: #{pack.name}@#{pack.short_sha}"

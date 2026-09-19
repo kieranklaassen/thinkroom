@@ -571,6 +571,8 @@ class DocumentsController < InertiaController
   def compound_writing_props(document, mode)
     return {} unless compound_writing_available?
 
+    # An enabled account gets the first pack on its first visit, once.
+    CompoundWriting::FirstPack.seed!(current_user)
     pass = -> { document.writing_passes.order(created_at: :desc).first&.as_props }
     lens_set = -> { @lens_set ||= CompoundWriting::LensSet.for(current_user) }
     {

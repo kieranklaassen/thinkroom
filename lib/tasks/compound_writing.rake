@@ -1,5 +1,6 @@
-# Compound writing packs and accounts. Run in the deployed container with
+# Compound writing packs. Run in the deployed container with
 #   bin/kamal app exec --reuse 'bin/rails "compound_writing:install[EveryInc/compound-writing,someone@example.com]"'
+# Enabling the feature itself is Flipper (flags:enable, or Flipper UI).
 namespace :compound_writing do
   desc "Install or refresh a pack from a marketplace and subscribe an account: compound_writing:install[owner/repo@ref,email,plugin]"
   task :install, [ :locator, :email, :plugin ] => :environment do |_task, args|
@@ -8,18 +9,9 @@ namespace :compound_writing do
     next if args[:email].blank?
 
     user = User.find_by(email: args[:email].to_s.strip.downcase) or abort "No account with email #{args[:email].inspect}"
-    user.grant_feature!(Features::COMPOUND_WRITING)
+    Flipper.enable_actor(CompoundWriting::FLAG, user)
     outcome = UserWritingPack.subscribe!(user, pack)
     puts "#{outcome.change.to_s.capitalize} subscription for #{user.email} (#{outcome.subscription.enabled_lenses.size} lenses on)"
-  end
-
-  desc "Grant the feature, build the first pack offline, and subscribe accounts: compound_writing:bootstrap[email1;email2]"
-  task :bootstrap, [ :emails ] => :environment do |_task, args|
-    emails = args[:emails].to_s.split(";").map { |email| email.strip.downcase }.reject(&:blank?)
-    emails = CompoundWriting::Bootstrap.initial_accounts if emails.empty?
-    result = CompoundWriting::Bootstrap.run!(emails:)
-    puts "Pack #{result.pack.name}@#{result.pack.short_sha}; granted #{result.granted.join(', ').presence || 'nobody'}; " \
-         "subscribed #{result.subscribed.join(', ').presence || 'nobody'}; missing #{result.missing.join(', ').presence || 'none'}"
   end
 
   desc "List packs and their lenses"
@@ -32,7 +24,7 @@ namespace :compound_writing do
 end
 
 namespace :compound_writing do
-  desc "Create or reset a password account holding the feature and the first pack, for the browser check: compound_writing:check_account[email,password]"
+  desc "Create or reset a password account with the flag enabled, for the browser check: compound_writing:check_account[email,password]"
   task :check_account, [ :email, :password ] => :environment do |_task, args|
     abort "compound_writing:check_account is for development and test only" if Rails.env.production?
 
@@ -41,8 +33,11 @@ namespace :compound_writing do
     user = User.find_or_initialize_by(email:)
     user.name ||= "Compound Check"
     user.password = password
+    # Admin too, so the check can open Flipper UI.
+    user.admin = true
     user.save!
-    result = CompoundWriting::Bootstrap.run!(emails: [ email ])
-    puts "Check account #{email} holds compound_writing with #{result.pack.lens_structs.size} lenses from #{result.pack.name}@#{result.pack.short_sha}"
+    Flipper.enable_actor(CompoundWriting::FLAG, user)
+    pack = CompoundWriting::FirstPack.ensure_pack!
+    puts "Check account #{email} (admin) has #{CompoundWriting::FLAG} enabled; #{pack.name}@#{pack.short_sha} (#{pack.lens_structs.size} lenses) is subscribed on first visit"
   end
 end

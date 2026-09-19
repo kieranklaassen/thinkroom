@@ -5,8 +5,14 @@ no stable release series; changes under development are listed as unreleased.
 
 ## Unreleased
 
-- Added: Compound writing for featured accounts. In Comment mode, an account
-  holding the `compound_writing` feature gets a Reviewers panel that runs the
+- Added: Feature flags on Flipper, as in Cora (`flipper`, `flipper-active_record`,
+  `flipper-ui`): `config/flipper_flag_defaults.yml` documents every flag,
+  Flipper UI is mounted at `/admin/flipper` for admin accounts
+  (`users.admin`, `admin:grant`), and `flags:enable/disable/list` wrap Flipper
+  for the container. The `compound_writing` grant moved from a JSON column to
+  a Flipper actor gate by migration.
+- Added: Compound writing for flag-enabled accounts. In Comment mode, an account
+  with the `compound_writing` flag gets a Reviewers panel that runs the
   lenses of its installed packs; TypeSafe's Jev answers each lens as yes/no
   questions per phrase, sentence, and paragraph in background jobs, and
   findings stream back as coloured highlights and margin cards (stacked with
@@ -17,8 +23,8 @@ no stable release series; changes under development are listed as unreleased.
   first pack is `EveryInc/compound-writing` (Hemingway, AI check, Line edit,
   Tracks, Mom, First-time reader, Nemesis, Sorkin, Sedaris, Vonnegut,
   Hitchcock, Developmental edit, BLUF). Lens choices, packs, the pass, and
-  dismissals live on the account and survive reload. Grants are operator data
-  (`features:grant`, `COMPOUND_WRITING_INITIAL_ACCOUNTS`); requires
+  dismissals live on the account and survive reload; the first pack is
+  subscribed on the account's first Comment-mode visit. Requires
   `TYPESAFE_API_KEY` (or `COMPOUND_WRITING_FAKE_JUDGE=1` offline).
 - Added: WebMCP browser tools — Thinkroom pages register `thinkroom_*` tools
   (read, create, suggest, comment, resolve, presence, events) for agents

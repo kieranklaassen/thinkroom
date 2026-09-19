@@ -1,0 +1,19 @@
+# Feature flag defaults, as in Cora: every Flipper flag the code checks, with
+# its purpose and where it is used. At boot, flags listed here that do not
+# exist yet are registered (disabled in production whatever `enabled` says;
+# other environments take `enabled`). Existing flags are never changed here;
+# manage them in Flipper UI (/admin/flipper) or with `bin/rails flags:enable`.
+#
+# Retiring a flag: remove every check, remove it here, and add a data
+# migration that deletes its flipper_gates rows before its flipper_features
+# row (see Cora's RemoveCategoryAutoClearFlag).
+compound_writing:
+  enabled: false
+  purpose: "Compound writing reviewers in Comment mode (packs of Jev lenses)"
+  usage: |
+    Checked through CompoundWriting.available_to?(user) by documents#show
+    (props), WritingPassesController, WritingFindingsController, and
+    WritingPacksController. Enable per account (actor) from Flipper UI or
+    `bin/rails "flags:enable[compound_writing,someone@example.com]"`. An
+    enabled account is subscribed to the Compound Writing pack on its first
+    Comment-mode visit (CompoundWriting::FirstPack).

@@ -10,6 +10,8 @@ execution: code
 
 # Compound Writing Packs in Comment Mode - Plan
 
+> Superseded in part by `2026-09-19-1230-refactor-compound-writing-flipper-plan.md`: the `users.features` grant, `Features` concern, `features:*` tasks, and `COMPOUND_WRITING_INITIAL_ACCOUNTS` bootstrap became a Flipper flag with Flipper UI and lazy first-pack seeding. Packs, lenses, and Comment mode hosting below still stand.
+
 ## Goal Capsule
 
 - **Objective:** The compound writing reviewers become an account feature inside Comment mode: only enabled accounts see them, reviewers come from installable packs sourced from Claude Code plugin marketplaces, and everything from round one (Jev judging, anchoring, streaming, throttles, caps, budget, semaphore, tests, browser check) keeps working.

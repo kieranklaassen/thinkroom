@@ -1,6 +1,7 @@
 // Compound writing smoke check using Playwright, against a server started
-// with COMPOUND_WRITING_FAKE_JUDGE=1 (the deterministic lexicon judge) and a
-// featured account prepared by `bin/rails "compound_writing:check_account[...]"`.
+// with COMPOUND_WRITING_FAKE_JUDGE=1 (the deterministic lexicon judge) and an
+// admin account with the compound_writing flag enabled, prepared by
+// `bin/rails "compound_writing:check_account[...]"`.
 // Usage: BASE_URL=http://localhost:3000 CHECK_EMAIL=... CHECK_PASSWORD=... node script/compound_writing_check.mjs
 import { chromium } from 'playwright'
 import { expectedBrowserNoise, waitForLive } from './lib/check_helpers.mjs'
@@ -75,6 +76,8 @@ try {
   check(!(await highlightNames(visitor)).some((name) => name.startsWith('cw-')), 'a signed-out visitor gets no finding highlights')
   const gone = await visitor.request.get(`${BASE}/d/${slug}/compound`)
   check(gone.status() === 404, 'the old /compound route is gone')
+  const flipperForVisitor = await visitor.request.get(`${BASE}/admin/flipper/features`)
+  check(flipperForVisitor.status() === 404, 'Flipper UI is 404 for a signed-out visitor')
   await visitor.context().close()
 
   // A featured account signs in; Comment mode hosts the reviewers.
@@ -94,6 +97,8 @@ try {
       }
     }
   }
+  const flipperForAdmin = await page.request.get(`${BASE}/admin/flipper/features`)
+  check(flipperForAdmin.status() === 200 && (await flipperForAdmin.text()).includes('compound_writing'), 'Flipper UI renders the compound_writing flag for an admin account')
   check((await page.locator('.compound-panel').count()) === 0, 'Edit mode shows no reviewers panel')
   await switchMode(3, `/d/${slug}/comment`)
   await page.locator('.compound-panel').waitFor()
