@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_18_230001) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_19_160003) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -188,9 +188,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_18_230001) do
     t.index ["document_id"], name: "index_suggestions_on_document_id"
   end
 
+  create_table "user_writing_packs", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.json "disabled_lens_keys", default: [], null: false
+    t.integer "position", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.integer "user_id", null: false
+    t.integer "writing_pack_id", null: false
+    t.index ["user_id", "writing_pack_id"], name: "index_user_writing_packs_on_user_id_and_writing_pack_id", unique: true
+    t.index ["user_id"], name: "index_user_writing_packs_on_user_id"
+    t.index ["writing_pack_id"], name: "index_user_writing_packs_on_writing_pack_id"
+  end
+
   create_table "users", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "email", limit: 320, null: false
+    t.json "features", default: {}, null: false
     t.string "google_uid"
     t.string "name", limit: 255, null: false
     t.string "password_digest"
@@ -218,12 +231,30 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_18_230001) do
     t.check_constraint "scope IN ('phrase', 'sentence', 'paragraph', 'text')", name: "writing_findings_scope_check"
   end
 
+  create_table "writing_packs", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "description"
+    t.string "display_name", null: false
+    t.datetime "fetched_at"
+    t.json "lenses", default: [], null: false
+    t.string "name", null: false
+    t.string "plugin_name", null: false
+    t.string "source_kind", default: "github", null: false
+    t.string "source_locator", null: false
+    t.string "source_ref"
+    t.string "source_sha", null: false
+    t.datetime "updated_at", null: false
+    t.string "version"
+    t.index ["source_locator", "plugin_name", "source_sha"], name: "index_writing_packs_on_version", unique: true
+  end
+
   create_table "writing_passes", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.integer "document_id", null: false
     t.integer "estimated_calls", default: 0, null: false
     t.integer "estimated_nouls", default: 0, null: false
     t.datetime "finished_at"
+    t.json "lenses", default: [], null: false
     t.json "paragraphs", default: [], null: false
     t.string "paragraphs_digest", limit: 8
     t.string "requested_by_name", null: false
@@ -267,6 +298,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_18_230001) do
   add_foreign_key "documents", "users"
   add_foreign_key "feedback_runs", "users"
   add_foreign_key "suggestions", "documents"
+  add_foreign_key "user_writing_packs", "users"
+  add_foreign_key "user_writing_packs", "writing_packs"
   add_foreign_key "writing_findings", "documents"
   add_foreign_key "writing_findings", "writing_passes"
   add_foreign_key "writing_passes", "documents"

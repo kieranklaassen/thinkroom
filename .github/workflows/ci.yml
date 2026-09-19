@@ -145,6 +145,9 @@ jobs:
       - name: Prepare development database with the demo document
         run: bin/rails db:prepare db:seed
 
+      - name: Prepare the compound writing check account (feature grant plus the first pack)
+        run: bin/rails "compound_writing:check_account[compound-check@example.com,thoughtful-passphrase]"
+
       - name: Start Rails and Vite
         # The check loop legitimately creates ~15+ documents from one IP in
         # minutes; keep it clear of the per-IP creation burst limit.

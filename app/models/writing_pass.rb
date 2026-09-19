@@ -25,7 +25,7 @@ class WritingPass < ApplicationRecord
   end
 
   belongs_to :document
-  has_many :findings, class_name: "WritingFinding", dependent: :delete_all
+  has_many :findings, class_name: "WritingFinding", inverse_of: :writing_pass, dependent: :delete_all
 
   validates :status, inclusion: { in: STATUSES }
   validates :requested_by_name, presence: true
@@ -56,27 +56,29 @@ class WritingPass < ApplicationRecord
   # The single entry point for a run: refuses a pass that would repeat, crowd,
   # or overspend (Throttled, Unchanged, PassBudget::Exceeded), then replaces
   # the document's earlier passes, logs the activity, and enqueues one job per
-  # reviewer after commit.
-  def self.start!(document:, requested_by_name:, reviewer_keys:, paragraphs:, now: Time.current)
-    keys = CompoundWriting::Reviewers.normalize_keys(reviewer_keys)
-    raise ArgumentError, "choose at least one reviewer" if keys.empty?
+  # lens after commit. `lenses` are CompoundWriting::Lens structs the caller
+  # already validated against the account's LensSet; the pass snapshots them.
+  def self.start!(document:, requested_by_name:, lenses:, paragraphs:, now: Time.current)
+    lenses = Array(lenses).uniq(&:key)
+    raise ArgumentError, "choose at least one reviewer" if lenses.empty?
 
+    keys = lenses.map(&:key)
     paragraphs, words = prepare_paragraphs(paragraphs)
     digest = CompoundWriting::ParagraphDigest.of(paragraphs.map { |paragraph| paragraph["text"] })
     previous = document.writing_passes.order(created_at: :desc).first
     previous&.refuse_replacement!(keys, digest, now:)
-    estimate = CompoundWriting::PassBudget.check!(paragraphs, keys.map { |key| CompoundWriting::Reviewers.find!(key) })
+    estimate = CompoundWriting::PassBudget.check!(paragraphs, lenses)
 
     pass = transaction do
       document.writing_passes.destroy_all
       created = document.writing_passes.create!(
-        requested_by_name:, reviewer_keys: keys, paragraphs:, word_count: words, paragraphs_digest: digest,
+        requested_by_name:, reviewer_keys: keys, lenses: lenses.map(&:to_h), paragraphs:, word_count: words, paragraphs_digest: digest,
         estimated_nouls: estimate.nouls, estimated_calls: estimate.calls,
         reviewer_runs: keys.to_h { |key| [ key, { "status" => "queued" } ] }
       )
       Activity.log!(
         document:, actor_name: requested_by_name, actor_kind: "human", action: "ran_writing_reviewers",
-        detail: keys.map { |key| CompoundWriting::Reviewers.find!(key).name }.to_sentence
+        detail: lenses.map(&:name).to_sentence
       )
       created
     end
@@ -111,6 +113,13 @@ class WritingPass < ApplicationRecord
 
   def finished? = status.in?(%w[finished failed])
 
+  # The lens definitions this pass ran with (its own snapshot).
+  def lens_structs
+    @lens_structs ||= lenses.map { |lens| CompoundWriting::Lens.from_h(lens) }
+  end
+
+  def lens(key) = lens_structs.find { |lens| lens.key == key }
+
   # Updates one reviewer's entry under a row lock and re-derives the pass
   # status, so concurrent reviewer jobs never lose each other's writes.
   def record_run!(reviewer_key, status:, error: nil, findings_count: nil)
@@ -139,6 +148,7 @@ class WritingPass < ApplicationRecord
   def as_props
     {
       id:, status:, reviewer_keys:, reviewer_runs:, word_count:,
+      lenses: lens_structs.map(&:as_props),
       paragraph_count: paragraphs.size,
       # The client hashes its live projection the same way to say "text
       # changed since the last run" even where no finding was touched.

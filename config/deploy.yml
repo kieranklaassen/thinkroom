@@ -43,6 +43,9 @@ env:
     # ("should be a string") whenever the variable is unset in deploy.env.
     # Empty disables Riffrec automation. Use a comma-separated allowlist.
     RIFFREC_AUTOMATION_EMAILS: <%= ENV.fetch("RIFFREC_AUTOMATION_EMAILS", "").to_json %>
+    # Comma-separated accounts granted the compound writing feature and the
+    # first pack by the boot migration and seed. Empty grants nobody.
+    COMPOUND_WRITING_INITIAL_ACCOUNTS: <%= ENV.fetch("COMPOUND_WRITING_INITIAL_ACCOUNTS", "").to_json %>
     # Public Chrome origin-trial token for WebMCP. Empty emits no meta tag.
     WEBMCP_ORIGIN_TRIAL_TOKEN: <%= ENV.fetch("WEBMCP_ORIGIN_TRIAL_TOKEN", "").to_json %>
 

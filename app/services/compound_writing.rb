@@ -40,4 +40,31 @@ module CompoundWriting
   def judge=(judge)
     @judge = judge
   end
+
+  # The account gate: compound writing exists only for signed-in accounts
+  # holding the feature (Features::COMPOUND_WRITING). Independent of whether a
+  # judge is configured, so a featured account still sees the panel and its
+  # not-configured notice.
+  def available_to?(user)
+    user.present? && user.feature?(Features::COMPOUND_WRITING)
+  end
+
+  # Hands ruby_llm-skills' marketplace layer the token and caps before a
+  # fetch. Only MARKETPLACE_GITHUB_TOKEN is used (a public-read token, to
+  # lift GitHub's anonymous rate limit); the gem's own GITHUB_TOKEN default
+  # is overridden with nil so a broad token in the environment never travels
+  # with a marketplace fetch.
+  def configure_marketplaces!(env: ENV)
+    RubyLLM::Skills::Marketplace.configure do |config|
+      config.github_token = env["MARKETPLACE_GITHUB_TOKEN"].presence
+      config.max_archive_bytes = 32 * 1024 * 1024
+      config.max_file_bytes = 4 * 1024 * 1024
+      config.max_files = 2_000
+      config.max_skills = 200
+      config.user_agent = "thinkroom-compound-writing (+https://github.com/kieranklaassen/thinkroom)"
+      # PackInstaller only follows repository sources, so no author-supplied
+      # URL should ever reach the fetcher; refuse any that does.
+      config.url_guard = ->(uri) { raise RubyLLM::Skills::Marketplace::FetchError, "refusing to fetch #{uri.host}: packs come from repositories only" }
+    end
+  end
 end

@@ -427,10 +427,6 @@
   background: var(--ink-faint);
 }
 
-.mode-control-dot--compound {
-  background: var(--cw-1, var(--accent));
-}
-
 .mode-control-popover {
   width: 13.5rem;
   padding: 0.25rem;

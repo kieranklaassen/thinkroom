@@ -10,7 +10,7 @@ export type SheetKind = 'suggestions' | 'comments' | 'activity' | 'theme' | 'rev
 interface DockProps {
   suggestionCount: number
   commentCount: number
-  /** Compound mode swaps the suggestions and comments items for Reviewers. */
+  /** Comment mode for a featured account adds a Reviewers item. */
   reviewerFindingCount?: number
   active: SheetKind | null
   onOpen: (kind: SheetKind) => void
@@ -32,14 +32,9 @@ export function MobileDock({ suggestionCount, commentCount, reviewerFindingCount
 
   return (
     <nav className="mobile-dock" aria-label="Document tools">
-      {reviewerFindingCount === undefined ? (
-        <>
-          {item('suggestions', 'Suggestions', suggestionCount)}
-          {item('comments', 'Comments', commentCount)}
-        </>
-      ) : (
-        item('reviewers', 'Reviewers', reviewerFindingCount)
-      )}
+      {item('suggestions', 'Suggestions', suggestionCount)}
+      {item('comments', 'Comments', commentCount)}
+      {reviewerFindingCount !== undefined && item('reviewers', 'Reviewers', reviewerFindingCount)}
       {item('activity', 'Activity', 0)}
     </nav>
   )

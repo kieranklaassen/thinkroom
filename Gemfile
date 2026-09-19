@@ -57,6 +57,10 @@ gem "inertia_rails", "~> 3.22"
 # Kieran's provider gem (structured output only; Jev writes no text).
 gem "ruby_llm", "~> 2.0"
 gem "ruby_llm-typesafe", "~> 0.1"
+# Fetches and pins compound writing packs from Claude Code plugin
+# marketplaces over HTTPS (no git in the production image). Pre-release,
+# pinned exactly; CompoundWriting::PackInstaller is its only caller.
+gem "ruby_llm-skills", "0.5.0.pre1"
 
 gem "vite_rails", "~> 3.11"
 

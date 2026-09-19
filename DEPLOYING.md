@@ -44,22 +44,57 @@ Captured Riffrec ZIPs are private Active Storage attachments. Cursor receives a
 purpose-scoped bundle URL that expires after 24 hours; generated pull requests
 are never merged or deployed automatically.
 
-### Compound writing mode (TypeSafe Jev)
+### Compound writing (TypeSafe Jev, featured accounts)
 
-The compound writing mode (`/d/:slug/compound`, Cmd+5) asks TypeSafe's Jev
-model the Compound Writing reviewers' questions over a document. It needs a
-TypeSafe API key from <https://console.typesafe.ai>. Add it to `.kamal/secrets`
-as `TYPESAFE_API_KEY=$TYPESAFE_API_KEY` and set `KAMAL_COMPOUND_WRITING=1` in
+Compound writing lives in Comment mode for accounts that hold the
+`compound_writing` feature: their reviewers panel runs the lenses of the packs
+they subscribed to, and TypeSafe's Jev answers each lens's yes/no questions
+over the document. Everyone else sees no panel, no props, and the pass and
+pack endpoints refuse them. It needs a TypeSafe API key from
+<https://console.typesafe.ai>. Add it to `.kamal/secrets` as
+`TYPESAFE_API_KEY=$TYPESAFE_API_KEY` and set `KAMAL_COMPOUND_WRITING=1` in
 `.kamal/deploy.env`; without the flag the container receives no key and the
-mode shows a "not configured" notice instead of running reviewers.
+panel shows a "not configured" notice instead of running reviewers.
 `TYPESAFE_MODEL` (default `jev-latest`) may be set in `env.clear` if needed.
 
-Every pass spends against that shared key, so passes are bounded. Anyone with
-write access to a document can start one, but only one pass runs per document
-at a time, a document waits `COMPOUND_WRITING_COOLDOWN_SECONDS` (60) between
-passes, and a rerun with the same text and reviewers returns the finished pass
-instead of spending; a failed pass can always be rerun. Daily caps answer 429
-and count only passes that actually started, per fixed UTC day:
+Grants are data, not code. `COMPOUND_WRITING_INITIAL_ACCOUNTS` (comma-separated
+emails in `.kamal/deploy.env`, passed through `env.clear`) names the accounts
+the boot migration and `db:seed` grant the feature and subscribe to the first
+pack, `EveryInc/compound-writing` at commit
+`8fd0ec88c00976cf0274cb76552dc7ad9405ca92`, built offline from
+`config/compound_writing/lenses/everyinc--compound-writing.yml`. Later grants
+need no deploy:
+
+```bash
+bin/kamal app exec --reuse 'bin/rails "features:grant[someone@example.com,compound_writing]"'
+bin/kamal app exec --reuse 'bin/rails "compound_writing:install[EveryInc/compound-writing,someone@example.com]"'
+bin/kamal app exec --reuse 'bin/rails "features:list[compound_writing]"'
+```
+
+Packs are fetched through `ruby_llm-skills`' marketplace layer over HTTPS
+(api.github.com, raw.githubusercontent.com, codeload.github.com; no `git` in
+the image is needed). Each install is an immutable version row keyed by
+locator, plugin, and the commit the ref resolved to; re-adding a locator moves
+only the requester's subscription, never another account's. A plugin must live
+in the marketplace repository itself (a relative source, or a `github` source
+naming the same owner/repo); archives, hosted URLs, and other repositories are
+refused. Pack-authored text is bounded before it is stored (lenses per pack,
+questions per lens, field lengths, single-line printable text), and a pack
+that breaks a bound fails to install.
+
+`MARKETPLACE_GITHUB_TOKEN` (optional, `env.clear`) is sent with marketplace
+fetches to lift GitHub's anonymous rate limit. Use a token with public read
+access only (a fine-grained token with no repository access, or a classic
+token with no scopes): it travels with every fetch a featured account
+triggers, and the code never falls back to a broader `GITHUB_TOKEN`. How a
+pack's `SKILL.md` files become lenses is in `docs/compound-writing-packs.md`.
+
+Every pass spends against that shared key, so passes are bounded. A featured
+account with write access to a document can start one, but only one pass runs
+per document at a time, a document waits `COMPOUND_WRITING_COOLDOWN_SECONDS`
+(60) between passes, and a rerun with the same text and reviewers returns the
+finished pass instead of spending; a failed pass can always be rerun. Daily
+caps answer 429 and count only passes that actually started, per fixed UTC day:
 `COMPOUND_WRITING_DOCUMENT_DAILY_PASSES` (40 per document) and
 `COMPOUND_WRITING_IP_DAILY_PASSES` (100 per client address). A pass is refused
 up front when its estimate exceeds
@@ -68,8 +103,7 @@ up front when its estimate exceeds
 process never has more than `COMPOUND_WRITING_MAX_CONCURRENT_JEV_CALLS` (4)
 requests in flight. A pass still running after `COMPOUND_WRITING_STALL_SECONDS`
 (600) is treated as abandoned and may be replaced. Set any of these in
-`env.clear` to tune a deployment. Restricting passes to signed-in owners rather
-than any writer is a product decision that is still open.
+`env.clear` to tune a deployment.
 
 For local development put the key in an untracked `.env` at the repo root;
 `bin/dev` (overmind or foreman) loads it. `bin/rails console` and

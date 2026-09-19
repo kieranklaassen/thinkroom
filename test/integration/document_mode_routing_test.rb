@@ -15,7 +15,7 @@ class DocumentModeRoutingTest < ActionDispatch::IntegrationTest
   end
 
   test "explicit mode URLs render their matching mode" do
-    %w[edit suggest comment compound].each do |mode|
+    %w[edit suggest comment].each do |mode|
       get document_mode_path(@document.slug, mode), headers: browser
 
       assert_response :ok

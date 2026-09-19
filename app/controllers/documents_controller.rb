@@ -110,7 +110,7 @@ class DocumentsController < InertiaController
     # a blank document until it expires.
     seed_granted = initial_render? && !prefetch_request? && !link_preview_request &&
       writable && document.try_claim_seed
-    preview_editable = writable && %w[edit suggest compound].include?(mode)
+    preview_editable = writable && %w[edit suggest].include?(mode)
     preview_sketch_interactive = writable && mode == "edit"
 
     render inertia: "documents/show", props: {
@@ -163,14 +163,14 @@ class DocumentsController < InertiaController
       activities: -> { document.activities.recent.map(&:as_props) },
       presences: -> { document.agent_presences.active.map(&:as_props) },
       highlight_names: -> { document.highlight_names || {} },
-      # Compound writing mode: the reviewer registry is static; the pass (with
-      # its findings) is eager in compound mode and optional elsewhere, so a
-      # writer opening /compound paints findings on first render while other
-      # modes never pay for rows they do not show. The client reloads it
-      # explicitly on `writing_pass` cable events while in compound mode.
-      writing_reviewers: -> { CompoundWriting::Reviewers.as_props },
-      writing_enabled: -> { CompoundWriting.enabled? },
-      writing_pass: mode == "compound" ? -> { writing_pass_props(document) } : InertiaRails.optional { writing_pass_props(document) },
+      # Compound writing lives in Comment mode for featured accounts only:
+      # everyone else gets `writing_available: false` and nothing more. The
+      # pass (with its findings) is eager in Comment mode and optional
+      # elsewhere, so a featured reviewer paints findings on first render
+      # while other modes never pay for rows they do not show; the client
+      # reloads it on `writing_pass` cable events while in Comment mode.
+      writing_available: -> { compound_writing_available? },
+      **compound_writing_props(document, mode),
       # WebMCP tool manifest for agents driving this browser (lazy: partial
       # reloads that poll suggestions/comments/presences never re-ship it).
       # The in-page update tool rides only when THIS viewer can write.
@@ -566,8 +566,19 @@ class DocumentsController < InertiaController
     end
   end
 
-  def writing_pass_props(document)
-    document.writing_passes.order(created_at: :desc).first&.as_props
+  def compound_writing_available? = CompoundWriting.available_to?(current_user)
+
+  def compound_writing_props(document, mode)
+    return {} unless compound_writing_available?
+
+    pass = -> { document.writing_passes.order(created_at: :desc).first&.as_props }
+    lens_set = -> { @lens_set ||= CompoundWriting::LensSet.for(current_user) }
+    {
+      writing_enabled: -> { CompoundWriting.enabled? },
+      writing_reviewers: -> { lens_set.call.as_props },
+      writing_packs: -> { lens_set.call.packs_props },
+      writing_pass: mode == "comment" ? pass : InertiaRails.optional(&pass)
+    }
   end
 
   def ui_prefs(mode:)
@@ -580,7 +591,6 @@ class DocumentsController < InertiaController
       activity_filter: cookies[:pruf_activity_filter].to_s.presence_in(%w[all agents decisions]) || "all",
       activity_expanded: cookies[:pruf_activity_expanded] == "1",
       comments_resolved: cookies[:pruf_comments_resolved] == "1",
-      compound_reviewers_off: cookies[:pruf_cw_off].to_s.split(",").select { |key| CompoundWriting::Reviewers.known?(key) }.uniq,
       mode:,
       document_width: document_width&.clamp(MIN_DOCUMENT_WIDTH, MAX_DOCUMENT_WIDTH),
       rich_content_width: rich_content_width&.clamp(MIN_RICH_CONTENT_WIDTH, MAX_RICH_CONTENT_WIDTH)

@@ -28,9 +28,9 @@ Inspired by [Proof](https://proofeditor.ai) from Dan Shipper.
 
 - Real-time collaborative Markdown and semantic HTML editing
 - Human and AI authorship provenance
-- Read, edit, comment, suggest, and compound writing modes
+- Read, edit, comment, and suggest modes
 - Reviewable suggestions, anchored comments, and task checkboxes
-- Compound Writing reviewers (Hemingway, AI check, Mom, Nemesis, and more) answered by TypeSafe's Jev and painted into the text
+- Compound writing in Comment mode for featured accounts: packs of reviewer lenses (Compound Writing's Hemingway, AI check, Mom, Nemesis, and more) answered by TypeSafe's Jev and painted into the text
 - Inline Excalidraw sketches with touch, Apple Pencil, and SVG export
 - Agent presence, activity, and a discoverable HTTP API
 - Local-first Yjs state synchronized through Action Cable
@@ -98,11 +98,17 @@ http://localhost:3000/auth/google_oauth2/callback
 http://localhost:3001/auth/google_oauth2/callback
 ```
 
-The compound writing mode (Cmd+5) runs the Compound Writing reviewers through
-[TypeSafe's Jev](https://docs.typesafe.ai). Put `TYPESAFE_API_KEY=...` in an
-untracked `.env` at the repo root before `bin/dev`, or start with
-`COMPOUND_WRITING_FAKE_JUDGE=1 bin/dev` to try the mode with a deterministic
-offline judge. See `DEPLOYING.md` for production.
+Compound writing (the Reviewers panel in Comment mode) runs packs of reviewer
+lenses through [TypeSafe's Jev](https://docs.typesafe.ai) for accounts holding
+the `compound_writing` feature. Locally: sign up, then grant yourself and the
+first pack with `bin/rails "compound_writing:check_account[you@example.com,your-password]"`
+(or `bin/rails "features:grant[you@example.com,compound_writing]"` plus
+`bin/rails "compound_writing:install[EveryInc/compound-writing,you@example.com]"`).
+Put `TYPESAFE_API_KEY=...` in an untracked `.env` at the repo root before
+`bin/dev`, or start with `COMPOUND_WRITING_FAKE_JUDGE=1 bin/dev` for a
+deterministic offline judge. Packs are Claude Code plugin marketplaces; see
+`docs/compound-writing-packs.md` for how a `SKILL.md` becomes a lens, and
+`DEPLOYING.md` for production.
 
 ## Verify
 

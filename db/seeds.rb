@@ -58,3 +58,9 @@ doc = Document.find_or_create_by!(slug: "demo") do |d|
 end
 
 puts "Seeded demo document: /d/#{doc.slug}"
+
+# Compound writing: the first pack (offline, from the curated set) and the
+# feature for the accounts in COMPOUND_WRITING_INITIAL_ACCOUNTS, if any exist.
+bootstrap = CompoundWriting::Bootstrap.run!
+puts "Seeded compound writing pack: #{bootstrap.pack.name}@#{bootstrap.pack.short_sha} " \
+     "(granted #{bootstrap.granted.size}, missing #{bootstrap.missing.size})"

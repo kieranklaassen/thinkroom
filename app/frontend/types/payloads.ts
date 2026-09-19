@@ -54,15 +54,33 @@ export interface ActivityPayload {
 /** CompoundWriting::Reviewers::SCOPES. */
 export type WritingScope = 'phrase' | 'sentence' | 'paragraph' | 'text'
 
-/** CompoundWriting::Reviewers::Reviewer#as_props. */
+/** CompoundWriting::Lens#as_props: one reviewer from a pack. */
 export interface WritingReviewerPayload {
+  /** `<pack name>/<skill name>`. */
   key: string
   name: string
   blurb: string
-  /** Colour slot (0-12) mapped to --cw-<slot> custom properties. */
+  /** Colour slot (0-15) mapped to --cw-<slot> custom properties and the cw-<slot>-* highlights. */
   color: number
-  source: string
+  origin: 'sidecar' | 'curated' | 'generated'
+  skill_path: string
   questions: Array<{ id: string; scope: WritingScope; note: string }>
+}
+
+/** WritingPack#as_props for one of the account's subscriptions. */
+export interface WritingPackPayload {
+  id: number
+  name: string
+  display_name: string
+  description: string | null
+  version: string | null
+  source_kind: string
+  source_locator: string
+  source_ref: string | null
+  source_sha: string
+  short_sha: string
+  fetched_at: string | null
+  lenses: Array<WritingReviewerPayload & { enabled: boolean }>
 }
 
 /** WritingFinding#as_props. Text-scope findings carry null anchors. */
@@ -88,6 +106,8 @@ export interface WritingPassPayload {
   status: WritingRunStatus
   reviewer_keys: string[]
   reviewer_runs: Record<string, { status: WritingRunStatus; error?: string; findings_count?: number; finished_at?: string }>
+  /** The lens definitions this pass ran with (its own snapshot). */
+  lenses: WritingReviewerPayload[]
   word_count: number
   paragraph_count: number
   /** CompoundWriting::ParagraphDigest of the judged paragraphs (see paragraphDigest). */

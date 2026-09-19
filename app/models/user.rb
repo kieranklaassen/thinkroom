@@ -1,4 +1,6 @@
 class User < ApplicationRecord
+  include Features
+
   MINIMUM_PASSWORD_LENGTH = 10
   MAXIMUM_PASSWORD_BYTES = 72
 
@@ -8,6 +10,8 @@ class User < ApplicationRecord
   has_many :cli_access_tokens, dependent: :destroy
   has_many :cli_device_authorizations, dependent: :destroy
   has_many :feedback_runs, dependent: :destroy
+  has_many :user_writing_packs, dependent: :destroy
+  has_many :writing_packs, through: :user_writing_packs
 
   before_validation :normalize_identity
 

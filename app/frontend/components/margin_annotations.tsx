@@ -12,6 +12,7 @@ import {
 } from './suggestion_card'
 
 import { CommentCard } from './comment_card'
+import { FindingCardBody, findingCardKey, findingCardLabel, type FindingCardsSource } from './finding_margin_cards'
 import type { CommentPayload } from '../types/payloads'
 import type { CommentRange } from '../editor/comment_anchors'
 
@@ -33,6 +34,9 @@ interface Props {
    *  the anchor — mobile routes markers into the suggestion sheet. Tracked
    *  edits always jump (their marks are visible in the copy). */
   onMarkerSelect?: (item: ReviewableSuggestion) => void
+  /** Compound writing findings (Comment mode, featured accounts): one card
+   *  per paragraph with findings, measured in this same stack. */
+  findings?: FindingCardsSource
 }
 
 /**
@@ -43,7 +47,7 @@ interface Props {
  * the CSS Custom Highlight API where available; tracked edits are already
  * tinted by their marks.
  */
-export function MarginAnnotations({ items, comments, anchorRanges, handle, focusMode, onMarkerSelect, onResolveComment, onJumpToComment, onHoverComment, onCommentMarkerSelect, resolvingComments }: Props) {
+export function MarginAnnotations({ items, comments, anchorRanges, handle, focusMode, onMarkerSelect, onResolveComment, onJumpToComment, onHoverComment, onCommentMarkerSelect, resolvingComments, findings }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const rangesRef = useRef(new Map<string, Range>())
 
@@ -93,9 +97,18 @@ export function MarginAnnotations({ items, comments, anchorRanges, handle, focus
       }
       entries.push({ key: `comment:${comment.id}`, top: Math.max(0, top) })
     }
+    for (const paragraph of findings?.paragraphs ?? []) {
+      let top: number
+      try {
+        top = view.coordsAtPos(Math.min(paragraph.pos + 1, docSize)).top - containerTop
+      } catch {
+        top = 0 // remeasured on the next change
+      }
+      entries.push({ key: findingCardKey(paragraph), top: Math.max(0, top) })
+    }
     setHighlight('sug-anchor', [...rangesRef.current.values()])
     return entries
-  }, [items, comments, anchorRanges, handle, focusMode], layoutElement)
+  }, [items, comments, anchorRanges, handle, focusMode, findings], layoutElement)
 
   useEffect(() => {
     if (!supportsHighlights) return
@@ -136,6 +149,26 @@ export function MarginAnnotations({ items, comments, anchorRanges, handle, focus
 
   return (
     <div className="margin-annotations" style={{ minHeight: height }} ref={containerRef} aria-label="Document annotations">
+      {findings?.paragraphs.map((paragraph) => {
+        const key = findingCardKey(paragraph)
+        const label = findingCardLabel(paragraph)
+        if (focusMode) {
+          return (
+            <button key={key} ref={setCardRef(key)}
+              className={`margin-marker margin-marker--finding ${placed.has(key) ? 'is-placed' : ''}`}
+              style={{ top: tops.get(key) ?? 0 }}
+              aria-label={label}
+              title={label}
+              onClick={() => (findings.onMarkerSelect ? findings.onMarkerSelect(paragraph) : findings.onJumpTo(paragraph.findings[0]))} />
+          )
+        }
+        return (
+          <article key={key} ref={setCardRef(key)} className={`compound-card ${placed.has(key) ? 'is-placed' : ''}`}
+            style={{ top: tops.get(key) ?? 0 }} aria-label={label}>
+            <FindingCardBody paragraph={paragraph} source={findings} />
+          </article>
+        )
+      })}
       {comments.map((comment) => {
         const key = `comment:${comment.id}`
         return focusMode ? (

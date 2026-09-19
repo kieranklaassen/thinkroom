@@ -3,17 +3,16 @@ import { router } from '@inertiajs/react'
 import { editorViewCtx } from '@milkdown/kit/core'
 import type { EditorHandle } from '../../editor/milkdown_editor'
 import { paragraphDigest, paragraphPayload, projectParagraphs } from '../../editor/paragraph_projection'
-import { setCookie } from '../../lib/cookies'
-import type { WritingPassPayload, WritingReviewerPayload } from '../../types/payloads'
+import type { WritingPackPayload, WritingPassPayload, WritingReviewerPayload } from '../../types/payloads'
 
 interface Options {
   slug: string
-  /** undefined: not loaded (optional prop outside compound mode); null: no pass yet. */
+  /** undefined: not loaded (optional prop outside Comment mode); null: no pass yet. */
   pass: WritingPassPayload | null | undefined
+  /** The account's enabled lenses across its packs (server-derived). */
   reviewers: WritingReviewerPayload[]
-  /** Reviewer keys switched off, from the server-validated cookie. */
-  initialOff: string[]
-  /** True while the page is in compound mode. */
+  packs: WritingPackPayload[]
+  /** True while the page is in Comment mode for a featured account. */
   active: boolean
   /** Server has a judge configured (TypeSafe key or the fake). */
   enabled: boolean
@@ -25,8 +24,17 @@ interface Options {
 }
 
 export interface WritingPassControls {
+  /** Lens keys switched off across the account's packs (server state). */
   off: Set<string>
-  toggleReviewer: (key: string) => void
+  /** Switch one lens on or off; persisted on the account's pack subscription. */
+  toggleLens: (packId: number, key: string) => void
+  /** Install (or refresh) a pack by `owner/repo[@ref]` and subscribe the account. */
+  addPack: (locator: string) => void
+  removePack: (packId: number) => void
+  /** A pack request is in flight. */
+  packBusy: boolean
+  packError: string | null
+  clearPackError: () => void
   run: () => void
   /** The run request is in flight. A pass still being judged does not block
    *  a new run: the new pass replaces it, which is also the recovery path for
@@ -39,35 +47,79 @@ export interface WritingPassControls {
   clearError: () => void
   /** The live paragraphs no longer match the ones the pass judged. */
   textChanged: boolean
-  /** Reload the pass prop (cable event or entering compound mode). */
+  /** Reload the pass prop (cable event or entering Comment mode). */
   reloadPass: () => void
 }
 
-const OFF_COOKIE = 'pruf_cw_off'
+const SELECTION_PROPS = ['writing_reviewers', 'writing_packs']
 
 /**
- * Owns the compound panel's state: which reviewers are on (cookie-backed so
- * the server can render the same toggles on first paint), the run request
- * (paragraphs projected from the live editor, reviewers, the viewer's name),
- * and reloading the `writing_pass` prop, which other modes never fetch.
+ * Owns the reviewers panel's state: the account's packs and lens selection
+ * (server-persisted through the writing_packs endpoints, so they follow the
+ * account across browsers), the run request (paragraphs projected from the
+ * live editor, lens keys, the viewer's name), and reloading the
+ * `writing_pass` prop, which other modes never fetch.
  */
-export function useWritingPass({ slug, pass, reviewers, initialOff, active, enabled, canWrite, handle, identityName, docTick }: Options): WritingPassControls {
-  const [off, setOff] = useState(() => new Set(initialOff))
+export function useWritingPass({ slug, pass, reviewers, packs, active, enabled, canWrite, handle, identityName, docTick }: Options): WritingPassControls {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [requesting, setRequesting] = useState(false)
+  const [packBusy, setPackBusy] = useState(false)
+  const [packError, setPackError] = useState<string | null>(null)
   const activeRef = useRef(active)
   activeRef.current = active
 
-  const toggleReviewer = useCallback((key: string) => {
-    const next = new Set(off)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    setOff(next)
-    setCookie(OFF_COOKIE, [...next].join(','))
-  }, [off])
+  const off = useMemo(() => {
+    const keys = new Set<string>()
+    for (const pack of packs) for (const lens of pack.lenses) if (!lens.enabled) keys.add(lens.key)
+    return keys
+  }, [packs])
 
-  const activeKeys = useMemo(() => reviewers.filter((reviewer) => !off.has(reviewer.key)).map((reviewer) => reviewer.key), [reviewers, off])
+  const selectionVisit = useCallback((request: () => void) => {
+    setPackError(null)
+    setPackBusy(true)
+    request()
+  }, [])
+  const selectionOptions = useMemo(() => ({
+    preserveState: true,
+    preserveScroll: true,
+    only: SELECTION_PROPS,
+    async: true,
+    onError: (errors: Record<string, unknown>) => {
+      const message = errors.writing_pack
+      setPackError(typeof message === 'string' ? message : 'That pack could not be changed.')
+    },
+    onHttpException: (response: { status: number; data: unknown }) => {
+      const text = typeof response.data === 'string' ? response.data.trim() : ''
+      setPackError(response.status === 429 && text.length > 0 && text.length < 240 ? text : 'That pack could not be changed.')
+      return false
+    },
+    onFinish: () => setPackBusy(false),
+  }), [])
+
+  const toggleLens = useCallback((packId: number, key: string) => {
+    const pack = packs.find((candidate) => candidate.id === packId)
+    if (!pack) return
+    const disabled = new Set(pack.lenses.filter((lens) => !lens.enabled).map((lens) => lens.key))
+    if (disabled.has(key)) disabled.delete(key)
+    else disabled.add(key)
+    selectionVisit(() => router.patch(`/writing_packs/${packId}`, { disabled_lens_keys: [...disabled] }, selectionOptions))
+  }, [packs, selectionVisit, selectionOptions])
+
+  const addPack = useCallback((locator: string) => {
+    const trimmed = locator.trim()
+    if (!trimmed) {
+      setPackError('Enter a marketplace as owner/repo, optionally @branch or @commit')
+      return
+    }
+    selectionVisit(() => router.post('/writing_packs', { locator: trimmed }, selectionOptions))
+  }, [selectionVisit, selectionOptions])
+
+  const removePack = useCallback((packId: number) => {
+    selectionVisit(() => router.delete(`/writing_packs/${packId}`, selectionOptions))
+  }, [selectionVisit, selectionOptions])
+
+  const activeKeys = useMemo(() => reviewers.map((reviewer) => reviewer.key), [reviewers])
 
   const projected = useCallback(() => {
     if (!handle) return null
@@ -85,7 +137,7 @@ export function useWritingPass({ slug, pass, reviewers, initialOff, active, enab
     return paragraphs !== null && paragraphDigest(paragraphs.map((paragraph) => paragraph.text)) !== pass.paragraphs_digest
   }, [active, pass, projected, docTick])
 
-  // A running pass broadcasts once per paragraph per reviewer; coalesce the
+  // A running pass broadcasts once per paragraph per lens; coalesce the
   // burst into one reload per window, like useMetaChannel does for its props.
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const reloadPass = useCallback(() => {
@@ -102,7 +154,7 @@ export function useWritingPass({ slug, pass, reviewers, initialOff, active, enab
     if (reloadTimer.current) clearTimeout(reloadTimer.current)
   }, [])
 
-  // The prop is optional outside compound mode; fetch it once on entry.
+  // The prop is optional outside Comment mode; fetch it once on entry.
   useEffect(() => {
     if (active && pass === undefined) reloadPass()
   }, [active, pass, reloadPass])
@@ -154,7 +206,12 @@ export function useWritingPass({ slug, pass, reviewers, initialOff, active, enab
 
   return {
     off,
-    toggleReviewer,
+    toggleLens,
+    addPack,
+    removePack,
+    packBusy,
+    packError,
+    clearPackError: () => setPackError(null),
     run,
     requesting,
     canRun: enabled && canWrite && Boolean(handle) && !requesting,

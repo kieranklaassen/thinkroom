@@ -1,0 +1,330 @@
+# Curated Jev lenses for the EveryInc/compound-writing marketplace (Compound Writing 2.4.1).
+# Keyed by skill directory name; each becomes one reviewer lens. Colour slots are assigned in this order.
+# Questions are literal yes/no questions about one unit of text, phrased per Jevgram; lexicon feeds the FakeJudge.
+marketplace: EveryInc/compound-writing
+pinned_sha: 8fd0ec88c00976cf0274cb76552dc7ad9405ca92
+version: 2.4.1
+display_name: Compound Writing
+description: 'Every''s writing toolbox: the review lenses as Jev yes/no questions.'
+skills:
+  cw-hemingway:
+    name: Hemingway
+    blurb: Cuts every word that does not earn its place.
+    lexicon:
+    - very
+    - really
+    - quite
+    - somewhat
+    - rather
+    - basically
+    - actually
+    - completely
+    - absolutely
+    - extremely
+    questions:
+    - id: cut
+      scope: phrase
+      note: 'Cut or shorten: adverb, qualifier, redundancy, or inflated phrase'
+      threshold: 0.7
+      question: Is this phrase an adverb, an empty qualifier such as very or quite,
+        a redundancy such as completely finished, or an inflated phrase such as at
+        this point in time that could be cut or shortened without changing the meaning?
+    - id: padding
+      scope: sentence
+      note: Throat-clearing or passive padding
+      threshold: 0.7
+      question: Does this sentence open with throat-clearing such as it is important
+        to note, or lean on passive voice, so that it could be rewritten shorter with
+        the same meaning?
+  cw-ai-check:
+    name: AI check
+    blurb: Finds the residue that makes prose sound generated.
+    lexicon:
+    - delve
+    - leverage
+    - utilize
+    - tapestry
+    - seamless
+    - robust
+    - pivotal
+    - crucial
+    - multifaceted
+    - moreover
+    - furthermore
+    - additionally
+    - landscape
+    - realm
+    questions:
+    - id: vocabulary
+      scope: phrase
+      note: Stock AI vocabulary or template
+      threshold: 0.7
+      question: Is this phrase stock AI vocabulary or a generic template, such as
+        delve, leverage, utilize, tapestry, seamless, robust, pivotal, it is worth
+        noting, in today's fast-paced world, at its core, or a formal transition such
+        as moreover or furthermore?
+    - id: performed
+      scope: sentence
+      note: Performed symmetry, self-rating, or false enthusiasm
+      threshold: 0.7
+      question: 'Does this sentence read as machine-generated: a not X but Y contrast,
+        a rule-of-three flourish, commentary that rates its own evidence or signposts
+        its own structure, an empty metaphor, or enthusiasm the material has not earned?'
+    - id: overcompletion
+      scope: paragraph
+      note: Unearned causality, symmetry, or resolution
+      threshold: 0.7
+      question: Does this paragraph supply neat causality, symmetry, or a tidy resolution
+        that reads as generated overcompletion rather than something the material
+        supports?
+  cw-line-edit:
+    name: Line edit
+    blurb: Sentence-level cuts that keep the voice.
+    lexicon:
+    - perhaps
+    - maybe
+    - might
+    - arguably
+    - studies show
+    - some say
+    - synergy
+    - paradigm
+    - stakeholders
+    - robust
+    questions:
+    - id: weak
+      scope: phrase
+      note: Hedge, weasel word, intensifier, cliché, or jargon
+      threshold: 0.7
+      question: Is this phrase a hedge such as perhaps or somewhat, a weasel attribution
+        such as some people say or studies show, an empty intensifier, a cliché metaphor,
+        or business or academic jargon a line editor would cut or replace?
+    - id: construction
+      scope: sentence
+      note: Passive, back-loaded, or an echo
+      threshold: 0.7
+      question: Is this sentence in passive voice, does it bury its main point at
+        the end, or does it restate a point the paragraph already made?
+  cw-tracks:
+    name: Tracks
+    blurb: Erases the scaffolding the writer used to get here.
+    lexicon:
+    - realized
+    - surprisingly
+    - I think
+    - it seems
+    - this raises the question
+    - one might wonder
+    - what I learned
+    questions:
+    - id: narration
+      scope: sentence
+      note: Process or arrival narration
+      threshold: 0.7
+      question: Does this sentence narrate the writer's process or arrival, such as
+        after much research I realized, this raises the question, one might wonder,
+        surprisingly I found, or what I learned was, instead of stating the thought
+        itself?
+    - id: scaffolding
+      scope: paragraph
+      note: Scaffolding or warm-up
+      threshold: 0.7
+      question: Is this paragraph warm-up or scaffolding that helped the writer build
+        the argument but that a reader could skip without losing anything the piece
+        needs?
+  cw-mom:
+    name: Mom
+    blurb: Where a smart, supportive outsider smiles and nods.
+    lexicon:
+    - API
+    - CRDT
+    - idempotent
+    - latency
+    - throughput
+    - orchestration
+    - middleware
+    questions:
+    - id: insider
+      scope: sentence
+      note: Unexplained jargon, name, or insider reference
+      threshold: 0.7
+      question: Would a smart, supportive reader from outside this field smile and
+        nod at this sentence without understanding it, because it uses a technical
+        term, a name, or an insider reference that the text has not explained?
+    - id: stakes
+      scope: paragraph
+      note: No human stakes, the thread is lost
+      threshold: 0.7
+      question: Would a general reader lose the thread or stop caring in this paragraph
+        because it stays abstract and never connects to a person, a stake, or a consequence
+        they can feel?
+  cw-reader:
+    name: First-time reader
+    blurb: A cold read with none of the writer's context.
+    lexicon:
+    - as mentioned
+    - as discussed
+    - the aforementioned
+    - obviously
+    - clearly
+    - of course
+    questions:
+    - id: reread
+      scope: sentence
+      note: Needs rereading or missing setup
+      threshold: 0.7
+      question: Would a first-time reader need to read this sentence twice, or does
+        it depend on setup, a term, or a reference that the text has not supplied
+        yet?
+    - id: trust
+      scope: paragraph
+      note: Unearned trust or attention weakens
+      threshold: 0.7
+      question: Does this paragraph ask the reader for trust, agreement, or patience
+        it has not earned, or is it repetitive or abstract enough that attention would
+        weaken here?
+  cw-nemesis:
+    name: Nemesis
+    blurb: The least charitable reader attacks every claim.
+    lexicon:
+    - everyone
+    - knows
+    - always
+    - never
+    - proves
+    - obviously
+    - undeniably
+    - experts agree
+    questions:
+    - id: claim
+      scope: sentence
+      note: Unsupported claim, leap, or false dichotomy
+      threshold: 0.7
+      question: Is this sentence an unsupported assertion, an overgeneralization such
+        as everyone or always, a weasel attribution, a leap in reasoning, or a false
+        dichotomy that a hostile reader would attack?
+    - id: evidence
+      scope: paragraph
+      note: Thin or cherry-picked evidence
+      threshold: 0.7
+      question: Does this paragraph rest its claim on thin evidence, a single cherry-picked
+        example, or an anecdote standing in for data?
+  cw-sorkin:
+    name: Sorkin
+    blurb: 'Pacing: walking and talking, not standing still.'
+    lexicon:
+    - let me explain
+    - in this section
+    - as we will see
+    - before we begin
+    - background
+    questions:
+    - id: stall
+      scope: paragraph
+      note: Stall, lecture, meander, or dead end
+      threshold: 0.7
+      question: 'Does this paragraph stall the piece: explanation with no forward
+        motion, a lecture delivered at the reader, a wander with no visible destination,
+        or an ending that does not push into the next paragraph?'
+  cw-sedaris:
+    name: Sedaris
+    blurb: Finds where specificity or self-implication would land.
+    lexicon:
+    - a car
+    - a friend
+    - a meeting
+    - some time ago
+    - a while
+    - things
+    - stuff
+    questions:
+    - id: generic
+      scope: sentence
+      note: Generic where a specific detail would land
+      threshold: 0.7
+      question: Is this sentence generic, such as a car, a friend, or some time ago,
+        where an exact, concrete, or self-implicating detail would make it land or
+        be funny?
+  cw-vonnegut:
+    name: Vonnegut
+    blurb: Every sentence reveals character or advances the action.
+    lexicon:
+    - in this post
+    - I will
+    - in order to understand
+    - first some context
+    - historically
+    questions:
+    - id: wasted
+      scope: sentence
+      note: Neither reveals character nor advances the action
+      threshold: 0.7
+      question: Does this sentence neither reveal something about a person nor move
+        the piece forward, so a stranger reading it would feel the time was wasted?
+    - id: backstory
+      scope: paragraph
+      note: Setup the piece could cut to start closer to the end
+      threshold: 0.7
+      question: Is this paragraph backstory or setup the piece could cut so that it
+        starts closer to where things are already happening?
+  cw-hitchcock:
+    name: Hitchcock
+    blurb: Where is the bomb under the table?
+    lexicon:
+    - in the end
+    - eventually
+    - as it turned out
+    - fortunately
+    - luckily
+    questions:
+    - id: tension
+      scope: paragraph
+      note: Buried stakes or tension released too early
+      threshold: 0.7
+      question: Does this paragraph bury its stakes until the end, or release its
+        tension before the payoff, where showing the risk earlier and holding it would
+        keep the reader leaning forward?
+  cw-dev-edit:
+    name: Developmental edit
+    blurb: Argument, structure, stakes, and payoff.
+    lexicon:
+    - in conclusion
+    - to summarize
+    - in summary
+    - as stated above
+    questions:
+    - id: place
+      scope: paragraph
+      note: Does not earn its place in the argument
+      threshold: 0.7
+      question: 'Does this paragraph fail to earn its place: no clear claim, no support
+        for the claim it makes, or a position out of order with the paragraphs around
+        it?'
+    - id: promise
+      scope: text
+      note: The opening promises a different piece
+      threshold: 0.7
+      question: Does the opening of this text promise a piece different from the one
+        the rest of the text delivers?
+  cw-bluf:
+    name: BLUF
+    blurb: Is the bottom line where the reader first needs it?
+    lexicon:
+    - the real point
+    - what matters most
+    - the key insight
+    - ultimately
+    - the bottom line
+    questions:
+    - id: buried
+      scope: paragraph
+      note: Holds the most important idea but arrives late
+      threshold: 0.7
+      question: Does this paragraph hold the most important idea of the text while
+        appearing later than a reader would need it?
+    - id: lede
+      scope: text
+      note: The bottom line is buried
+      threshold: 0.7
+      question: Is the most important idea of this text buried, so that a reader meets
+        it later than the point where they first need it?
