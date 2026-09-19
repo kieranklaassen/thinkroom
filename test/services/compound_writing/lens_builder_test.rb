@@ -83,6 +83,22 @@ class CompoundWriting::LensBuilderTest < ActiveSupport::TestCase
     assert_equal "Wandering Sentences", lenses[1].name, "the frontmatter name is untouched"
   end
 
+  test "a generated suffix never collides with a folder whose natural slug is that string" do
+    files = {
+      "skills/lens/SKILL.md" => skill("lens"),
+      "skills/Lens/SKILL.md" => skill("Lens", "Same slug, different case."),
+      "skills/lens-2/SKILL.md" => skill("lens-2", "Naturally named lens-2.")
+    }
+
+    lenses = CompoundWriting::LensBuilder.build(files, pack_name: "acme", marketplace: "acme/lenses")
+
+    keys = lenses.map(&:key)
+    assert_equal keys.uniq, keys
+    assert_equal "acme/lens-2", lenses.find { |lens| lens.skill_path == "skills/lens-2/SKILL.md" }.key, "the natural slug keeps its key"
+    assert_equal %w[acme/lens acme/lens-3], lenses.reject { |lens| lens.skill_path == "skills/lens-2/SKILL.md" }.map(&:key).sort
+    assert_equal keys, CompoundWriting::LensBuilder.build(files, pack_name: "acme", marketplace: "acme/lenses").map(&:key), "deterministic"
+  end
+
   test "a skill folder that opens with a separator still yields a parsable key" do
     files = { "skills/_beta lens/SKILL.md" => skill("_beta lens") }
 

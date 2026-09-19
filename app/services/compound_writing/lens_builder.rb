@@ -18,11 +18,12 @@ module CompoundWriting
       @files = files
       @pack_slug = Lens.slug(pack_name)
       @curated = CuratedLenses.for_marketplace(marketplace)
-      @used_slugs = Hash.new(0)
     end
 
     def build
-      lenses = skill_dirs.filter_map.with_index { |dir, index| lens_for(dir, index) }
+      dirs = skill_dirs
+      slugs = assign_slugs(dirs)
+      lenses = dirs.filter_map.with_index { |dir, index| lens_for(dir, slugs.fetch(dir), index) }
       raise Invalid, "the plugin has no skills that yield a lens" if lenses.empty?
 
       lenses.each_with_index.map { |lens, index| lens.with(color: index % Lens::COLOR_SLOTS) }
@@ -41,10 +42,34 @@ module CompoundWriting
       curated.skill_names.select { |name| present.include?(name) }
     end
 
-    def lens_for(skill_name, index)
+    # Two passes keep keys unique and deterministic: every directory whose
+    # natural slug is still free takes it (so a folder literally named
+    # "lens-2" keeps "lens-2"), then each remaining directory gets the first
+    # "-N" suffix that no natural or generated slug has claimed.
+    def assign_slugs(dirs)
+      claimed = Set.new
+      assigned = {}
+      deferred = []
+      dirs.each do |dir|
+        slug = Lens.slug(dir)
+        if claimed.add?(slug)
+          assigned[dir] = slug
+        else
+          deferred << [ dir, slug ]
+        end
+      end
+      deferred.each do |dir, slug|
+        suffix = 2
+        suffix += 1 until claimed.add?("#{slug}-#{suffix}")
+        assigned[dir] = "#{slug}-#{suffix}"
+      end
+      assigned
+    end
+
+    def lens_for(skill_name, slug, index)
       skill_path = "skills/#{skill_name}/#{SKILL_FILE}"
       frontmatter = parse_frontmatter(files.fetch(skill_path), skill_path)
-      key = "#{pack_slug}/#{unique_slug(skill_name)}"
+      key = "#{pack_slug}/#{slug}"
       base = { key:, skill_path:, color: index % Lens::COLOR_SLOTS }
 
       if (sidecar = files["skills/#{skill_name}/#{SIDECAR}"])
@@ -61,15 +86,6 @@ module CompoundWriting
       raise Invalid, "#{skill_path}: jev.yml is not valid YAML (#{e.message[0, 80]})"
     rescue ArgumentError => e
       raise Invalid, "#{skill_path}: #{e.message}"
-    end
-
-    # Skill directories may be title case or spaced; the key takes their slug,
-    # made unique within the pack when two directories collapse to one slug.
-    # `skill_path` keeps the directory as written.
-    def unique_slug(skill_name)
-      slug = Lens.slug(skill_name)
-      count = (@used_slugs[slug] += 1)
-      count == 1 ? slug : "#{slug}-#{count}"
     end
 
     def from_definition(definition, base, fallback_name:)
