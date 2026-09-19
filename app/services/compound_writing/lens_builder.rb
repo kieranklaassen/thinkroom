@@ -16,8 +16,9 @@ module CompoundWriting
 
     def initialize(files, pack_name:, marketplace:)
       @files = files
-      @pack_name = pack_name
+      @pack_slug = Lens.slug(pack_name)
       @curated = CuratedLenses.for_marketplace(marketplace)
+      @used_slugs = Hash.new(0)
     end
 
     def build
@@ -29,7 +30,7 @@ module CompoundWriting
 
     private
 
-    attr_reader :files, :pack_name, :curated
+    attr_reader :files, :pack_slug, :curated
 
     # Curated order when a set exists (it is the reviewers' reading order),
     # else alphabetical.
@@ -43,7 +44,7 @@ module CompoundWriting
     def lens_for(skill_name, index)
       skill_path = "skills/#{skill_name}/#{SKILL_FILE}"
       frontmatter = parse_frontmatter(files.fetch(skill_path), skill_path)
-      key = "#{pack_name}/#{skill_name}"
+      key = "#{pack_slug}/#{unique_slug(skill_name)}"
       base = { key:, skill_path:, color: index % Lens::COLOR_SLOTS }
 
       if (sidecar = files["skills/#{skill_name}/#{SIDECAR}"])
@@ -60,6 +61,15 @@ module CompoundWriting
       raise Invalid, "#{skill_path}: jev.yml is not valid YAML (#{e.message[0, 80]})"
     rescue ArgumentError => e
       raise Invalid, "#{skill_path}: #{e.message}"
+    end
+
+    # Skill directories may be title case or spaced; the key takes their slug,
+    # made unique within the pack when two directories collapse to one slug.
+    # `skill_path` keeps the directory as written.
+    def unique_slug(skill_name)
+      slug = Lens.slug(skill_name)
+      count = (@used_slugs[slug] += 1)
+      count == 1 ? slug : "#{slug}-#{count}"
     end
 
     def from_definition(definition, base, fallback_name:)

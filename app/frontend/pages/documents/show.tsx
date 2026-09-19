@@ -977,16 +977,19 @@ export default function DocumentShow({
     return () => window.removeEventListener('keydown', escape)
   }, [textTarget, closeReview])
 
-  // Finding cards join the comment and suggestion stack in the margin.
-  const findingCards: FindingCardsSource = {
-    paragraphs: findingAnchors.paragraphs,
+  // Finding cards join the comment and suggestion stack in the margin. The
+  // object identity is a remeasure signal for that stack, so it changes only
+  // when the anchored paragraphs, the lens snapshot, or the handlers do.
+  const { paragraphs: anchoredParagraphs, jumpToFinding, hoverFinding } = findingAnchors
+  const findingCards = useMemo<FindingCardsSource>(() => ({
+    paragraphs: anchoredParagraphs,
     lenses: passLenses,
     canWrite: ownership.can_write,
-    onJumpTo: findingAnchors.jumpToFinding,
-    onHover: findingAnchors.hoverFinding,
+    onJumpTo: jumpToFinding,
+    onHover: hoverFinding,
     onDismiss: dismissFinding,
     onMarkerSelect: isMobile ? () => setActiveSheet('reviewers') : undefined,
-  }
+  }), [anchoredParagraphs, passLenses, ownership.can_write, jumpToFinding, hoverFinding, dismissFinding, isMobile])
   // One prop bag for the desktop rail and the compact sheet.
   const compoundPanelProps: CompoundPanelProps = {
     reviewers: writingReviewers,

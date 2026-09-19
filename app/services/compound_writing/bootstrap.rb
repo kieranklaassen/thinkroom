@@ -52,7 +52,7 @@ module CompoundWriting
       lenses = curated.skill_names.each_with_index.map do |skill_name, index|
         skill = curated.skill(skill_name)
         Lens.from_h(
-          key: "#{PLUGIN}/#{skill_name}", name: skill["name"], blurb: skill["blurb"], color: index % Lens::COLOR_SLOTS,
+          key: "#{Lens.slug(PLUGIN)}/#{Lens.slug(skill_name)}", name: skill["name"], blurb: skill["blurb"], color: index % Lens::COLOR_SLOTS,
           skill_path: "skills/#{skill_name}/SKILL.md", origin: "curated", questions: skill["questions"], lexicon: skill["lexicon"]
         )
       end

@@ -28,6 +28,13 @@ module CompoundWriting
       def to_h = { "id" => id, "scope" => scope, "question" => question, "note" => note, "threshold" => threshold }
     end
 
+    # The key-safe form of a marketplace or skill name: "Wandering Sentences"
+    # becomes "wandering-sentences", repeats collapse, and an empty result
+    # falls back so a key always parses.
+    def self.slug(text)
+      text.to_s.parameterize.presence || "lens"
+    end
+
     def self.from_h(hash)
       hash = hash.to_h.with_indifferent_access
       lens = new(

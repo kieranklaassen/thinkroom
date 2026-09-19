@@ -67,6 +67,22 @@ class CompoundWriting::LensBuilderTest < ActiveSupport::TestCase
     assert_equal "Mom", lenses.last.name
   end
 
+  test "title-case or spaced marketplace and skill names become stable slugs in the key, unique within the pack" do
+    files = {
+      "skills/Wandering Sentences/SKILL.md" => skill("Wandering Sentences"),
+      "skills/wandering-sentences/SKILL.md" => skill("wandering-sentences", "A second skill whose folder slugs the same."),
+      "skills/BLUF  Check/SKILL.md" => skill("BLUF Check", "Leads with the point."),
+      "skills/BLUF  Check/jev.yml" => SIDECAR
+    }
+
+    lenses = CompoundWriting::LensBuilder.build(files, pack_name: "Acme Lenses", marketplace: "acme/lenses")
+
+    assert_equal %w[acme-lenses/bluf-check acme-lenses/wandering-sentences acme-lenses/wandering-sentences-2], lenses.map(&:key)
+    assert_equal "skills/BLUF  Check/SKILL.md", lenses.first.skill_path, "the path keeps the directory as written"
+    assert_equal "Wanderer", lenses.first.name, "the sidecar's display name is untouched"
+    assert_equal "Wandering Sentences", lenses[1].name, "the frontmatter name is untouched"
+  end
+
   test "colour slots follow lens order and wrap at sixteen" do
     files = (1..18).to_h { |index| [ "skills/s#{format('%02d', index)}/SKILL.md", skill("s#{index}") ] }
 
