@@ -29,10 +29,11 @@ module CompoundWriting
     end
 
     # The key-safe form of a marketplace or skill name: "Wandering Sentences"
-    # becomes "wandering-sentences", repeats collapse, and an empty result
-    # falls back so a key always parses.
+    # becomes "wandering-sentences", repeats collapse, a leading separator
+    # ("_internal") drops, and an empty result falls back so a key always
+    # parses.
     def self.slug(text)
-      text.to_s.parameterize.presence || "lens"
+      text.to_s.parameterize.sub(/\A[^a-z0-9]+/, "").presence || "lens"
     end
 
     def self.from_h(hash)

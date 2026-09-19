@@ -83,6 +83,14 @@ class CompoundWriting::LensBuilderTest < ActiveSupport::TestCase
     assert_equal "Wandering Sentences", lenses[1].name, "the frontmatter name is untouched"
   end
 
+  test "a skill folder that opens with a separator still yields a parsable key" do
+    files = { "skills/_beta lens/SKILL.md" => skill("_beta lens") }
+
+    lens = CompoundWriting::LensBuilder.build(files, pack_name: "Acme Lenses", marketplace: "acme/lenses").first
+
+    assert_equal "acme-lenses/beta-lens", lens.key
+  end
+
   test "colour slots follow lens order and wrap at sixteen" do
     files = (1..18).to_h { |index| [ "skills/s#{format('%02d', index)}/SKILL.md", skill("s#{index}") ] }
 
