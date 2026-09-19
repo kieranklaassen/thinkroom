@@ -8,7 +8,7 @@ class WritingFinding < ApplicationRecord
   belongs_to :writing_pass
 
   validates :reviewer_key, :question_id, presence: true
-  validates :scope, inclusion: { in: CompoundWriting::Reviewers::SCOPES }
+  validates :scope, inclusion: { in: CompoundWriting::Lens::SCOPES }
   validates :probability, numericality: { greater_than_or_equal_to: 0, less_than_or_equal_to: 1 }
 
   scope :active, -> { where(dismissed_at: nil) }
@@ -25,7 +25,8 @@ class WritingFinding < ApplicationRecord
     DocumentMetaChannel.broadcast_event_after_commit(document, :writing_pass)
   end
 
-  def question = CompoundWriting::Reviewers.find(reviewer_key)&.question(question_id)
+  # From the pass's own lens snapshot, so a later pack change cannot relabel it.
+  def question = writing_pass.lens(reviewer_key)&.question(question_id)
 
   def as_props
     {

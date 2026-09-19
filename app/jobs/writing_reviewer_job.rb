@@ -13,7 +13,7 @@ class WritingReviewerJob < ApplicationJob
     pass = WritingPass.find_by(id: pass_id)
     return unless pass
 
-    reviewer = CompoundWriting::Reviewers.find!(reviewer_key)
+    reviewer = pass.lens(reviewer_key) or raise ArgumentError, "pass #{pass.id} carries no lens #{reviewer_key}"
     judge = CompoundWriting.judge
     pass.record_run!(reviewer.key, status: "running")
     count = 0

@@ -1,12 +1,14 @@
 require "test_helper"
 
 class CompoundWriting::ParagraphReviewTest < ActiveSupport::TestCase
+  include CompoundWritingHelpers
+
   LONG = "We should utilize the report to leverage synergies. Moreover, the landscape is robust and seamless for everyone who reads it today."
 
-  def review(key) = CompoundWriting::ParagraphReview.new(CompoundWriting::Reviewers.find!(key), judge: CompoundWriting::FakeJudge.new)
+  def review(skill) = CompoundWriting::ParagraphReview.new(compound_lens(skill), judge: CompoundWriting::FakeJudge.new)
 
   test "a paragraph yields phrase, sentence, and paragraph findings with paragraph offsets" do
-    findings = review("ai_check").call(index: 3, kind: "paragraph", text: LONG)
+    findings = review("cw-ai-check").call(index: 3, kind: "paragraph", text: LONG)
 
     phrases = findings.select { |finding| finding.scope == "phrase" }
     assert_equal %w[utilize leverage Moreover landscape robust seamless], phrases.map(&:quote)
@@ -22,13 +24,13 @@ class CompoundWriting::ParagraphReviewTest < ActiveSupport::TestCase
   end
 
   test "headings receive phrase questions only" do
-    findings = review("ai_check").call(index: 0, kind: "heading", text: "Leverage the robust landscape")
+    findings = review("cw-ai-check").call(index: 0, kind: "heading", text: "Leverage the robust landscape")
 
     assert_equal %w[phrase], findings.map(&:scope).uniq
   end
 
   test "short paragraphs skip paragraph-scope questions" do
-    findings = review("ai_check").call(index: 0, kind: "paragraph", text: "Robust and seamless.")
+    findings = review("cw-ai-check").call(index: 0, kind: "paragraph", text: "Robust and seamless.")
 
     assert_not_includes findings.map(&:scope), "paragraph"
     assert_includes findings.map(&:scope), "phrase"
@@ -42,7 +44,7 @@ class CompoundWriting::ParagraphReviewTest < ActiveSupport::TestCase
         Array.new(nouls.size, 0.1)
       end
     end.new
-    reviewer = CompoundWriting::Reviewers.find!("hemingway")
+    reviewer = compound_lens("cw-hemingway")
 
     assert_empty CompoundWriting::ParagraphReview.new(reviewer, judge:).call(index: 0, kind: "paragraph", text: "Plain words.")
     assert_empty CompoundWriting::ParagraphReview.new(reviewer, judge:).call(index: 1, kind: "paragraph", text: "   ")
@@ -50,7 +52,7 @@ class CompoundWriting::ParagraphReviewTest < ActiveSupport::TestCase
   end
 
   test "text review answers whole-text questions without an anchor" do
-    findings = CompoundWriting::TextReview.new(CompoundWriting::Reviewers.find!("bluf"), judge: CompoundWriting::FakeJudge.new)
+    findings = CompoundWriting::TextReview.new(compound_lens("cw-bluf"), judge: CompoundWriting::FakeJudge.new)
                                             .call([ { "text" => "Ultimately, the bottom line is late." }, { "text" => "More." } ])
 
     assert_equal [ "lede" ], findings.map(&:question_id)

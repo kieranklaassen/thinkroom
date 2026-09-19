@@ -1,15 +1,17 @@
 require "test_helper"
 
 class CompoundWriting::PassBudgetTest < ActiveSupport::TestCase
+  include CompoundWritingHelpers
+
   PARAGRAPHS = [
     { "kind" => "heading", "text" => "Leverage the report" },
     { "kind" => "paragraph", "text" => "We should utilize the report to leverage synergies across the whole team this quarter, obviously." }
   ].freeze
 
-  def reviewer(key) = CompoundWriting::Reviewers.find!(key)
+  def reviewer(skill) = compound_lens(skill)
 
   test "estimates one noul per gram, sentence, paragraph, and text question, batched per request" do
-    estimate = CompoundWriting::PassBudget.estimate(PARAGRAPHS, [ reviewer("ai_check") ])
+    estimate = CompoundWriting::PassBudget.estimate(PARAGRAPHS, [ reviewer("cw-ai-check") ])
 
     heading_grams = CompoundWriting::Segmenter.ngrams("Leverage the report").size
     body_grams = CompoundWriting::Segmenter.ngrams(PARAGRAPHS[1]["text"]).size
@@ -19,19 +21,19 @@ class CompoundWriting::PassBudgetTest < ActiveSupport::TestCase
   end
 
   test "text-scope questions add one request per reviewer with content" do
-    estimate = CompoundWriting::PassBudget.estimate(PARAGRAPHS, [ reviewer("bluf") ])
+    estimate = CompoundWriting::PassBudget.estimate(PARAGRAPHS, [ reviewer("cw-bluf") ])
 
     # bluf: one paragraph question (body only, heading skipped) and one text question.
     assert_equal 2, estimate.nouls
     assert_equal 2, estimate.calls
-    assert_equal 0, CompoundWriting::PassBudget.estimate([], [ reviewer("bluf") ]).calls
+    assert_equal 0, CompoundWriting::PassBudget.estimate([], [ reviewer("cw-bluf") ]).calls
   end
 
   test "check! passes under the limits and raises a readable message over them" do
-    assert_nothing_raised { CompoundWriting::PassBudget.check!(PARAGRAPHS, [ reviewer("ai_check") ]) }
+    assert_nothing_raised { CompoundWriting::PassBudget.check!(PARAGRAPHS, [ reviewer("cw-ai-check") ]) }
 
     error = assert_raises(CompoundWriting::PassBudget::Exceeded) do
-      CompoundWriting::PassBudget.check!(PARAGRAPHS, [ reviewer("ai_check") ], env: { "COMPOUND_WRITING_MAX_NOULS_PER_PASS" => "5" })
+      CompoundWriting::PassBudget.check!(PARAGRAPHS, [ reviewer("cw-ai-check") ], env: { "COMPOUND_WRITING_MAX_NOULS_PER_PASS" => "5" })
     end
     assert_match(/would ask about \d+ passages in 2 requests; the limit is 5 passages or 1,500 requests/, error.message)
   end

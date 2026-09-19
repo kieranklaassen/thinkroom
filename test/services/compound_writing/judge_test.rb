@@ -1,6 +1,8 @@
 require "test_helper"
 
 class CompoundWriting::JudgeTest < ActiveSupport::TestCase
+  include CompoundWritingHelpers
+
   # Stands in for RubyLLM::Chat: records each schema + state and answers from a script.
   class ChatDouble
     attr_reader :requests
@@ -24,7 +26,7 @@ class CompoundWriting::JudgeTest < ActiveSupport::TestCase
     end
   end
 
-  def reviewer = CompoundWriting::Reviewers.find!("ai_check")
+  def reviewer = compound_lens("cw-ai-check")
   def question = reviewer.question("vocabulary")
 
   def nouls(count)
@@ -65,7 +67,7 @@ class CompoundWriting::JudgeTest < ActiveSupport::TestCase
     error = assert_raises(CompoundWriting::JudgeError) do
       CompoundWriting::Judge.new(chat:).judge(state: { paragraph: "x" }, nouls: nouls(1))
     end
-    assert_equal "ai_check", error.reviewer_key
+    assert_equal "compound-writing/cw-ai-check", error.reviewer_key
     assert_match(/RateLimitError/, error.message)
   end
 
@@ -110,7 +112,7 @@ class CompoundWriting::JudgeTest < ActiveSupport::TestCase
     fake = CompoundWriting::FakeJudge.new
     hit = CompoundWriting::Prompts.phrase(question, reviewer, "utilize")
     miss = CompoundWriting::Prompts.phrase(question, reviewer, "the report")
-    nemesis = CompoundWriting::Reviewers.find!("nemesis")
+    nemesis = compound_lens("cw-nemesis")
     other = CompoundWriting::Prompts.phrase(nemesis.questions.first, nemesis, "utilize")
 
     assert_equal [ 0.9, 0.1, 0.1 ], fake.judge(state: {}, nouls: [ hit, miss, other ])

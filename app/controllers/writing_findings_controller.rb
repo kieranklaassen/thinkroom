@@ -1,7 +1,10 @@
-# Hides one finding for everyone until the next pass. Write access, like
-# starting a pass: findings belong to the document's writers.
+# Hides one finding for everyone until the next pass. Featured accounts with
+# write access, like starting a pass: findings belong to the document's
+# writers.
 class WritingFindingsController < InertiaController
   include DocumentWriteAuthorization
+  include CompoundWritingAccess
+  before_action :require_compound_writing
 
   def dismiss
     finding = WritingFinding.find(params[:id])

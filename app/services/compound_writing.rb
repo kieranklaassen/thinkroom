@@ -40,4 +40,26 @@ module CompoundWriting
   def judge=(judge)
     @judge = judge
   end
+
+  # The account gate: compound writing exists only for signed-in accounts
+  # holding the feature (Features::COMPOUND_WRITING). Independent of whether a
+  # judge is configured, so a featured account still sees the panel and its
+  # not-configured notice.
+  def available_to?(user)
+    user.present? && user.feature?(Features::COMPOUND_WRITING)
+  end
+
+  # Hands ruby_llm-skills' marketplace layer the token and caps before a
+  # fetch. GITHUB_TOKEN is the gem's own default; MARKETPLACE_GITHUB_TOKEN
+  # overrides it for deployments that keep a dedicated read token.
+  def configure_marketplaces!(env: ENV)
+    RubyLLM::Skills::Marketplace.configure do |config|
+      config.github_token = env["MARKETPLACE_GITHUB_TOKEN"].presence || env["GITHUB_TOKEN"].presence
+      config.max_archive_bytes = 32 * 1024 * 1024
+      config.max_file_bytes = 4 * 1024 * 1024
+      config.max_files = 2_000
+      config.max_skills = 200
+      config.user_agent = "thinkroom-compound-writing (+https://github.com/kieranklaassen/thinkroom)"
+    end
+  end
 end

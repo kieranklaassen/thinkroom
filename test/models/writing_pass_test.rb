@@ -3,6 +3,7 @@ require "test_helper"
 class WritingPassTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
   include ActionCable::TestHelper
+  include CompoundWritingHelpers
 
   PARAGRAPHS = [
     { index: 0, kind: "heading", text: "Leverage the report" },
@@ -11,26 +12,8 @@ class WritingPassTest < ActiveSupport::TestCase
 
   setup { @document = Document.create!(title: "Doc") }
 
-  test "start! creates a queued pass, one queued run per reviewer, an activity, and one job per reviewer" do
-    pass = nil
-    assert_enqueued_jobs 2, only: WritingReviewerJob do
-      assert_difference -> { @document.activities.count }, 1 do
-        pass = WritingPass.start!(document: @document, requested_by_name: "Quiet Falcon", reviewer_keys: %w[hemingway ai_check hemingway], paragraphs: PARAGRAPHS)
-      end
-    end
-
-    assert_equal "queued", pass.status
-    assert_equal %w[hemingway ai_check], pass.reviewer_keys
-    assert_equal({ "hemingway" => { "status" => "queued" }, "ai_check" => { "status" => "queued" } }, pass.reviewer_runs)
-    assert_equal 2, pass.paragraphs.size
-    assert_equal 17, pass.word_count
-    activity = @document.activities.last
-    assert_equal "ran_writing_reviewers", activity.action
-    assert_equal "Hemingway and AI check", activity.detail
-  end
-
-  def start(keys: %w[mom], paragraphs: PARAGRAPHS, now: Time.current)
-    WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: keys, paragraphs:, now:)
+  def start(keys: %w[cw-mom], paragraphs: PARAGRAPHS, now: Time.current)
+    WritingPass.start!(document: @document, requested_by_name: "A", lenses: compound_lenses(*keys), paragraphs:, now:)
   end
 
   def finish(pass, at: Time.current)
@@ -41,11 +24,37 @@ class WritingPassTest < ActiveSupport::TestCase
 
   def after_cooldown = Time.current + CompoundWriting::Limits.cooldown_seconds + 1
 
+  test "start! creates a queued pass, one queued run per lens, a lens snapshot, an activity, and one job per lens" do
+    pass = nil
+    assert_enqueued_jobs 2, only: WritingReviewerJob do
+      assert_difference -> { @document.activities.count }, 1 do
+        pass = start(keys: %w[cw-hemingway cw-ai-check cw-hemingway])
+      end
+    end
+
+    assert_equal "queued", pass.status
+    assert_equal %w[compound-writing/cw-hemingway compound-writing/cw-ai-check], pass.reviewer_keys
+    assert_equal %w[compound-writing/cw-hemingway compound-writing/cw-ai-check], pass.lens_structs.map(&:key)
+    assert_equal({ "compound-writing/cw-hemingway" => { "status" => "queued" }, "compound-writing/cw-ai-check" => { "status" => "queued" } }, pass.reviewer_runs)
+    assert_equal 2, pass.paragraphs.size
+    assert_equal 17, pass.word_count
+    activity = @document.activities.last
+    assert_equal "ran_writing_reviewers", activity.action
+    assert_equal "Hemingway and AI check", activity.detail
+  end
+
+  test "a pass keeps judging from its own lens snapshot when the pack changes" do
+    pass = start(keys: %w[cw-mom])
+    compound_pack.update!(lenses: compound_pack.lenses.map { |lens| lens.merge("name" => "Renamed") })
+
+    assert_equal "Mom", pass.reload.lens("compound-writing/cw-mom").name
+  end
+
   test "start! replaces the document's finished pass and its findings after the cooldown" do
     old = finish(start)
-    old.findings.create!(document: @document, reviewer_key: "mom", question_id: "insider", scope: "sentence", probability: 0.9)
+    old.findings.create!(document: @document, reviewer_key: "compound-writing/cw-mom", question_id: "insider", scope: "sentence", probability: 0.9)
 
-    fresh = start(keys: %w[nemesis], now: after_cooldown)
+    fresh = start(keys: %w[cw-nemesis], now: after_cooldown)
 
     assert_equal [ fresh ], @document.writing_passes.reload.to_a
     assert_equal 0, WritingFinding.where(document: @document).count
@@ -54,21 +63,21 @@ class WritingPassTest < ActiveSupport::TestCase
   test "start! refuses to replace a pass that is still running until it has stalled" do
     running = start
 
-    error = assert_raises(WritingPass::Throttled) { start(keys: %w[nemesis], now: Time.current + 30) }
+    error = assert_raises(WritingPass::Throttled) { start(keys: %w[cw-nemesis], now: Time.current + 30) }
     assert_match(/already running/, error.message)
     assert_equal [ running ], @document.writing_passes.reload.to_a
 
-    stalled = start(keys: %w[nemesis], now: Time.current + CompoundWriting::Limits.stall_seconds + 1)
+    stalled = start(keys: %w[cw-nemesis], now: Time.current + CompoundWriting::Limits.stall_seconds + 1)
     assert_equal [ stalled ], @document.writing_passes.reload.to_a
   end
 
   test "start! enforces a cooldown between passes on one document" do
     finish(start)
 
-    error = assert_raises(WritingPass::Throttled) { start(keys: %w[nemesis], now: Time.current + 10) }
+    error = assert_raises(WritingPass::Throttled) { start(keys: %w[cw-nemesis], now: Time.current + 10) }
     assert_match(/Wait \d+ more seconds? before running/, error.message)
 
-    assert_nothing_raised { start(keys: %w[nemesis], now: after_cooldown) }
+    assert_nothing_raised { start(keys: %w[cw-nemesis], now: after_cooldown) }
   end
 
   test "start! returns the finished pass unchanged when text and reviewers repeat" do
@@ -84,7 +93,7 @@ class WritingPassTest < ActiveSupport::TestCase
 
   test "start! reruns a failed pass with the same text and reviewers" do
     failed = start
-    failed.record_run!("mom", status: "failed", error: "RateLimitError: slow down")
+    failed.record_run!("compound-writing/cw-mom", status: "failed", error: "RateLimitError: slow down")
     failed.update!(finished_at: Time.current, created_at: 1.second.ago)
     assert_equal "failed", failed.reload.status
 
@@ -103,11 +112,11 @@ class WritingPassTest < ActiveSupport::TestCase
 
     finish(pass)
     with_env("COMPOUND_WRITING_MAX_NOULS_PER_PASS" => "3") do
-      error = assert_raises(CompoundWriting::PassBudget::Exceeded) { start(keys: %w[ai_check], now: after_cooldown) }
+      error = assert_raises(CompoundWriting::PassBudget::Exceeded) { start(keys: %w[cw-ai-check], now: after_cooldown) }
       assert_match(/the limit is 3 passages/, error.message)
     end
     with_env("COMPOUND_WRITING_MAX_JEV_CALLS_PER_PASS" => "1") do
-      assert_raises(CompoundWriting::PassBudget::Exceeded) { start(keys: %w[ai_check], now: after_cooldown) }
+      assert_raises(CompoundWriting::PassBudget::Exceeded) { start(keys: %w[cw-ai-check], now: after_cooldown) }
     end
     assert_equal [ pass ], @document.writing_passes.reload.to_a
   end
@@ -121,13 +130,12 @@ class WritingPassTest < ActiveSupport::TestCase
     ENV.update(previous)
   end
 
-  test "start! refuses unknown reviewers, no reviewers, and oversized documents" do
-    assert_raises(ArgumentError) { WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: %w[nope], paragraphs: PARAGRAPHS) }
-    assert_raises(ArgumentError) { WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: [], paragraphs: PARAGRAPHS) }
+  test "start! refuses no reviewers and oversized documents" do
+    assert_raises(ArgumentError) { WritingPass.start!(document: @document, requested_by_name: "A", lenses: [], paragraphs: PARAGRAPHS) }
     long = [ { text: (%w[word] * (WritingPass::MAX_WORDS + 1)).join(" ") } ]
-    assert_raises(WritingPass::TooLarge) { WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: %w[mom], paragraphs: long) }
+    assert_raises(WritingPass::TooLarge) { start(paragraphs: long) }
     many = Array.new(WritingPass::MAX_PARAGRAPHS + 1) { { text: "one" } }
-    assert_raises(WritingPass::TooLarge) { WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: %w[mom], paragraphs: many) }
+    assert_raises(WritingPass::TooLarge) { start(paragraphs: many) }
     assert_empty @document.writing_passes
   end
 
@@ -139,46 +147,47 @@ class WritingPassTest < ActiveSupport::TestCase
   end
 
   test "record_run! merges entries under lock and derives the pass status" do
-    pass = WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: %w[mom nemesis], paragraphs: PARAGRAPHS)
+    pass = start(keys: %w[cw-mom cw-nemesis])
 
-    pass.record_run!("mom", status: "running")
+    pass.record_run!("compound-writing/cw-mom", status: "running")
     assert_equal "running", pass.reload.status
 
-    pass.record_run!("mom", status: "finished", findings_count: 3)
+    pass.record_run!("compound-writing/cw-mom", status: "finished", findings_count: 3)
     assert_equal "running", pass.reload.status
-    assert_equal 3, pass.reviewer_runs["mom"]["findings_count"]
-    assert pass.reviewer_runs["mom"]["finished_at"].present?
-    assert_equal "queued", pass.reviewer_runs["nemesis"]["status"]
+    assert_equal 3, pass.reviewer_runs["compound-writing/cw-mom"]["findings_count"]
+    assert pass.reviewer_runs["compound-writing/cw-mom"]["finished_at"].present?
+    assert_equal "queued", pass.reviewer_runs["compound-writing/cw-nemesis"]["status"]
 
-    pass.record_run!("nemesis", status: "failed", error: "RateLimitError: slow down")
+    pass.record_run!("compound-writing/cw-nemesis", status: "failed", error: "RateLimitError: slow down")
     pass.reload
     assert_equal "finished", pass.status
     assert pass.finished_at.present?
-    assert_equal "RateLimitError: slow down", pass.reviewer_runs["nemesis"]["error"]
+    assert_equal "RateLimitError: slow down", pass.reviewer_runs["compound-writing/cw-nemesis"]["error"]
   end
 
   test "a pass whose every reviewer failed is failed" do
-    pass = WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: %w[mom], paragraphs: PARAGRAPHS)
-    pass.record_run!("mom", status: "failed", error: "boom")
+    pass = start(keys: %w[cw-mom])
+    pass.record_run!("compound-writing/cw-mom", status: "failed", error: "boom")
 
     assert_equal "failed", pass.reload.status
   end
 
   test "as_props lists active findings in document order with the question note" do
-    pass = WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: %w[ai_check], paragraphs: PARAGRAPHS)
-    later = pass.findings.create!(document: @document, reviewer_key: "ai_check", question_id: "vocabulary", scope: "phrase", paragraph_index: 1, paragraph_text: "p", quote: "leverage", quote_offset: 30, probability: 0.91)
-    pass.findings.create!(document: @document, reviewer_key: "ai_check", question_id: "vocabulary", scope: "phrase", paragraph_index: 1, paragraph_text: "p", quote: "utilize", quote_offset: 10, probability: 0.9)
+    pass = start(keys: %w[cw-ai-check])
+    later = pass.findings.create!(document: @document, reviewer_key: "compound-writing/cw-ai-check", question_id: "vocabulary", scope: "phrase", paragraph_index: 1, paragraph_text: "p", quote: "leverage", quote_offset: 30, probability: 0.91)
+    pass.findings.create!(document: @document, reviewer_key: "compound-writing/cw-ai-check", question_id: "vocabulary", scope: "phrase", paragraph_index: 1, paragraph_text: "p", quote: "utilize", quote_offset: 10, probability: 0.9)
     later.dismiss!
 
     props = pass.reload.as_props
     assert_equal [ "utilize" ], props[:findings].map { |finding| finding[:quote] }
     assert_equal "Stock AI vocabulary or template", props[:findings].first[:note]
     assert_equal 2, props[:paragraph_count]
+    assert_equal [ "compound-writing/cw-ai-check" ], props[:lenses].map { |lens| lens[:key] }
   end
 
   test "dismiss! broadcasts a writing_pass event once" do
-    pass = WritingPass.start!(document: @document, requested_by_name: "A", reviewer_keys: %w[ai_check], paragraphs: PARAGRAPHS)
-    finding = pass.findings.create!(document: @document, reviewer_key: "ai_check", question_id: "vocabulary", scope: "phrase", probability: 0.9)
+    pass = start(keys: %w[cw-ai-check])
+    finding = pass.findings.create!(document: @document, reviewer_key: "compound-writing/cw-ai-check", question_id: "vocabulary", scope: "phrase", probability: 0.9)
 
     assert_broadcasts(DocumentMetaChannel.broadcasting_for(@document), 1) { finding.dismiss! }
     assert finding.reload.dismissed_at.present?

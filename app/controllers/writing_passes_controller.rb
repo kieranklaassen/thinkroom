@@ -1,12 +1,15 @@
-# Starts a compound writing pass: the client posts the reviewers it wants and
-# the paragraphs it sees; the reviewers run in background jobs and stream
-# findings back through the meta channel. Writers only, because a pass spends
-# TypeSafe credits, and every pass is bounded: per-address and per-document
-# daily caps here (429 with a message the panel shows), and per-document
-# throttles plus a per-pass question budget in WritingPass.start!.
+# Starts a compound writing pass: the client posts the lens keys it wants and
+# the paragraphs it sees; the lenses run in background jobs and stream
+# findings back through the meta channel. Featured accounts with document
+# write access only, because a pass spends TypeSafe credits, and every pass
+# is bounded: per-address and per-document daily caps here (429 with a
+# message the panel shows), and per-document throttles plus a per-pass
+# question budget in WritingPass.start!.
 class WritingPassesController < InertiaController
   include DocumentWriteAuthorization
+  include CompoundWritingAccess
   rate_limit_contributions
+  before_action :require_compound_writing
 
   class DailyCapReached < StandardError; end
 
@@ -24,7 +27,7 @@ class WritingPassesController < InertiaController
       WritingPass.start!(
         document:,
         requested_by_name: preferred_name(params[:requested_by_name], fallback: "Anonymous"),
-        reviewer_keys: pass_params[:reviewers],
+        lenses: CompoundWriting::LensSet.for(current_user).select!(pass_params[:reviewers]),
         paragraphs: pass_params[:paragraphs]
       )
       count_pass!(document)
