@@ -181,6 +181,7 @@
 }
 
 .notebook-page {
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 1.4rem;
@@ -471,7 +472,16 @@
 
 .contents-groups {
   display: grid;
+  /* A bare implicit column sizes to its widest row's unwrapped title and
+     pushes long titles off the page; a zero-minimum track lets them ellipsize. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.4rem;
+}
+
+.contents-group,
+.contents-list,
+.contents-row {
+  min-width: 0;
 }
 
 .contents-group h3 {
