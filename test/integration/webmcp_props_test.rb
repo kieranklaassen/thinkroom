@@ -66,6 +66,20 @@ class WebmcpPropsTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "index pin reloads do not re-ship the manifest" do
+    get root_path, headers: browser.merge(
+      "X-Inertia" => "true",
+      "X-Inertia-Version" => InertiaController.safe_vite_digest.to_s,
+      "X-Inertia-Partial-Component" => "documents/index",
+      "X-Inertia-Partial-Data" => "pinned,yours,recent,errors"
+    )
+
+    assert_response :success
+    assert_inertia_props do |props|
+      props.key?(:pinned) && props.key?(:yours) && !props.key?(:webmcp)
+    end
+  end
+
   test "partial reloads that do not ask for webmcp skip it" do
     get document_page_path(@document.slug), headers: browser.merge(
       "X-Inertia" => "true",
