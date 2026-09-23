@@ -28,6 +28,8 @@ Rails.application.routes.draw do
   get "d/:slug", to: "documents#show", as: :document_page
   post "d/:slug/claim", to: "documents#claim", as: :claim_document
   patch "d/:slug/tags", to: "documents#update_tags", as: :document_tags
+  post "d/:slug/pin", to: "document_pins#create", as: :document_pin
+  delete "d/:slug/pin", to: "document_pins#destroy"
   patch "d/:slug/highlight_names", to: "documents#update_highlight_names", as: :document_highlight_names
   patch "d/:slug/link_access", to: "documents#update_link_access", as: :document_link_access
   patch "d/:slug/editing_lock", to: "documents#update_editing_lock", as: :document_editing_lock
