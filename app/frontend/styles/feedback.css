@@ -131,31 +131,8 @@
   background: var(--surface);
 }
 
-.landing-corner {
-  position: absolute;
-  /* Extra offset only inside the Ruby Native shell / installed PWAs. */
-  top: calc(1rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
-  right: 1rem;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.landing {
-  position: relative;
-}
-
 @media (max-width: 30rem) {
   .doc-header .feedback-button > button {
     padding: 0.28rem 0.5rem !important;
-  }
-
-  .landing-corner {
-    top: calc(0.75rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
-    right: 0.75rem;
-  }
-
-  .landing-corner .feedback-button {
-    display: none;
   }
 }

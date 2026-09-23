@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Head, Link, router, useForm } from '@inertiajs/react'
 import { NativeNavbar, NativeButton, NativeMenuItem, NativeFab, nativeHaptic } from '@ruby-native/react'
 import { FeedbackButton } from '../../components/feedback_button'
 import { AccountControl } from '../../components/account_control'
+import { BackgroundPicker, type IndexBackground } from '../../components/background_picker'
 import { SwipeRow } from '../../components/swipe_row'
 import { userIdentity } from '../../editor/identity'
 import { setCookie } from '../../lib/cookies'
 import { useClaim } from '../../lib/use_claim'
 import { useIsClient } from '../../lib/use_is_client'
+import { usePin, type PinnableDocument } from '../../lib/use_pin'
 import { useWebmcpTools } from '../../lib/use_webmcp_tools'
 import { executeManifestTool } from '../../lib/webmcp_execute'
 import { errorResult, type WebmcpManifest } from '../../lib/webmcp'
@@ -16,6 +18,7 @@ import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
 
 type AgeGroup = 'this_week' | 'earlier'
+type DayPart = 'morning' | 'afternoon' | 'evening'
 
 type DocLink = {
   title: string
@@ -27,10 +30,17 @@ type DocLink = {
 }
 
 type RecentDoc = DocLink & OwnershipPayload
+type PinnedDoc = RecentDoc & { pinned_at: string }
 
 type Props = Pick<SharedProps, 'nativeApp'> & {
   yours: DocLink[]
+  yours_count: number
   recent: RecentDoc[]
+  pinned: PinnedDoc[]
+  continue_reading: RecentDoc | null
+  today_label: string
+  day_part: DayPart
+  ui: { background: IndexBackground }
   viewer: ViewerPayload
   // WebMCP tool manifest (AgentGuide.webmcp_index_tools) — lazy prop.
   webmcp: WebmcpManifest
@@ -41,36 +51,69 @@ const INDEX_VIEWER_CONTEXT_NOTE =
   'This is the human viewer of the documents index. You act as an anonymous agent; created documents start unclaimed.'
 
 const EARLIER_PREVIEW_LIMIT = 8
+const CONTENTS_WINDOW = 50
 const GITHUB_REPOSITORY_URL = 'https://github.com/kieranklaassen/thinkroom'
 const GITHUB_PROFILE_URL = 'https://github.com/kieranklaassen'
+// Every list that shows a star or a Pinned row reloads together, so star
+// state (derived from `pinned`) and Pinned meta never drift apart.
+const LIST_PROPS = ['pinned', 'yours', 'yours_count', 'recent', 'continue_reading', 'errors']
 
 const errorText = (error: unknown): string | null => {
   if (Array.isArray(error)) return error.find((value) => typeof value === 'string') ?? null
   return typeof error === 'string' ? error : null
 }
 
-function RecentClaimButton({ slug, claimerName }: { slug: string; claimerName: string }) {
-  const { claim, claiming, claimFailed } = useClaim(slug, claimerName, {
-    only: ['yours', 'recent'],
-  })
+const pluralPages = (count: number) => (count === 1 ? '1 page' : `${count} pages`)
 
+function PinStar({
+  title,
+  pinned,
+  pending,
+  onToggle,
+  buttonRef,
+}: {
+  title: string
+  pinned: boolean
+  pending: boolean
+  onToggle: () => void
+  buttonRef?: (button: HTMLButtonElement | null) => void
+}) {
   return (
     <button
-      className="recent-claim"
-      aria-label="Claim this document"
-      title={claimFailed ? 'Claim failed — try again' : 'Claim this document'}
-      disabled={claiming}
-      onClick={claim}
+      ref={buttonRef}
+      type="button"
+      className={`pin-star${pinned ? ' is-pinned' : ''}${pending ? ' is-pending' : ''}`}
+      aria-pressed={pinned}
+      aria-busy={pending || undefined}
+      aria-label={`${pinned ? 'Unpin' : 'Pin'} ${title}`}
+      title={pinned ? 'Unpin' : 'Pin'}
+      onClick={onToggle}
     >
-      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
         <path
           d="M8 1.5l1.8 3.9 4.2.5-3.1 2.9.8 4.2L8 10.9 4.3 13l.8-4.2L2 5.9l4.2-.5L8 1.5z"
-          fill="none"
+          fill={pinned ? 'currentColor' : 'none'}
           stroke="currentColor"
-          strokeWidth="1.2"
+          strokeWidth="1.3"
           strokeLinejoin="round"
         />
       </svg>
+    </button>
+  )
+}
+
+function ClaimButton({ slug, claimerName }: { slug: string; claimerName: string }) {
+  const { claim, claiming, claimFailed } = useClaim(slug, claimerName, { only: LIST_PROPS })
+
+  return (
+    <button
+      className="notebook-claim"
+      type="button"
+      disabled={claiming}
+      title={claimFailed ? 'Claim failed — try again' : 'Make this document yours'}
+      onClick={claim}
+    >
+      {claiming ? 'Claiming…' : claimFailed ? 'Try again' : 'Claim'}
     </button>
   )
 }
@@ -88,7 +131,7 @@ function TagEditor({ document, onClose }: { document: DocLink; onClose: () => vo
     }))
     form.patch(`/d/${document.slug}/tags`, {
       preserveScroll: true,
-      only: ['yours', 'recent', 'errors'],
+      only: LIST_PROPS,
       onSuccess: onClose,
     })
   }
@@ -132,72 +175,57 @@ function TagEditor({ document, onClose }: { document: DocLink; onClose: () => vo
   )
 }
 
-function DocumentTags({ tags }: { tags: string[] }) {
-  if (tags.length === 0) return null
-
-  return (
-    <div className="document-tags" aria-label="Tags">
-      {tags.map((tag) => (
-        <span className="document-tag" key={tag.toLowerCase()}>
-          {tag}
-        </span>
-      ))}
-    </div>
-  )
-}
-
-function DocumentRow({
+function ContentsRow({
   document,
-  editable = false,
-  claimerName,
+  pinned,
+  pending,
+  onTogglePin,
   swipe,
 }: {
-  document: DocLink | RecentDoc
-  editable?: boolean
-  claimerName?: string
+  document: DocLink
+  pinned: boolean
+  pending: boolean
+  onTogglePin: () => void
   swipe?: { deleting: boolean; onDelete: () => void; closeSignal: number }
 }) {
   const [editingTags, setEditingTags] = useState(false)
-  const recentDocument = 'claimable' in document ? document : null
 
   const body = (
     <>
-      <div className="document-row-summary">
-        <div className="document-row-copy">
-          <Link className="document-row-title" href={`/d/${document.slug}`} prefetch>
-            {document.title}
-          </Link>
-          <time className="document-row-date" dateTime={document.created_at}>
-            Created {document.created_label}
-          </time>
-        </div>
-        <div className="document-row-actions">
-          {editable && (
-            <button
-              className="document-tag-edit"
-              type="button"
-              aria-expanded={editingTags}
-              onClick={() => setEditingTags((open) => !open)}
-            >
-              {document.tags.length > 0 ? 'Edit tags' : '+ Add tag'}
-            </button>
-          )}
-          {recentDocument?.claimable && claimerName && (
-            <RecentClaimButton slug={document.slug} claimerName={claimerName} />
-          )}
-          {recentDocument?.claimed && !recentDocument.yours && recentDocument.owner_name && (
-            <span className="recent-owner">Owned by {recentDocument.owner_name}</span>
-          )}
-        </div>
+      <div className="contents-row-line">
+        <PinStar title={document.title} pinned={pinned} pending={pending} onToggle={onTogglePin} />
+        <Link className="document-row-title" href={`/d/${document.slug}`} prefetch>
+          {document.title}
+        </Link>
+        <button
+          className="document-tag-edit"
+          type="button"
+          aria-expanded={editingTags}
+          onClick={() => setEditingTags((open) => !open)}
+        >
+          {document.tags.length > 0 ? 'Edit tags' : '+ Add tag'}
+        </button>
+        <span className="contents-leader" aria-hidden="true" />
+        <time className="contents-date" dateTime={document.created_at}>
+          {document.created_label}
+        </time>
       </div>
-      <DocumentTags tags={document.tags} />
+      {document.tags.length > 0 && (
+        <div className="contents-row-meta">
+          {document.tags.map((tag) => (
+            <span className="document-tag" key={tag.toLowerCase()}>
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
       {editingTags && <TagEditor document={document} onClose={() => setEditingTags(false)} />}
     </>
   )
 
   if (swipe) {
     return (
-      <li className="document-row document-row--swipe">
+      <li className="contents-row contents-row--swipe">
         <SwipeRow
           slug={document.slug}
           deleting={swipe.deleting}
@@ -210,59 +238,28 @@ function DocumentRow({
     )
   }
 
-  return <li className="document-row">{body}</li>
+  return <li className="contents-row">{body}</li>
 }
 
-function DocumentGroup({
-  title,
-  documents,
-  editable,
-  claimerName,
-  deletingSlug,
-  swipeCloseSignal,
-  onDeleteDocument,
-}: {
-  title: string
-  documents: Array<DocLink | RecentDoc>
-  editable?: boolean
-  claimerName?: string
-  deletingSlug?: string | null
-  swipeCloseSignal?: number
-  onDeleteDocument?: (slug: string) => void
-}) {
-  if (documents.length === 0) return null
-  const headingId = `document-group-${title.toLowerCase().replace(/\s+/g, '-')}`
-
-  return (
-    <section className="document-group" aria-labelledby={headingId}>
-      <div className="document-group-heading">
-        <h3 id={headingId}>{title}</h3>
-        <span>{documents.length}</span>
-      </div>
-      <ul className="document-list">
-        {documents.map((document) => (
-          <DocumentRow
-            key={document.slug}
-            document={document}
-            editable={editable}
-            claimerName={claimerName}
-            swipe={
-              onDeleteDocument
-                ? {
-                    deleting: deletingSlug === document.slug,
-                    onDelete: () => onDeleteDocument(document.slug),
-                    closeSignal: swipeCloseSignal ?? 0,
-                  }
-                : undefined
-            }
-          />
-        ))}
-      </ul>
-    </section>
-  )
+const pinnedMeta = (document: PinnedDoc) => {
+  if (!document.yours && document.owner_name) return `Owned by ${document.owner_name}`
+  if (document.tags.length > 0) return document.tags.join(', ')
+  return `Created ${document.created_label}`
 }
 
-export default function DocumentsIndex({ yours, recent, viewer, webmcp, nativeApp }: Props) {
+export default function DocumentsIndex({
+  yours,
+  yours_count,
+  recent,
+  pinned,
+  continue_reading,
+  today_label,
+  day_part,
+  ui,
+  viewer,
+  webmcp,
+  nativeApp,
+}: Props) {
   const [identityName] = useState(() => userIdentity(viewer.name).name)
   // WebMCP: the index registers its two tools once (KTD5); the page component
   // is remounted on every cross-page Inertia visit, so cleanup unregisters.
@@ -288,53 +285,82 @@ export default function DocumentsIndex({ yours, recent, viewer, webmcp, nativeAp
   const { post, processing } = useForm(() => ({
     name: identityName,
   }))
-  const [copied, setCopied] = useState(false)
-  const [agentInstructionsOpen, setAgentInstructionsOpen] = useState(false)
-  const [selectedTag, setSelectedTag] = useState<string | null>(null)
-  const [showAllEarlier, setShowAllEarlier] = useState(false)
   const isClient = useIsClient()
+  const [background, setBackground] = useState<IndexBackground>(ui.background)
+  const changeBackground = useCallback((next: IndexBackground) => {
+    setBackground(next)
+    setCookie('pruf_background', next)
+  }, [])
 
   const [origin, setOrigin] = useState('')
   useEffect(() => {
     setOrigin(window.location.origin)
   }, [])
-  // Server-rendered "Created" labels and the THIS WEEK grouping follow the
-  // viewer's timezone through this cookie (same server-readable pattern as
-  // width/panel prefs). The first-ever visit renders in the app default once.
+  // Server-rendered labels, the THIS WEEK grouping, the date line and the
+  // greeting follow the viewer's timezone through this cookie (same
+  // server-readable pattern as width/panel prefs). The first-ever visit
+  // renders in the app default once.
   useEffect(() => {
     const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
     if (zone) setCookie('pruf_tz', zone)
   }, [])
+
+  // --- Copy agent prompt: copy on click; reveal the text when the clipboard
+  // refuses (permissions policy, native web view) so it can be copied by hand.
   const agentInstruction =
     `Create a Thinkroom document for me: POST ${origin}/api/docs with JSON ` +
     `{"title": "…", "format": "markdown", "content": "# …"} ` +
     `or use "format": "html" with HTML content, plus an X-Agent-Name header. ` +
     `The response includes the share URL — open it and we'll collaborate live. ` +
     `Fetch the share URL (Accept: text/plain) for the full API guide.`
-
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'refused'>('idle')
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const copyInstruction = useCallback(() => {
-    // Clipboard can be denied (permissions policy, non-secure origin). The
-    // prompt stays visible with its manual Copy button, so a rejected write
-    // must not surface as an unhandled rejection or fake a "Copied" state.
-    void navigator.clipboard.writeText(agentInstruction).then(
-      () => {
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2400)
-      },
-      () => {},
-    )
-  }, [agentInstruction])
-
-  // Revealing the prompt also copies it: the agent-start action is "give me the
-  // prompt", so a single click both shows it and puts it on the clipboard.
-  const revealAgentInstructions = useCallback(() => {
-    const willOpen = !agentInstructionsOpen
-    setAgentInstructionsOpen(willOpen)
-    if (willOpen) {
-      copyInstruction()
+    clearTimeout(copyTimer.current)
+    const refused = () => setCopyState('refused')
+    try {
+      void navigator.clipboard.writeText(agentInstruction).then(() => {
+        setCopyState('copied')
+        copyTimer.current = setTimeout(() => setCopyState('idle'), 2400)
+      }, refused)
+    } catch {
+      refused()
     }
-  }, [agentInstructionsOpen, copyInstruction])
+  }, [agentInstruction])
+  useEffect(() => () => clearTimeout(copyTimer.current), [])
 
+  // --- Pins: every star reads from `pinned`.
+  const { toggle: togglePin, pending: pendingPins, error: pinError } = usePin(LIST_PROPS)
+  const pinnedSlugs = new Set(pinned.map((document) => document.slug))
+  const [announcement, setAnnouncement] = useState('')
+  const pinnedHeadingRef = useRef<HTMLHeadingElement>(null)
+  const pinnedStarRefs = useRef(new Map<string, HTMLButtonElement>())
+  const [focusAfterUnpin, setFocusAfterUnpin] = useState<string | null>(null)
+  useEffect(() => {
+    if (focusAfterUnpin === null) return
+    const target =
+      focusAfterUnpin === '' ? pinnedHeadingRef.current : pinnedStarRefs.current.get(focusAfterUnpin)
+    target?.focus({ preventScroll: true })
+    setFocusAfterUnpin(null)
+  }, [focusAfterUnpin, pinned])
+
+  const setPin = (document: PinnableDocument, isPinned: boolean) => {
+    if (togglePin(document, isPinned)) {
+      setAnnouncement(`${isPinned ? 'Unpinned' : 'Pinned'} ${document.title}`)
+    }
+  }
+  const unpinFromPinned = (document: PinnedDoc, index: number) => {
+    const next = pinned[index + 1] ?? pinned[index - 1]
+    if (togglePin(document, true)) {
+      setAnnouncement(`Unpinned ${document.title}`)
+      setFocusAfterUnpin(next ? next.slug : '')
+    }
+  }
+
+  // --- Contents filters: tag and search combine (AND).
+  const [selectedTag, setSelectedTag] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const [showAllEarlier, setShowAllEarlier] = useState(false)
   const availableTags = yours.reduce<string[]>((tags, document) => {
     document.tags.forEach((tag) => {
       if (!tags.some((existingTag) => existingTag.toLowerCase() === tag.toLowerCase())) {
@@ -344,18 +370,48 @@ export default function DocumentsIndex({ yours, recent, viewer, webmcp, nativeAp
     return tags
   }, [])
   const activeTag = availableTags.includes(selectedTag ?? '') ? selectedTag : null
-  const visibleDocuments = activeTag
-    ? yours.filter((document) =>
-        document.tags.some((tag) => tag.toLowerCase() === activeTag.toLowerCase()),
-      )
-    : yours
+  const needle = query.trim().toLowerCase()
+  const filterActive = activeTag !== null || needle !== ''
+  const visibleDocuments = yours.filter((document) => {
+    if (activeTag && !document.tags.some((tag) => tag.toLowerCase() === activeTag.toLowerCase())) {
+      return false
+    }
+    if (!needle) return true
+    return (
+      document.title.toLowerCase().includes(needle) ||
+      document.tags.some((tag) => tag.toLowerCase().includes(needle))
+    )
+  })
   const thisWeek = visibleDocuments.filter((document) => document.age_group === 'this_week')
   const earlier = visibleDocuments.filter((document) => document.age_group === 'earlier')
   const visibleEarlier =
-    showAllEarlier || activeTag ? earlier : earlier.slice(0, EARLIER_PREVIEW_LIMIT)
+    showAllEarlier || filterActive ? earlier : earlier.slice(0, EARLIER_PREVIEW_LIMIT)
   const hiddenEarlierCount = earlier.length - visibleEarlier.length
+  const clearFilters = () => {
+    setSelectedTag(null)
+    setQuery('')
+  }
+
+  // On a phone the Contents page sits below the left page: bring its heading
+  // into view when a filter changes so results are never off-screen.
+  const contentsHeadingRef = useRef<HTMLHeadingElement>(null)
+  const filtersTouched = useRef(false)
+  useEffect(() => {
+    if (!filtersTouched.current) return
+    if (window.matchMedia('(max-width: 56rem)').matches) {
+      contentsHeadingRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    }
+  }, [activeTag, needle])
+  const touchFilters = () => {
+    filtersTouched.current = true
+  }
+
   const claimerName = identityName
   const hasDemo = recent.some((document) => document.slug === 'demo')
+  // Continue reading already shows the newest recent; Shared with you skips it.
+  const shared = recent.filter((document) => document.slug !== continue_reading?.slug)
+  const firstName = (viewer.account?.name ?? viewer.name ?? '').trim().split(/\s+/)[0]
+  const greeting = `Good ${day_part}${firstName ? `, ${firstName}` : ''}.`
 
   // Native-only swipe-to-delete on owned rows. The server re-checks ownership;
   // this is just the affordance. WKWebView shows confirm() as a native alert.
@@ -379,6 +435,36 @@ export default function DocumentsIndex({ yours, recent, viewer, webmcp, nativeAp
     })
   }, [])
 
+  const contentsGroup = (title: string, documents: DocLink[]) => {
+    if (documents.length === 0) return null
+    const headingId = `contents-${title.toLowerCase().replace(/\s+/g, '-')}`
+    return (
+      <section className="contents-group" aria-labelledby={headingId}>
+        <h3 id={headingId}>{title}</h3>
+        <ul className="contents-list">
+          {documents.map((document) => (
+            <ContentsRow
+              key={document.slug}
+              document={document}
+              pinned={pinnedSlugs.has(document.slug)}
+              pending={pendingPins.has(document.slug)}
+              onTogglePin={() => setPin(document, pinnedSlugs.has(document.slug))}
+              swipe={
+                nativeApp
+                  ? {
+                      deleting: deletingSlug === document.slug,
+                      onDelete: () => deleteDocument(document.slug),
+                      closeSignal: swipeCloseSignal,
+                    }
+                  : undefined
+              }
+            />
+          ))}
+        </ul>
+      </section>
+    )
+  }
+
   return (
     <>
       <Head title="Thinkroom" />
@@ -394,34 +480,58 @@ export default function DocumentsIndex({ yours, recent, viewer, webmcp, nativeAp
           )}
         </NativeButton>
         <NativeButton position="trailing" icon="ellipsis.circle">
-          <NativeMenuItem title="Have an agent start one" click="#agent-start-trigger" />
+          <NativeMenuItem title="Copy agent prompt" click="#agent-start-trigger" />
           {hasDemo && <NativeMenuItem title="Open the demo" href="/d/demo" />}
           {isClient && <NativeMenuItem title="Send feedback" click=".feedback-button button" />}
         </NativeButton>
       </NativeNavbar>
       {/* Floating action button, sibling of the navbar (its own signal
-          element). While a create is in flight the only feedback is the web
-          hero button's disabled "Creating…" state; repeat taps are no-ops. */}
+          element). While a create is in flight the only feedback is the
+          New page button's disabled "Creating…" state; repeat taps are no-ops. */}
       <NativeFab icon="plus" click="#new-document-button" />
-      <div className="landing">
-        <div className="landing-corner">
-          <AccountControl viewer={viewer} />
-          {isClient && (
-            <FeedbackButton automationEnabled={viewer.feedback_automation_enabled} />
-          )}
-        </div>
-        <main className="landing-main">
-          <header className="landing-hero">
-            {/* native-hidden: the native nav bar already says Thinkroom, so the
-                hero title would read twice inside the app. */}
-            <h1 className="landing-wordmark native-hidden">
-              <Link href="/" className="landing-wordmark-link">
-                Thinkroom
-              </Link>
+      <div className="landing notebook" data-background={background}>
+        <header className="notebook-bar">
+          {/* native-hidden: the native nav bar already says Thinkroom, so the
+              wordmark would read twice inside the app. */}
+          <p className="landing-wordmark native-hidden">
+            <Link href="/" className="landing-wordmark-link">
+              Thinkroom
+            </Link>
+          </p>
+          <div className="notebook-bar-tools">
+            <BackgroundPicker value={background} onChange={changeBackground} />
+            <label className="notebook-search">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" strokeWidth="2" />
+                <path d="M20 20l-3.5-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              <input
+                type="search"
+                value={query}
+                placeholder="Search your pages"
+                aria-label="Search your pages"
+                onChange={(event) => {
+                  touchFilters()
+                  setQuery(event.target.value)
+                }}
+              />
+            </label>
+            <div className="notebook-account">
+              <AccountControl viewer={viewer} />
+              {isClient && (
+                <FeedbackButton automationEnabled={viewer.feedback_automation_enabled} />
+              )}
+            </div>
+          </div>
+        </header>
+
+        <main className="notebook-spread">
+          <section className="notebook-page notebook-page--left" aria-labelledby="notebook-greeting">
+            <p className="notebook-date">{today_label}</p>
+            <h1 id="notebook-greeting" className="notebook-greeting">
+              {greeting}
             </h1>
-            <p className="landing-tagline">Where deeper thinking compounds.</p>
-            <p className="landing-byline">From the creator of Compound Engineering.</p>
-            <div className="landing-actions">
+            <div className="notebook-actions">
               <button
                 id="new-document-button"
                 className="btn btn-primary"
@@ -430,72 +540,139 @@ export default function DocumentsIndex({ yours, recent, viewer, webmcp, nativeAp
                 onClick={() => post('/documents')}
                 {...nativeHaptic('impact')}
               >
-                {processing ? 'Creating…' : 'New document'}
+                {processing ? 'Creating…' : 'New page'}
               </button>
               <button
                 id="agent-start-trigger"
-                className="btn btn-agent"
+                className="notebook-text-button"
                 type="button"
-                aria-expanded={agentInstructionsOpen}
-                aria-controls="agent-start-instructions"
-                onClick={revealAgentInstructions}
+                aria-controls={copyState === 'refused' ? 'agent-start-instructions' : undefined}
+                onClick={copyInstruction}
               >
-                Have an agent start one
+                {copyState === 'copied' ? 'Copied' : 'Copy agent prompt'}
               </button>
-              {hasDemo && (
-                <Link href="/d/demo" className="btn btn-ghost" prefetch>
-                  Open the demo
-                </Link>
-              )}
             </div>
-          </header>
-
-          {agentInstructionsOpen && (
-            <section
-              id="agent-start-instructions"
-              className="landing-agent"
-              aria-labelledby="agent-start-trigger"
-            >
-              <p
-                className={`landing-agent-hint${copied ? ' is-copied' : ''}`}
-                aria-live="polite"
-              >
-                {copied
-                  ? 'Copied to clipboard — paste it into any agent that can make HTTP requests:'
-                  : 'Paste this to any agent that can make HTTP requests:'}
-              </p>
-              <div className="landing-agent-block">
+            <p className="notebook-sr-only" aria-live="polite">
+              {copyState === 'copied' ? 'Agent prompt copied to clipboard' : ''}
+            </p>
+            {copyState === 'refused' && (
+              <div id="agent-start-instructions" className="landing-agent-block">
+                <p className="landing-agent-hint">
+                  Your browser blocked copying. Paste this to any agent that can make HTTP requests:
+                </p>
                 <code>{agentInstruction}</code>
-                <button className="share-copy" type="button" onClick={copyInstruction}>
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
               </div>
-            </section>
-          )}
+            )}
 
-          <section className="document-library" aria-labelledby="your-documents-heading">
-            <div className="document-library-heading">
-              <div>
-                <h2 id="your-documents-heading">Your documents</h2>
-                <p>{yours.length === 1 ? '1 document' : `${yours.length} documents`}</p>
-              </div>
+            <section className="notebook-section" aria-labelledby="pinned-heading">
+              <h2 id="pinned-heading" className="notebook-label" tabIndex={-1} ref={pinnedHeadingRef}>
+                Pinned
+              </h2>
+              {pinError && (
+                <p className="document-tag-error" role="alert">
+                  {pinError}
+                </p>
+              )}
+              {pinned.length === 0 ? (
+                <p className="notebook-hint">Star any page in Contents to keep it here.</p>
+              ) : (
+                <ul className="pinned-list">
+                  {pinned.map((document, index) => (
+                    <li className="pinned-row" key={document.slug}>
+                      <PinStar
+                        title={document.title}
+                        pinned
+                        pending={pendingPins.has(document.slug)}
+                        onToggle={() => unpinFromPinned(document, index)}
+                        buttonRef={(button) => {
+                          if (button) pinnedStarRefs.current.set(document.slug, button)
+                          else pinnedStarRefs.current.delete(document.slug)
+                        }}
+                      />
+                      <Link className="pinned-title" href={`/d/${document.slug}`} prefetch>
+                        <span>{document.title}</span>
+                        <span className="pinned-meta">{pinnedMeta(document)}</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            {continue_reading && (
+              <section className="notebook-section" aria-labelledby="continue-heading">
+                <h2 id="continue-heading" className="notebook-label">
+                  Continue reading
+                </h2>
+                <Link className="continue-card" href={`/d/${continue_reading.slug}`} prefetch>
+                  <span className="continue-title">{continue_reading.title}</span>
+                  <span className="continue-meta">
+                    {continue_reading.yours || !continue_reading.owner_name
+                      ? `Created ${continue_reading.created_label}`
+                      : `Owned by ${continue_reading.owner_name}`}
+                  </span>
+                </Link>
+              </section>
+            )}
+
+            {shared.length > 0 && (
+              <section className="notebook-section" aria-labelledby="shared-heading">
+                <h2 id="shared-heading" className="notebook-label">
+                  Shared with you
+                </h2>
+                <ul className="shared-list">
+                  {shared.map((document) => (
+                    <li className="shared-row" key={document.slug}>
+                      <PinStar
+                        title={document.title}
+                        pinned={pinnedSlugs.has(document.slug)}
+                        pending={pendingPins.has(document.slug)}
+                        onToggle={() => setPin(document, pinnedSlugs.has(document.slug))}
+                      />
+                      <Link className="shared-title" href={`/d/${document.slug}`} prefetch>
+                        {document.title}
+                      </Link>
+                      {document.claimable ? (
+                        <ClaimButton slug={document.slug} claimerName={claimerName} />
+                      ) : (
+                        document.owner_name && <span className="shared-owner">{document.owner_name}</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            <p className="notebook-folio" aria-hidden="true">
+              i
+            </p>
+          </section>
+
+          <section className="notebook-page notebook-page--right" aria-labelledby="contents-heading">
+            <div className="contents-heading">
+              <h2 id="contents-heading" ref={contentsHeadingRef}>
+                Contents
+              </h2>
               {availableTags.length > 0 && (
-                <div className="document-tag-filters" aria-label="Filter documents by tag">
+                <div className="contents-filters" aria-label="Filter pages by tag">
                   <button
-                    className={activeTag === null ? 'is-active' : undefined}
                     type="button"
                     aria-pressed={activeTag === null}
-                    onClick={() => setSelectedTag(null)}
+                    onClick={() => {
+                      touchFilters()
+                      setSelectedTag(null)
+                    }}
                   >
                     All
                   </button>
                   {availableTags.map((tag) => (
                     <button
-                      className={activeTag === tag ? 'is-active' : undefined}
                       type="button"
                       key={tag.toLowerCase()}
                       aria-pressed={activeTag === tag}
-                      onClick={() => setSelectedTag(tag)}
+                      onClick={() => {
+                        touchFilters()
+                        setSelectedTag(tag)
+                      }}
                     >
                       {tag}
                     </button>
@@ -503,6 +680,14 @@ export default function DocumentsIndex({ yours, recent, viewer, webmcp, nativeAp
                 </div>
               )}
             </div>
+            <p className="notebook-sr-only" aria-live="polite">
+              {filterActive ? `${pluralPages(visibleDocuments.length)} match` : ''}
+            </p>
+            {filterActive && needle && yours_count > CONTENTS_WINDOW && (
+              <p className="notebook-hint">
+                Searching your newest {CONTENTS_WINDOW} of {yours_count} pages.
+              </p>
+            )}
 
             {/* Above the list branches: a failed delete re-scopes the props,
                 and the message must survive whatever the list becomes. */}
@@ -512,56 +697,54 @@ export default function DocumentsIndex({ yours, recent, viewer, webmcp, nativeAp
               </p>
             )}
             {yours.length === 0 ? (
-              <p className="document-library-empty">
-                Create a document and it will stay close at hand here.
+              <p className="notebook-hint notebook-empty">
+                Your pages will be listed here. Start with New page, or copy the agent prompt and let
+                an agent write the first draft.
               </p>
             ) : visibleDocuments.length === 0 ? (
-              <p className="document-library-empty">No documents use this tag yet.</p>
+              <div className="notebook-empty">
+                <p className="notebook-hint">No pages match.</p>
+                <button className="notebook-text-button" type="button" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              </div>
             ) : (
-              <div className="document-groups">
-                <DocumentGroup
-                  title="This week"
-                  documents={thisWeek}
-                  editable
-                  deletingSlug={deletingSlug}
-                  swipeCloseSignal={swipeCloseSignal}
-                  onDeleteDocument={nativeApp ? deleteDocument : undefined}
-                />
-                <DocumentGroup
-                  title="Earlier"
-                  documents={visibleEarlier}
-                  editable
-                  deletingSlug={deletingSlug}
-                  swipeCloseSignal={swipeCloseSignal}
-                  onDeleteDocument={nativeApp ? deleteDocument : undefined}
-                />
+              <div className="contents-groups">
+                {contentsGroup('This week', thisWeek)}
+                {contentsGroup('Earlier', visibleEarlier)}
                 {hiddenEarlierCount > 0 && (
                   <button
                     className="document-reveal"
                     type="button"
                     onClick={() => setShowAllEarlier(true)}
                   >
-                    Show {hiddenEarlierCount} more
+                    Turn the page, {hiddenEarlierCount} more
                   </button>
                 )}
               </div>
             )}
+            {yours.length > 0 && (
+              <p className="contents-footer">
+                {pluralPages(yours_count)}
+                {yours_count > yours.length && ` · showing the newest ${yours.length}`}
+              </p>
+            )}
+            <p className="notebook-folio" aria-hidden="true">
+              ii
+            </p>
           </section>
-
-          {recent.length > 0 && (
-            <section className="document-library document-library--recent" aria-labelledby="recent-documents-heading">
-              <div className="document-library-heading">
-                <div>
-                  <h2 id="recent-documents-heading">Recently opened</h2>
-                  <p>Documents from this browser</p>
-                </div>
-              </div>
-              <DocumentGroup title="Recent" documents={recent} claimerName={claimerName} />
-            </section>
-          )}
-
         </main>
+
+        <p className="notebook-sr-only" aria-live="polite">
+          {announcement}
+        </p>
+
         <footer className="landing-footer">
+          {hasDemo && (
+            <Link href="/d/demo" className="landing-demo-link" prefetch>
+              Open the demo
+            </Link>
+          )}
           <a
             className="landing-github"
             href={GITHUB_REPOSITORY_URL}
