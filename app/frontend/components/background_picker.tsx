@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { PopoverShell } from './popover_shell'
 
 export const INDEX_BACKGROUNDS = [
@@ -21,8 +21,6 @@ interface Props {
  * the pruf_background cookie, which the server reads for first paint.
  */
 export function BackgroundPicker({ value, onChange }: Props) {
-  const group = useRef<HTMLDivElement>(null)
-
   return (
     <PopoverShell
       rootClassName="share-root background-picker-root"
@@ -45,48 +43,57 @@ export function BackgroundPicker({ value, onChange }: Props) {
         </button>
       )}
     >
-      {({ close }) => (
-        <div className="background-picker" role="radiogroup" aria-label="Background" ref={group}>
-          {INDEX_BACKGROUNDS.map(({ name, label, description }, index) => (
-            <button
-              type="button"
-              key={name}
-              role="radio"
-              aria-checked={value === name}
-              tabIndex={value === name ? 0 : -1}
-              className={`background-option${value === name ? ' is-active' : ''}`}
-              ref={(button) => {
-                if (button && value === name) button.focus({ preventScroll: true })
-              }}
-              onClick={() => {
-                onChange(name)
-                close()
-              }}
-              onKeyDown={(event) => {
-                let next: number
-                switch (event.key) {
-                  case 'Home': next = 0; break
-                  case 'End': next = INDEX_BACKGROUNDS.length - 1; break
-                  case 'ArrowDown':
-                  case 'ArrowRight': next = (index + 1) % INDEX_BACKGROUNDS.length; break
-                  case 'ArrowUp':
-                  case 'ArrowLeft': next = (index - 1 + INDEX_BACKGROUNDS.length) % INDEX_BACKGROUNDS.length; break
-                  default: return
-                }
-                event.preventDefault()
-                onChange(INDEX_BACKGROUNDS[next].name)
-              }}
-            >
-              <span className={`background-swatch background-swatch--${name}`} aria-hidden="true" />
-              <span className="background-copy">
-                <span className="background-label">{label}</span>
-                <span className="background-description">{description}</span>
-              </span>
-              <span className="background-check" aria-hidden="true">{value === name ? '✓' : ''}</span>
-            </button>
-          ))}
-        </div>
-      )}
+      {({ close }) => <BackgroundOptions value={value} onChange={onChange} onSelect={close} />}
     </PopoverShell>
+  )
+}
+
+/** The radiogroup mounts only while the popover is open, so focusing the
+ *  active option on mount runs once per open, never on unrelated re-renders. */
+function BackgroundOptions({ value, onChange, onSelect }: Props & { onSelect: () => void }) {
+  const group = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    group.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus({ preventScroll: true })
+  }, [])
+
+  return (
+    <div className="background-picker" role="radiogroup" aria-label="Background" ref={group}>
+      {INDEX_BACKGROUNDS.map(({ name, label, description }, index) => (
+        <button
+          type="button"
+          key={name}
+          role="radio"
+          aria-checked={value === name}
+          tabIndex={value === name ? 0 : -1}
+          className={`background-option${value === name ? ' is-active' : ''}`}
+          onClick={() => {
+            onChange(name)
+            onSelect()
+          }}
+          onKeyDown={(event) => {
+            let next: number
+            switch (event.key) {
+              case 'Home': next = 0; break
+              case 'End': next = INDEX_BACKGROUNDS.length - 1; break
+              case 'ArrowDown':
+              case 'ArrowRight': next = (index + 1) % INDEX_BACKGROUNDS.length; break
+              case 'ArrowUp':
+              case 'ArrowLeft': next = (index - 1 + INDEX_BACKGROUNDS.length) % INDEX_BACKGROUNDS.length; break
+              default: return
+            }
+            event.preventDefault()
+            onChange(INDEX_BACKGROUNDS[next].name)
+            group.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus({ preventScroll: true })
+          }}
+        >
+          <span className={`background-swatch background-swatch--${name}`} aria-hidden="true" />
+          <span className="background-copy">
+            <span className="background-label">{label}</span>
+            <span className="background-description">{description}</span>
+          </span>
+          <span className="background-check" aria-hidden="true">{value === name ? '✓' : ''}</span>
+        </button>
+      ))}
+    </div>
   )
 }

@@ -286,10 +286,12 @@ export default function DocumentsIndex({
     name: identityName,
   }))
   const isClient = useIsClient()
-  const [background, setBackground] = useState<IndexBackground>(ui.background)
+  // The choice lives in the page props (and so the history entry), not local
+  // state, so Back navigation restores the current background.
+  const background = ui.background
   const changeBackground = useCallback((next: IndexBackground) => {
-    setBackground(next)
     setCookie('pruf_background', next)
+    router.replaceProp('ui.background', next)
   }, [])
 
   const [origin, setOrigin] = useState('')

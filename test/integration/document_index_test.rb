@@ -138,6 +138,23 @@ class DocumentIndexTest < ActionDispatch::IntegrationTest
     assert_inertia_props { |props| props[:continue_reading][:slug] == mine.slug }
   end
 
+  test "shared with you lists only documents the viewer does not own" do
+    user = create_and_sign_in_user
+    old_mine = Document.create!(title: "Old but mine", user:, owner_name: user.name, created_at: 2.years.ago)
+    50.times { |i| Document.create!(title: "Doc #{i}", user:, owner_name: user.name) }
+    other = Document.create!(title: "Someone else's", owner_token: "other", owner_name: "Other")
+    get document_page_path(old_mine.slug), headers: { "User-Agent" => "Mozilla/5.0" }
+    get document_page_path(other.slug), headers: { "User-Agent" => "Mozilla/5.0" }
+
+    get root_path
+    assert_inertia_props do |props|
+      props[:yours].none? { |row| row[:slug] == old_mine.slug } &&
+        props[:recent].map { |row| row[:slug] } == [ other.slug ] &&
+        props[:continue_reading][:slug] == other.slug &&
+        props[:continue_reading][:yours] == false
+    end
+  end
+
   test "background preference is read from its cookie with a safe default" do
     establish_identity
     cookies[:pruf_background] = "night"

@@ -30,34 +30,48 @@ class DocumentsController < InertiaController
     # Signed-in ownership follows the account across browsers. Guests retain
     # the original permanent-cookie ownership model.
     owned = current_user ? current_user.documents : Document.where(owner_token: owner_token)
+    # AR relations memoize their own load, so props sharing one relation run
+    # its query once. List props are procs: a scoped partial reload (a pin,
+    # a tag edit, a claim) runs only the queries its `only:` asks for.
     yours = owned.order(created_at: :desc).limit(50)
-    your_slugs = yours.map(&:slug).to_set
 
     # Recents are session-scoped: you see the documents you opened, not a
     # global listing of everyone's. The mechanism is unchanged — the display
     # just skips docs already shown under Your docs. Continue reading is the
     # newest recent that still exists, owned or not.
     slugs = Array(session[:recent_slugs])
-    docs = Document.where(slug: slugs).index_by(&:slug)
-    continue_reading = slugs.lazy.filter_map { |slug| docs[slug] }.first
+    recent_docs = Document.where(slug: slugs)
+    recent_by_slug = -> { @recent_by_slug ||= recent_docs.index_by(&:slug) }
     with_ownership = ->(document) { row.(document).merge(document.ownership_props(owner_token, viewer_user: current_user)) }
 
     render inertia: "documents/index", props: {
-      yours: yours.map(&row),
-      yours_count: owned.count,
-      # Recent rows carry ownership state so claimable docs can offer an
-      # inline claim affordance. Render-time staleness is fine: the claim
-      # POST is race-tolerant and the scoped reload reconciles the lists.
-      recent: slugs.filter_map { |slug| docs[slug] unless your_slugs.include?(slug) }.map(&with_ownership),
+      yours: -> { yours.map(&row) },
+      yours_count: -> { owned.count },
+      # Recent rows ("Shared with you") are documents opened here that the
+      # viewer does not own — filtered by ownership, not the 50-row window,
+      # so an older owned page never shows up as shared. Rows carry ownership
+      # state so claimable docs can offer an inline claim affordance.
+      # Render-time staleness is fine: the claim POST is race-tolerant and the
+      # scoped reload reconciles the lists.
+      recent: -> {
+        slugs.filter_map { |slug| recent_by_slug.()[slug] }
+             .reject { |document| document.owned_by?(owner_token, user: current_user) }
+             .map(&with_ownership)
+      },
       # Pins are their own query so an old pinned doc outside the 50 newest
       # still shows. The cap keeps this list complete, so the page derives
       # every star's state from it.
-      pinned: DocumentPin.for_owner(user: current_user, token: owner_token)
-                         .includes(:document)
-                         .order(created_at: :desc, id: :desc)
-                         .limit(DocumentPin::MAX_PER_OWNER)
-                         .map { |pin| with_ownership.(pin.document).merge(pinned_at: pin.created_at.iso8601) },
-      continue_reading: continue_reading && with_ownership.(continue_reading),
+      pinned: -> {
+        DocumentPin.for_owner(user: current_user, token: owner_token)
+                   .includes(:document)
+                   .order(created_at: :desc, id: :desc)
+                   .limit(DocumentPin::MAX_PER_OWNER)
+                   .map { |pin| with_ownership.(pin.document).merge(pinned_at: pin.created_at.iso8601) }
+      },
+      continue_reading: -> {
+        document = slugs.lazy.filter_map { |slug| recent_by_slug.()[slug] }.first
+        document && with_ownership.(document)
+      },
       today_label: now.strftime("%A, %-d %B"),
       day_part: day_part(now),
       ui: { background: cookies[:pruf_background].to_s.presence_in(INDEX_BACKGROUNDS) || INDEX_BACKGROUNDS.first },

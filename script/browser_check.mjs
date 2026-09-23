@@ -853,7 +853,35 @@ try {
   } else {
     fail('pinned state did not survive a reload')
   }
-  await landing.locator('.pinned-row').getByRole('button', { name: `Unpin ${firstTitle}` }).click()
+  // With two pins, unpinning the first moves focus to the next pinned star.
+  // Create a second page (waiting for its seed to persist, as above).
+  await landing.getByRole('button', { name: 'New page' }).click()
+  await landing.waitForURL(/\/d\//)
+  await waitForLive(landing)
+  await landing
+    .locator('.doc-live-editor .ProseMirror p', { hasText: 'Start writing' })
+    .waitFor({ timeout: 15000 })
+  await landing.goto(BASE)
+  await landing.locator('.pinned-row', { hasText: firstTitle }).waitFor()
+  const secondTitle = await contentsRows
+    .filter({ hasNot: landing.getByRole('button', { name: /^Unpin / }) })
+    .first()
+    .locator('.document-row-title')
+    .innerText()
+  const secondRow = contentsRows.filter({ hasText: secondTitle }).filter({ hasNot: landing.getByRole('button', { name: /^Unpin / }) }).first()
+  await secondRow.getByRole('button', { name: `Pin ${secondTitle}` }).click()
+  await landing.locator('.pinned-row').nth(1).waitFor()
+  await landing.waitForLoadState('networkidle')
+  const pinnedOrder = await landing.locator('.pinned-row .pinned-title > span:first-child').allInnerTexts()
+  await landing.locator('.pinned-row').first().getByRole('button', { name: `Unpin ${pinnedOrder[0]}` }).click()
+  await landing.locator('.pinned-row').nth(1).waitFor({ state: 'detached' })
+  if (await landing.evaluate(() => document.activeElement === document.querySelector('.pinned-row .pin-star'))) {
+    ok('unpinning a pinned page moves focus to the next pinned star')
+  } else {
+    fail('focus did not move to the next pinned star after unpinning')
+  }
+  await landing.waitForLoadState('networkidle')
+  await landing.locator('.pinned-row .pin-star').click()
   await landing.locator('.pinned-row').waitFor({ state: 'detached' })
   if ((await landing.evaluate(() => document.activeElement?.id)) === 'pinned-heading') {
     ok('unpinning the last pinned page moves focus to the Pinned heading')
@@ -870,6 +898,15 @@ try {
     ok('the background choice survives a reload')
   } else {
     fail('the background choice did not persist')
+  }
+  await landing.locator('.contents-row .document-row-title').first().click()
+  await landing.waitForURL(/\/d\//)
+  await landing.goBack()
+  await landing.waitForSelector('.notebook')
+  if ((await landing.locator('.notebook').getAttribute('data-background')) === 'night') {
+    ok('the background choice survives Back navigation')
+  } else {
+    fail('Back navigation restored a stale background')
   }
   await landing.getByRole('button', { name: 'Background' }).click()
   await landing.getByRole('radio', { name: /Morning/ }).click()

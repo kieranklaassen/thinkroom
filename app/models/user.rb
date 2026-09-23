@@ -57,7 +57,7 @@ class User < ApplicationRecord
 
       room = [ DocumentPin::MAX_PER_OWNER - document_pins.count, 0 ].max
       keep_ids = guest_pins.order(created_at: :desc, id: :desc).limit(room).pluck(:id)
-      guest_pins.where(id: keep_ids).update_all(user_id: id, owner_token: nil, updated_at: Time.current)
+      guest_pins.where(id: keep_ids).update_all(user_id: id, owner_token: nil, updated_at: Time.current) if keep_ids.any?
       guest_pins.where.not(id: keep_ids).delete_all
     end
   end
