@@ -901,7 +901,12 @@ try {
   }
   await landing.locator('.contents-row .document-row-title').first().click()
   await landing.waitForURL(/\/d\//)
+  // Let the document page finish its visit before going back; a Back fired
+  // mid-visit races the history entry on slower machines.
+  await landing.waitForSelector('.doc-page')
+  await landing.waitForLoadState('networkidle')
   await landing.goBack()
+  await landing.waitForURL((url) => new URL(url).pathname === '/', { timeout: 15000 })
   await landing.waitForSelector('.notebook')
   if ((await landing.locator('.notebook').getAttribute('data-background')) === 'night') {
     ok('the background choice survives Back navigation')
