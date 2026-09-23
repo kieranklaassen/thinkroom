@@ -173,7 +173,7 @@ try {
   // so the no-cookie assertion below is a real negative.
   phase = 'index'
   await page.goto(`${BASE}/`)
-  await page.getByRole('heading', { name: 'Your documents' }).waitFor()
+  await page.getByRole('heading', { name: 'Contents' }).waitFor()
   await page.waitForFunction(() => (window.__webmcpToolchange ?? 0) >= 2)
   const indexTools = await getTools()
   assert(sameSet(indexTools.map((t) => t.name), INDEX_TOOLS), 'index registers exactly the two index tools')
@@ -454,7 +454,7 @@ try {
   // AE5: Inertia navigation from the index to a document swaps the tool set.
   phase = 'AE5'
   await page.goto(`${BASE}/`)
-  await page.getByRole('heading', { name: 'Your documents' }).waitFor()
+  await page.getByRole('heading', { name: 'Contents' }).waitFor()
   const before = await page.evaluate(() => window.__webmcpToolchange ?? 0)
   await page.locator(`a.document-row-title[href="/d/${slug}"]`).first().click()
   await page.waitForURL(new RegExp(`/d/${slug}`))
@@ -483,7 +483,7 @@ try {
   await plain.goto(`${BASE}/d/${createdByTool.json.slug}`)
   await waitForLive(plain)
   await plain.goto(`${BASE}/`)
-  await plain.getByRole('heading', { name: 'Your documents' }).waitFor()
+  await plain.getByRole('heading', { name: 'Contents' }).waitFor()
   assert(plainErrors.length === 0, 'pages load with no console errors without WebMCP', plainErrors.join(' | '))
   assert(!plainErrors.some((e) => e.includes('Hydration failed')), 'no hydration failure without WebMCP')
   await plainContext.close()

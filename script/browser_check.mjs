@@ -742,53 +742,47 @@ try {
   } else {
     fail('landing page does not use the Thinkroom wordmark')
   }
-  if ((await landing.locator('.landing-tagline').innerText()) === 'Where deeper thinking compounds.') {
-    ok('landing page uses the approved Thinkroom tagline')
+  if (/^Good (morning|afternoon|evening)/.test(await landing.locator('.notebook-greeting').innerText())) {
+    ok('notebook greets the reader by time of day')
   } else {
-    fail('landing page does not use the approved Thinkroom tagline')
+    fail('notebook greeting is missing')
   }
-  await landing.locator('.landing-byline', { hasText: 'creator of Compound Engineering' }).waitFor()
-  await landing.getByRole('heading', { name: 'Your documents' }).waitFor()
-  if ((await landing.getByRole('heading', { name: 'Recently opened' }).count()) === 0) {
-    ok('fresh home omits the redundant empty recently-opened section')
+  await landing.getByRole('heading', { name: 'Contents' }).waitFor()
+  if ((await landing.getByRole('heading', { name: 'Shared with you' }).count()) === 0) {
+    ok('fresh home omits the empty shared-with-you section')
   } else {
-    fail('fresh home still renders an empty recently-opened section')
+    fail('fresh home still renders an empty shared-with-you section')
   }
-  const agentStart = landing.getByRole('button', { name: 'Have an agent start one' })
-  const newDocument = landing.getByRole('button', { name: 'New document' })
+  const agentStart = landing.getByRole('button', { name: 'Copy agent prompt' })
+  const newDocument = landing.getByRole('button', { name: 'New page' })
   if (
     (await agentStart.isVisible()) &&
     (await newDocument.isVisible()) &&
-    (await agentStart.getAttribute('aria-expanded')) === 'false' &&
     (await landing.locator('#agent-start-instructions').count()) === 0
   ) {
-    ok('human and agent creation paths are prominent while instructions start closed')
+    ok('human and agent creation paths are both one click away')
   } else {
-    fail('home does not present both creation paths with closed agent instructions')
+    fail('home does not present both creation paths')
   }
   await agentStart.click()
-  await landing.locator('.landing-agent-block').waitFor({ state: 'visible' })
-  if ((await agentStart.getAttribute('aria-expanded')) === 'true') {
-    ok('agent creation action reveals the copyable instructions and reports its state')
-  } else {
-    fail('agent creation action does not report its expanded state')
-  }
-  // Activating the trigger should copy the prompt automatically — the in-panel Copy
-  // button confirms with "Copied" without requiring a separate copy click.
-  await landing.locator('.landing-agent-block .share-copy', { hasText: 'Copied' }).waitFor()
-  ok('activating the agent action copies the instruction automatically')
-  // And a clear, prominent confirmation message appears (not just the small button).
-  await landing
-    .locator('.landing-agent-hint.is-copied', { hasText: 'Copied to clipboard' })
-    .waitFor()
-  ok('a clear "Copied to clipboard" confirmation is shown on copy')
+  await landing.getByRole('button', { name: 'Copied' }).waitFor()
+  ok('copy agent prompt copies the instruction and confirms')
   if ((await landing.locator('.format-label').count()) === 0) {
     ok('landing page organizes documents without format labels')
   } else {
     fail('landing page still exposes document format labels')
   }
 
-  await landing.getByRole('button', { name: 'New document' }).click()
+  // Without clipboard permission the write is refused: the instruction must
+  // appear inline so it can still be copied by hand.
+  const refusedClipboard = await browser.newPage()
+  await refusedClipboard.goto(BASE)
+  await refusedClipboard.getByRole('button', { name: 'Copy agent prompt' }).click()
+  await refusedClipboard.locator('#agent-start-instructions', { hasText: '/api/docs' }).waitFor()
+  ok('a refused clipboard write reveals the agent instruction inline')
+  await refusedClipboard.close()
+
+  await landing.getByRole('button', { name: 'New page' }).click()
   await landing.waitForURL(/\/d\//)
   const accessSlug = new URL(landing.url()).pathname.split('/')[2]
   // The creating page holds the document's one-shot seed claim. Leaving
@@ -800,6 +794,8 @@ try {
     .locator('.doc-live-editor .ProseMirror p', { hasText: 'Start writing' })
     .waitFor({ timeout: 15000 })
   await landing.goto(BASE)
+  // Tag editing stays quiet until the contents row is hovered.
+  await landing.locator('.contents-row').first().hover()
   await landing.getByRole('button', { name: /Add tag/ }).first().click()
   await landing
     .getByLabel('Tags')
@@ -825,6 +821,58 @@ try {
   } else {
     fail('saved tags did not update the document row')
   }
+
+  // Tag filter and search narrow Contents together; no match offers a reset.
+  const contentsRows = landing.locator('.contents-row')
+  const allRows = await contentsRows.count()
+  await landing.locator('.contents-filters').getByRole('button', { name: 'Research' }).click()
+  const researchRows = await contentsRows.count()
+  const researchTagged = await landing.locator('.contents-row:has(.document-tag:text-is("Research"))').count()
+  if (researchRows >= 1 && researchRows === researchTagged) {
+    ok('a tag filter narrows Contents to that tag')
+  } else {
+    fail(`tag filter left ${researchRows} rows, ${researchTagged} tagged`)
+  }
+  await landing.getByRole('searchbox', { name: 'Search your pages' }).fill('zz-no-such-page')
+  await landing.getByText('No pages match.').waitFor()
+  ok('search and tag filter combine, with an empty state when nothing matches')
+  await landing.getByRole('button', { name: 'Clear filters' }).click()
+  await landing.waitForFunction((count) => document.querySelectorAll('.contents-row').length === count, allRows)
+  ok('clearing filters restores every contents row')
+
+  // Pinning from Contents persists across reloads; unpinning from Pinned
+  // keeps keyboard focus on the Pinned section.
+  const firstTitle = await contentsRows.first().locator('.document-row-title').innerText()
+  await contentsRows.first().getByRole('button', { name: `Pin ${firstTitle}` }).click()
+  await landing.locator('.pinned-row', { hasText: firstTitle }).waitFor()
+  await landing.waitForLoadState('networkidle')
+  await landing.reload()
+  await landing.locator('.pinned-row', { hasText: firstTitle }).waitFor()
+  if ((await contentsRows.first().getByRole('button', { name: `Unpin ${firstTitle}` }).getAttribute('aria-pressed')) === 'true') {
+    ok('a pinned page stays pinned after reload and its star reads pressed')
+  } else {
+    fail('pinned state did not survive a reload')
+  }
+  await landing.locator('.pinned-row').getByRole('button', { name: `Unpin ${firstTitle}` }).click()
+  await landing.locator('.pinned-row').waitFor({ state: 'detached' })
+  if ((await landing.evaluate(() => document.activeElement?.id)) === 'pinned-heading') {
+    ok('unpinning the last pinned page moves focus to the Pinned heading')
+  } else {
+    fail('focus was lost after unpinning from Pinned')
+  }
+
+  // The background choice is a cookie the server renders on first paint.
+  await landing.getByRole('button', { name: 'Background' }).click()
+  await landing.getByRole('radio', { name: /Night/ }).click()
+  await landing.waitForSelector('.notebook[data-background="night"]')
+  await landing.reload()
+  if ((await landing.locator('.notebook').getAttribute('data-background')) === 'night') {
+    ok('the background choice survives a reload')
+  } else {
+    fail('the background choice did not persist')
+  }
+  await landing.getByRole('button', { name: 'Background' }).click()
+  await landing.getByRole('radio', { name: /Morning/ }).click()
 
   // Shared-link access: the owner chooses Edit, Comment, or View. A commenter
   // gets Comment/Read modes and HTTP comments without Yjs write authority;
