@@ -1,17 +1,751 @@
-/* --------------------------------- Landing ------------------------------- */
-.landing {
+/* ------------------------------ Notebook index ----------------------------
+ * The documents index is an open notebook: a left page for today (greeting,
+ * start, Pinned, Continue reading, Shared with you) and a right page of
+ * Contents. The Background preset (data-background, server-rendered from the
+ * pruf_background cookie) retunes the app tokens through :root:has(), so the
+ * body background and popovers PopoverShell portals to <body> follow it, and
+ * the override disappears when the index unmounts after Inertia navigation.
+ */
+:root:has(.notebook[data-background='morning']) {
+  --surface: #dfe7ee;
+  --surface-raised: #ffffff;
+  --ink: #1b2230;
+  --ink-soft: #5d6778;
+  --ink-faint: #8b95a3;
+  --line: #e1e6ec;
+  --accent: #2c55c9;
+  --accent-soft: #2c55c91f;
+  --notebook-edge: #eef1f4;
+  --notebook-spine: #d5dce3;
+  --notebook-leader: #b8c1cc;
+}
+
+:root:has(.notebook[data-background='terracotta']) {
+  --surface: #e7cfc2;
+  --surface-raised: #fffcfa;
+  --ink: #241a16;
+  --ink-soft: #6d5c54;
+  --ink-faint: #9c8a81;
+  --line: #efe3dc;
+  --accent: #b1452a;
+  --accent-soft: #b1452a1f;
+  --notebook-edge: #f5ece6;
+  --notebook-spine: #e6d6cc;
+  --notebook-leader: #d4c1b6;
+}
+
+:root:has(.notebook[data-background='paper']) {
+  --surface: #f3f1ed;
+  --surface-raised: #ffffff;
+  --ink: #21201c;
+  --ink-soft: #6a655b;
+  --ink-faint: #a8a294;
+  --line: #ebe6dc;
+  --accent: #8f4429;
+  --accent-soft: #8f44291f;
+  --notebook-edge: #f4f1ea;
+  --notebook-spine: #e3ddd1;
+  --notebook-leader: #c9c1b3;
+}
+
+:root:has(.notebook[data-background='night']) {
+  color-scheme: dark;
+  --surface: #16181d;
+  --surface-raised: #23262d;
+  --ink: #eceae5;
+  --ink-soft: #a3a7b0;
+  --ink-faint: #7d828c;
+  --line: #333842;
+  --accent: #f0b45a;
+  --accent-soft: #f0b45a26;
+  --code-bg: #1c1f25;
+  --sketch-danger: #e0675b;
+  --notebook-edge: #1c1f25;
+  --notebook-spine: #30343c;
+  --notebook-leader: #4a4f59;
+}
+
+.notebook {
+  --document-library-muted: var(--ink-soft);
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 2rem;
+  padding: 0 2rem 2rem;
+  color: var(--ink);
 }
 
 /* Inside the native shell the web view extends behind the status bar and the
-   native nav bar sits above the page, so the landing needs the shell's
+   native nav bar sits above the page, so the notebook needs the shell's
    safe-area clearance on top. Inert on the open web (attribute absent). */
-[data-native-app] .landing {
-  padding-top: calc(2rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
+[data-native-app] .notebook {
+  padding-top: var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top));
+}
+
+.notebook-bar,
+.notebook-spread {
+  width: 100%;
+  max-width: 77.5rem;
+}
+
+.notebook-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-height: 4.75rem;
+}
+
+.landing-wordmark {
+  margin: 0;
+  font-family: var(--font-doc);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.landing-wordmark-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.notebook-bar-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-left: auto;
+}
+
+.notebook-bar-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.25rem;
+  padding: 0 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-raised) 72%, transparent);
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.notebook-bar-button:hover,
+.notebook-bar-button[aria-expanded='true'] {
+  border-color: color-mix(in srgb, var(--ink) 34%, transparent);
+}
+
+.notebook-search {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 15rem;
+  height: 2.25rem;
+  padding: 0 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink-soft);
+}
+
+.notebook-search:focus-within {
+  border-color: var(--accent);
+}
+
+.notebook-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.notebook-account {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* --- The spread: two pages, soft shading toward the spine. --- */
+.notebook-spread {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0.75rem;
+  border-radius: 6px;
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 10%),
+    0 24px 50px rgb(20 26 38 / 16%);
+}
+
+.notebook-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+  min-height: 40rem;
+  padding: 3.5rem 4rem 2rem 4.25rem;
+}
+
+.notebook-page--left {
+  border-radius: 6px 0 0 6px;
+  border-right: 1px solid var(--notebook-spine);
+  background: linear-gradient(to left, var(--notebook-edge) 0, var(--surface-raised) 2.25rem);
+}
+
+.notebook-page--right {
+  gap: 0.4rem;
+  padding-left: 4.75rem;
+  border-radius: 0 6px 6px 0;
+  background: linear-gradient(to right, var(--notebook-edge) 0, var(--surface-raised) 2.25rem);
+}
+
+.notebook-date,
+.notebook-label,
+.contents-group h3,
+.notebook-folio {
+  margin: 0;
+  color: var(--ink-soft);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.notebook-greeting {
+  margin: -0.5rem 0 0;
+  font-family: var(--font-doc);
+  font-size: 2.6rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+}
+
+.notebook-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.notebook-actions .btn {
+  min-height: 2.75rem;
+  padding-inline: 1.3rem;
+  font-weight: 600;
+}
+
+.notebook-text-button {
+  min-height: 2.75rem;
+  padding: 0 0.4rem;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.notebook-text-button:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.notebook-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.notebook-label {
+  margin-bottom: 0.3rem;
+}
+
+.notebook-label:focus {
+  outline: none;
+}
+
+.notebook-hint {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.notebook-folio {
+  margin-top: auto;
+  padding-top: 1.5rem;
+  text-align: center;
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+
+.notebook-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.pinned-list,
+.shared-list,
+.contents-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* --- Stars pin and unpin; every star reads the same Pinned list. --- */
+.pin-star {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--notebook-leader);
+  cursor: pointer;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+
+.pin-star:hover,
+.pin-star.is-pinned {
+  color: var(--accent);
+}
+
+.pin-star.is-pending {
+  opacity: 0.55;
+}
+
+.pin-star:focus-visible,
+.contents-filters button:focus-visible,
+.notebook-text-button:focus-visible,
+.notebook-claim:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.pinned-row,
+.shared-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.pinned-title {
+  display: grid;
+  flex: 1;
+  gap: 0.1rem;
+  min-width: 0;
+  padding: 0.55rem 0;
+  color: var(--ink);
+  font-family: var(--font-doc);
+  font-size: 1.05rem;
+  text-decoration: none;
+}
+
+.pinned-title > span:first-child,
+.shared-title,
+.continue-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pinned-meta,
+.continue-meta {
+  color: var(--ink-soft);
+  font-family: var(--font-ui);
+  font-size: 0.74rem;
+}
+
+.pinned-title:hover,
+.shared-title:hover,
+.continue-card:hover .continue-title {
+  color: var(--accent);
+}
+
+.continue-card {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.9rem 1rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface-raised));
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.continue-title {
+  font-family: var(--font-doc);
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.shared-title {
+  flex: 1;
+  min-width: 0;
+  padding: 0.6rem 0;
+  color: var(--ink);
+  font-family: var(--font-doc);
+  font-size: 1.02rem;
+  text-decoration: none;
+}
+
+.shared-owner {
+  flex: none;
+  color: var(--ink-soft);
+  font-family: var(--font-doc);
+  font-size: 0.92rem;
+  font-style: italic;
+}
+
+.notebook-claim {
+  flex: none;
+  min-height: 2rem;
+  padding: 0.2rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.notebook-claim:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* --- Contents: title, dotted leader, date. --- */
+.contents-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.4rem;
+}
+
+.contents-heading h2 {
+  margin: 0;
+  font-family: var(--font-doc);
+  font-size: 1.9rem;
+  font-weight: 700;
+  scroll-margin-top: 1rem;
+}
+
+.contents-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.9rem;
+}
+
+.contents-filters button {
+  min-height: 2rem;
+  padding: 0.2rem 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.contents-filters button:hover,
+.contents-filters button[aria-pressed='true'] {
+  color: var(--ink);
+}
+
+.contents-filters button[aria-pressed='true'] {
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
+
+.contents-groups {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.contents-group h3 {
+  margin: 0.9rem 0 0.1rem;
+}
+
+.contents-row {
+  padding: 0.1rem 0 0.35rem;
+}
+
+.contents-row-line {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* The star hangs in the page margin so titles align with the heading. */
+.contents-row-line .pin-star {
+  margin-left: -2.6rem;
+  margin-right: 0.1rem;
+}
+
+.contents-row .document-row-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-family: var(--font-doc);
+  font-size: 1.12rem;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contents-row .document-row-title:hover {
+  color: var(--accent);
+}
+
+.contents-leader {
+  flex: 1 1 1.5rem;
+  min-width: 1.5rem;
+  border-bottom: 1.5px dotted var(--notebook-leader);
+  transform: translateY(0.35rem);
+}
+
+.contents-date {
+  flex: none;
+  color: var(--ink-soft);
+  font-family: var(--font-doc);
+  font-size: 0.92rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.contents-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  margin: -0.35rem 0 0.2rem;
+}
+
+/* Tag editing stays quiet until the row is hovered or focused; touch
+   screens without hover always show it. */
+.contents-row .document-tag-edit {
+  flex: none;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  min-height: 1.75rem;
+  padding: 0;
+  font-size: 0.68rem;
+  white-space: nowrap;
+  transition: opacity 120ms ease;
+}
+
+.contents-row:hover .document-tag-edit,
+.contents-row:focus-within .document-tag-edit,
+.contents-row .document-tag-edit[aria-expanded='true'] {
+  max-width: 8rem;
+  padding: 0 0.15rem;
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .contents-row .document-tag-edit {
+    max-width: 8rem;
+    padding: 0 0.15rem;
+    opacity: 1;
+  }
+}
+
+.notebook .document-reveal {
+  justify-self: start;
+  margin-top: 0.4rem;
+  min-height: 2.5rem;
+  color: var(--accent);
+  font-family: var(--font-doc);
+  font-size: 1.05rem;
+  font-style: italic;
+  font-weight: 400;
+}
+
+.notebook-empty {
+  padding: 1rem 0;
+}
+
+.contents-footer {
+  margin: 1.2rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+}
+
+.notebook .landing-agent-block {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.notebook .landing-agent-hint {
+  margin: 0;
+}
+
+.landing-demo-link {
+  color: var(--ink-soft);
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+
+/* --- Background menu --- */
+.background-picker {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 16rem;
+}
+
+.background-option {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 2.9rem;
+  padding: 0.4rem 0.5rem;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.background-option:hover,
+.background-option:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.background-swatch {
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  border: 1px solid rgb(0 0 0 / 12%);
+  border-radius: 6px;
+}
+
+.background-swatch--morning { background: #dfe7ee; }
+.background-swatch--terracotta { background: #e7cfc2; }
+.background-swatch--paper { background: #f3f1ed; }
+.background-swatch--night { background: #16181d; }
+
+.background-copy {
+  display: grid;
+  flex: 1;
+  gap: 0.05rem;
+}
+
+.background-label {
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.background-description {
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+}
+
+.background-check {
+  width: 1rem;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* Night keeps the few hard-coded reds legible on dark paper. */
+:root:has(.notebook[data-background='night']) :is(.document-tag-error, .document-delete-error) {
+  color: #ff9b8f;
+}
+
+:root:has(.notebook[data-background='night']) .feedback-status.is-error,
+:root:has(.notebook[data-background='night']) .feedback-button > [aria-live] {
+  color: #ff9b8f !important;
+}
+
+:root:has(.notebook[data-background='night']) .btn-primary:hover {
+  background: #fff;
+}
+
+/* --- Tablet and phone: the pages stack. --- */
+@media (max-width: 56rem) {
+  .notebook-spread {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .notebook-page {
+    min-height: 0;
+    padding: 2.25rem 1.5rem 1.5rem;
+  }
+
+  .notebook-page--left {
+    border-right: 0;
+    border-bottom: 1px solid var(--notebook-spine);
+    border-radius: 6px 6px 0 0;
+    background: var(--surface-raised);
+  }
+
+  .notebook-page--right {
+    padding-left: 1.5rem;
+    border-radius: 0 0 6px 6px;
+    background: var(--surface-raised);
+  }
+
+  .contents-row-line .pin-star {
+    margin-left: -0.5rem;
+    margin-right: 0;
+  }
+
+  .notebook-greeting {
+    font-size: 2rem;
+  }
+}
+
+@media (max-width: 40rem) {
+  .notebook {
+    padding: 0 0.75rem 1.5rem;
+  }
+
+  .notebook-bar {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.75rem 0 0.25rem;
+  }
+
+  .notebook-bar-tools {
+    display: contents;
+  }
+
+  .notebook-account {
+    margin-left: auto;
+  }
+
+  .notebook-bar-button {
+    order: 3;
+  }
+
+  .notebook-search {
+    order: 4;
+    flex: 1;
+    width: auto;
+  }
+
+  /* 16px keeps iOS from zooming the page when the field takes focus. */
+  .notebook-search input {
+    font-size: 1rem;
+  }
+
+  .notebook-account .feedback-button {
+    display: none;
+  }
 }
 
 .account-control {
@@ -52,53 +786,4 @@
 
 .account-control--signed-in button:hover {
   color: var(--ink);
-}
-
-.landing-main {
-  width: 100%;
-  max-width: 44rem;
-  margin-block: auto;
-  text-align: center;
-}
-
-.landing-hero {
-  max-width: 28rem;
-  margin-inline: auto;
-}
-
-.landing-wordmark {
-  font-family: var(--font-doc);
-  font-size: 2.75rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-.landing-wordmark-link {
-  color: inherit;
-  text-decoration: none;
-}
-
-.landing-tagline {
-  margin-top: 0.75rem;
-  color: var(--ink-soft);
-  line-height: 1.55;
-  font-size: 0.95rem;
-}
-
-.landing-byline {
-  margin-top: 0.4rem;
-  color: var(--ink-faint);
-  font-size: 0.76rem;
-}
-
-.landing-actions {
-  margin-top: 1.75rem;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  justify-content: center;
-}
-
-.landing-actions .btn {
-  min-height: 2.75rem;
 }

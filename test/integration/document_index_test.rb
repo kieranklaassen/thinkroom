@@ -72,6 +72,100 @@ class DocumentIndexTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "greeting and date line follow the viewer's timezone" do
+    establish_identity
+    cookies[:pruf_tz] = "Asia/Tokyo"
+
+    # 22:00 UTC Monday is 07:00 Tuesday in Tokyo.
+    travel_to Time.utc(2026, 9, 21, 22, 0) do
+      get root_path
+      assert_inertia_props do |props|
+        props[:day_part] == "morning" && props[:today_label] == "Tuesday, 22 September"
+      end
+    end
+
+    travel_to Time.utc(2026, 9, 22, 5, 0) do
+      get root_path
+      assert_inertia_props { |props| props[:day_part] == "afternoon" }
+    end
+
+    travel_to Time.utc(2026, 9, 22, 12, 0) do
+      get root_path
+      assert_inertia_props { |props| props[:day_part] == "evening" }
+    end
+  end
+
+  test "pinned lists the owner's pins newest first beyond the fifty newest documents" do
+    user = create_and_sign_in_user
+    old = Document.create!(title: "Old but pinned", user:, owner_name: user.name, created_at: 2.years.ago)
+    51.times { |i| Document.create!(title: "Doc #{i}", user:, owner_name: user.name) }
+    shared = Document.create!(title: "Someone else's", owner_token: "other", owner_name: "Other")
+    travel_to(1.minute.ago) { DocumentPin.pin!(old, user:, token: nil) }
+    DocumentPin.pin!(shared, user:, token: nil)
+
+    get root_path
+    assert_inertia_props do |props|
+      props[:yours].length == 50 &&
+        props[:yours_count] == 52 &&
+        props[:pinned].map { |row| row[:slug] } == [ shared.slug, old.slug ] &&
+        props[:pinned].first[:yours] == false &&
+        props[:pinned].first[:owner_name] == "Other" &&
+        props[:pinned].last[:yours] == true &&
+        props[:pinned].none? { |row| row.key?(:owner_token) }
+    end
+  end
+
+  test "continue reading is the most recently opened document that still exists" do
+    establish_identity
+    get root_path
+    assert_inertia_props { |props| props[:continue_reading].nil? }
+
+    post documents_path, params: { name: "Me" }
+    mine = Document.order(:created_at).last
+    other = Document.create!(title: "Shared read")
+    gone = Document.create!(title: "Deleted soon")
+    get document_page_path(other.slug), headers: { "User-Agent" => "Mozilla/5.0" }
+    get document_page_path(mine.slug), headers: { "User-Agent" => "Mozilla/5.0" }
+
+    get root_path
+    assert_inertia_props do |props|
+      props[:continue_reading][:slug] == mine.slug && props[:continue_reading][:yours] == true
+    end
+
+    get document_page_path(gone.slug), headers: { "User-Agent" => "Mozilla/5.0" }
+    gone.destroy!
+    get root_path
+    assert_inertia_props { |props| props[:continue_reading][:slug] == mine.slug }
+  end
+
+  test "shared with you lists only documents the viewer does not own" do
+    user = create_and_sign_in_user
+    old_mine = Document.create!(title: "Old but mine", user:, owner_name: user.name, created_at: 2.years.ago)
+    50.times { |i| Document.create!(title: "Doc #{i}", user:, owner_name: user.name) }
+    other = Document.create!(title: "Someone else's", owner_token: "other", owner_name: "Other")
+    get document_page_path(old_mine.slug), headers: { "User-Agent" => "Mozilla/5.0" }
+    get document_page_path(other.slug), headers: { "User-Agent" => "Mozilla/5.0" }
+
+    get root_path
+    assert_inertia_props do |props|
+      props[:yours].none? { |row| row[:slug] == old_mine.slug } &&
+        props[:recent].map { |row| row[:slug] } == [ other.slug ] &&
+        props[:continue_reading][:slug] == other.slug &&
+        props[:continue_reading][:yours] == false
+    end
+  end
+
+  test "background preference is read from its cookie with a safe default" do
+    establish_identity
+    cookies[:pruf_background] = "night"
+    get root_path
+    assert_inertia_props { |props| props.dig(:ui, :background) == "night" }
+
+    cookies[:pruf_background] = "neon"
+    get root_path
+    assert_inertia_props { |props| props.dig(:ui, :background) == "morning" }
+  end
+
   test "guest owner can replace and clear tags" do
     establish_identity
     post documents_path, params: { name: "Guest owner" }

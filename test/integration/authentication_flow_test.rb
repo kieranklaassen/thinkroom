@@ -52,6 +52,25 @@ class AuthenticationFlowTest < ActionDispatch::IntegrationTest
     assert_equal user, document.reload.user
   end
 
+  test "login moves this browser's pins to the account and logout leaves them there" do
+    user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
+    get root_path
+    post documents_path, params: { name: "Guest" }
+    guest_token = Document.order(:created_at).last.owner_token
+    pinned = Document.create!(title: "Worth keeping")
+    DocumentPin.pin!(pinned, user: nil, token: guest_token)
+
+    post login_path, params: { email: user.email, password: "thoughtful-passphrase" }
+
+    assert_response :see_other
+    assert DocumentPin.exists?(user:, document: pinned)
+    assert_not DocumentPin.exists?(owner_token: guest_token)
+
+    delete logout_path
+    assert DocumentPin.exists?(user:, document: pinned)
+    assert_equal 0, DocumentPin.where(user_id: nil).count
+  end
+
   test "safe return path survives login while external return path is discarded" do
     user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
     document = Document.create!(title: "Return here")

@@ -113,6 +113,17 @@ try {
   await assertTouchRules(page)
   await auditPage(page, '/signup', { expectFields: true })
   await auditPage(page, '/', { expectFields: false })
+
+  // On a phone the notebook's Contents page sits below the left page, so a
+  // search must bring the Contents heading on screen to show its results.
+  await page.getByRole('searchbox', { name: 'Search your pages' }).fill('zz')
+  await page.waitForFunction(() => {
+    const heading = document.getElementById('contents-heading')?.getBoundingClientRect()
+    return heading && heading.top >= 0 && heading.bottom <= window.innerHeight
+  }, null, { timeout: 5000 }).then(
+    () => ok('/: searching on a phone scrolls the Contents heading into view'),
+    () => fail('/: search results stayed below the fold on a phone'),
+  )
   await auditPage(page, `/d/${SLUG}`, { expectFields: false })
 } finally {
   await browser.close()

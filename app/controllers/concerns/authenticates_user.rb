@@ -7,7 +7,12 @@ module AuthenticatesUser
     destination = safe_return_to(session[:return_to])
     anonymous_token = owner_token
 
-    user.claim_documents!(anonymous_token)
+    # Documents and pins move together, before the token rotates below —
+    # afterwards the guest token can no longer be matched.
+    User.transaction do
+      user.claim_documents!(anonymous_token)
+      user.adopt_pins!(anonymous_token)
+    end
     reset_session
     session[:user_id] = user.id
     # Ruby Native app users are always remembered (per rubynative.com/docs/

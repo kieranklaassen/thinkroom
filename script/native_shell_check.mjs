@@ -164,9 +164,9 @@ try {
   check((await trailing.count()) === 1, 'home: trailing actions menu button present')
   check(
     (await trailing
-      .locator('[data-native-menu-item][data-native-title="Have an agent start one"][data-native-click="#agent-start-trigger"]')
+      .locator('[data-native-menu-item][data-native-title="Copy agent prompt"][data-native-click="#agent-start-trigger"]')
       .count()) === 1,
-    'home: actions menu triggers the agent start reveal',
+    'home: actions menu copies the agent prompt',
   )
   check(
     (await trailing
@@ -265,6 +265,9 @@ try {
     'home: swipe row carries a haptic Delete action',
   )
   const swipeOpen = async (target) => {
+    // On a phone Contents sits below the left page; mouse events outside the
+    // viewport are dropped, so bring the row on screen first.
+    await target.scrollIntoViewIfNeeded()
     const box = await target.boundingBox()
     if (!box) return
     const y = box.y + box.height / 2
