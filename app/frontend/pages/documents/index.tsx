@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { Head, Link, router, useForm } from '@inertiajs/react'
 import { NativeNavbar, NativeButton, NativeMenuItem, NativeFab, nativeHaptic } from '@ruby-native/react'
 import { FeedbackButton } from '../../components/feedback_button'
 import { AccountControl } from '../../components/account_control'
 import { BackgroundPicker, type IndexBackground } from '../../components/background_picker'
+import { RowMenu } from '../../components/row_menu'
 import { SwipeRow } from '../../components/swipe_row'
 import { userIdentity } from '../../editor/identity'
 import { setCookie } from '../../lib/cookies'
@@ -35,6 +36,9 @@ type PinnedDoc = RecentDoc & { pinned_at: string }
 type Props = Pick<SharedProps, 'nativeApp'> & {
   yours: DocLink[]
   yours_count: number
+  archived_count: number
+  // Optional prop: loaded only when the reader opens Archived.
+  archived?: DocLink[]
   recent: RecentDoc[]
   pinned: PinnedDoc[]
   continue_reading: RecentDoc | null
@@ -56,7 +60,7 @@ const GITHUB_REPOSITORY_URL = 'https://github.com/kieranklaassen/thinkroom'
 const GITHUB_PROFILE_URL = 'https://github.com/kieranklaassen'
 // Every list that shows a star or a Pinned row reloads together, so star
 // state (derived from `pinned`) and Pinned meta never drift apart.
-const LIST_PROPS = ['pinned', 'yours', 'yours_count', 'recent', 'continue_reading', 'errors']
+const LIST_PROPS = ['pinned', 'yours', 'yours_count', 'archived_count', 'recent', 'continue_reading', 'errors']
 
 const errorText = (error: unknown): string | null => {
   if (Array.isArray(error)) return error.find((value) => typeof value === 'string') ?? null
@@ -180,15 +184,28 @@ function ContentsRow({
   pinned,
   pending,
   onTogglePin,
+  onArchive,
+  onDelete,
   swipe,
 }: {
   document: DocLink
   pinned: boolean
   pending: boolean
   onTogglePin: () => void
+  onArchive: () => void
+  onDelete: () => void
   swipe?: { deleting: boolean; onDelete: () => void; closeSignal: number }
 }) {
   const [editingTags, setEditingTags] = useState(false)
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const menuButtonRef = useRef<HTMLButtonElement>(null)
+  const menuItems = [
+    { label: 'Open', onSelect: () => router.visit(`/d/${document.slug}`) },
+    { label: pinned ? 'Unpin' : 'Pin', onSelect: onTogglePin },
+    { label: document.tags.length > 0 ? 'Edit tags' : 'Add tag', onSelect: () => setEditingTags(true) },
+    { label: 'Archive', onSelect: onArchive },
+    { label: 'Delete…', onSelect: onDelete, danger: true },
+  ]
 
   const body = (
     <>
@@ -209,6 +226,24 @@ function ContentsRow({
         <time className="contents-date" dateTime={document.created_at}>
           {document.created_label}
         </time>
+        <button
+          ref={menuButtonRef}
+          className="row-menu-button"
+          type="button"
+          aria-label={`More actions for ${document.title}`}
+          aria-haspopup="menu"
+          aria-expanded={menu !== null}
+          onClick={(event) => {
+            const box = event.currentTarget.getBoundingClientRect()
+            setMenu({ x: box.right - 208, y: box.bottom + 4 })
+          }}
+        >
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <circle cx="3.5" cy="8" r="1.3" fill="currentColor" />
+            <circle cx="8" cy="8" r="1.3" fill="currentColor" />
+            <circle cx="12.5" cy="8" r="1.3" fill="currentColor" />
+          </svg>
+        </button>
       </div>
       {document.tags.length > 0 && (
         <div className="contents-row-meta">
@@ -220,12 +255,29 @@ function ContentsRow({
         </div>
       )}
       {editingTags && <TagEditor document={document} onClose={() => setEditingTags(false)} />}
+      {menu && (
+        <RowMenu
+          label={`Actions for ${document.title}`}
+          x={menu.x}
+          y={menu.y}
+          items={menuItems}
+          onClose={(restoreFocus) => {
+            setMenu(null)
+            if (restoreFocus) menuButtonRef.current?.focus({ preventScroll: true })
+          }}
+        />
+      )}
     </>
   )
+  // Right-click anywhere on the row opens the same menu at the pointer.
+  const openAtPointer = (event: ReactMouseEvent) => {
+    event.preventDefault()
+    setMenu({ x: event.clientX, y: event.clientY })
+  }
 
   if (swipe) {
     return (
-      <li className="contents-row contents-row--swipe">
+      <li className="contents-row contents-row--swipe" onContextMenu={openAtPointer}>
         <SwipeRow
           slug={document.slug}
           deleting={swipe.deleting}
@@ -238,7 +290,11 @@ function ContentsRow({
     )
   }
 
-  return <li className="contents-row">{body}</li>
+  return (
+    <li className="contents-row" onContextMenu={openAtPointer}>
+      {body}
+    </li>
+  )
 }
 
 const pinnedMeta = (document: PinnedDoc) => {
@@ -250,6 +306,8 @@ const pinnedMeta = (document: PinnedDoc) => {
 export default function DocumentsIndex({
   yours,
   yours_count,
+  archived_count,
+  archived,
   recent,
   pinned,
   continue_reading,
@@ -415,8 +473,9 @@ export default function DocumentsIndex({
   const firstName = (viewer.account?.name ?? viewer.name ?? '').trim().split(/\s+/)[0]
   const greeting = `Good ${day_part}${firstName ? `, ${firstName}` : ''}.`
 
-  // Native-only swipe-to-delete on owned rows. The server re-checks ownership;
-  // this is just the affordance. WKWebView shows confirm() as a native alert.
+  // Delete (row menu, Archived list, native swipe). The server re-checks
+  // ownership; this is just the affordance. WKWebView shows confirm() as a
+  // native alert.
   const [deletingSlug, setDeletingSlug] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   // Bumped on failure so every SwipeRow snaps closed (per R6, the error
@@ -429,6 +488,9 @@ export default function DocumentsIndex({
       preserveScroll: true,
       onStart: () => setDeletingSlug(slug),
       onFinish: () => setDeletingSlug(null),
+      onSuccess: () => {
+        if (showArchivedRef.current) router.reload({ only: ['archived', 'archived_count'] })
+      },
       onError: (errors) => {
         const message = typeof errors.document === 'string' ? errors.document : null
         setDeleteError(message ?? 'Delete failed — please try again')
@@ -436,6 +498,39 @@ export default function DocumentsIndex({
       },
     })
   }, [])
+
+  // Archive puts a page away without deleting it: it leaves Contents and
+  // Pinned and is listed under Archived. A notice offers one-click undo.
+  const [showArchived, setShowArchived] = useState(false)
+  const showArchivedRef = useRef(false)
+  showArchivedRef.current = showArchived
+  const [notice, setNotice] = useState<{ text: string; undo?: () => void } | null>(null)
+  const setArchived = useCallback((document: DocLink, archive: boolean) => {
+    setDeleteError(null)
+    router.patch(
+      `/d/${document.slug}/archive`,
+      { archived: archive },
+      {
+        preserveScroll: true,
+        only: showArchivedRef.current ? [...LIST_PROPS, 'archived'] : LIST_PROPS,
+        onSuccess: () =>
+          setNotice(
+            archive
+              ? { text: `Archived “${document.title}”.`, undo: () => setArchived(document, false) }
+              : { text: `Restored “${document.title}”.` },
+          ),
+        onError: (errors) => {
+          const message = typeof errors.archive === 'string' ? errors.archive : null
+          setDeleteError(message ?? 'Archive failed — please try again')
+        },
+      },
+    )
+  }, [])
+  const toggleArchived = () => {
+    const next = !showArchived
+    setShowArchived(next)
+    if (next) router.reload({ only: ['archived'] })
+  }
 
   const contentsGroup = (title: string, documents: DocLink[]) => {
     if (documents.length === 0) return null
@@ -451,6 +546,8 @@ export default function DocumentsIndex({
               pinned={pinnedSlugs.has(document.slug)}
               pending={pendingPins.has(document.slug)}
               onTogglePin={() => setPin(document, pinnedSlugs.has(document.slug))}
+              onArchive={() => setArchived(document, true)}
+              onDelete={() => deleteDocument(document.slug)}
               swipe={
                 nativeApp
                   ? {
@@ -698,6 +795,26 @@ export default function DocumentsIndex({
                 {deleteError}
               </p>
             )}
+            <div className="contents-notice" role="status">
+              {notice && (
+                <>
+                  <span>{notice.text}</span>
+                  {notice.undo && (
+                    <button
+                      className="notebook-text-button"
+                      type="button"
+                      onClick={() => {
+                        const undo = notice.undo
+                        setNotice(null)
+                        undo?.()
+                      }}
+                    >
+                      Undo
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
             {yours.length === 0 ? (
               <p className="notebook-hint notebook-empty">
                 Your pages will be listed here. Start with New page, or copy the agent prompt and let
@@ -725,11 +842,61 @@ export default function DocumentsIndex({
                 )}
               </div>
             )}
-            {yours.length > 0 && (
-              <p className="contents-footer">
-                {pluralPages(yours_count)}
-                {yours_count > yours.length && ` · showing the newest ${yours.length}`}
-              </p>
+            {(yours.length > 0 || archived_count > 0) && (
+              <div className="contents-footer">
+                <span>
+                  {pluralPages(yours_count)}
+                  {yours_count > yours.length && ` · showing the newest ${yours.length}`}
+                </span>
+                {archived_count > 0 && (
+                  <button
+                    className="contents-archived-toggle"
+                    type="button"
+                    aria-expanded={showArchived}
+                    aria-controls="archived-pages"
+                    onClick={toggleArchived}
+                  >
+                    Archived ({archived_count})
+                  </button>
+                )}
+              </div>
+            )}
+            {showArchived && archived_count > 0 && (
+              <section id="archived-pages" className="contents-group" aria-labelledby="archived-heading">
+                <h3 id="archived-heading">Archived</h3>
+                {archived === undefined ? (
+                  <p className="notebook-hint">Loading…</p>
+                ) : (
+                  <ul className="contents-list">
+                    {archived.map((document) => (
+                      <li className="contents-row archived-row" key={document.slug}>
+                        <div className="contents-row-line">
+                          <Link className="document-row-title" href={`/d/${document.slug}`} prefetch>
+                            {document.title}
+                          </Link>
+                          <span className="contents-leader" aria-hidden="true" />
+                          <button
+                            className="notebook-text-button archived-action"
+                            type="button"
+                            aria-label={`Restore ${document.title}`}
+                            onClick={() => setArchived(document, false)}
+                          >
+                            Restore
+                          </button>
+                          <button
+                            className="notebook-text-button archived-action is-danger"
+                            type="button"
+                            aria-label={`Delete ${document.title}`}
+                            onClick={() => deleteDocument(document.slug)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
             )}
             <p className="notebook-folio" aria-hidden="true">
               ii

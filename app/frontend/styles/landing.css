@@ -589,9 +589,136 @@
 }
 
 .contents-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
   margin: 1.2rem 0 0;
   color: var(--ink-soft);
   font-size: 0.75rem;
+}
+
+.contents-archived-toggle {
+  min-height: 2rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.contents-archived-toggle:hover,
+.contents-archived-toggle[aria-expanded='true'] {
+  color: var(--ink);
+}
+
+/* Archive/restore confirmation with its one-click undo. Empty keeps no
+   height so the list does not jump. */
+.contents-notice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+}
+
+.contents-notice:empty {
+  display: none;
+}
+
+.contents-notice .notebook-text-button {
+  min-height: 2rem;
+  font-size: 0.8rem;
+}
+
+/* --- Row actions: a ⋯ button and the same menu on right-click. --- */
+.row-menu-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  margin-right: -0.4rem;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-soft);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+
+.contents-row:hover .row-menu-button,
+.contents-row:focus-within .row-menu-button,
+.row-menu-button[aria-expanded='true'] {
+  opacity: 1;
+}
+
+.row-menu-button:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
+.row-menu-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (hover: none) {
+  .row-menu-button {
+    opacity: 1;
+  }
+}
+
+.row-menu {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  padding: 0.3rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-raised);
+  box-shadow:
+    0 2px 4px rgb(0 0 0 / 8%),
+    0 16px 36px rgb(20 26 38 / 18%);
+}
+
+.row-menu-item {
+  min-height: 2.25rem;
+  padding: 0 0.7rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.row-menu-item:hover,
+.row-menu-item:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.row-menu-item.is-danger,
+.archived-action.is-danger {
+  color: #a1372c;
+}
+
+.archived-row .document-row-title {
+  color: var(--ink-soft);
+}
+
+.archived-action {
+  flex: none;
+  min-height: 2.25rem;
+  font-size: 0.8rem;
 }
 
 .notebook .landing-agent-block {
@@ -672,7 +799,7 @@
 }
 
 /* Night keeps the few hard-coded reds legible on dark paper. */
-:root:has(.notebook[data-background='night']) :is(.document-tag-error, .document-delete-error) {
+:root:has(.notebook[data-background='night']) :is(.document-tag-error, .document-delete-error, .row-menu-item.is-danger, .archived-action.is-danger) {
   color: #ff9b8f;
 }
 

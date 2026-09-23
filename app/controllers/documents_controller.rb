@@ -29,7 +29,10 @@ class DocumentsController < InertiaController
     row = ->(document) { index_document_props(document, week_start:, current_year: now.year, zone:) }
     # Signed-in ownership follows the account across browsers. Guests retain
     # the original permanent-cookie ownership model.
-    owned = current_user ? current_user.documents : Document.where(owner_token: owner_token)
+    owned_all = current_user ? current_user.documents : Document.where(owner_token: owner_token)
+    # Archived pages leave Contents and Pinned; they stay readable by link and
+    # are listed on demand under Archived.
+    owned = owned_all.where(archived_at: nil)
     # AR relations memoize their own load, so props sharing one relation run
     # its query once. List props are procs: a scoped partial reload (a pin,
     # a tag edit, a claim) runs only the queries its `only:` asks for.
@@ -47,6 +50,10 @@ class DocumentsController < InertiaController
     render inertia: "documents/index", props: {
       yours: -> { yours.map(&row) },
       yours_count: -> { owned.count },
+      archived_count: -> { owned_all.where.not(archived_at: nil).count },
+      archived: InertiaRails.optional {
+        owned_all.where.not(archived_at: nil).order(archived_at: :desc).limit(50).map(&row)
+      },
       # Recent rows ("Shared with you") are documents opened here that the
       # viewer does not own — filtered by ownership, not the 50-row window,
       # so an older owned page never shows up as shared. Rows carry ownership
@@ -63,6 +70,7 @@ class DocumentsController < InertiaController
       # every star's state from it.
       pinned: -> {
         DocumentPin.for_owner(user: current_user, token: owner_token)
+                   .joins(:document).where(documents: { archived_at: nil })
                    .includes(:document)
                    .order(created_at: :desc, id: :desc)
                    .limit(DocumentPin::MAX_PER_OWNER)
@@ -256,6 +264,20 @@ class DocumentsController < InertiaController
   rescue ActiveRecord::RecordNotFound
     # The doc was deleted while the claim was in flight — go home cleanly
     # instead of popping a 404 modal over a dead editor.
+    redirect_to root_path, status: :see_other
+  end
+
+  def update_archive
+    document = Document.find_by!(slug: params[:slug])
+    unless document.owned_by?(owner_token, user: current_user)
+      return redirect_back fallback_location: root_path,
+                           inertia: { errors: { archive: "Only the owner can archive this document" } }
+    end
+
+    archived = ActiveModel::Type::Boolean.new.cast(params[:archived])
+    document.update!(archived_at: archived ? (document.archived_at || Time.current) : nil)
+    redirect_back fallback_location: root_path, status: :see_other
+  rescue ActiveRecord::RecordNotFound
     redirect_to root_path, status: :see_other
   end
 

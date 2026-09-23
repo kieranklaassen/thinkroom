@@ -28,6 +28,7 @@ Rails.application.routes.draw do
   get "d/:slug", to: "documents#show", as: :document_page
   post "d/:slug/claim", to: "documents#claim", as: :claim_document
   patch "d/:slug/tags", to: "documents#update_tags", as: :document_tags
+  patch "d/:slug/archive", to: "documents#update_archive", as: :document_archive
   post "d/:slug/pin", to: "document_pins#create", as: :document_pin
   delete "d/:slug/pin", to: "document_pins#destroy"
   patch "d/:slug/highlight_names", to: "documents#update_highlight_names", as: :document_highlight_names

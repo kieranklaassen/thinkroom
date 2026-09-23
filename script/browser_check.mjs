@@ -916,6 +916,35 @@ try {
   await landing.getByRole('button', { name: 'Background' }).click()
   await landing.getByRole('radio', { name: /Morning/ }).click()
 
+  // Row actions: right-click opens the menu; Archive hides the page with an
+  // undo; Archived lists it with Restore; Delete removes it after a confirm.
+  // Use the spare page from the pin check, never the one later steps share.
+  const spareRow = landing.locator(`.contents-row:not(:has(a[href="/d/${accessSlug}"]))`).first()
+  const spareHref = await spareRow.locator('.document-row-title').getAttribute('href')
+  await spareRow.locator('.document-row-title').click({ button: 'right' })
+  await landing.getByRole('menu').waitFor()
+  await landing.getByRole('menuitem', { name: 'Archive' }).click()
+  await landing.locator(`.contents-row a[href="${spareHref}"]`).waitFor({ state: 'detached' })
+  await landing.getByRole('status').getByRole('button', { name: 'Undo' }).click()
+  await landing.locator(`.contents-row a[href="${spareHref}"]`).waitFor()
+  ok('right-click Archive hides a page and Undo brings it back')
+
+  await landing.locator(`.contents-row:has(a[href="${spareHref}"])`).hover()
+  await landing.locator(`.contents-row:has(a[href="${spareHref}"])`).getByRole('button', { name: /^More actions for / }).click()
+  await landing.getByRole('menuitem', { name: 'Archive' }).click()
+  await landing.getByRole('button', { name: /^Archived \(/ }).click()
+  await landing.locator(`.archived-row a[href="${spareHref}"]`).waitFor()
+  await landing.locator('.archived-row').getByRole('button', { name: /^Restore / }).click()
+  await landing.locator(`.contents-row:not(.archived-row) a[href="${spareHref}"]`).waitFor()
+  ok('the Archived list restores a page to Contents')
+
+  landing.once('dialog', (dialog) => dialog.accept())
+  await landing.locator(`.contents-row:has(a[href="${spareHref}"])`).hover()
+  await landing.locator(`.contents-row:has(a[href="${spareHref}"])`).getByRole('button', { name: /^More actions for / }).click()
+  await landing.getByRole('menuitem', { name: 'Delete…' }).click()
+  await landing.locator(`.contents-row a[href="${spareHref}"]`).waitFor({ state: 'detached' })
+  ok('Delete from the row menu removes the page after confirming')
+
   // Shared-link access: the owner chooses Edit, Comment, or View. A commenter
   // gets Comment/Read modes and HTTP comments without Yjs write authority;
   // downgrading to View canonicalizes their open Comment URL immediately.
