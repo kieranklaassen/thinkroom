@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_19_191807) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_22_213000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -113,6 +113,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_191807) do
     t.index ["document_id", "expires_at"], name: "index_document_assets_on_document_id_and_expires_at"
     t.index ["document_id"], name: "index_document_assets_on_document_id"
     t.index ["expires_at"], name: "index_document_assets_on_expires_at", where: "document_id IS NULL"
+  end
+
+  create_table "document_pins", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "document_id", null: false
+    t.string "owner_token"
+    t.datetime "updated_at", null: false
+    t.integer "user_id"
+    t.index ["document_id", "owner_token"], name: "index_document_pins_on_document_id_and_owner_token", unique: true, where: "owner_token IS NOT NULL"
+    t.index ["document_id", "user_id"], name: "index_document_pins_on_document_id_and_user_id", unique: true, where: "user_id IS NOT NULL"
+    t.index ["owner_token", "created_at"], name: "index_document_pins_on_owner_token_and_created_at", where: "owner_token IS NOT NULL"
+    t.index ["user_id", "created_at"], name: "index_document_pins_on_user_id_and_created_at", where: "user_id IS NOT NULL"
+    t.check_constraint "(user_id IS NULL) <> (owner_token IS NULL)", name: "document_pins_single_owner"
   end
 
   create_table "documents", force: :cascade do |t|
@@ -312,6 +325,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_19_191807) do
   add_foreign_key "cli_device_authorizations", "users"
   add_foreign_key "comments", "documents"
   add_foreign_key "document_assets", "documents"
+  add_foreign_key "document_pins", "documents"
+  add_foreign_key "document_pins", "users"
   add_foreign_key "documents", "users"
   add_foreign_key "feedback_runs", "users"
   add_foreign_key "suggestions", "documents"

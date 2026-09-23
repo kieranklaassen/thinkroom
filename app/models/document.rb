@@ -46,6 +46,7 @@ class Document < ApplicationRecord
   has_many :document_assets, dependent: :destroy
   has_many :yjs_state_archives, dependent: :destroy
   has_many :yjs_document_updates, dependent: :delete_all
+  has_many :document_pins, dependent: :delete_all
   belongs_to :user, optional: true
 
   before_validation :ensure_slug, on: :create

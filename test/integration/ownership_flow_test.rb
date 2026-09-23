@@ -162,6 +162,20 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
     assert_equal 0, Comment.where(document_id: @document.id).count
   end
 
+  test "delete by owner succeeds for a pinned doc and removes every pin" do
+    establish_identity
+    post claim_document_path(@document.slug), params: { name: "Owner" }
+    reader = User.create!(name: "Reader", email: "reader@example.com", password: "thoughtful-passphrase")
+    DocumentPin.pin!(@document, user: nil, token: @document.reload.owner_token)
+    DocumentPin.pin!(@document, user: reader, token: nil)
+
+    delete destroy_document_path(@document.slug)
+
+    assert_redirected_to root_path
+    assert_nil Document.find_by(slug: @document.slug)
+    assert_equal 0, DocumentPin.where(document_id: @document.id).count
+  end
+
   test "delete by non-owner is refused and the doc survives" do
     Document.where(id: @document.id).update_all(
       owner_token: "someone-else", owner_name: "Owner", claimed_at: Time.current

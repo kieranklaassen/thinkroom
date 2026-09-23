@@ -91,4 +91,36 @@ class UserTest < ActiveSupport::TestCase
     assert_equal user.id, already_owned.reload.user_id
     assert_equal 0, user.claim_documents!("browser")
   end
+
+  test "adopt_pins moves guest pins to the account without duplicates" do
+    user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
+    shared = Document.create!(title: "Shared")
+    guest_only = Document.create!(title: "Guest only")
+    DocumentPin.pin!(shared, user:, token: nil)
+    DocumentPin.pin!(shared, user: nil, token: "browser")
+    DocumentPin.pin!(guest_only, user: nil, token: "browser")
+
+    user.adopt_pins!("browser")
+
+    assert_equal [ guest_only.id, shared.id ].sort, DocumentPin.where(user:).pluck(:document_id).sort
+    assert_not DocumentPin.exists?(owner_token: "browser")
+  end
+
+  test "adopt_pins keeps the newest guest pins that fit under the cap" do
+    user = User.create!(name: "Kieran", email: "kieran@example.com", password: "thoughtful-passphrase")
+    (DocumentPin::MAX_PER_OWNER - 1).times do |i|
+      DocumentPin.pin!(Document.create!(title: "Account #{i}"), user:, token: nil)
+    end
+    older = Document.create!(title: "Older")
+    newest = Document.create!(title: "Newest")
+    travel_to(2.minutes.ago) { DocumentPin.pin!(older, user: nil, token: "browser") }
+    DocumentPin.pin!(newest, user: nil, token: "browser")
+
+    user.adopt_pins!("browser")
+
+    assert_equal DocumentPin::MAX_PER_OWNER, DocumentPin.where(user:).count
+    assert DocumentPin.exists?(user:, document: newest)
+    assert_not DocumentPin.exists?(document: older)
+    assert_raises(DocumentPin::CapReached) { DocumentPin.pin!(Document.create!(title: "One more"), user:, token: nil) }
+  end
 end

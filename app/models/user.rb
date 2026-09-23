@@ -5,6 +5,7 @@ class User < ApplicationRecord
   has_secure_password validations: false
 
   has_many :documents, dependent: :restrict_with_exception
+  has_many :document_pins, dependent: :delete_all
   has_many :cli_access_tokens, dependent: :destroy
   has_many :cli_device_authorizations, dependent: :destroy
   has_many :feedback_runs, dependent: :destroy
@@ -40,6 +41,24 @@ class User < ApplicationRecord
         owner_name: name,
         updated_at: Time.current
       )
+    end
+  end
+
+  # Moves a guest browser's pins onto this account at sign-in, before the
+  # owner token rotates. Documents the account already pinned drop their guest
+  # duplicate, and only the newest guest pins that fit under the per-owner cap
+  # move; the rest are discarded so the account never exceeds the cap.
+  def adopt_pins!(owner_token)
+    return if owner_token.blank?
+
+    transaction do
+      guest_pins = DocumentPin.where(user_id: nil, owner_token:)
+      guest_pins.where(document_id: document_pins.select(:document_id)).delete_all
+
+      room = [ DocumentPin::MAX_PER_OWNER - document_pins.count, 0 ].max
+      keep_ids = guest_pins.order(created_at: :desc, id: :desc).limit(room).pluck(:id)
+      guest_pins.where(id: keep_ids).update_all(user_id: id, owner_token: nil, updated_at: Time.current)
+      guest_pins.where.not(id: keep_ids).delete_all
     end
   end
 
