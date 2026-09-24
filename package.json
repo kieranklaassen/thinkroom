@@ -20,7 +20,7 @@
     "@milkdown/plugin-collab": "7.21.3",
     "@milkdown/plugin-highlight": "7.21.3",
     "@milkdown/react": "7.21.3",
-    "@rails/actioncable": "^8.1.300",
+    "@rails/actioncable": "^8.1.301",
     "@ruby-native/react": "^0.15.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
