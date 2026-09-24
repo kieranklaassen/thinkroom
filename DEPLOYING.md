@@ -22,11 +22,20 @@ Put secret values in `.kamal/secrets`:
 KAMAL_REGISTRY_PASSWORD=$KAMAL_REGISTRY_PASSWORD
 RAILS_MASTER_KEY=$RAILS_MASTER_KEY
 CURSOR_API_KEY=$CURSOR_API_KEY
+TYPESAFE_API_KEY=$(bin/typesafe-key)
 GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID
 GOOGLE_CLIENT_SECRET=$GOOGLE_CLIENT_SECRET
 ```
 
-`.kamal/secrets.example` contains the complete safe-to-copy key list. Google
+`.kamal/secrets.example` contains the complete safe-to-copy key list. Every
+name that `config/deploy.yml` lists under `env.secret` must be present in
+`.kamal/secrets` of the checkout you deploy from, or Kamal stops before
+building ("Secret 'X' not found"). `TYPESAFE_API_KEY` is one of them on every
+deploy: `bin/typesafe-key` prints the exported variable or the value from the
+checkout's untracked `.env` (the file `bin/dev` loads), and
+`.kamal/hooks/pre-build` fails the deploy when neither has it, because Kamal
+would otherwise accept an empty value and ship a container whose reviewers
+panel says "not configured". Google
 sign-in is enabled only when both Google values are present. Set
 `KAMAL_GOOGLE_OAUTH=1` in `.kamal/deploy.env` when those secrets are configured;
 leave it unset to deploy without Google. Password accounts and anonymous
@@ -77,11 +86,14 @@ Compound writing lives in Comment mode for accounts with the
 packs they subscribed to, and TypeSafe's Jev answers each lens's yes/no
 questions over the document. Everyone else sees no panel, no props, and the
 pass and pack endpoints refuse them. It needs a TypeSafe API key from
-<https://console.typesafe.ai>. Add it to `.kamal/secrets` as
-`TYPESAFE_API_KEY=$TYPESAFE_API_KEY` and set `KAMAL_COMPOUND_WRITING=1` in
-`.kamal/deploy.env`; without the flag the container receives no key and the
-panel shows a "not configured" notice instead of running reviewers.
-`TYPESAFE_MODEL` (default `jev-latest`) may be set in `env.clear` if needed.
+<https://console.typesafe.ai>, shipped with every deploy: keep
+`TYPESAFE_API_KEY=$(bin/typesafe-key)` in `.kamal/secrets` and the key in the
+checkout's untracked `.env` (or exported in the deploying shell). There is no
+deploy-time switch any more; a checkout without the key cannot deploy, which
+is the point, since the feature is gated per account by Flipper rather than
+per deployment. `TYPESAFE_MODEL` (default `jev-latest`) may be set in
+`env.clear` if needed. To confirm a running container has the key without
+printing it: `bin/kamal app exec --reuse 'printenv TYPESAFE_API_KEY | cut -c1-6'`.
 
 An enabled account is subscribed to the first pack, `EveryInc/compound-writing`
 at commit `8fd0ec88c00976cf0274cb76552dc7ad9405ca92` (built offline from
@@ -171,15 +183,20 @@ Bundler cannot parse this application's Gemfile platforms and will fail before
 the deploy starts.
 
 An isolated Git worktree does not inherit ignored files from the primary
-checkout. Before deploying from a worktree, copy `.kamal/deploy.env`,
-`.kamal/secrets`, and `config/master.key` into it, then verify that all three are
-non-empty without printing their contents:
+checkout. Before deploying from a worktree (or any second checkout), copy
+`.kamal/deploy.env`, `.kamal/secrets`, `.env`, and `config/master.key` into it,
+then verify that they are non-empty and that the TypeSafe key resolves, without
+printing their contents:
 
 ```bash
 test -s .kamal/deploy.env
 test -s .kamal/secrets
 test -s config/master.key
+bin/typesafe-key > /dev/null && echo "TypeSafe key resolves"
 ```
+
+Deploys from any checkout that skips this stop at the pre-build hook instead
+of shipping a container without the key.
 
 Load the non-secret deployment identifiers, validate the rendered
 configuration, and deploy:

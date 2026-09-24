@@ -1,0 +1,11 @@
+#!/bin/sh
+# Runs before every Kamal build. The TypeSafe key is a required secret in
+# config/deploy.yml and .kamal/secrets resolves it with bin/typesafe-key; Kamal
+# would accept an empty substitution silently, so fail here instead when the
+# key cannot be resolved from this checkout.
+set -eu
+
+if ! bin/typesafe-key > /dev/null; then
+  echo "kamal pre-build: refusing to deploy without TYPESAFE_API_KEY (see DEPLOYING.md, Compound writing)" >&2
+  exit 1
+fi

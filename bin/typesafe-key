@@ -1,0 +1,26 @@
+#!/bin/sh
+# Prints the TypeSafe API key for Kamal (.kamal/secrets calls this at deploy
+# time) without anyone exporting it first. Sources, in order: the
+# TYPESAFE_API_KEY variable if already exported, then the checkout's untracked
+# .env file (the same one bin/dev loads). Exits 1 with a message on stderr when
+# neither has it; .kamal/hooks/pre-build turns that into a failed deploy, so a
+# checkout that lacks the key can no longer ship a container without it.
+set -eu
+
+if [ -n "${TYPESAFE_API_KEY:-}" ]; then
+  printf '%s' "$TYPESAFE_API_KEY"
+  exit 0
+fi
+
+if [ -f .env ]; then
+  value=$(sed -n -E 's/^[[:space:]]*(export[[:space:]]+)?TYPESAFE_API_KEY[[:space:]]*=[[:space:]]*//p' .env | tail -n 1)
+  # Drop a trailing comment and whitespace, then one pair of surrounding quotes.
+  value=$(printf '%s' "$value" | sed -E "s/[[:space:]]+#.*$//; s/[[:space:]]+$//; s/^\"(.*)\"$/\1/; s/^'(.*)'$/\1/")
+  if [ -n "$value" ]; then
+    printf '%s' "$value"
+    exit 0
+  fi
+fi
+
+echo "bin/typesafe-key: TYPESAFE_API_KEY is not set and not in $(pwd)/.env; add TYPESAFE_API_KEY=... to .env (untracked) or export it before deploying" >&2
+exit 1
