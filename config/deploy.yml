@@ -33,9 +33,12 @@ env:
     - GOOGLE_CLIENT_ID
     - GOOGLE_CLIENT_SECRET
 <% end %>
-<% if ENV["KAMAL_COMPOUND_WRITING"] == "1" %>
+    # TypeSafe (compound writing) on every deploy: the feature itself is a
+    # Flipper flag, and a deploy that shipped without the key once left
+    # enabled accounts with a "not configured" panel. Kamal refuses to deploy
+    # when the name is missing from .kamal/secrets; .kamal/hooks/pre-build
+    # refuses when it resolves empty.
     - TYPESAFE_API_KEY
-<% end %>
   clear:
     # SQLite and the database-backed Cable adapter share one persistent volume.
     WEB_CONCURRENCY: "1"

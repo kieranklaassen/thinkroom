@@ -5,6 +5,12 @@ no stable release series; changes under development are listed as unreleased.
 
 ## Unreleased
 
+- Changed: `TYPESAFE_API_KEY` ships with every Kamal deploy (the
+  `KAMAL_COMPOUND_WRITING` switch is gone, since the feature is gated per
+  account by Flipper). `.kamal/secrets` resolves it with `bin/typesafe-key`
+  (exported variable or the checkout's `.env`) and `.kamal/hooks/pre-build`
+  refuses to deploy when it cannot be resolved, so a checkout without the key
+  can no longer leave production's reviewers panel "not configured".
 - Added: Feature flags on Flipper, as in Cora (`flipper`, `flipper-active_record`,
   `flipper-ui`): `config/flipper_flag_defaults.yml` documents every flag,
   Flipper UI is mounted at `/admin/flipper` for admin accounts
