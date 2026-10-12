@@ -36,7 +36,7 @@
     "y-prosemirror": "^1.3.7",
     "y-protocols": "^1.0.7",
     "yaml": "^2.9.0",
-    "yjs": "^13.6.31"
+    "yjs": "^13.6.32"
   },
   "scripts": {
     "check": "tsc -p tsconfig.app.json && tsc -p tsconfig.node.json && npm run check:lint && npm run check:cli",
