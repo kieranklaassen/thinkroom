@@ -21,7 +21,7 @@
     "@milkdown/plugin-highlight": "7.21.3",
     "@milkdown/react": "7.21.3",
     "@rails/actioncable": "^8.1.300",
-    "@ruby-native/react": "^0.15.0",
+    "@ruby-native/react": "^0.15.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
