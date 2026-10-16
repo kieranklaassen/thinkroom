@@ -55,7 +55,7 @@ gem "inertia_rails", "~> 3.22"
 # Compound writing mode: TypeSafe's Jev model answers the reviewers' yes/no
 # questions through RubyLLM's structured-output API. ruby_llm-typesafe is
 # Kieran's provider gem (structured output only; Jev writes no text).
-gem "ruby_llm", "~> 2.0"
+gem "ruby_llm", "~> 2.1"
 gem "ruby_llm-typesafe", "~> 0.1"
 # Fetches and pins compound writing packs from Claude Code plugin
 # marketplaces over HTTPS (no git in the production image). Pre-release,
