@@ -16,7 +16,8 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     assert_inertia_props do |props|
       props[:document][:seed_granted] == true &&
         props[:document][:seed_content] == "# Template" &&
-        props[:document][:seed_markdown] == "# Template" &&
+        !props[:document].key?(:seed_markdown) &&
+        props[:document][:content_generation] == 0 &&
         props[:document][:content_format] == "markdown"
     end
     assert_equal "claimed", @document.reload.seed_state
@@ -132,6 +133,7 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     assert_inertia_props do |props|
       props[:document][:seed_version].present? &&
         props[:document][:seed_version] != first_version &&
+        props[:document][:content_generation] == 1 &&
         props[:document][:seed_content] == "# Replacement"
     end
   end

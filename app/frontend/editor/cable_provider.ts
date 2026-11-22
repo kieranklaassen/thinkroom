@@ -25,7 +25,6 @@ type SyncMessage = {
   seed?: boolean
   content_format?: 'markdown' | 'html'
   seed_content?: string
-  seed_markdown?: string
   seed_author_kind?: CollaboratorKind | null
   seed_author_name?: string | null
   cid?: string
@@ -103,22 +102,29 @@ export class CableProvider {
   // every open of a document with deletion history persist a redundant
   // delete-set frame that the server then has to fold away.
   private pendingLocalChanges = false
-  // Learned from each "sync" message and echoed back on outgoing
-  // update/sync-reply frames so the server can detect a client whose local
-  // Yjs doc predates an owner CLI replacement (Document#replace_content!)
-  // and reject its frame instead of merging stale content back in.
-  private generation: number | null = null
+  // Initialized from documents#show props and verified on each "sync" message,
+  // then echoed back on outgoing update/sync-reply frames and keepalive HTTP
+  // flushes so the server rejects any client whose local Yjs doc predates an
+  // owner CLI replacement (Document#replace_content!).
+  private generation: number | null
   private readonly slug: string
   private readonly canWrite: boolean
 
   constructor(
     doc: Y.Doc,
     slug: string,
-    options?: { consumer?: Consumer; canWrite?: boolean; connectionIdentity?: string },
+    options?: {
+      consumer?: Consumer
+      canWrite?: boolean
+      connectionIdentity?: string
+      initialGeneration?: number | null
+    },
   ) {
     this.doc = doc
     this.slug = slug
     this.canWrite = options?.canWrite ?? true
+    this.generation =
+      typeof options?.initialGeneration === 'number' ? options.initialGeneration : null
     this.awareness = new Awareness(doc)
     this.consumer = options?.consumer ?? getConsumer(options?.connectionIdentity)
 
@@ -191,9 +197,7 @@ export class CableProvider {
       type,
       update: toBase64(update),
       seq: this.updateSequence,
-      // Omitted (not null) when not yet known, matching the server's
-      // "absent key means trust it" rollout-compatibility handling.
-      ...(this.generation === null ? {} : { generation: this.generation }),
+      generation: this.generation,
     })
   }
 
@@ -213,11 +217,10 @@ export class CableProvider {
       update: toBase64(update),
       cid: this.clientId,
       // Same staleness guard as sendUpdate: this beforeunload/keepalive
-      // fallback merges through the identical YjsPersistence.merge path as
-      // SyncChannel, so it must carry generation too -- otherwise a closing
-      // stale tab could resurrect content a replacement just reset via this
-      // second transport.
-      ...(this.generation === null ? {} : { generation: this.generation }),
+      // fallback merges through the identical YjsPersistence.merge_bytes path
+      // as SyncChannel, so it always carries content_generation (initialized
+      // from page props even before the WebSocket handshake completes).
+      generation: this.generation,
     }
     const completePayload = { ...updatePayload, ...snapshot }
     const completeBody = JSON.stringify(completePayload)
@@ -290,7 +293,7 @@ export class CableProvider {
           }
           this.pendingLocalChanges = false
         }
-        const seedContent = data.seed_content ?? data.seed_markdown
+        const seedContent = data.seed_content
         if (data.seed && seedContent) {
           // No one listens to 'seed' by design: the editor reads
           // provider.seedContent directly inside its bind step, which runs

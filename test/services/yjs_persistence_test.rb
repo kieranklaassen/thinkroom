@@ -124,14 +124,73 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal "current content", text_of(doc)
   end
 
-  test "merge trusts a frame with no generation (rollout compatibility)" do
+  test "merge rejects a frame with missing or malformed generation" do
     doc = Document.create!(title: "Live", seed_content: "# Seed")
     doc.replace_content!(source: "# Replacement")
 
-    YjsPersistence.merge(doc, b64_update_for("no generation sent"), generation: nil)
+    [ nil, "1", "bogus" ].each do |bad_generation|
+      assert_notification("merge.yjs", outcome: "rejected_stale") do
+        assert_raises(Document::StaleGenerationError) do
+          YjsPersistence.merge(doc, b64_update_for("no generation sent"), generation: bad_generation)
+        end
+      end
+    end
 
-    assert_equal "no generation sent", text_of(doc),
-                 "a frame with no generation key must still merge, matching pre-existing behavior"
+    assert_nil doc.reload.yjs_state
+    assert_not doc.yjs_document_updates.exists?,
+               "missing or non-integer generation must never bypass the anti-resurrection guard"
+  end
+
+  test "merge_bytes persists raw binary updates without decoding base64" do
+    doc = Document.create!(title: "RawBytes")
+    ydoc = Y::Doc.new
+    ydoc.get_text("t") << "binary update"
+    raw = ydoc.encode_state_as_update
+
+    decode_calls = 0
+    original_decode = Base64.method(:strict_decode64)
+    Base64.define_singleton_method(:strict_decode64) do |*args|
+      decode_calls += 1
+      original_decode.call(*args)
+    end
+    begin
+      assert_equal true, YjsPersistence.merge_bytes(doc, raw, generation: doc.content_generation)
+    ensure
+      Base64.define_singleton_method(:strict_decode64, original_decode)
+    end
+
+    assert_equal 0, decode_calls, "merge_bytes must accept raw bytes directly without base64 decoding"
+    assert_equal "binary update", text_of(doc)
+  end
+
+  test "merge_bytes probes decodable_update? outside mutex and row locks" do
+    doc = Document.create!(title: "NoLockProbe", seed_markdown: "# Template")
+
+    # Holding the document's persistence mutex on the current thread guarantees
+    # a ThreadError deadlock if merge_bytes attempts to acquire lock_for before
+    # rejecting the undecodable payload.
+    YjsPersistence.send(:lock_for, doc.id).synchronize do
+      assert_notification("merge.yjs", outcome: "rejected_undecodable") do
+        assert_raises(ArgumentError) do
+          YjsPersistence.merge_bytes(doc, "yrs-garbage-bytes", generation: doc.content_generation)
+        end
+      end
+    end
+
+    assert_not doc.reload.yjs_document_updates.exists?
+    assert_equal "pending", doc.seed_state
+  end
+
+  test "merge_bytes rejects read-only callers before probing decodable_update?" do
+    doc = Document.create!(title: "LockedGarbage", owner_token: "owner", owner_name: "O", link_access: "view")
+
+    YjsPersistence.send(:lock_for, doc.id).synchronize do
+      assert_notification("merge.yjs", outcome: "rejected_locked") do
+        assert_raises(Document::EditingLockedError) do
+          YjsPersistence.merge_bytes(doc, "yrs-garbage-bytes", generation: doc.content_generation)
+        end
+      end
+    end
   end
 
   test "corrupt base64 raises and leaves the document untouched" do
