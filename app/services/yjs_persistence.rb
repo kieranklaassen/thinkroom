@@ -31,22 +31,63 @@ class YjsPersistence
   # deletes) — what a joining client with nothing new sends as sync-reply.
   EMPTY_UPDATE = "\x00\x00".b.freeze
 
+  # Maximum decoded size of a single incoming Yjs update frame, mirrored in
+  # DocumentsController and the frontend document size guard.
+  MAX_UPDATE_BYTES = 2.megabytes
+
+  # Pre-decode Base64 length cap corresponding to MAX_UPDATE_BYTES so
+  # oversized wire payloads are rejected before allocating/decoding.
+  MAX_UPDATE_B64_BYTES = (MAX_UPDATE_BYTES * 4 / 3) + 4
+
   class << self
+    # Parse a wire-supplied content_generation into a non-negative Integer, or
+    # nil if absent/malformed. Shared by SyncChannel and DocumentsController so
+    # both transports enforce identical generation validation.
+    def parse_generation(value)
+      parsed = case value
+      when Integer then value
+      when String then Integer(value, 10, exception: false)
+      end
+      parsed if parsed && parsed >= 0
+    end
+
     # Merge a base64-encoded Yjs update into the document's persisted state.
+    # Convenience wrapper over merge_bytes for callers holding a base64 frame;
+    # transport boundaries (SyncChannel, DocumentsController) decode once and
+    # call merge_bytes directly.
+    def merge(document, base64_update, generation: document.content_generation, token: nil, user: nil)
+      merge_bytes(document, decode(base64_update), generation:, token:, user:)
+    end
+
+    # Merge raw binary Yjs update bytes into the document's persisted state.
     #
-    # `generation` is the sending client's last-known Document#content_generation
-    # (nil for clients deployed before this field existed — trusted, matching
-    # the channel's existing seq-less rollout-compatibility behavior). A
-    # present generation behind the document's current one means an owner CLI
-    # replacement (Document#replace_content!) reset this document's live
-    # state since the client last synced: merging would resurrect the exact
-    # CRDT content the replacement just wiped, so the update is rejected
-    # rather than persisted.
-    def merge(document, base64_update, generation: nil, token: nil, user: nil)
-      update = decode(base64_update)
+    # `generation` is the sending client's required Document#content_generation
+    # integer. A missing, malformed, or mismatched generation means the client
+    # is out of date with an owner CLI replacement (Document#replace_content!)
+    # or untrusted: merging could resurrect wiped CRDT content, so the update is
+    # rejected with Document::StaleGenerationError rather than persisted.
+    def merge_bytes(document, update, generation:, token: nil, user: nil)
+      update = update.b
       ActiveSupport::Notifications.instrument(
         "merge.yjs", document_id: document.id, update_bytes: update.bytesize
       ) do |payload|
+        # Fast pre-lock checks: reject unauthorized callers, missing/malformed
+        # generations, and undecodable updates before taking the per-document
+        # mutex or SQLite row lock so untrusted frames never stall writers.
+        unless document.writable_by?(token, user:) || document.reload.writable_by?(token, user:)
+          payload[:outcome] = "rejected_locked"
+          raise Document::EditingLockedError, "This document is read-only."
+        end
+        unless generation.is_a?(Integer)
+          payload[:outcome] = "rejected_stale"
+          raise Document::StaleGenerationError,
+                "Client generation #{generation.inspect} is missing or invalid."
+        end
+        unless update == EMPTY_UPDATE || decodable_update?(update)
+          payload[:outcome] = "rejected_undecodable"
+          raise ArgumentError, "undecodable Yjs update for document #{document.id}"
+        end
+
         entered_at = monotonic_ms
         lock_for(document.id).synchronize do
           document.with_lock do
@@ -56,7 +97,7 @@ class YjsPersistence
               payload[:outcome] = "rejected_locked"
               raise Document::EditingLockedError, "This document is read-only."
             end
-            if generation && generation != document.content_generation
+            unless generation == document.content_generation
               payload[:outcome] = "rejected_stale"
               raise Document::StaleGenerationError,
                     "Client generation #{generation} is behind document generation #{document.content_generation}."
@@ -69,16 +110,6 @@ class YjsPersistence
             if update == EMPTY_UPDATE
               payload[:outcome] = "noop"
               next
-            end
-
-            # An undecodable update must be rejected before it becomes
-            # durable: appended garbage would flip seed_state, broadcast to
-            # peers, and clog every future fold. The probe is O(update) on
-            # a fresh doc — updates with unmet causal dependencies park
-            # cleanly and do not raise.
-            unless decodable_update?(update)
-              payload[:outcome] = "rejected_undecodable"
-              raise ArgumentError, "undecodable Yjs update for document #{document.id}"
             end
 
             # The durable act: an O(update) append. No Y::Doc is built on

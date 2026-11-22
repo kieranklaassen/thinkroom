@@ -27,6 +27,7 @@ export function acquireSession(
   canWrite: boolean,
   connectionIdentity: string,
   initialStateB64?: string | null,
+  initialGeneration?: number | null,
 ): CollabSession {
   let session = sessions.get(slug)
   if (session && (session.canWrite !== canWrite || session.connectionIdentity !== connectionIdentity)) {
@@ -55,7 +56,11 @@ export function acquireSession(
         // corrupt/stale prop — fall back to the wait-for-synced path
       }
     }
-    const provider = new CableProvider(ydoc, slug, { canWrite, connectionIdentity })
+    const provider = new CableProvider(ydoc, slug, {
+      canWrite,
+      connectionIdentity,
+      initialGeneration,
+    })
     provider.awareness.setLocalStateField('user', identity)
     session = { ydoc, provider, refs: 0, destroyTimer: null, canWrite, connectionIdentity }
     sessions.set(slug, session)

@@ -36,6 +36,7 @@ function connect(slug, label) {
   const cid = `${label}-${Math.random().toString(36).slice(2)}`
   let synced = false
   let updateSequence = 0
+  let generation = null
   const syncedPromise = {}
   syncedPromise.promise = new Promise((resolve) => (syncedPromise.resolve = resolve))
 
@@ -48,11 +49,13 @@ function connect(slug, label) {
           case 'sync': {
             Y.applyUpdate(doc, fromBase64(data.update), 'remote')
             updateSequence = 0
+            generation = data.generation
             subscription.send({
               type: 'sync-reply',
               update: toBase64(Y.encodeStateAsUpdate(doc, fromBase64(data.sv))),
               cid,
               seq: ++updateSequence,
+              generation,
             })
             synced = true
             syncedPromise.resolve()
@@ -74,6 +77,7 @@ function connect(slug, label) {
       update: toBase64(update),
       cid,
       seq: ++updateSequence,
+      generation,
     })
   })
 
@@ -123,7 +127,15 @@ for (let i = 0; i < 20; i += 1) {
   b.doc.getText('check').insert(0, `B${i};`)
   // interleave without awaiting — genuine concurrency over the wire
 }
-await sleep(1500)
+await waitFor(
+  () => {
+    const aNow = a.doc.getText('check').toString()
+    const bNow = b.doc.getText('check').toString()
+    return aNow === bNow && aNow.includes('A19;') && aNow.includes('B19;')
+  },
+  '40 concurrent edits to converge',
+  30000,
+)
 
 const aText = a.doc.getText('check').toString()
 const bText = b.doc.getText('check').toString()

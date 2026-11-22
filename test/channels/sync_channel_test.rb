@@ -43,7 +43,7 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert_equal true, transmissions.last["seed"]
     assert_equal "markdown", transmissions.last["content_format"]
     assert_equal "# Template", transmissions.last["seed_content"]
-    assert_equal "# Template", transmissions.last["seed_markdown"]
+    assert_not transmissions.last.key?("seed_markdown")
 
     unsubscribe
     subscribe slug: doc.slug
@@ -135,7 +135,9 @@ class SyncChannelTest < ActionCable::Channel::TestCase
 
     update = build_update_b64("typed text")
     assert_broadcast_on(SyncChannel.broadcasting_for(doc), type: "update", update: update, cid: "abc") do
-      perform :receive, { "type" => "update", "update" => update, "cid" => "abc" }
+      perform :receive, {
+        "type" => "update", "update" => update, "cid" => "abc", "generation" => doc.content_generation
+      }
     end
 
     assert doc.reload.yjs_document_updates.exists?, "the frame must be durably appended"
@@ -190,17 +192,29 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert doc.reload.yjs_document_updates.exists?
   end
 
-  test "a frame with no generation key still merges (rollout compatibility)" do
+  test "a frame with missing, nil, or malformed generation is rejected as stale" do
     doc = Document.create!(title: "Live", seed_content: "# Seed")
     subscribe slug: doc.slug
     doc.replace_content!(source: "# Replacement")
     update = build_update_b64("no generation sent")
 
-    assert_broadcast_on(SyncChannel.broadcasting_for(doc), type: "update", update:, cid: "legacy-client") do
-      perform :receive, { "type" => "update", "update" => update, "cid" => "legacy-client" }
+    [
+      { "type" => "update", "update" => update, "cid" => "legacy-client" },
+      { "type" => "update", "update" => update, "cid" => "nil-gen", "generation" => nil },
+      { "type" => "update", "update" => update, "cid" => "bad-gen", "generation" => "not-an-int" },
+      { "type" => "update", "update" => update, "cid" => "seq-no-gen", "seq" => 2 }
+    ].each do |frame|
+      assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+        perform :receive, frame
+      end
+      last = transmissions.last
+      assert_equal "write-denied", last["type"]
+      assert_equal true, last["stale"]
     end
 
-    assert doc.reload.yjs_document_updates.exists?
+    assert_nil doc.reload.yjs_state
+    assert_not doc.yjs_document_updates.exists?
+    assert_empty subscription.instance_variable_get(:@pending_updates)
   end
 
   test "locked non-owner updates are rejected without persistence or relay" do
@@ -214,11 +228,38 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     update = build_update_b64("forbidden")
 
     assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
-      perform :receive, { "type" => "update", "update" => update, "cid" => "reader" }
+      perform :receive, {
+        "type" => "update", "update" => update, "cid" => "reader", "generation" => doc.content_generation
+      }
     end
 
     assert_not doc.reload.yjs_document_updates.exists?
     assert_equal "write-denied", transmissions.last["type"]
+    assert_equal true, transmissions.last["locked"]
+  end
+
+  test "read-only viewers cannot buffer out-of-order sequenced frames" do
+    doc = Document.create!(
+      title: "LockedSeq",
+      owner_token: "owner-token",
+      owner_name: "Owner",
+      link_access: "view"
+    )
+    subscribe slug: doc.slug
+    update = build_update_b64("buffered forbidden")
+
+    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+      perform :receive, {
+        "type" => "update", "update" => update, "cid" => "reader",
+        "seq" => 2, "generation" => doc.content_generation
+      }
+    end
+
+    assert_equal "write-denied", transmissions.last["type"]
+    assert_equal true, transmissions.last["locked"]
+    assert_empty subscription.instance_variable_get(:@pending_updates),
+                 "read-only connections must not buffer frames in @pending_updates"
+    assert_not doc.reload.yjs_document_updates.exists?
   end
 
   test "locked guest owner updates still persist and relay" do
@@ -236,7 +277,9 @@ class SyncChannelTest < ActionCable::Channel::TestCase
       SyncChannel.broadcasting_for(doc),
       type: "update", update:, cid: "owner"
     ) do
-      perform :receive, { "type" => "update", "update" => update, "cid" => "owner" }
+      perform :receive, {
+        "type" => "update", "update" => update, "cid" => "owner", "generation" => doc.content_generation
+      }
     end
     assert doc.reload.yjs_document_updates.exists?
   end
@@ -276,14 +319,16 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     subscribe slug: doc.slug
     update = build_update_b64("not durable")
 
-    original_merge = YjsPersistence.method(:merge)
-    YjsPersistence.define_singleton_method(:merge) { |*| raise "storage unavailable" }
+    original_merge = YjsPersistence.method(:merge_bytes)
+    YjsPersistence.define_singleton_method(:merge_bytes) { |*| raise "storage unavailable" }
     begin
       assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
-        perform :receive, { "type" => "update", "update" => update, "cid" => "x" }
+        perform :receive, {
+          "type" => "update", "update" => update, "cid" => "x", "generation" => doc.content_generation
+        }
       end
     ensure
-      YjsPersistence.define_singleton_method(:merge, original_merge)
+      YjsPersistence.define_singleton_method(:merge_bytes, original_merge)
     end
 
     assert_nil doc.reload.yjs_state
@@ -296,13 +341,15 @@ class SyncChannelTest < ActionCable::Channel::TestCase
 
     assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
       perform :receive, {
-        "type" => "update", "update" => second, "cid" => "x", "seq" => 2
+        "type" => "update", "update" => second, "cid" => "x", "seq" => 2,
+        "generation" => doc.content_generation
       }
     end
 
     assert_broadcasts SyncChannel.broadcasting_for(doc), 2 do
       perform :receive, {
-        "type" => "update", "update" => first, "cid" => "x", "seq" => 1
+        "type" => "update", "update" => first, "cid" => "x", "seq" => 1,
+        "generation" => doc.content_generation
       }
     end
 
@@ -318,7 +365,10 @@ class SyncChannelTest < ActionCable::Channel::TestCase
 
     # A joining client with an empty doc replies with a no-op update.
     empty_update = Base64.strict_encode64(Y::Doc.new.compacted_state_update)
-    perform :receive, { "type" => "sync-reply", "update" => empty_update, "cid" => "x" }
+    perform :receive, {
+      "type" => "sync-reply", "update" => empty_update, "cid" => "x",
+      "generation" => doc.content_generation
+    }
 
     # The claim is consumed but reclaimable after timeout because the no-op
     # merge did not flip seed_state to "seeded".
@@ -334,8 +384,66 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     subscribe slug: doc.slug
 
     assert_notification("frame_dropped.yjs", document_id: doc.id, outcome: "dropped_malformed") do
-      perform :receive, { "type" => "update", "update" => "not!!base64!!", "cid" => "x" }
+      perform :receive, {
+        "type" => "update", "update" => "not!!base64!!", "cid" => "x",
+        "generation" => doc.content_generation
+      }
     end
+  end
+
+  test "oversized update frames are dropped before base64 decoding" do
+    doc = Document.create!(title: "Oversized")
+    subscribe slug: doc.slug
+
+    # Invalid base64 beyond the pre-decode encoded cap must trigger
+    # dropped_oversized (not dropped_malformed) without calling strict_decode64.
+    huge = "!" * (YjsPersistence::MAX_UPDATE_B64_BYTES + 1)
+    assert_notification("frame_dropped.yjs", document_id: doc.id, outcome: "dropped_oversized") do
+      assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+        perform :receive, {
+          "type" => "update", "update" => huge, "cid" => "x",
+          "generation" => doc.content_generation
+        }
+      end
+    end
+
+    # A payload 1 byte past MAX_UPDATE_BYTES whose encoded length still fits
+    # inside MAX_UPDATE_B64_BYTES must also be rejected as dropped_oversized.
+    boundary = Base64.strict_encode64("x" * (YjsPersistence::MAX_UPDATE_BYTES + 1))
+    assert_notification("frame_dropped.yjs", document_id: doc.id, outcome: "dropped_oversized") do
+      assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+        perform :receive, {
+          "type" => "update", "update" => boundary, "cid" => "x",
+          "generation" => doc.content_generation
+        }
+      end
+    end
+
+    assert_not doc.reload.yjs_document_updates.exists?
+  end
+
+  test "valid update frame decodes base64 once at the channel boundary" do
+    doc = Document.create!(title: "SingleDecode")
+    subscribe slug: doc.slug
+    update = build_update_b64("once")
+
+    decode_calls = 0
+    original_decode = Base64.method(:strict_decode64)
+    Base64.define_singleton_method(:strict_decode64) do |*args|
+      decode_calls += 1
+      original_decode.call(*args)
+    end
+    begin
+      perform :receive, {
+        "type" => "update", "update" => update, "cid" => "x",
+        "generation" => doc.content_generation
+      }
+    ensure
+      Base64.define_singleton_method(:strict_decode64, original_decode)
+    end
+
+    assert_equal 1, decode_calls, "update payload should be base64-decoded exactly once"
+    assert doc.reload.yjs_document_updates.exists?
   end
 
   test "an excessive sequence gap emits a frame_dropped event and drops the frame" do
@@ -349,7 +457,10 @@ class SyncChannelTest < ActionCable::Channel::TestCase
       outcome: "dropped_gap", sequence: beyond_gap, expected_sequence: 1
     ) do
       assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
-        perform :receive, { "type" => "update", "update" => update, "cid" => "x", "seq" => beyond_gap }
+        perform :receive, {
+          "type" => "update", "update" => update, "cid" => "x",
+          "seq" => beyond_gap, "generation" => doc.content_generation
+        }
       end
     end
 
@@ -359,7 +470,10 @@ class SyncChannelTest < ActionCable::Channel::TestCase
   test "the last unsubscribe folds the update tail into the snapshot" do
     doc = Document.create!(title: "Folded on exit")
     subscribe slug: doc.slug
-    perform :receive, { "type" => "update", "update" => build_update_b64("typed"), "cid" => "x" }
+    perform :receive, {
+      "type" => "update", "update" => build_update_b64("typed"), "cid" => "x",
+      "generation" => doc.content_generation
+    }
     assert doc.reload.yjs_document_updates.exists?
     assert_nil doc.yjs_state
 
@@ -374,7 +488,10 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     doc = Document.create!(title: "Still open")
     SyncChannel.track_subscribe(doc.id) # a second, concurrent subscriber
     subscribe slug: doc.slug
-    perform :receive, { "type" => "update", "update" => build_update_b64("typed"), "cid" => "x" }
+    perform :receive, {
+      "type" => "update", "update" => build_update_b64("typed"), "cid" => "x",
+      "generation" => doc.content_generation
+    }
 
     unsubscribe
 
@@ -432,7 +549,10 @@ class SyncChannelTest < ActionCable::Channel::TestCase
 
     subscribe slug: doc.slug
     assert_equal true, transmissions.last["seed"]
-    perform :receive, { "type" => "update", "update" => build_update_b64("applied template"), "cid" => "x" }
+    perform :receive, {
+      "type" => "update", "update" => build_update_b64("applied template"), "cid" => "x",
+      "generation" => doc.content_generation
+    }
     assert_equal "seeded", doc.reload.seed_state
 
     perform :receive, { "type" => "seed-decline", "cid" => "x" }

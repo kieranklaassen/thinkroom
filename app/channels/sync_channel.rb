@@ -13,16 +13,15 @@
 # via cid); update/sync-reply are additionally merged into persistent storage.
 #
 # `generation` (Document#content_generation) is the client's last-known
-# content generation, learned from the initial "sync" message and echoed back
-# on every outgoing update/sync-reply frame. A client connected before an
-# owner CLI replacement (Document#replace_content!) still has a live
-# subscription — ActionCable has no way to know the content changed — but its
-# next outgoing frame carries the stale generation. YjsPersistence.merge
-# rejects (does not persist) a frame whose generation is behind the
-# document's current one, so a stale tab can never resurrect content a
-# replacement just wiped. A frame with no generation key (clients deployed
-# before this) is trusted, matching the existing seq-less rollout-compatibility
-# branch below.
+# content generation, initialized from documents#show props and verified on the
+# initial "sync" message, then echoed back on every outgoing update/sync-reply
+# frame. A client connected before an owner CLI replacement
+# (Document#replace_content!) still has a live subscription — ActionCable has no
+# way to know the content changed — but its next outgoing frame carries the
+# stale generation. YjsPersistence.merge_bytes rejects (does not persist) any
+# frame whose generation is missing, malformed, or behind the document's current
+# one, so a stale or misbehaving client can never resurrect content a
+# replacement just wiped.
 class SyncChannel < ApplicationCable::Channel
   MAX_SEQUENCE_GAP = 256
 
@@ -59,8 +58,6 @@ class SyncChannel < ApplicationCable::Channel
       message[:seed] = true
       message[:content_format] = @document.content_format
       message[:seed_content] = @document.seed_content
-      # Keep the old key for deployed Markdown clients during rollout.
-      message[:seed_markdown] = @document.seed_content if @document.content_format == "markdown"
       # Omitted (not null) for legacy docs without recorded authorship —
       # keeps the wire format minimal and presence-of-key meaningful.
       message[:seed_author_kind] = @document.seed_author_kind if @document.seed_author_kind
@@ -86,11 +83,20 @@ class SyncChannel < ApplicationCable::Channel
     message = data.slice("type", "update", "cid")
     case data["type"]
     when "update", "sync-reply"
-      # Validate before relaying: a malformed frame must neither reach peers
-      # nor crash the channel action.
+      # Validate before relaying or buffering: oversized or malformed frames
+      # must neither allocate unbounded decode buffers, reach peers, nor crash
+      # the channel action.
       update = data["update"].to_s
       return if update.blank?
-      begin
+
+      if update.bytesize > YjsPersistence::MAX_UPDATE_B64_BYTES
+        ActiveSupport::Notifications.instrument(
+          "frame_dropped.yjs", document_id: @document.id, outcome: "dropped_oversized"
+        )
+        return
+      end
+
+      decoded = begin
         Base64.strict_decode64(update)
       rescue ArgumentError
         ActiveSupport::Notifications.instrument(
@@ -99,21 +105,23 @@ class SyncChannel < ApplicationCable::Channel
         return
       end
 
-      # nil (key absent) means "trust it" — rollout compatibility for clients
-      # deployed before this field existed, mirroring the seq-less branch
-      # below. Present-but-blank/non-integer is treated the same as absent
-      # rather than as generation 0, so a malformed value can't accidentally
-      # reject a legitimate current-generation frame.
-      generation = Integer(data["generation"], exception: false) if data.key?("generation")
+      if decoded.bytesize > YjsPersistence::MAX_UPDATE_BYTES
+        ActiveSupport::Notifications.instrument(
+          "frame_dropped.yjs", document_id: @document.id, outcome: "dropped_oversized"
+        )
+        return
+      end
+
+      generation = YjsPersistence.parse_generation(data["generation"])
 
       if data.key?("seq")
         sequence = Integer(data["seq"], exception: false)
         return unless sequence&.positive?
 
-        enqueue_update(sequence, message, update, generation)
+        enqueue_update(sequence, message, decoded, generation)
       else
         # Rollout compatibility for clients deployed before ordered frames.
-        persist_and_broadcast(message, update, generation)
+        persist_and_broadcast(message, decoded, generation)
       end
     when "awareness", "awareness-query"
       self.class.broadcast_to(@document, message)
@@ -128,9 +136,18 @@ class SyncChannel < ApplicationCable::Channel
   # causally dependent Yjs updates can enter #receive out of order. Sequencing
   # and draining each subscription's frames in client order avoids transient
   # causal gaps before persistence and broadcast.
-  def enqueue_update(sequence, message, update, generation)
+  def enqueue_update(sequence, message, decoded, generation)
     @sequence_lock.synchronize do
       return if sequence < @next_sequence
+      unless writable_connection?(reload: sequence > @next_sequence)
+        @pending_updates.clear
+        transmit({ type: "write-denied", locked: true })
+        return
+      end
+      unless generation.is_a?(Integer)
+        transmit({ type: "write-denied", locked: false, stale: true })
+        return
+      end
       if sequence > @next_sequence + MAX_SEQUENCE_GAP
         ActiveSupport::Notifications.instrument(
           "frame_dropped.yjs",
@@ -140,7 +157,7 @@ class SyncChannel < ApplicationCable::Channel
         return
       end
 
-      @pending_updates[sequence] ||= [ message, update, generation ]
+      @pending_updates[sequence] ||= [ message, decoded, generation ]
       while (frame = @pending_updates.delete(@next_sequence))
         persist_and_broadcast(*frame)
         @next_sequence += 1
@@ -148,28 +165,50 @@ class SyncChannel < ApplicationCable::Channel
     end
   end
 
-  def persist_and_broadcast(message, update, generation = nil)
-    YjsPersistence.merge(
+  def persist_and_broadcast(message, decoded, generation)
+    YjsPersistence.merge_bytes(
       @document,
-      update,
+      decoded,
       generation:,
-      token: (connection.owner_token if connection.respond_to?(:owner_token)),
-      user: (connection.current_user if connection.respond_to?(:current_user))
+      token: connection_owner_token,
+      user: connection_current_user
     )
     # A peer seeing an edit means the server has made it durable. This
     # ordering also prevents clients from accepting a frame that failed
     # persistence and would disappear on reload.
     self.class.broadcast_to(@document, message)
   rescue Document::EditingLockedError
+    @pending_updates.clear
     transmit({ type: "write-denied", locked: true })
   rescue Document::StaleGenerationError
     # The document was replaced (Document#replace_content!) since this client
-    # last synced. Drop the frame — merging it would resurrect content the
-    # replacement just wiped — and tell the client to discard its session
-    # rather than silently dropping it with no recovery signal.
+    # last synced, or the frame omitted a valid generation. Drop the frame —
+    # merging it would resurrect content the replacement just wiped — and tell
+    # the client to discard its session rather than silently dropping it with
+    # no recovery signal.
     transmit({ type: "write-denied", locked: false, stale: true })
   rescue StandardError => e
     Rails.logger.warn("SyncChannel: merge failed: #{e.class}: #{e.message}")
+  end
+
+  def connection_owner_token
+    connection.owner_token if connection.respond_to?(:owner_token)
+  end
+
+  def connection_current_user
+    connection.current_user if connection.respond_to?(:current_user)
+  end
+
+  # In-order frames from an already-writable connection skip an extra SELECT
+  # here because YjsPersistence.merge_bytes authoritatively reloads under lock.
+  # Out-of-order frames about to buffer — and currently read-only connections —
+  # reload so neither a mid-session lock nor an unlock goes stale.
+  def writable_connection?(reload: false)
+    return true if !reload && @document.writable_by?(connection_owner_token, user: connection_current_user)
+
+    @document.reload.writable_by?(connection_owner_token, user: connection_current_user)
+  rescue ActiveRecord::RecordNotFound
+    false
   end
 
   # Exactly one client seeds an empty document from its markdown template.
