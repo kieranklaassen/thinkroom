@@ -227,7 +227,9 @@ class YjsPersistence
             document.reload
             perform_fold(document) if document.yjs_document_updates.exists?
 
-            stored_bytes = document.yjs_state.to_s.bytesize
+            original_state = document.yjs_state
+            original_checksum = document.yjs_state_checksum
+            stored_bytes = original_state.to_s.bytesize
             if stored_bytes.zero?
               payload[:outcome] = "empty"
               next { before_bytes: 0, after_bytes: 0, changed: false, outcome: "empty" }
@@ -235,9 +237,9 @@ class YjsPersistence
 
             ydoc = load_or_heal_ydoc(document)
             # A corrupt blob was quarantined and a checkpoint restored (or the
-            # document emptied) by the load; report that rather than
-            # compacting or stamping the restored state as if nothing happened.
-            healed = document.yjs_state.to_s.bytesize != stored_bytes || document.yjs_state.blank?
+            # document emptied, or a stale checksum restamped) by the load;
+            # report that rather than compacting or stamping the restored state.
+            healed = document.yjs_state != original_state || document.yjs_state_checksum != original_checksum
             before = document.yjs_state.to_s
             blob = ydoc.compacted_state_update
             result = { before_bytes: stored_bytes, after_bytes: before.bytesize, changed: false }
@@ -291,11 +293,11 @@ class YjsPersistence
     #   delete all applied rows with no per-row probe
     # - gapped batch (ydoc.pending?) -> persist gap-free compacted_state_update
     #   and judge each applied row against the folded snapshot:
-    #   - zero-struct payload -> pure delete-set frame (applied deletes or moot
-    #     tombstone), delete
-    #   - ready and does not advance the folded snapshot -> fully captured,
-    #     delete
-    #   - otherwise (pure pending or mixed integrated+pending frame) -> retain
+    #   - ready and does not advance the folded snapshot -> fully captured
+    #     (including deletes whose target structs are already integrated and
+    #     joiner delete-set echoes), delete
+    #   - otherwise (pending structs, mixed integrated+pending frames, or
+    #     out-of-order deletes whose target structs have not arrived) -> retain
     #     for the next fold, quarantine after ORPHAN_TTL
     def perform_fold(document)
       rows = document.yjs_document_updates.order(:id).to_a
@@ -321,15 +323,37 @@ class YjsPersistence
           end
         end
 
+        # The blob (not the vector) is the persistence signal: delete-only
+        # folds change the encoded delete set without advancing the vector.
+        # A truly empty doc (only stale/retained rows on a never-folded
+        # document) must not persist the empty encoding — a present-but-empty
+        # yjs_state would block seed claims.
         blob = ydoc.compacted_state_update
+        still_empty = document.yjs_state.nil? && blob == EMPTY_UPDATE
+        persisting = blob != document.yjs_state && !still_empty
+
+        if persisting
+          payload[:blob_bytes_after] = blob.bytesize
+          unless blob_loadable?(blob)
+            # Serve clients from the in-memory doc but never persist a blob
+            # that would brick future loads; all rows stay for the next fold.
+            payload[:outcome] = "invalid_encode"
+            return ydoc
+          end
+        end
 
         if !ydoc.pending?
           integrated_ids.concat(applied.map(&:id))
         else
           base = Y::Doc.new
-          base.apply_update(blob)
+          begin
+            base.apply_update(blob)
+          rescue StandardError
+            payload[:outcome] = "invalid_encode"
+            return ydoc
+          end
           applied.each do |row|
-            if zero_struct_update?(row.payload) || (base.update_ready?(row.payload) && !base.update_advances?(row.payload))
+            if base.update_ready?(row.payload) && !base.update_advances?(row.payload)
               integrated_ids << row.id
             else
               retained << row
@@ -337,25 +361,7 @@ class YjsPersistence
           end
         end
 
-        quarantine_orphans(document, retained)
-        payload[:integrated] = integrated_ids.length
-        payload[:retained] = retained.length
-
-        # The blob (not the vector) is the persistence signal: delete-only
-        # folds change the encoded delete set without advancing the vector.
-        # A truly empty doc (only stale/retained rows on a never-folded
-        # document) must not persist the empty encoding — a present-but-empty
-        # yjs_state would block seed claims.
-        still_empty = document.yjs_state.nil? && blob == EMPTY_UPDATE
-        if blob != document.yjs_state && !still_empty
-          payload[:blob_bytes_after] = blob.bytesize
-          unless blob_loadable?(blob)
-            # Serve clients from the in-memory doc but never persist a blob
-            # that would brick future loads; rows stay for the next fold.
-            payload[:outcome] = "invalid_encode"
-            return ydoc
-          end
-
+        if persisting
           maybe_checkpoint(document)
           document.update_columns(
             yjs_state: blob,
@@ -365,20 +371,13 @@ class YjsPersistence
           )
         end
 
+        quarantine_orphans(document, retained)
+        payload[:integrated] = integrated_ids.length
+        payload[:retained] = retained.length
         document.yjs_document_updates.where(id: integrated_ids).delete_all if integrated_ids.any?
         payload[:outcome] = "folded"
         ydoc
       end
-    end
-
-    # A v1 update whose struct count is zero carries only a delete set —
-    # the shape of a backspace-only frame or a joiner's sync-reply echo on
-    # a document with deletion history.
-    def zero_struct_update?(blob)
-      count, = decode_var_uint(blob, 0)
-      count.zero?
-    rescue ArgumentError
-      false
     end
 
     # Updates with unmet causal dependencies park cleanly; genuine garbage

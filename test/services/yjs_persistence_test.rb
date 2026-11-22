@@ -281,6 +281,47 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal "pending", doc.seed_state
   end
 
+  test "a stored blob with corrupted tail bytes heals cleanly via CorruptStateError" do
+    doc = Document.create!(title: "StoredCorruptTail")
+    YjsPersistence.merge(doc, b64_update_for("good state"))
+    YjsPersistence.fold!(doc)
+
+    valid = doc.reload.yjs_state
+    corrupted = valid.byteslice(0, valid.bytesize - 2) + "\xff\xff".b
+    doc.update_columns(
+      yjs_state: corrupted,
+      yjs_state_checksum: Digest::SHA256.hexdigest(corrupted)
+    )
+    YjsPersistence.merge(doc.reload, b64_update_for("recovered"))
+
+    assert_notification("recovered.yjs", restored_from: "empty") do
+      YjsPersistence.fold!(doc.reload)
+    end
+    assert_equal "recovered", text_of(doc.reload)
+    assert_equal corrupted, doc.yjs_state_archives.where(kind: YjsStateArchive::QUARANTINE).sole.yjs_state
+  end
+
+  test "an out-of-order delete-only frame is retained until its target insert arrives" do
+    doc = Document.create!(title: "OutOfOrderDelete")
+    client = Y::Doc.new(300)
+    client.get_text("t") << "keep-me"
+    insert_update = client.encode_state_as_update
+    sv_after_insert = client.encode_state_vector
+    client.get_text("t").delete(4, 3)
+    delete_update = client.encode_state_as_update(sv_after_insert)
+
+    YjsPersistence.merge(doc, Base64.strict_encode64(delete_update))
+    first_fold = assert_notification("fold.yjs", outcome: "folded") { YjsPersistence.fold!(doc) }
+    assert_equal 1, first_fold.payload[:retained], "an out-of-order delete must stay retained until its target arrives"
+    assert_equal 1, doc.reload.yjs_document_updates.count
+
+    YjsPersistence.merge(doc, Base64.strict_encode64(insert_update))
+    second_fold = assert_notification("fold.yjs", outcome: "folded") { YjsPersistence.fold!(doc) }
+    assert_equal 0, second_fold.payload[:retained]
+    assert_not doc.reload.yjs_document_updates.exists?
+    assert_equal "keep", text_of(doc)
+  end
+
   test "a pending row is retained across folds and quarantined after the TTL" do
     doc = Document.create!(title: "Pending")
     # Build a causally dependent pair and append only the second half.
@@ -903,29 +944,30 @@ class YjsPersistenceTest < ActiveSupport::TestCase
   test "compact! shrinks a blob that still carries deleted content and keeps the old one as a checkpoint" do
     doc = Document.create!(title: "Tombstones")
     client = Y::Doc.new
-    YjsPersistence.merge(doc, b64_update_for("x" * 5000, from_doc: client))
-    YjsPersistence.fold!(doc)
-
-    # A blob written before its deletions were garbage-collected: the
-    # client's own encoding after deleting most of the text still carries
-    # the tombstoned content when GC is skipped on that side.
+    client.get_text("t") << ("x" * 5000)
+    insert_update = client.encode_state_as_update
+    sv_after_insert = client.encode_state_vector
     client.get_text("t").delete(0, 4990)
-    bloated = client.compacted_state_update
-    doc.reload.update_columns(yjs_state: bloated, yjs_state_vector: client.encode_state_vector,
-                              yjs_state_checksum: Digest::SHA256.hexdigest(bloated))
+    delete_update = client.encode_state_as_update(sv_after_insert)
+
+    # Combine raw structs (without empty trailing delete-set byte) and raw
+    # delete set (without leading zero struct-count byte) to build a valid
+    # un-GC'd Yjs v1 update whose deleted characters are still present verbatim.
+    bloated = insert_update.byteslice(0, insert_update.bytesize - 1) +
+              delete_update.byteslice(1, delete_update.bytesize - 1)
+    doc.update_columns(yjs_state: bloated, yjs_state_vector: client.encode_state_vector,
+                       yjs_state_checksum: Digest::SHA256.hexdigest(bloated))
     before = bloated.bytesize
 
     result = YjsPersistence.compact!(doc)
     doc.reload
 
+    assert_equal "compacted", result[:outcome]
+    assert result[:changed]
     assert_equal "x" * 10, text_of(doc)
-    if result[:outcome] == "compacted"
-      assert_operator doc.yjs_state.bytesize, :<, before, "deleted content must not survive compaction"
-      assert_equal Digest::SHA256.hexdigest(doc.yjs_state), doc.yjs_state_checksum
-      assert_equal bloated, doc.yjs_state_archives.where(kind: YjsStateArchive::CHECKPOINT).sole.yjs_state
-    else
-      assert_equal "unchanged", result[:outcome], "an already garbage-collected blob is left alone"
-    end
+    assert_operator doc.yjs_state.bytesize, :<, before, "deleted content must not survive compaction"
+    assert_equal Digest::SHA256.hexdigest(doc.yjs_state), doc.yjs_state_checksum
+    assert_equal bloated, doc.yjs_state_archives.where(kind: YjsStateArchive::CHECKPOINT).sole.yjs_state
     assert_equal "unchanged", YjsPersistence.compact!(doc)[:outcome]
   end
 

@@ -1,6 +1,6 @@
 # Relays Yjs CRDT messages between clients on the same document and persists
-# merged state server-side. Wire format mirrors @y-rb/actioncable
-# ({ update: <base64> } JSON) so the yrb-actioncable client could be swapped in.
+# merged state server-side via YjsPersistence. Uses a `{ update: <base64> }`
+# JSON wire envelope paired with `CableProvider` on the frontend.
 #
 # Protocol:
 #   server -> joining client : { type: "sync", update, sv, generation, seed?, content_format?, seed_content?, seed_author_kind?, seed_author_name? }
