@@ -109,13 +109,12 @@ try {
   const seedPage = await seeder.newPage()
   watch(seedPage, 'seeder')
   const seedPersisted = seedPage.waitForResponse(
-    (response) => response.url().includes(`/d/${slug}/sync_update`) && response.ok(),
+    (res) => res.url().includes(`/d/${slug}/sync_update`) && res.status() === 204,
     { timeout: 90000 },
   )
   await seedPage.goto(`${BASE}/d/${slug}/edit`, { waitUntil: 'domcontentloaded' })
   await waitForLive(seedPage, 60000)
   await seedPersisted
-  await seedPage.waitForTimeout(1500)
   await seeder.close()
 
   const stateBefore = await storedState(slug)

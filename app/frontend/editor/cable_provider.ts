@@ -33,7 +33,6 @@ type SyncMessage = {
   seed?: boolean
   content_format?: 'markdown' | 'html'
   seed_content?: string
-  seed_markdown?: string
   seed_author_kind?: CollaboratorKind | null
   seed_author_name?: string | null
   cid?: string
@@ -60,6 +59,7 @@ export interface CableProviderOptions {
   consumer?: Consumer
   canWrite?: boolean
   connectionIdentity?: string
+  initialGeneration?: number | null
   ackTimeoutMs?: number
   retryBaseMs?: number
   retryMaxMs?: number
@@ -124,11 +124,11 @@ export class CableProvider {
   private ackTimer: ReturnType<typeof setTimeout> | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryAttempt = 0
-  // Learned from each "sync" message and echoed back on outgoing
-  // update/sync-reply frames so the server can detect a client whose local
-  // Yjs doc predates an owner CLI replacement (Document#replace_content!)
-  // and reject its frame instead of merging stale content back in.
-  private generation: number | null = null
+  // Initialized from documents#show props and verified on each "sync" message,
+  // then echoed back on outgoing update/sync-reply frames and keepalive HTTP
+  // flushes so the server rejects any client whose local Yjs doc predates an
+  // owner CLI replacement (Document#replace_content!).
+  private generation: number | null
   private readonly slug: string
   private readonly canWrite: boolean
   private readonly ackTimeoutMs: number
@@ -139,6 +139,8 @@ export class CableProvider {
     this.doc = doc
     this.slug = slug
     this.canWrite = options?.canWrite ?? true
+    this.generation =
+      typeof options?.initialGeneration === 'number' ? options.initialGeneration : null
     this.ackTimeoutMs = options?.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS
     this.retryBaseMs = options?.retryBaseMs ?? DEFAULT_RETRY_BASE_MS
     this.retryMaxMs = options?.retryMaxMs ?? DEFAULT_RETRY_MAX_MS
@@ -285,9 +287,7 @@ export class CableProvider {
       type,
       update: toBase64(update),
       seq,
-      // Omitted (not null) when not yet known, matching the server's
-      // "absent key means trust it" rollout-compatibility handling.
-      ...(this.generation === null ? {} : { generation: this.generation }),
+      generation: this.generation,
     })
     this.ackTimer = setTimeout(() => this.handleAckTimeout(seq), this.ackTimeoutMs)
   }
@@ -326,11 +326,10 @@ export class CableProvider {
       update: toBase64(pending ?? EMPTY_UPDATE),
       cid: this.clientId,
       // Same staleness guard as flush(): this beforeunload/keepalive
-      // fallback merges through the identical YjsPersistence.merge path as
-      // SyncChannel, so it must carry generation too -- otherwise a closing
-      // stale tab could resurrect content a replacement just reset via this
-      // second transport.
-      ...(this.generation === null ? {} : { generation: this.generation }),
+      // fallback merges through the identical YjsPersistence.merge_bytes path
+      // as SyncChannel, so it always carries content_generation (initialized
+      // from page props even before the WebSocket handshake completes).
+      generation: this.generation,
     }
     let body: string
     if (snapshot) {
@@ -414,7 +413,7 @@ export class CableProvider {
         this.updateSequence = 0
         this.retryAttempt = 0
         if (typeof data.generation === 'number') this.generation = data.generation
-        const seedContent = data.seed_content ?? data.seed_markdown
+        const seedContent = data.seed_content
         if (data.seed && seedContent) {
           // No one listens to 'seed' by design: the editor reads
           // provider.seedContent directly inside its bind step, which runs

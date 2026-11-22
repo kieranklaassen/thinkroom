@@ -40,7 +40,7 @@ Rails.application.config.after_initialize do
       duration_ms: event.duration.round(1)
     }
     %i[update_bytes blob_bytes blob_bytes_before blob_bytes_after lock_wait_ms
-       tail_rows rows integrated retained served_from restored_from
+       tail_rows rows integrated retained quarantined served_from restored_from
        sequence expected_sequence error].each do |key|
       fields[key] = payload[key] if payload.key?(key)
     end

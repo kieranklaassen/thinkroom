@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_23_080000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_21_233500) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -303,7 +303,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_23_080000) do
     t.datetime "created_at", null: false
     t.integer "document_id", null: false
     t.binary "payload", null: false
+    t.datetime "retained_at"
     t.index ["document_id"], name: "index_yjs_document_updates_on_document_id"
+    t.index ["document_id"], name: "index_yjs_document_updates_on_document_id_unexamined", where: "retained_at IS NULL"
   end
 
   create_table "yjs_state_archives", force: :cascade do |t|

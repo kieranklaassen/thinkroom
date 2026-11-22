@@ -20,16 +20,15 @@
 # in flight at a time and needs no server-side reordering buffer.
 #
 # `generation` (Document#content_generation) is the client's last-known
-# content generation, learned from the initial "sync" message and echoed back
-# on every outgoing update/sync-reply frame. A client connected before an
-# owner CLI replacement (Document#replace_content!) still has a live
-# subscription — ActionCable has no way to know the content changed — but its
-# next outgoing frame carries the stale generation. YjsPersistence.merge
-# rejects (does not persist) a frame whose generation is behind the
-# document's current one, so a stale tab can never resurrect content a
-# replacement just wiped. A frame with no generation key (clients deployed
-# before this) is trusted, matching the seq-less rollout-compatibility path
-# below.
+# content generation, initialized from documents#show props and verified on the
+# initial "sync" message, then echoed back on every outgoing update/sync-reply
+# frame. A client connected before an owner CLI replacement
+# (Document#replace_content!) still has a live subscription — ActionCable has no
+# way to know the content changed — but its next outgoing frame carries the
+# stale generation. YjsPersistence.merge_bytes rejects (does not persist) any
+# frame whose generation is missing, malformed, or behind the document's current
+# one, so a stale or misbehaving client can never resurrect content a
+# replacement just wiped.
 class SyncChannel < ApplicationCable::Channel
   # In-process subscriber refcount per document id, driving the
   # fold-on-last-disconnect compaction trigger. Entries are removed when
@@ -61,8 +60,6 @@ class SyncChannel < ApplicationCable::Channel
       message[:seed] = true
       message[:content_format] = @document.content_format
       message[:seed_content] = @document.seed_content
-      # Keep the old key for deployed Markdown clients during rollout.
-      message[:seed_markdown] = @document.seed_content if @document.content_format == "markdown"
       # Omitted (not null) for legacy docs without recorded authorship —
       # keeps the wire format minimal and presence-of-key meaningful.
       message[:seed_author_kind] = @document.seed_author_kind if @document.seed_author_kind
@@ -88,11 +85,20 @@ class SyncChannel < ApplicationCable::Channel
     message = data.slice("type", "update", "cid")
     case data["type"]
     when "update", "sync-reply"
-      # Validate before relaying: a malformed frame must neither reach peers
-      # nor crash the channel action.
+      # Validate before relaying or buffering: oversized or malformed frames
+      # must neither allocate unbounded decode buffers, reach peers, nor crash
+      # the channel action.
       update = data["update"].to_s
       return if update.blank?
-      begin
+
+      if update.bytesize > YjsPersistence::MAX_UPDATE_B64_BYTES
+        ActiveSupport::Notifications.instrument(
+          "frame_dropped.yjs", document_id: @document.id, outcome: "dropped_oversized"
+        )
+        return
+      end
+
+      decoded = begin
         Base64.strict_decode64(update)
       rescue ArgumentError
         ActiveSupport::Notifications.instrument(
@@ -101,12 +107,14 @@ class SyncChannel < ApplicationCable::Channel
         return
       end
 
-      # nil (key absent) means "trust it" — rollout compatibility for clients
-      # deployed before this field existed, mirroring the seq-less handling
-      # below. Present-but-blank/non-integer is treated the same as absent
-      # rather than as generation 0, so a malformed value can't accidentally
-      # reject a legitimate current-generation frame.
-      generation = Integer(data["generation"], exception: false) if data.key?("generation")
+      if decoded.bytesize > YjsPersistence::MAX_UPDATE_BYTES
+        ActiveSupport::Notifications.instrument(
+          "frame_dropped.yjs", document_id: @document.id, outcome: "dropped_oversized"
+        )
+        return
+      end
+
+      generation = YjsPersistence.parse_generation(data["generation"])
 
       seq = nil
       if data.key?("seq")
@@ -114,7 +122,7 @@ class SyncChannel < ApplicationCable::Channel
         return unless seq&.positive?
       end
 
-      persist_and_broadcast(message, update, generation:, seq:)
+      persist_and_broadcast(message, decoded, generation:, seq:)
     when "awareness", "awareness-query"
       self.class.broadcast_to(@document, message)
     when "seed-decline"
@@ -124,13 +132,13 @@ class SyncChannel < ApplicationCable::Channel
 
   private
 
-  def persist_and_broadcast(message, update, generation: nil, seq: nil)
-    YjsPersistence.merge(
+  def persist_and_broadcast(message, decoded, generation:, seq: nil)
+    YjsPersistence.merge_bytes(
       @document,
-      update,
+      decoded,
       generation:,
-      token: (connection.owner_token if connection.respond_to?(:owner_token)),
-      user: (connection.current_user if connection.respond_to?(:current_user))
+      token: connection_owner_token,
+      user: connection_current_user
     )
     # A peer seeing an edit means the server has made it durable. This
     # ordering also prevents clients from accepting a frame that failed
@@ -141,9 +149,10 @@ class SyncChannel < ApplicationCable::Channel
     transmit({ type: "write-denied", locked: true })
   rescue Document::StaleGenerationError
     # The document was replaced (Document#replace_content!) since this client
-    # last synced. Drop the frame — merging it would resurrect content the
-    # replacement just wiped — and tell the client to discard its session
-    # rather than silently dropping it with no recovery signal.
+    # last synced, or the frame omitted a valid generation. Drop the frame —
+    # merging it would resurrect content the replacement just wiped — and tell
+    # the client to discard its session rather than silently dropping it with
+    # no recovery signal.
     transmit({ type: "write-denied", locked: false, stale: true })
   rescue ArgumentError => e
     Rails.logger.warn("SyncChannel: undecodable update dropped: #{e.message}")
@@ -151,6 +160,14 @@ class SyncChannel < ApplicationCable::Channel
   rescue StandardError => e
     Rails.logger.warn("SyncChannel: merge failed: #{e.class}: #{e.message}")
     transmit({ type: "nack", seq:, reason: "retryable" }) if seq
+  end
+
+  def connection_owner_token
+    connection.owner_token if connection.respond_to?(:owner_token)
+  end
+
+  def connection_current_user
+    connection.current_user if connection.respond_to?(:current_user)
   end
 
   # Exactly one client seeds an empty document from its markdown template.

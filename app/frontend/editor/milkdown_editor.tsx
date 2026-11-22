@@ -112,6 +112,10 @@ export interface EditorProps {
   slug: string
   identity: UserIdentity
   contentFormat: DocumentFormat
+  /** Server-known Document#content_generation at page render time, so
+   *  CableProvider carries the current generation from first paint (including
+   *  early keepalive flushes before the WebSocket sync handshake completes). */
+  contentGeneration?: number
   /** Server-rendered Yjs state (base64) — hydrates the doc before the
    *  provider syncs, so the first paint is already populated. */
   initialStateB64?: string | null
@@ -287,6 +291,7 @@ function CollabEditor({
   slug,
   identity,
   contentFormat,
+  contentGeneration,
   initialStateB64,
   seedContent,
   seedVersion,
@@ -445,6 +450,7 @@ function CollabEditor({
       canWriteRef.current,
       connectionIdentity,
       initialStateB64,
+      contentGeneration,
     )
     callbacksRef.current.onStatus?.('connecting')
 

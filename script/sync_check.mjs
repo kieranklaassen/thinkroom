@@ -40,6 +40,7 @@ function connect(slug, label) {
   let queuedUpdate = null
   let retryTimer = null
   let acksReceived = 0
+  let generation = null
   const syncedPromise = {}
   syncedPromise.promise = new Promise((resolve) => (syncedPromise.resolve = resolve))
 
@@ -54,6 +55,7 @@ function connect(slug, label) {
       update: toBase64(update),
       cid,
       seq: inFlight.seq,
+      generation,
     })
   }
 
@@ -76,6 +78,7 @@ function connect(slug, label) {
               inFlight = null
             }
             updateSequence = 0
+            generation = data.generation
             synced = true
             flush('sync-reply')
             syncedPromise.resolve()
@@ -185,11 +188,19 @@ for (let i = 0; i < 20; i += 1) {
   // interleave without awaiting — genuine concurrency over the wire
 }
 await waitFor(
-  () =>
-    a.drained() &&
-    b.drained() &&
-    a.doc.getText('check').toString() === b.doc.getText('check').toString(),
-  'both outboxes to drain ACKs and replicas to converge',
+  () => {
+    const aNow = a.doc.getText('check').toString()
+    const bNow = b.doc.getText('check').toString()
+    return (
+      a.drained() &&
+      b.drained() &&
+      aNow === bNow &&
+      aNow.includes('A19;') &&
+      aNow.includes('B19;')
+    )
+  },
+  'both outboxes to drain ACKs and 40 concurrent edits to converge',
+  30000,
 )
 if (a.acks() === 0 || b.acks() === 0) {
   fail(`expected explicit ACK receipts (A=${a.acks()}, B=${b.acks()})`)
