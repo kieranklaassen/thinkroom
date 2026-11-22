@@ -108,8 +108,13 @@ try {
   const seeder = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   const seedPage = await seeder.newPage()
   watch(seedPage, 'seeder')
+  const seedPersisted = seedPage.waitForResponse(
+    (response) => response.url().includes(`/d/${slug}/sync_update`) && response.ok(),
+    { timeout: 90000 },
+  )
   await seedPage.goto(`${BASE}/d/${slug}/edit`, { waitUntil: 'domcontentloaded' })
   await waitForLive(seedPage, 60000)
+  await seedPersisted
   await seedPage.waitForTimeout(1500)
   await seeder.close()
 

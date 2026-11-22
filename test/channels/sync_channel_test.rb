@@ -287,29 +287,111 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     end
 
     assert_nil doc.reload.yjs_state
+    assert_equal "sync", transmissions.last["type"], "seq-less failure does not emit nack"
   end
 
-  test "sequenced updates are persisted and relayed in client order" do
-    doc = Document.create!(title: "Ordered relay")
+  test "a sequenced update that fails transiently transmits a retryable nack without relaying" do
+    doc = Document.create!(title: "Retryable failure")
+    subscribe slug: doc.slug
+    update = build_update_b64("transient error")
+
+    original_merge = YjsPersistence.method(:merge)
+    YjsPersistence.define_singleton_method(:merge) { |*| raise SQLite3::BusyException, "database is locked" }
+    begin
+      assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+        perform :receive, { "type" => "update", "update" => update, "cid" => "x", "seq" => 4 }
+      end
+    ensure
+      YjsPersistence.define_singleton_method(:merge, original_merge)
+    end
+
+    assert_nil doc.reload.yjs_state
+    assert_equal({ "type" => "nack", "seq" => 4, "reason" => "retryable" }, transmissions.last)
+  end
+
+  test "a sequenced undecodable update transmits an invalid nack without relaying" do
+    doc = Document.create!(title: "Undecodable")
+    subscribe slug: doc.slug
+    undecodable = Base64.strict_encode64("\xff\xff\xff\xff".b)
+
+    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+      perform :receive, { "type" => "update", "update" => undecodable, "cid" => "x", "seq" => 2 }
+    end
+
+    assert_nil doc.reload.yjs_state
+    assert_equal({ "type" => "nack", "seq" => 2, "reason" => "invalid" }, transmissions.last)
+  end
+
+  test "sequenced updates persist, broadcast, and transmit an ack receipt" do
+    doc = Document.create!(title: "Acked relay")
     subscribe slug: doc.slug
     first, second = build_sequential_updates
 
-    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
-      perform :receive, {
-        "type" => "update", "update" => second, "cid" => "x", "seq" => 2
-      }
+    assert_broadcast_on(SyncChannel.broadcasting_for(doc), type: "update", update: first, cid: "x") do
+      perform :receive, { "type" => "update", "update" => first, "cid" => "x", "seq" => 1 }
     end
+    assert_equal({ "type" => "ack", "seq" => 1 }, transmissions.last)
 
-    assert_broadcasts SyncChannel.broadcasting_for(doc), 2 do
-      perform :receive, {
-        "type" => "update", "update" => first, "cid" => "x", "seq" => 1
-      }
+    assert_broadcast_on(SyncChannel.broadcasting_for(doc), type: "sync-reply", update: second, cid: "x") do
+      perform :receive, { "type" => "sync-reply", "update" => second, "cid" => "x", "seq" => 2 }
     end
+    assert_equal({ "type" => "ack", "seq" => 2 }, transmissions.last)
 
     full_state, = YjsPersistence.state_b64(doc.reload)
     persisted = Y::Doc.new
     persisted.apply_update(Base64.strict_decode64(full_state))
     assert_equal "ab", persisted.get_text("t").to_s
+  end
+
+  test "a seq-less update persists and broadcasts without transmitting an ack" do
+    doc = Document.create!(title: "Legacy client")
+    subscribe slug: doc.slug
+    update = build_update_b64("legacy")
+
+    assert_broadcast_on(SyncChannel.broadcasting_for(doc), type: "update", update: update, cid: "legacy") do
+      perform :receive, { "type" => "update", "update" => update, "cid" => "legacy" }
+    end
+
+    assert_equal "sync", transmissions.last["type"]
+  end
+
+  test "a non-positive or malformed seq is dropped without persisting or acking" do
+    doc = Document.create!(title: "Bad seq")
+    subscribe slug: doc.slug
+    update = build_update_b64("ignored")
+
+    [ 0, -1, "abc", nil ].each do |bad_seq|
+      assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+        perform :receive, { "type" => "update", "update" => update, "cid" => "x", "seq" => bad_seq }
+      end
+    end
+
+    assert_not doc.reload.yjs_document_updates.exists?
+    assert_equal "sync", transmissions.last["type"]
+  end
+
+  test "sequenced locked and stale frames transmit write-denied rather than ack or nack" do
+    locked_doc = Document.create!(
+      title: "Locked",
+      owner_token: "owner-token",
+      owner_name: "Owner",
+      link_access: "view"
+    )
+    subscribe slug: locked_doc.slug
+    perform :receive, { "type" => "update", "update" => build_update_b64("no"), "cid" => "r", "seq" => 1 }
+    assert_equal({ "type" => "write-denied", "locked" => true }, transmissions.last)
+
+    unsubscribe
+
+    stale_doc = Document.create!(title: "Stale", seed_content: "# Seed")
+    subscribe slug: stale_doc.slug
+    stale_generation = transmissions.last["generation"]
+    stale_doc.replace_content!(source: "# Replaced")
+    perform :receive, {
+      "type" => "update", "update" => build_update_b64("old"), "cid" => "s",
+      "seq" => 1, "generation" => stale_generation
+    }
+    assert_equal({ "type" => "write-denied", "locked" => false, "stale" => true }, transmissions.last)
   end
 
   test "first subscriber still gets the seed after an empty sync-reply was merged" do
@@ -336,24 +418,6 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert_notification("frame_dropped.yjs", document_id: doc.id, outcome: "dropped_malformed") do
       perform :receive, { "type" => "update", "update" => "not!!base64!!", "cid" => "x" }
     end
-  end
-
-  test "an excessive sequence gap emits a frame_dropped event and drops the frame" do
-    doc = Document.create!(title: "Gapped")
-    subscribe slug: doc.slug
-    update = build_update_b64("too far ahead")
-    beyond_gap = SyncChannel::MAX_SEQUENCE_GAP + 2
-
-    assert_notification(
-      "frame_dropped.yjs",
-      outcome: "dropped_gap", sequence: beyond_gap, expected_sequence: 1
-    ) do
-      assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
-        perform :receive, { "type" => "update", "update" => update, "cid" => "x", "seq" => beyond_gap }
-      end
-    end
-
-    assert_nil doc.reload.yjs_state
   end
 
   test "the last unsubscribe folds the update tail into the snapshot" do
