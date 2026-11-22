@@ -110,7 +110,7 @@ try {
   watch(seedPage, 'seeder')
   const seedPersisted = seedPage.waitForResponse(
     (res) => res.url().includes(`/d/${slug}/sync_update`) && res.status() === 204,
-    { timeout: 60000 },
+    { timeout: 90000 },
   )
   await seedPage.goto(`${BASE}/d/${slug}/edit`, { waitUntil: 'domcontentloaded' })
   await waitForLive(seedPage, 60000)

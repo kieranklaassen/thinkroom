@@ -29,16 +29,35 @@ const fail = (msg) => {
 const toBase64 = (u8) => Buffer.from(u8).toString('base64')
 const fromBase64 = (b64) => new Uint8Array(Buffer.from(b64, 'base64'))
 
-/** Minimal provider speaking the SyncChannel protocol. */
+/** Minimal provider speaking the SyncChannel single-in-flight ACK/NACK protocol. */
 function connect(slug, label) {
   const doc = new Y.Doc()
   const consumer = createConsumer(WS)
   const cid = `${label}-${Math.random().toString(36).slice(2)}`
   let synced = false
   let updateSequence = 0
+  let inFlight = null
+  let queuedUpdate = null
+  let retryTimer = null
+  let acksReceived = 0
   let generation = null
   const syncedPromise = {}
   syncedPromise.promise = new Promise((resolve) => (syncedPromise.resolve = resolve))
+
+  function flush(type = 'update') {
+    if (!synced || inFlight || retryTimer || !queuedUpdate) return
+    const update = queuedUpdate
+    queuedUpdate = null
+    updateSequence += 1
+    inFlight = { seq: updateSequence, update }
+    subscription.send({
+      type,
+      update: toBase64(update),
+      cid,
+      seq: inFlight.seq,
+      generation,
+    })
+  }
 
   const subscription = consumer.subscriptions.create(
     { channel: 'SyncChannel', slug },
@@ -48,40 +67,81 @@ function connect(slug, label) {
         switch (data.type) {
           case 'sync': {
             Y.applyUpdate(doc, fromBase64(data.update), 'remote')
+            if (retryTimer) {
+              clearTimeout(retryTimer)
+              retryTimer = null
+            }
+            if (inFlight) {
+              queuedUpdate = queuedUpdate
+                ? Y.mergeUpdates([inFlight.update, queuedUpdate])
+                : inFlight.update
+              inFlight = null
+            }
             updateSequence = 0
             generation = data.generation
-            subscription.send({
-              type: 'sync-reply',
-              update: toBase64(Y.encodeStateAsUpdate(doc, fromBase64(data.sv))),
-              cid,
-              seq: ++updateSequence,
-              generation,
-            })
             synced = true
+            flush('sync-reply')
             syncedPromise.resolve()
             break
           }
+          case 'ack':
+            if (!inFlight || data.seq !== inFlight.seq) break
+            acksReceived += 1
+            inFlight = null
+            flush('update')
+            break
+          case 'nack':
+            if (!inFlight || data.seq !== inFlight.seq) break
+            if (data.reason === 'retryable') {
+              queuedUpdate = queuedUpdate
+                ? Y.mergeUpdates([inFlight.update, queuedUpdate])
+                : inFlight.update
+              inFlight = null
+              retryTimer = setTimeout(() => {
+                retryTimer = null
+                flush('update')
+              }, 100)
+            } else {
+              inFlight = null
+              flush('update')
+            }
+            break
           case 'update':
           case 'sync-reply':
             Y.applyUpdate(doc, fromBase64(data.update), 'remote')
             break
         }
       },
+      disconnected() {
+        synced = false
+        if (retryTimer) {
+          clearTimeout(retryTimer)
+          retryTimer = null
+        }
+        if (inFlight) {
+          queuedUpdate = queuedUpdate
+            ? Y.mergeUpdates([inFlight.update, queuedUpdate])
+            : inFlight.update
+          inFlight = null
+        }
+      },
     },
   )
 
   doc.on('update', (update, origin) => {
-    if (origin === 'remote' || !synced) return
-    subscription.send({
-      type: 'update',
-      update: toBase64(update),
-      cid,
-      seq: ++updateSequence,
-      generation,
-    })
+    if (origin === 'remote') return
+    queuedUpdate = queuedUpdate ? Y.mergeUpdates([queuedUpdate, update]) : update
+    flush('update')
   })
 
-  return { doc, consumer, synced: () => syncedPromise.promise, label }
+  return {
+    doc,
+    consumer,
+    synced: () => syncedPromise.promise,
+    drained: () => !inFlight && !queuedUpdate,
+    acks: () => acksReceived,
+    label,
+  }
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -131,11 +191,21 @@ await waitFor(
   () => {
     const aNow = a.doc.getText('check').toString()
     const bNow = b.doc.getText('check').toString()
-    return aNow === bNow && aNow.includes('A19;') && aNow.includes('B19;')
+    return (
+      a.drained() &&
+      b.drained() &&
+      aNow === bNow &&
+      aNow.includes('A19;') &&
+      aNow.includes('B19;')
+    )
   },
-  '40 concurrent edits to converge',
+  'both outboxes to drain ACKs and 40 concurrent edits to converge',
   30000,
 )
+if (a.acks() === 0 || b.acks() === 0) {
+  fail(`expected explicit ACK receipts (A=${a.acks()}, B=${b.acks()})`)
+}
+ok(`coalescing outboxes drained with explicit ACKs (A=${a.acks()}, B=${b.acks()})`)
 
 const aText = a.doc.getText('check').toString()
 const bText = b.doc.getText('check').toString()

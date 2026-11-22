@@ -19,7 +19,15 @@ import {
 } from 'y-protocols/awareness'
 
 type SyncMessage = {
-  type: 'sync' | 'sync-reply' | 'update' | 'awareness' | 'awareness-query' | 'write-denied'
+  type:
+    | 'sync'
+    | 'sync-reply'
+    | 'update'
+    | 'ack'
+    | 'nack'
+    | 'awareness'
+    | 'awareness-query'
+    | 'write-denied'
   update?: string
   sv?: string
   seed?: boolean
@@ -29,6 +37,7 @@ type SyncMessage = {
   seed_author_name?: string | null
   cid?: string
   seq?: number
+  reason?: string
   /** Document#content_generation at the time of this message. */
   generation?: number
   /** True when a write-denied frame was rejected for staleness (the
@@ -46,6 +55,16 @@ export interface DurableSnapshotPayload {
   render_hints?: RenderHints
 }
 
+export interface CableProviderOptions {
+  consumer?: Consumer
+  canWrite?: boolean
+  connectionIdentity?: string
+  initialGeneration?: number | null
+  ackTimeoutMs?: number
+  retryBaseMs?: number
+  retryMaxMs?: number
+}
+
 const toBase64 = (u8: Uint8Array): string => {
   let binary = ''
   u8.forEach((b) => (binary += String.fromCharCode(b)))
@@ -55,9 +74,10 @@ const toBase64 = (u8: Uint8Array): string => {
 const fromBase64 = (b64: string): Uint8Array =>
   Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
 
-/** A v1 update opens with the varUint count of clients carrying structs;
- *  a single zero byte means the update is a delete set only. */
-const hasStructs = (update: Uint8Array): boolean => update.length > 0 && update[0] !== 0
+const EMPTY_UPDATE = new Uint8Array([0, 0])
+const DEFAULT_ACK_TIMEOUT_MS = 10_000
+const DEFAULT_RETRY_BASE_MS = 250
+const DEFAULT_RETRY_MAX_MS = 8_000
 
 export type ProviderEvent = 'synced' | 'seed' | 'rejected' | 'write-denied' | 'stale'
 
@@ -67,11 +87,13 @@ export const SERVER_HYDRATE_ORIGIN = 'server-hydrate'
 
 /**
  * Yjs provider over Rails ActionCable. Speaks the SyncChannel protocol:
- * the server transmits full state + its state vector on subscribe; we apply it,
- * reply with everything the server is missing (sync step 2), and from then on
- * relay incremental updates both ways. Awareness piggybacks on the same
- * subscription, relay-only. Reconnects re-run the handshake automatically
- * because ActionCable re-fires `connected` -> server re-transmits sync.
+ * the server transmits full state on subscribe; we apply it, flush any
+ * unacked local edits from our outbox, and from then on send at most one
+ * update frame in flight at a time, coalescing local edits via
+ * `Y.mergeUpdates` while awaiting each server `ack` receipt.
+ * Awareness piggybacks on the same subscription, relay-only. Reconnects
+ * re-run the handshake automatically because ActionCable re-fires `connected`
+ * -> server re-transmits sync.
  */
 export class CableProvider {
   readonly doc: Y.Doc
@@ -91,17 +113,17 @@ export class CableProvider {
   private listeners = new Map<ProviderEvent, Set<() => void>>()
   private destroyed = false
   private updateSequence = 0
-  private serverStateVector: Uint8Array | null = null
-  // True once a local transaction has changed the doc since the last
-  // handshake, whether or not it was live: an `update` sent on a live
-  // connection can still be lost before the disconnect, and a delete-only
-  // change leaves no structs for `hasStructs` to notice. Only then does the
-  // next handshake owe the server a sync-reply. A client that merely
-  // hydrated has nothing to send — and Y.encodeStateAsUpdate always
-  // appends the document's entire delete set, so replying anyway makes
-  // every open of a document with deletion history persist a redundant
-  // delete-set frame that the server then has to fold away.
-  private pendingLocalChanges = false
+  // Single-in-flight coalescing outbox: at most one frame awaits server ACK at
+  // a time. Local edits produced while offline, awaiting ACK, or backing off
+  // accumulate in `queuedUpdate` via `Y.mergeUpdates`. Exact unacked state
+  // (`inFlight` + `queuedUpdate`) tells us deterministically whether local
+  // edits owe a flush on reconnect or unload — a read-only open has neither
+  // and sends nothing.
+  private inFlight: { seq: number; update: Uint8Array } | null = null
+  private queuedUpdate: Uint8Array | null = null
+  private ackTimer: ReturnType<typeof setTimeout> | null = null
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private retryAttempt = 0
   // Initialized from documents#show props and verified on each "sync" message,
   // then echoed back on outgoing update/sync-reply frames and keepalive HTTP
   // flushes so the server rejects any client whose local Yjs doc predates an
@@ -109,22 +131,19 @@ export class CableProvider {
   private generation: number | null
   private readonly slug: string
   private readonly canWrite: boolean
+  private readonly ackTimeoutMs: number
+  private readonly retryBaseMs: number
+  private readonly retryMaxMs: number
 
-  constructor(
-    doc: Y.Doc,
-    slug: string,
-    options?: {
-      consumer?: Consumer
-      canWrite?: boolean
-      connectionIdentity?: string
-      initialGeneration?: number | null
-    },
-  ) {
+  constructor(doc: Y.Doc, slug: string, options?: CableProviderOptions) {
     this.doc = doc
     this.slug = slug
     this.canWrite = options?.canWrite ?? true
     this.generation =
       typeof options?.initialGeneration === 'number' ? options.initialGeneration : null
+    this.ackTimeoutMs = options?.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS
+    this.retryBaseMs = options?.retryBaseMs ?? DEFAULT_RETRY_BASE_MS
+    this.retryMaxMs = options?.retryMaxMs ?? DEFAULT_RETRY_MAX_MS
     this.awareness = new Awareness(doc)
     this.consumer = options?.consumer ?? getConsumer(options?.connectionIdentity)
 
@@ -134,6 +153,8 @@ export class CableProvider {
         received: (data: SyncMessage) => this.handleReceived(data),
         disconnected: () => {
           this.synced = false
+          this.clearRetryTimer()
+          this.requeueInFlight()
           // Peers' presence is unknown while offline; drop all remote states.
           const remote = Array.from(this.awareness.getStates().keys()).filter(
             (id) => id !== this.doc.clientID,
@@ -145,6 +166,7 @@ export class CableProvider {
           // was deleted while this client was offline). Without this, the
           // user keeps typing into a dead editor that will never sync.
           this.synced = false
+          this.clearOutbox()
           this.emit('rejected')
         },
       },
@@ -152,7 +174,9 @@ export class CableProvider {
 
     this.doc.on('update', this.handleDocUpdate)
     this.awareness.on('update', this.handleAwarenessUpdate)
-    window.addEventListener('beforeunload', this.handleUnload)
+    if (typeof window !== 'undefined') {
+      window.addEventListener('beforeunload', this.handleUnload)
+    }
   }
 
   on(event: ProviderEvent, handler: () => void): void {
@@ -168,7 +192,10 @@ export class CableProvider {
     if (this.destroyed) return
     this.destroyed = true
     this.handleUnload()
-    window.removeEventListener('beforeunload', this.handleUnload)
+    this.clearTimers()
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('beforeunload', this.handleUnload)
+    }
     this.doc.off('update', this.handleDocUpdate)
     this.awareness.off('update', this.handleAwarenessUpdate)
     this.subscription.unsubscribe()
@@ -191,46 +218,132 @@ export class CableProvider {
     this.subscription.send({ ...payload, cid: this.clientId })
   }
 
-  private sendUpdate(type: 'sync-reply' | 'update', update: Uint8Array): void {
+  private enqueue(update: Uint8Array): void {
+    this.queuedUpdate = this.queuedUpdate
+      ? Y.mergeUpdates([this.queuedUpdate, update])
+      : update
+  }
+
+  private requeueInFlight(): void {
+    this.clearAckTimer()
+    if (!this.inFlight) return
+    const { update } = this.inFlight
+    this.inFlight = null
+    this.queuedUpdate = this.queuedUpdate
+      ? Y.mergeUpdates([update, this.queuedUpdate])
+      : update
+  }
+
+  private mergedUnackedUpdate(): Uint8Array | null {
+    if (this.inFlight && this.queuedUpdate) {
+      return Y.mergeUpdates([this.inFlight.update, this.queuedUpdate])
+    }
+    return this.inFlight?.update ?? this.queuedUpdate
+  }
+
+  private clearAckTimer(): void {
+    if (this.ackTimer) {
+      clearTimeout(this.ackTimer)
+      this.ackTimer = null
+    }
+  }
+
+  private clearRetryTimer(): void {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer)
+      this.retryTimer = null
+    }
+  }
+
+  private clearTimers(): void {
+    this.clearAckTimer()
+    this.clearRetryTimer()
+  }
+
+  private clearOutbox(): void {
+    this.clearTimers()
+    this.inFlight = null
+    this.queuedUpdate = null
+    this.retryAttempt = 0
+  }
+
+  private flush(type: 'sync-reply' | 'update' = 'update'): void {
+    if (
+      this.destroyed ||
+      !this.canWrite ||
+      !this.synced ||
+      this.inFlight ||
+      this.retryTimer ||
+      !this.queuedUpdate
+    ) {
+      return
+    }
+    const update = this.queuedUpdate
+    this.queuedUpdate = null
     this.updateSequence += 1
+    const seq = this.updateSequence
+    this.inFlight = { seq, update }
     this.send({
       type,
       update: toBase64(update),
-      seq: this.updateSequence,
+      seq,
       generation: this.generation,
     })
+    this.ackTimer = setTimeout(() => this.handleAckTimeout(seq), this.ackTimeoutMs)
+  }
+
+  private handleAckTimeout(seq: number): void {
+    this.ackTimer = null
+    if (this.destroyed || !this.inFlight || this.inFlight.seq !== seq) return
+    this.requeueInFlight()
+    this.scheduleRetry()
+  }
+
+  private scheduleRetry(): void {
+    if (this.destroyed || !this.synced || this.retryTimer || !this.queuedUpdate) return
+    const exponent = Math.min(this.retryAttempt, 10)
+    const delayMs = Math.min(this.retryBaseMs * 2 ** exponent, this.retryMaxMs)
+    this.retryAttempt += 1
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null
+      this.flush('update')
+    }, delayMs)
   }
 
   /**
-   * Persist everything this client has observed beyond the server vector from
-   * its last handshake. The update is idempotent, and `keepalive` lets the
-   * request finish when a click is immediately followed by navigation.
+   * Persist strictly the merged unacked outbox bytes (`inFlight` +
+   * `queuedUpdate`) over a `keepalive` HTTP request so discrete edits or an
+   * immediate navigation/unload survive ActionCable teardown.
    */
-  persistCurrentState = (snapshot: DurableSnapshotPayload): void => {
+  persistCurrentState = (snapshot?: DurableSnapshotPayload): void => {
     if (!this.canWrite) return
-    const update = this.serverStateVector
-      ? Y.encodeStateAsUpdate(this.doc, this.serverStateVector)
-      : Y.encodeStateAsUpdate(this.doc)
-    const persistedVector = Y.encodeStateVector(this.doc)
+    const snapInFlight = this.inFlight
+    const snapQueued = this.queuedUpdate
+    const pending = this.mergedUnackedUpdate()
+    if (!pending && !snapshot) return
 
     const updatePayload = {
-      update: toBase64(update),
+      update: toBase64(pending ?? EMPTY_UPDATE),
       cid: this.clientId,
-      // Same staleness guard as sendUpdate: this beforeunload/keepalive
+      // Same staleness guard as flush(): this beforeunload/keepalive
       // fallback merges through the identical YjsPersistence.merge_bytes path
       // as SyncChannel, so it always carries content_generation (initialized
       // from page props even before the WebSocket handshake completes).
       generation: this.generation,
     }
-    const completePayload = { ...updatePayload, ...snapshot }
-    const completeBody = JSON.stringify(completePayload)
-    // Browsers cap keepalive request bodies at roughly 64 KiB. Large docs
-    // still get durable CRDT state (and therefore correct reload behavior);
-    // their derived source snapshot continues through the normal debounce.
-    const body =
-      new TextEncoder().encode(completeBody).byteLength <= 60 * 1024
-        ? completeBody
-        : JSON.stringify(updatePayload)
+    let body: string
+    if (snapshot) {
+      const completeBody = JSON.stringify({ ...updatePayload, ...snapshot })
+      // Browsers cap keepalive request bodies at roughly 64 KiB. Large docs
+      // still get durable CRDT state (and therefore correct reload behavior);
+      // their derived source snapshot continues through the normal debounce.
+      body =
+        new TextEncoder().encode(completeBody).byteLength <= 60 * 1024
+          ? completeBody
+          : JSON.stringify(updatePayload)
+    } else {
+      body = JSON.stringify(updatePayload)
+    }
 
     void fetch(`/d/${this.slug}/sync_update`, {
       method: 'POST',
@@ -243,7 +356,24 @@ export class CableProvider {
     })
       .then((response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        this.serverStateVector = persistedVector
+        if (this.destroyed) return
+        // Reconcile only the exact outbox snapshots this request carried; any
+        // newer edits merged into `queuedUpdate` after fetch started remain.
+        if (snapInFlight && this.inFlight === snapInFlight) {
+          this.clearAckTimer()
+          this.inFlight = null
+          this.retryAttempt = 0
+        }
+        if (snapQueued) {
+          if (this.queuedUpdate === snapQueued) {
+            this.queuedUpdate = null
+          } else if (!snapInFlight && this.inFlight?.update === snapQueued) {
+            this.clearAckTimer()
+            this.inFlight = null
+            this.retryAttempt = 0
+          }
+        }
+        this.flush('update')
       })
       .catch((error) => console.warn('CableProvider: durable sync failed', error))
   }
@@ -257,12 +387,10 @@ export class CableProvider {
         // owner CLI replacement (Document#replace_content!) reset this
         // document while this client was disconnected — it missed both the
         // content_reset broadcast and the merge-time rejection. Its local
-        // doc is stale: adopting the new generation and running sync step 2
-        // would upload the entire pre-replacement doc tagged with the
-        // current generation, resurrecting exactly the content the
-        // replacement wiped (YjsPersistence.merge cannot catch it — the
-        // frame passes the generation guard). Discard the session instead:
-        // same recovery action as a rejected stale frame.
+        // doc is stale: adopting the new generation and flushing queued edits
+        // would upload pre-replacement state tagged with the current
+        // generation, resurrecting content the replacement wiped. Discard the
+        // session instead: same recovery action as a rejected stale frame.
         if (
           this.generation !== null &&
           typeof data.generation === 'number' &&
@@ -273,26 +401,18 @@ export class CableProvider {
           // replaces this discarded session can claim and apply the new
           // template instead of everyone waiting out SEED_CLAIM_TIMEOUT.
           if (data.seed) this.send({ type: 'seed-decline' })
+          this.clearOutbox()
           this.emit('stale')
           break
         }
-        // Server's full state, then reply with what it's missing (sync step 2).
+        // Apply server's full state; any unacked local edits stay in the
+        // outbox and flush immediately once synced.
         Y.applyUpdate(this.doc, fromBase64(data.update!), this)
-        const serverVector = fromBase64(data.sv!)
-        this.serverStateVector = serverVector
+        this.clearRetryTimer()
+        this.requeueInFlight()
         this.updateSequence = 0
+        this.retryAttempt = 0
         if (typeof data.generation === 'number') this.generation = data.generation
-        if (this.canWrite) {
-          const missing = Y.encodeStateAsUpdate(this.doc, serverVector)
-          // Reply when any local change happened since the last handshake
-          // (its `update` may have been lost in flight, and a delete-only
-          // edit leaves no structs the count can see), or when the server
-          // lacks structs we hold. A client that only hydrated owes nothing.
-          if (this.pendingLocalChanges || hasStructs(missing)) {
-            this.sendUpdate('sync-reply', missing)
-          }
-          this.pendingLocalChanges = false
-        }
         const seedContent = data.seed_content
         if (data.seed && seedContent) {
           // No one listens to 'seed' by design: the editor reads
@@ -307,12 +427,33 @@ export class CableProvider {
           this.emit('seed')
         }
         this.synced = true
+        this.flush('sync-reply')
         this.emit('synced')
         // Announce ourselves and ask existing peers to re-announce.
         this.broadcastAwareness()
         this.send({ type: 'awareness-query' })
         break
       }
+      case 'ack':
+        if (!this.inFlight || data.seq !== this.inFlight.seq) break
+        this.clearAckTimer()
+        this.inFlight = null
+        this.retryAttempt = 0
+        this.flush('update')
+        break
+      case 'nack':
+        if (!this.inFlight || data.seq !== this.inFlight.seq) break
+        if (data.reason === 'retryable') {
+          this.requeueInFlight()
+          this.scheduleRetry()
+        } else {
+          console.warn('CableProvider: server rejected update', data.reason)
+          this.clearAckTimer()
+          this.inFlight = null
+          this.retryAttempt = 0
+          this.flush('update')
+        }
+        break
       case 'update':
       case 'sync-reply':
         try {
@@ -330,6 +471,7 @@ export class CableProvider {
         this.broadcastAwareness()
         break
       case 'write-denied':
+        this.clearOutbox()
         // Distinguish "this link is locked" from "your local doc predates an
         // owner CLI replacement" (Document#content_generation mismatch) —
         // each needs a different client recovery action (see show.tsx).
@@ -342,13 +484,8 @@ export class CableProvider {
     // Updates we applied from the wire carry `this` as origin — don't echo
     // them; the page's server-rendered hydration is server state too.
     if (origin === this || origin === SERVER_HYDRATE_ORIGIN || !this.canWrite) return
-    // Recorded for every local change, not only the unsynced ones: the frame
-    // sent below can be lost before a disconnect, and if the change was a
-    // delete the next handshake's struct count cannot tell it is missing.
-    this.pendingLocalChanges = true
-    // Unsynced changes stay buffered in the doc until the next sync-reply.
-    if (!this.synced) return
-    this.sendUpdate('update', update)
+    this.enqueue(update)
+    this.flush('update')
   }
 
   private handleAwarenessUpdate = (
@@ -375,5 +512,8 @@ export class CableProvider {
 
   private handleUnload = (): void => {
     removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload')
+    if (this.inFlight || this.queuedUpdate) {
+      this.persistCurrentState()
+    }
   }
 }

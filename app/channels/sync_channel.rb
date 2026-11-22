@@ -4,13 +4,20 @@
 #
 # Protocol:
 #   server -> joining client : { type: "sync", update, sv, generation, seed?, content_format?, seed_content?, seed_author_kind?, seed_author_name? }
-#   client -> server         : { type: "sync-reply", update, cid, seq, generation }   # everything server was missing
-#                              { type: "update", update, cid, seq, generation }       # incremental edit
-#                              { type: "awareness", update, cid }    # presence/cursors, relay-only
-#                              { type: "awareness-query", cid }      # ask peers to re-announce
-#                              { type: "seed-decline", cid }         # hand back a seed claim this handshake granted
+#   server -> sender         : { type: "ack", seq }                            # durable merge receipt (when seq was sent)
+#                              { type: "nack", seq, reason: "retryable" | "invalid" }
+#                              { type: "write-denied", locked: true }          # read-only link
+#                              { type: "write-denied", locked: false, stale: true } # document was replaced
+#   client -> server         : { type: "sync-reply", update, cid, seq?, generation? } # unacked edits flushed on reconnect
+#                              { type: "update", update, cid, seq?, generation? }     # incremental edit
+#                              { type: "awareness", update, cid }                     # presence/cursors, relay-only
+#                              { type: "awareness-query", cid }                       # ask peers to re-announce
+#                              { type: "seed-decline", cid }                          # hand back a seed claim this handshake granted
 # All client messages are broadcast to every subscriber (sender filters its own
-# via cid); update/sync-reply are additionally merged into persistent storage.
+# via cid); update/sync-reply are persisted before broadcast and acknowledged
+# back to the sender. Ordering is enforced client-side by CableProvider's
+# single-in-flight coalescing outbox, so each subscription has at most one frame
+# in flight at a time and needs no server-side reordering buffer.
 #
 # `generation` (Document#content_generation) is the client's last-known
 # content generation, initialized from documents#show props and verified on the
@@ -23,8 +30,6 @@
 # one, so a stale or misbehaving client can never resurrect content a
 # replacement just wiped.
 class SyncChannel < ApplicationCable::Channel
-  MAX_SEQUENCE_GAP = 256
-
   # In-process subscriber refcount per document id, driving the
   # fold-on-last-disconnect compaction trigger. Entries are removed when
   # the count reaches zero, so the map only holds actively-open documents.
@@ -43,9 +48,6 @@ class SyncChannel < ApplicationCable::Channel
     @document = Document.find_by(slug: params[:slug])
     return reject unless @document
 
-    @sequence_lock = Mutex.new
-    @next_sequence = 1
-    @pending_updates = {}
     stream_for @document
     self.class.track_subscribe(@document.id)
 
@@ -114,15 +116,13 @@ class SyncChannel < ApplicationCable::Channel
 
       generation = YjsPersistence.parse_generation(data["generation"])
 
+      seq = nil
       if data.key?("seq")
-        sequence = Integer(data["seq"], exception: false)
-        return unless sequence&.positive?
-
-        enqueue_update(sequence, message, decoded, generation)
-      else
-        # Rollout compatibility for clients deployed before ordered frames.
-        persist_and_broadcast(message, decoded, generation)
+        seq = Integer(data["seq"], exception: false)
+        return unless seq&.positive?
       end
+
+      persist_and_broadcast(message, decoded, generation:, seq:)
     when "awareness", "awareness-query"
       self.class.broadcast_to(@document, message)
     when "seed-decline"
@@ -132,40 +132,7 @@ class SyncChannel < ApplicationCable::Channel
 
   private
 
-  # Action Cable dispatches channel actions on a worker pool, so a burst of
-  # causally dependent Yjs updates can enter #receive out of order. Sequencing
-  # and draining each subscription's frames in client order avoids transient
-  # causal gaps before persistence and broadcast.
-  def enqueue_update(sequence, message, decoded, generation)
-    @sequence_lock.synchronize do
-      return if sequence < @next_sequence
-      unless writable_connection?(reload: sequence > @next_sequence)
-        @pending_updates.clear
-        transmit({ type: "write-denied", locked: true })
-        return
-      end
-      unless generation.is_a?(Integer)
-        transmit({ type: "write-denied", locked: false, stale: true })
-        return
-      end
-      if sequence > @next_sequence + MAX_SEQUENCE_GAP
-        ActiveSupport::Notifications.instrument(
-          "frame_dropped.yjs",
-          document_id: @document.id, outcome: "dropped_gap",
-          sequence: sequence, expected_sequence: @next_sequence
-        )
-        return
-      end
-
-      @pending_updates[sequence] ||= [ message, decoded, generation ]
-      while (frame = @pending_updates.delete(@next_sequence))
-        persist_and_broadcast(*frame)
-        @next_sequence += 1
-      end
-    end
-  end
-
-  def persist_and_broadcast(message, decoded, generation)
+  def persist_and_broadcast(message, decoded, generation:, seq: nil)
     YjsPersistence.merge_bytes(
       @document,
       decoded,
@@ -177,8 +144,8 @@ class SyncChannel < ApplicationCable::Channel
     # ordering also prevents clients from accepting a frame that failed
     # persistence and would disappear on reload.
     self.class.broadcast_to(@document, message)
+    transmit({ type: "ack", seq: }) if seq
   rescue Document::EditingLockedError
-    @pending_updates.clear
     transmit({ type: "write-denied", locked: true })
   rescue Document::StaleGenerationError
     # The document was replaced (Document#replace_content!) since this client
@@ -187,8 +154,12 @@ class SyncChannel < ApplicationCable::Channel
     # the client to discard its session rather than silently dropping it with
     # no recovery signal.
     transmit({ type: "write-denied", locked: false, stale: true })
+  rescue ArgumentError => e
+    Rails.logger.warn("SyncChannel: undecodable update dropped: #{e.message}")
+    transmit({ type: "nack", seq:, reason: "invalid" }) if seq
   rescue StandardError => e
     Rails.logger.warn("SyncChannel: merge failed: #{e.class}: #{e.message}")
+    transmit({ type: "nack", seq:, reason: "retryable" }) if seq
   end
 
   def connection_owner_token
@@ -197,18 +168,6 @@ class SyncChannel < ApplicationCable::Channel
 
   def connection_current_user
     connection.current_user if connection.respond_to?(:current_user)
-  end
-
-  # In-order frames from an already-writable connection skip an extra SELECT
-  # here because YjsPersistence.merge_bytes authoritatively reloads under lock.
-  # Out-of-order frames about to buffer — and currently read-only connections —
-  # reload so neither a mid-session lock nor an unlock goes stale.
-  def writable_connection?(reload: false)
-    return true if !reload && @document.writable_by?(connection_owner_token, user: connection_current_user)
-
-    @document.reload.writable_by?(connection_owner_token, user: connection_current_user)
-  rescue ActiveRecord::RecordNotFound
-    false
   end
 
   # Exactly one client seeds an empty document from its markdown template.
