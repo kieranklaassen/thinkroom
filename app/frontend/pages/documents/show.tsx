@@ -112,6 +112,7 @@ export interface DocumentProps {
     slug: string
     title: string
     content_format: DocumentFormat
+    content_generation: number
     seed_content: string | null
     seed_version: string
     seed_granted: boolean
@@ -1212,6 +1213,7 @@ export default function DocumentShow({
                 canWrite={ownership.can_write}
                 connectionIdentity={connectionIdentity}
                 contentFormat={doc.content_format}
+                contentGeneration={doc.content_generation}
                 initialStateB64={doc.yjs_state_b64}
                 initialStateChecksum={doc.yjs_state_checksum}
                 renderHints={doc.render_hints}

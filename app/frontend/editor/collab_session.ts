@@ -28,6 +28,7 @@ export function acquireSession(
   connectionIdentity: string,
   initialStateB64?: string | null,
   initialStateChecksum?: string | null,
+  initialGeneration?: number | null,
 ): CollabSession {
   let session = sessions.get(slug)
   if (session && (session.canWrite !== canWrite || session.connectionIdentity !== connectionIdentity)) {
@@ -62,6 +63,7 @@ export function acquireSession(
       canWrite,
       connectionIdentity,
       initialChecksum: hydratedChecksum,
+      initialGeneration,
     })
     provider.awareness.setLocalStateField('user', identity)
     session = { ydoc, provider, refs: 0, destroyTimer: null, canWrite, connectionIdentity }

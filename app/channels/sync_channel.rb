@@ -7,30 +7,34 @@
 #   server -> joining client : { type: "sync", update, sv, checksum?, generation, seed?, content_format?, seed_content?, seed_author_kind?, seed_author_name? }
 #                              { type: "awareness", update, cid }     # cached active peers, unicast on join
 #                              { type: "write-denied", reason: "stale", stale: true, locked: false, generation }
-#   client -> server         : { type: "sync-reply", update, cid, seq, generation }   # everything server was missing
-#                              { type: "update", update, cid, seq, generation }       # incremental edit
-#                              { type: "awareness", update, cid, client_id? }         # presence/cursors, cached + relayed (4 KiB cap)
-#                              { type: "seed-decline", cid }                          # hand back a seed claim this handshake granted
-#   server -> peers          : { type: "awareness-leave", cid, client_id }            # emitted on subscriber disconnect
+#   server -> sender         : { type: "ack", seq }                            # durable merge receipt (when seq was sent)
+#                              { type: "nack", seq, reason: "retryable" | "invalid" }
+#                              { type: "write-denied", locked: true }          # read-only link
+#                              { type: "write-denied", locked: false, stale: true } # document was replaced
+#   client -> server         : { type: "sync-reply", update, cid, seq?, generation } # unacked edits flushed on reconnect
+#                              { type: "update", update, cid, seq?, generation }     # incremental edit
+#                              { type: "awareness", update, cid, client_id? }        # presence/cursors, cached + relayed (4 KiB cap)
+#                              { type: "seed-decline", cid }                         # hand back a seed claim this handshake granted
+#   server -> peers          : { type: "awareness-leave", cid, client_id }           # emitted on subscriber disconnect
 # All client messages are broadcast to every subscriber (sender filters its own
-# via cid); update/sync-reply are additionally merged into persistent storage.
+# via cid); update/sync-reply are persisted before broadcast and acknowledged
+# back to the sender. Ordering is enforced client-side by CableProvider's
+# single-in-flight coalescing outbox, so each subscription has at most one frame
+# in flight at a time and needs no server-side reordering buffer.
 #
 # `generation` (Document#content_generation) is the client's last-known
-# content generation, learned from the initial "sync" message and echoed back
-# on every outgoing update/sync-reply frame (and on reconnect subscribe params).
-# A client connected before an owner CLI replacement (Document#replace_content!)
-# still has a live subscription — ActionCable has no way to know the content
-# changed — but its next outgoing frame or reconnect subscribe carries the
-# stale generation. SyncChannel#subscribed rejects stale reconnects immediately
-# without loading yjs_state or claiming a seed, and YjsPersistence.merge
-# rejects live stale frames so a stale tab can never resurrect content a
-# replacement just wiped. A frame with no generation key (clients deployed
-# before this) is trusted, matching the existing seq-less rollout-compatibility
-# branch below.
+# content generation, initialized from documents#show props and verified on the
+# initial "sync" message, then echoed back on every outgoing update/sync-reply
+# frame and reconnect subscribe params. A client connected before an owner CLI
+# replacement (Document#replace_content!) still has a live subscription —
+# ActionCable has no way to know the content changed — but its next outgoing
+# frame or reconnect subscribe carries the stale generation. SyncChannel#subscribed
+# rejects stale reconnects immediately without loading yjs_state or claiming a
+# seed, and YjsPersistence.merge_bytes rejects any frame whose generation is
+# missing, malformed, or behind the document's current one, so a stale or
+# misbehaving client can never resurrect content a replacement just wiped.
 class SyncChannel < ApplicationCable::Channel
-  MAX_SEQUENCE_GAP = 256
   MAX_AWARENESS_BYTES = YjsAwarenessCache::MAX_AWARENESS_BYTES
-
   # In-process subscriber refcount per document id, driving the
   # fold-on-last-disconnect compaction trigger and awareness cache eviction.
   # Entries are removed when the count reaches zero, so the map only holds
@@ -50,7 +54,7 @@ class SyncChannel < ApplicationCable::Channel
     document = Document.find_by(slug: params[:slug])
     return reject unless document
 
-    client_generation = Integer(params[:generation], exception: false) unless params[:generation].nil?
+    client_generation = YjsPersistence.parse_generation(params[:generation]) unless params[:generation].nil?
     if client_generation && client_generation < document.content_generation
       transmit({
         type: "write-denied",
@@ -66,9 +70,6 @@ class SyncChannel < ApplicationCable::Channel
     @subscriber_key = SecureRandom.uuid
     @subscriber_cid = params[:cid].presence&.to_s
     @awareness_client_id = Integer(params[:client_id], exception: false) unless params[:client_id].nil?
-    @sequence_lock = Mutex.new
-    @next_sequence = 1
-    @pending_updates = {}
     stream_for @document
     self.class.track_subscribe(@document.id)
 
@@ -80,8 +81,6 @@ class SyncChannel < ApplicationCable::Channel
       message[:seed] = true
       message[:content_format] = @document.content_format
       message[:seed_content] = @document.seed_content
-      # Keep the old key for deployed Markdown clients during rollout.
-      message[:seed_markdown] = @document.seed_content if @document.content_format == "markdown"
       # Omitted (not null) for legacy docs without recorded authorship —
       # keeps the wire format minimal and presence-of-key meaningful.
       message[:seed_author_kind] = @document.seed_author_kind if @document.seed_author_kind
@@ -113,11 +112,20 @@ class SyncChannel < ApplicationCable::Channel
     message = data.slice("type", "update", "cid")
     case data["type"]
     when "update", "sync-reply"
-      # Validate before relaying: a malformed frame must neither reach peers
-      # nor crash the channel action.
+      # Validate before relaying or buffering: oversized or malformed frames
+      # must neither allocate unbounded decode buffers, reach peers, nor crash
+      # the channel action.
       update = data["update"].to_s
       return if update.blank?
-      begin
+
+      if update.bytesize > YjsPersistence::MAX_UPDATE_B64_BYTES
+        ActiveSupport::Notifications.instrument(
+          "frame_dropped.yjs", document_id: @document.id, outcome: "dropped_oversized"
+        )
+        return
+      end
+
+      decoded = begin
         Base64.strict_decode64(update)
       rescue ArgumentError
         ActiveSupport::Notifications.instrument(
@@ -126,22 +134,21 @@ class SyncChannel < ApplicationCable::Channel
         return
       end
 
-      # nil (key absent) means "trust it" — rollout compatibility for clients
-      # deployed before this field existed, mirroring the seq-less branch
-      # below. Present-but-blank/non-integer is treated the same as absent
-      # rather than as generation 0, so a malformed value can't accidentally
-      # reject a legitimate current-generation frame.
-      generation = Integer(data["generation"], exception: false) if data.key?("generation")
-
-      if data.key?("seq")
-        sequence = Integer(data["seq"], exception: false)
-        return unless sequence&.positive?
-
-        enqueue_update(sequence, message, update, generation)
-      else
-        # Rollout compatibility for clients deployed before ordered frames.
-        persist_and_broadcast(message, update, generation)
+      if decoded.bytesize > YjsPersistence::MAX_UPDATE_BYTES
+        ActiveSupport::Notifications.instrument(
+          "frame_dropped.yjs", document_id: @document.id, outcome: "dropped_oversized"
+        )
+        return
       end
+      generation = YjsPersistence.parse_generation(data["generation"])
+
+      seq = nil
+      if data.key?("seq")
+        seq = Integer(data["seq"], exception: false)
+        return unless seq&.positive?
+      end
+
+      persist_and_broadcast(message, decoded, generation:, seq:)
     when "awareness"
       handle_awareness(data)
     when "seed-decline"
@@ -265,52 +272,42 @@ class SyncChannel < ApplicationCable::Channel
     })
   end
 
-  # Action Cable dispatches channel actions on a worker pool, so a burst of
-  # causally dependent Yjs updates can enter #receive out of order. Sequencing
-  # and draining each subscription's frames in client order avoids transient
-  # causal gaps before persistence and broadcast.
-  def enqueue_update(sequence, message, update, generation)
-    @sequence_lock.synchronize do
-      return if sequence < @next_sequence
-      if sequence > @next_sequence + MAX_SEQUENCE_GAP
-        ActiveSupport::Notifications.instrument(
-          "frame_dropped.yjs",
-          document_id: @document.id, outcome: "dropped_gap",
-          sequence: sequence, expected_sequence: @next_sequence
-        )
-        return
-      end
-
-      @pending_updates[sequence] ||= [ message, update, generation ]
-      while (frame = @pending_updates.delete(@next_sequence))
-        persist_and_broadcast(*frame)
-        @next_sequence += 1
-      end
-    end
-  end
-
-  def persist_and_broadcast(message, update, generation = nil)
-    YjsPersistence.merge(
+  def persist_and_broadcast(message, decoded, generation:, seq: nil)
+    YjsPersistence.merge_bytes(
       @document,
-      update,
+      decoded,
       generation:,
-      token: (connection.owner_token if connection.respond_to?(:owner_token)),
-      user: (connection.current_user if connection.respond_to?(:current_user))
+      token: connection_owner_token,
+      user: connection_current_user
     )
     # A peer seeing an edit means the server has made it durable. This
     # ordering also prevents clients from accepting a frame that failed
     # persistence and would disappear on reload.
     self.class.broadcast_to(@document, message)
+    transmit({ type: "ack", seq: }) if seq
   rescue Document::EditingLockedError
     transmit({ type: "write-denied", locked: true })
   rescue Document::StaleGenerationError
     # The document was replaced (Document#replace_content!) since this client
-    # last synced. Drop the frame — merging it would resurrect content the
-    # replacement just wiped — and tell the client to discard its session
-    # rather than silently dropping it with no recovery signal.
+    # last synced, or the frame omitted a valid generation. Drop the frame —
+    # merging it would resurrect content the replacement just wiped — and tell
+    # the client to discard its session rather than silently dropping it with
+    # no recovery signal.
     transmit({ type: "write-denied", locked: false, stale: true })
+  rescue ArgumentError => e
+    Rails.logger.warn("SyncChannel: undecodable update dropped: #{e.message}")
+    transmit({ type: "nack", seq:, reason: "invalid" }) if seq
   rescue StandardError => e
     Rails.logger.warn("SyncChannel: merge failed: #{e.class}: #{e.message}")
+    transmit({ type: "nack", seq:, reason: "retryable" }) if seq
+  end
+
+  def connection_owner_token
+    connection.owner_token if connection.respond_to?(:owner_token)
+  end
+
+  def connection_current_user
+    connection.current_user if connection.respond_to?(:current_user)
   end
 
   # Exactly one client seeds an empty document from its markdown template.

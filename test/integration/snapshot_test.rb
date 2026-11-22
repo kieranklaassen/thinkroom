@@ -74,7 +74,9 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert_response :locked
     assert_equal "original", @document.reload.content_snapshot
 
-    post document_sync_update_path(@document.slug), params: { update: }, as: :json
+    post document_sync_update_path(@document.slug),
+         params: { update:, generation: @document.content_generation },
+         as: :json
     assert_response :locked
     assert_nil @document.reload.yjs_state
   end
@@ -280,8 +282,8 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     ) do
       post document_sync_update_path(@document.slug),
            params: {
-             update:, cid: "browser-1", content: "* [x] checked",
-             spans: [], state_vector:
+             update:, cid: "browser-1", generation: @document.content_generation,
+             content: "* [x] checked", spans: [], state_vector:
            },
            as: :json
     end
@@ -331,29 +333,53 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert @document.reload.yjs_document_updates.exists?
   end
 
-  test "durable sync update with no generation key still merges (rollout compatibility)" do
+  test "durable sync update rejects missing, nil, and malformed generation with 409 conflict" do
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "legacy client, no generation field"
     update = Base64.strict_encode64(ydoc.encode_state_as_update)
 
-    post document_sync_update_path(@document.slug), params: { update: }, as: :json
+    [
+      { update: },
+      { update:, generation: nil },
+      { update:, generation: "not-an-int" }
+    ].each do |params|
+      assert_no_broadcasts(SyncChannel.broadcasting_for(@document)) do
+        post document_sync_update_path(@document.slug), params:, as: :json
+      end
+      assert_response :conflict
+    end
 
-    assert_response :no_content
-    assert @document.reload.yjs_document_updates.exists?
+    assert_not @document.reload.yjs_document_updates.exists?
   end
 
   test "durable sync update rejects malformed and oversized payloads" do
     post document_sync_update_path(@document.slug),
-         params: { update: "not-base64" },
+         params: { update: "not-base64", generation: @document.content_generation },
          as: :json
     assert_response :unprocessable_entity
     assert_nil @document.reload.yjs_state
 
-    oversized = Base64.strict_encode64("x" * (DocumentsController::MAX_SYNC_UPDATE_BYTES + 1))
+    # Invalid base64 past the pre-decode cap must return 413 (not 422), proving
+    # the size firewall rejects before Base64.strict_decode64 allocates.
+    pre_decode_oversized = "!" * (DocumentsController::MAX_SYNC_UPDATE_B64_BYTES + 1)
     post document_sync_update_path(@document.slug),
-         params: { update: oversized },
+         params: { update: pre_decode_oversized, generation: @document.content_generation },
          as: :json
     assert_response :content_too_large
     assert_nil @document.reload.yjs_state
+
+    oversized = Base64.strict_encode64("x" * (DocumentsController::MAX_SYNC_UPDATE_BYTES + 1))
+    post document_sync_update_path(@document.slug),
+         params: { update: oversized, generation: @document.content_generation },
+         as: :json
+    assert_response :content_too_large
+    assert_nil @document.reload.yjs_state
+
+    undecodable = Base64.strict_encode64("yrs-garbage-bytes")
+    post document_sync_update_path(@document.slug),
+         params: { update: undecodable, generation: @document.content_generation },
+         as: :json
+    assert_response :unprocessable_entity
+    assert_not @document.reload.yjs_document_updates.exists?
   end
 end
