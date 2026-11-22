@@ -4,19 +4,19 @@ class SyncChannelTest < ActionCable::Channel::TestCase
   def build_update_b64(text)
     ydoc = Y::Doc.new
     ydoc.get_text("t") << text
-    Base64.strict_encode64(ydoc.diff.pack("C*"))
+    Base64.strict_encode64(ydoc.encode_state_as_update)
   end
 
   def build_sequential_updates
     ydoc = Y::Doc.new
     text = ydoc.get_text("t")
-    before_first = ydoc.state
+    before_first = ydoc.encode_state_vector
     text << "a"
-    first = ydoc.diff(before_first)
-    before_second = ydoc.state
+    first = ydoc.encode_state_as_update(before_first)
+    before_second = ydoc.encode_state_vector
     text << "b"
-    second = ydoc.diff(before_second)
-    [ first, second ].map { |update| Base64.strict_encode64(update.pack("C*")) }
+    second = ydoc.encode_state_as_update(before_second)
+    [ first, second ].map { |update| Base64.strict_encode64(update) }
   end
 
   test "subscribing transmits the sync handshake" do
@@ -308,7 +308,7 @@ class SyncChannelTest < ActionCable::Channel::TestCase
 
     full_state, = YjsPersistence.state_b64(doc.reload)
     persisted = Y::Doc.new
-    persisted.sync(Base64.strict_decode64(full_state).unpack("C*"))
+    persisted.apply_update(Base64.strict_decode64(full_state))
     assert_equal "ab", persisted.get_text("t").to_s
   end
 
@@ -317,7 +317,7 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     subscribe slug: doc.slug
 
     # A joining client with an empty doc replies with a no-op update.
-    empty_update = Base64.strict_encode64(Y::Doc.new.full_diff.pack("C*"))
+    empty_update = Base64.strict_encode64(Y::Doc.new.compacted_state_update)
     perform :receive, { "type" => "sync-reply", "update" => empty_update, "cid" => "x" }
 
     # The claim is consumed but reclaimable after timeout because the no-op

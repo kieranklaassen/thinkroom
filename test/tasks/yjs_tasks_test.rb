@@ -21,14 +21,14 @@ class YjsTasksTest < ActiveSupport::TestCase
   def state_text(document)
     full_state, = YjsPersistence.state_b64(document.reload)
     ydoc = Y::Doc.new
-    ydoc.sync(Base64.strict_decode64(full_state).unpack("C*"))
+    ydoc.apply_update(Base64.strict_decode64(full_state))
     ydoc.get_text("t").to_s
   end
 
   def update_for(text)
     ydoc = Y::Doc.new
     ydoc.get_text("t") << text
-    Base64.strict_encode64(ydoc.diff.pack("C*"))
+    Base64.strict_encode64(ydoc.encode_state_as_update)
   end
 
   test "yjs:compact folds and re-encodes, reporting sizes" do

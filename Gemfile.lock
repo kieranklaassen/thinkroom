@@ -449,30 +449,14 @@ GEM
       base64
       websocket-extensions (>= 0.1.0)
     websocket-extensions (0.1.5)
-    y-rb (0.7.0)
-      rake (~> 13.2)
-      rb_sys (~> 0.9.110)
-    y-rb (0.7.0-aarch64-linux-gnu)
-      rake (~> 13.2)
-      rb_sys (~> 0.9.110)
-    y-rb (0.7.0-aarch64-linux-musl)
-      rake (~> 13.2)
-      rb_sys (~> 0.9.110)
-    y-rb (0.7.0-arm64-darwin)
-      rake (~> 13.2)
-      rb_sys (~> 0.9.110)
-    y-rb (0.7.0-x86_64-darwin)
-      rake (~> 13.2)
-      rb_sys (~> 0.9.110)
-    y-rb (0.7.0-x86_64-linux-gnu)
-      rake (~> 13.2)
-      rb_sys (~> 0.9.110)
-    y-rb (0.7.0-x86_64-linux-musl)
-      rake (~> 13.2)
-      rb_sys (~> 0.9.110)
-    y-rb_actioncable (0.1.7)
-      rails (>= 7.0.4)
-      y-rb (>= 0.4.5)
+    yrby (0.9.1)
+      rb_sys (~> 0.9)
+    yrby (0.9.1-aarch64-linux)
+    yrby (0.9.1-aarch64-linux-musl)
+    yrby (0.9.1-arm64-darwin)
+    yrby (0.9.1-x86_64-darwin)
+    yrby (0.9.1-x86_64-linux)
+    yrby (0.9.1-x86_64-linux-musl)
     zeitwerk (2.8.3)
 
 PLATFORMS
@@ -516,8 +500,7 @@ DEPENDENCIES
   tzinfo-data
   vite_rails (~> 3.11)
   web-console
-  y-rb (~> 0.7.0)
-  y-rb_actioncable (~> 0.1.7)
+  yrby (~> 0.9.1)
 
 CHECKSUMS
   action_text-trix (2.1.19) sha256=7012f59421009cf284aa651294896414d653a61a2417c9b8714c8476d2f74009
@@ -696,14 +679,13 @@ CHECKSUMS
   web-console (4.3.0) sha256=e13b71301cdfc2093f155b5aa3a622db80b4672d1f2f713119cc7ec7ac6a6da4
   websocket-driver (0.8.2) sha256=97c556b019bf3410b4961002ac501621e9322d3f8a7bc02161a09301cc4c4146
   websocket-extensions (0.1.5) sha256=1c6ba63092cda343eb53fc657110c71c754c56484aad42578495227d717a8241
-  y-rb (0.7.0) sha256=533c83d0e295c44f3a06b2abdd37139246967848aba2fad96e78c8f9c6d5a068
-  y-rb (0.7.0-aarch64-linux-gnu) sha256=30f16f46aafe8e0e399e42504794256fba49e413dbaf57969eb43568f1192a87
-  y-rb (0.7.0-aarch64-linux-musl) sha256=5d00a946c0d3ee371a6a8b4e38c5665feea080fe816431e848fa1479af7ab392
-  y-rb (0.7.0-arm64-darwin) sha256=42d75cdd38e06ff2cc15628d78adca97f9f9ddd674b2a9521d2b911e240d18be
-  y-rb (0.7.0-x86_64-darwin) sha256=1b87473f37dfdbeb5e94147e185bb6d7059bf9e9694af2ce704f4688d3fa8c25
-  y-rb (0.7.0-x86_64-linux-gnu) sha256=198391d0c7d483718bad8c0ffe87fe0f9d8f668f60b7704996ab1f634d87f290
-  y-rb (0.7.0-x86_64-linux-musl) sha256=e4dbb005e1651aa816be51ac645412b94768b0a683ce7826fe686ee7658e53e6
-  y-rb_actioncable (0.1.7) sha256=89cf4aa6c044d32fc59b8ee4e262b0ab8362b40265e2f8fc2bab5a7c6cde41af
+  yrby (0.9.1) sha256=ee9d93c535795b7160f5aa3be885be6093b24189a7ab34cbfb1631fbd44c8c74
+  yrby (0.9.1-aarch64-linux) sha256=c422dd46629e5b6a93ebf05bfc83f87e06a256bb709a3721cbf22445fd0af90d
+  yrby (0.9.1-aarch64-linux-musl) sha256=8df9458349f89f7c18616d13cdbcd1343a2c5affd85a977068727476f516e445
+  yrby (0.9.1-arm64-darwin) sha256=663a0dac59cde0e467b5fbc1b16bbaa0d8c8d54b3d1bb6e1f99e24b3c0641e50
+  yrby (0.9.1-x86_64-darwin) sha256=735c0a188d715dcac9ae9f7911e9bf8d1c38c187b19df1eda6858fb56490fbba
+  yrby (0.9.1-x86_64-linux) sha256=46f13f0284300c9c956a7622b4bf70a7544cde1429d2b64c4e74e08d4a4a52db
+  yrby (0.9.1-x86_64-linux-musl) sha256=f684589b85988aeddf1815b14f78c92021169483e869e33e813eaef9107aab42
   zeitwerk (2.8.3) sha256=2c85125a8467ce069e20123d1e709a08955c9d29c118c25b46b7b7fafdbb92e5
 
 BUNDLED WITH

@@ -156,7 +156,7 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
   test "the page embeds the Yjs state when it is under the cap" do
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "small state"
-    YjsPersistence.merge(@document, Base64.strict_encode64(ydoc.diff.pack("C*")))
+    YjsPersistence.merge(@document, Base64.strict_encode64(ydoc.encode_state_as_update))
     YjsPersistence.fold!(@document)
 
     get document_page_path(@document.slug), headers: browser

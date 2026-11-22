@@ -5,21 +5,21 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     ydoc = from_doc || Y::Doc.new
     ytext = ydoc.get_text("t")
     ytext << text
-    Base64.strict_encode64(ydoc.diff.pack("C*"))
+    Base64.strict_encode64(ydoc.encode_state_as_update)
   end
 
   # Decodes the served handshake, which folds any unfolded tail first.
   def text_of(document)
     full_state, = YjsPersistence.state_b64(document.reload)
     ydoc = Y::Doc.new
-    ydoc.sync(Base64.strict_decode64(full_state).unpack("C*"))
+    ydoc.apply_update(Base64.strict_decode64(full_state))
     ydoc.get_text("t").to_s
   end
 
   def doc_from(document)
     full_state, = YjsPersistence.state_b64(document.reload)
     ydoc = Y::Doc.new
-    ydoc.sync(Base64.strict_decode64(full_state).unpack("C*"))
+    ydoc.apply_update(Base64.strict_decode64(full_state))
     ydoc
   end
 
@@ -93,7 +93,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     doc = Document.create!(title: "Unseeded", seed_markdown: "# Template")
 
     # The empty sync-reply a client sends when joining an empty doc.
-    empty_update = Base64.strict_encode64(Y::Doc.new.full_diff.pack("C*"))
+    empty_update = Base64.strict_encode64(Y::Doc.new.compacted_state_update)
     YjsPersistence.merge(doc, empty_update)
 
     doc.reload
@@ -153,7 +153,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert state_vector.present?
 
     client = Y::Doc.new
-    client.sync(Base64.strict_decode64(full_state).unpack("C*"))
+    client.apply_update(Base64.strict_decode64(full_state))
     assert_equal "server content", client.get_text("t").to_s
   end
 
@@ -168,9 +168,9 @@ class YjsPersistenceTest < ActiveSupport::TestCase
 
     assert doc.yjs_state.present?
     ydoc = Y::Doc.new
-    ydoc.sync(doc.yjs_state.unpack("C*"))
+    ydoc.apply_update(doc.yjs_state)
     assert_equal "content", ydoc.get_text("t").to_s
-    assert_equal ydoc.state, doc.yjs_state_vector.unpack("C*")
+    assert_equal ydoc.encode_state_vector, doc.yjs_state_vector
     assert_equal Digest::SHA256.hexdigest(doc.yjs_state), doc.yjs_state_checksum
     assert_not doc.yjs_document_updates.exists?, "integrated rows must be deleted"
     assert_equal 1, event.payload[:rows]
@@ -186,9 +186,9 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     YjsPersistence.fold!(doc)
 
     reference = Y::Doc.new
-    reference.sync(doc.reload.yjs_state.unpack("C*"))
+    reference.apply_update(doc.reload.yjs_state)
     assert_equal "first second", reference.get_text("t").to_s
-    assert_equal reference.state, doc.yjs_state_vector.unpack("C*")
+    assert_equal reference.encode_state_vector, doc.yjs_state_vector
   end
 
   test "a duplicate full-state row is deleted as self-contained" do
@@ -198,7 +198,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
 
     # A synced client echoing the full state (e.g. a sync-reply that raced
     # the empty-update filter) appends a row that changes nothing.
-    duplicate = Base64.strict_encode64(doc_from(doc).full_diff.pack("C*"))
+    duplicate = Base64.strict_encode64(doc_from(doc).compacted_state_update)
     YjsPersistence.merge(doc, duplicate)
     assert doc.yjs_document_updates.exists?
 
@@ -216,10 +216,10 @@ class YjsPersistenceTest < ActiveSupport::TestCase
 
     # A backspace-only frame: zero structs, delete set only. It applies
     # deletes without advancing the state vector.
-    before_delete = client.state
-    client.get_text("t").slice!(4, 3) # delete "-me"
-    delete_frame = client.diff(before_delete)
-    YjsPersistence.merge(doc, Base64.strict_encode64(delete_frame.pack("C*")))
+    before_delete = client.encode_state_vector
+    client.get_text("t").delete(4, 3) # delete "-me"
+    delete_frame = client.encode_state_as_update(before_delete)
+    YjsPersistence.merge(doc, Base64.strict_encode64(delete_frame))
 
     event = assert_notification("fold.yjs", outcome: "folded") { YjsPersistence.fold!(doc) }
 
@@ -233,17 +233,17 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     doc = Document.create!(title: "Echoed")
     client = Y::Doc.new
     YjsPersistence.merge(doc, b64_update_for("abc", from_doc: client))
-    before_delete = client.state
-    client.get_text("t").slice!(2, 1)
-    YjsPersistence.merge(doc, Base64.strict_encode64(client.diff(before_delete).pack("C*")))
+    before_delete = client.encode_state_vector
+    client.get_text("t").delete(2, 1)
+    YjsPersistence.merge(doc, Base64.strict_encode64(client.encode_state_as_update(before_delete)))
     YjsPersistence.fold!(doc)
 
     # A fully-synced rejoining client's sync-reply is not [0,0] once the doc
     # has deletion history — it echoes the delete set.
     synced = doc_from(doc)
-    echo = synced.diff(synced.state)
-    assert_not_equal [ 0, 0 ], echo, "precondition: the echo must carry the delete set"
-    YjsPersistence.merge(doc, Base64.strict_encode64(echo.pack("C*")))
+    echo = synced.encode_state_as_update(synced.encode_state_vector)
+    assert_not_equal YjsPersistence::EMPTY_UPDATE, echo, "precondition: the echo must carry the delete set"
+    YjsPersistence.merge(doc, Base64.strict_encode64(echo))
 
     event = assert_notification("fold.yjs", outcome: "folded") { YjsPersistence.fold!(doc) }
 
@@ -265,16 +265,32 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal "pending", doc.seed_state, "garbage must not consume the seed claim"
   end
 
+  test "a base64-valid update with corrupted tail bytes raises ArgumentError cleanly" do
+    doc = Document.create!(title: "CorruptTail", seed_markdown: "# Template")
+    valid = Base64.strict_decode64(b64_update_for("hello world"))
+    # Mutate the final bytes inside the encoded update (truncates/corrupts the
+    # varint/delete-set tail that previously triggered native crashes).
+    corrupted = valid.byteslice(0, valid.bytesize - 2) + "\xff\xff".b
+
+    assert_notification("merge.yjs", outcome: "rejected_undecodable") do
+      assert_raises(ArgumentError) { YjsPersistence.merge(doc, Base64.strict_encode64(corrupted)) }
+    end
+
+    doc.reload
+    assert_not doc.yjs_document_updates.exists?
+    assert_equal "pending", doc.seed_state
+  end
+
   test "a pending row is retained across folds and quarantined after the TTL" do
     doc = Document.create!(title: "Pending")
     # Build a causally dependent pair and append only the second half.
     client = Y::Doc.new
     text = client.get_text("t")
     text << "a"
-    first_state = client.state
+    first_state = client.encode_state_vector
     text << "b"
-    dependent = client.diff(first_state)
-    YjsPersistence.merge(doc, Base64.strict_encode64(dependent.pack("C*")))
+    dependent = client.encode_state_as_update(first_state)
+    YjsPersistence.merge(doc, Base64.strict_encode64(dependent))
 
     event = assert_notification("fold.yjs") { YjsPersistence.fold!(doc) }
     assert_equal 1, event.payload[:retained], "a dependent row without its dependency stays pending"
@@ -286,7 +302,43 @@ class YjsPersistenceTest < ActiveSupport::TestCase
 
     assert_not doc.reload.yjs_document_updates.exists?, "orphans leave the log after the TTL"
     orphan = doc.yjs_state_archives.where(kind: "orphan").sole
-    assert_equal dependent.pack("C*"), orphan.yjs_state, "orphaned bytes are preserved, not dropped"
+    assert_equal dependent, orphan.yjs_state, "orphaned bytes are preserved, not dropped"
+  end
+
+  test "a mixed frame with integrated and pending structs retains its pending half until its dependency arrives" do
+    doc = Document.create!(title: "MixedPending")
+
+    client_a = Y::Doc.new(100)
+    client_a.get_text("t") << "fromA;"
+    update_a = client_a.encode_state_as_update
+
+    client_b = Y::Doc.new(200)
+    client_b.get_text("t") << "b0:"
+    sv_b0 = client_b.encode_state_vector
+    update_b0 = client_b.encode_state_as_update
+    client_b.get_text("t") << "b1;"
+    update_b1 = client_b.encode_state_as_update(sv_b0)
+
+    mixed_doc = Y::Doc.new
+    mixed_doc.apply_update(update_a)
+    mixed_doc.apply_update(update_b1)
+    mixed = mixed_doc.encode_state_as_update
+
+    YjsPersistence.merge(doc, Base64.strict_encode64(mixed))
+
+    first_fold = assert_notification("fold.yjs", outcome: "folded") { YjsPersistence.fold!(doc) }
+    assert_equal 1, first_fold.payload[:retained], "mixed frame must stay retained until its pending half integrates"
+    assert_equal 1, doc.reload.yjs_document_updates.count
+    assert_equal "fromA;", text_of(doc)
+
+    YjsPersistence.merge(doc, Base64.strict_encode64(update_b0))
+    second_fold = assert_notification("fold.yjs", outcome: "folded") { YjsPersistence.fold!(doc) }
+    assert_equal 0, second_fold.payload[:retained]
+    assert_not doc.reload.yjs_document_updates.exists?
+
+    merged = text_of(doc)
+    assert_includes merged, "fromA;"
+    assert_includes merged, "b0:b1;"
   end
 
   test "rows from an older generation are deleted without folding" do
@@ -316,7 +368,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
       end
 
       client = Y::Doc.new
-      client.sync(Base64.strict_decode64(full_state).unpack("C*"))
+      client.apply_update(Base64.strict_decode64(full_state))
       assert_equal "still served", client.get_text("t").to_s, "clients are served from the in-memory doc"
       doc.reload
       assert_nil doc.yjs_state, "an unloadable blob must never be persisted"
@@ -383,8 +435,8 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     ydoc = doc_from(doc)
     ydoc.get_text("t") << "old-code edit. "
     doc.reload.update_columns(
-      yjs_state: ydoc.full_diff.pack("C*"),
-      yjs_state_vector: ydoc.state.pack("C*")
+      yjs_state: ydoc.compacted_state_update,
+      yjs_state_vector: ydoc.encode_state_vector
     )
     YjsPersistence.merge(doc.reload, b64_update_for("new-code edit."))
 
@@ -442,7 +494,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_notification("recovered.yjs", restored_from: "empty") do
       persisted = YjsPersistence.persist_snapshot(
         doc.reload,
-        state_vector_b64: Base64.strict_encode64(Y::Doc.new.state.pack("C*")),
+        state_vector_b64: Base64.strict_encode64(Y::Doc.new.encode_state_vector),
         content: "fresh", spans: []
       )
     end
@@ -510,7 +562,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
 
     persisted = YjsPersistence.persist_snapshot(
       doc.reload,
-      state_vector_b64: Base64.strict_encode64(Y::Doc.new.state.pack("C*")),
+      state_vector_b64: Base64.strict_encode64(Y::Doc.new.encode_state_vector),
       content: "fresh", spans: []
     )
 
@@ -527,7 +579,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     full_state, = YjsPersistence.state_b64(doc.reload)
 
     client = Y::Doc.new
-    client.sync(Base64.strict_decode64(full_state).unpack("C*"))
+    client.apply_update(Base64.strict_decode64(full_state))
     assert_equal "old row", client.get_text("t").to_s
   end
 
@@ -605,7 +657,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     end
 
     client = Y::Doc.new
-    client.sync(doc.yjs_state.unpack("C*"))
+    client.apply_update(doc.yjs_state)
     assert_equal "column served", client.get_text("t").to_s
     assert_equal "ok", event.payload[:outcome]
   end
@@ -620,7 +672,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     end
 
     client = Y::Doc.new
-    client.sync(Base64.strict_decode64(full_state).unpack("C*"))
+    client.apply_update(Base64.strict_decode64(full_state))
     assert_equal "unfolded content", client.get_text("t").to_s
     assert doc.reload.yjs_state.present?, "the join folds the tail"
   end
@@ -638,7 +690,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     end
 
     client = Y::Doc.new
-    client.sync(Base64.strict_decode64(full_state).unpack("C*"))
+    client.apply_update(Base64.strict_decode64(full_state))
     assert_equal "old row", client.get_text("t").to_s
     assert state_vector.present?
   end
@@ -663,7 +715,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     doc = Document.create!(title: "Snapshot", content_snapshot: "current")
     YjsPersistence.merge(doc, b64_update_for("server content"))
     fold_and_reload(doc)
-    stale_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+    stale_vector = Base64.strict_encode64(Y::Doc.new.encode_state_vector)
 
     original = YjsPersistence.singleton_class.instance_method(:load_ydoc)
     YjsPersistence.define_singleton_method(:load_ydoc) { |*| raise "gate must not build a Y::Doc" }
@@ -683,7 +735,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     doc = Document.create!(title: "Tail gate", content_snapshot: "current")
     YjsPersistence.merge(doc, b64_update_for("snapshot base"))
     YjsPersistence.fold!(doc)
-    snapshot_only_vector = Base64.strict_encode64(doc_from(doc).state.pack("C*"))
+    snapshot_only_vector = Base64.strict_encode64(doc_from(doc).encode_state_vector)
 
     # New content lands in the tail after the client last synced.
     YjsPersistence.merge(doc, b64_update_for("tail content"))
@@ -703,12 +755,12 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     fold_and_reload(doc)
     doc.update_columns(yjs_state_vector: [ 0x85, 0xff ].pack("C*"))
 
-    stale_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+    stale_vector = Base64.strict_encode64(Y::Doc.new.encode_state_vector)
     assert_not YjsPersistence.persist_snapshot(
       doc.reload, state_vector_b64: stale_vector, content: "stale", spans: []
     ), "a behind client must still be rejected when the stored vector is corrupt"
 
-    current_vector = Base64.strict_encode64(client.state.pack("C*"))
+    current_vector = Base64.strict_encode64(client.encode_state_vector)
     assert YjsPersistence.persist_snapshot(
       doc.reload, state_vector_b64: current_vector, content: "fresh", spans: []
     ), "a current client must still be accepted when the stored vector is corrupt"
@@ -720,7 +772,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     YjsPersistence.merge(doc, b64_update_for("server content"))
     fold_and_reload(doc)
     doc.update_columns(yjs_state_vector: nil)
-    stale_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+    stale_vector = Base64.strict_encode64(Y::Doc.new.encode_state_vector)
 
     persisted = YjsPersistence.persist_snapshot(
       doc.reload, state_vector_b64: stale_vector, content: "stale", spans: []
@@ -733,7 +785,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
   test "snapshot persistence rejects a client behind the current Yjs state" do
     doc = Document.create!(title: "Snapshot", content_snapshot: "current")
     YjsPersistence.merge(doc, b64_update_for("server content"))
-    stale_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+    stale_vector = Base64.strict_encode64(Y::Doc.new.encode_state_vector)
 
     persisted = YjsPersistence.persist_snapshot(
       doc,
@@ -753,7 +805,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     client = Y::Doc.new
     YjsPersistence.merge(doc, b64_update_for("server content", from_doc: client))
     client.get_text("t") << " client content"
-    client_vector = Base64.strict_encode64(client.state.pack("C*"))
+    client_vector = Base64.strict_encode64(client.encode_state_vector)
 
     persisted = YjsPersistence.persist_snapshot(
       doc,
@@ -775,8 +827,8 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     fold_and_reload(doc)
 
     server = Y::Doc.new
-    server.sync(doc.yjs_state.unpack("C*"))
-    entries = decode_state_vector_for_test(server.state).to_a.reverse
+    server.apply_update(doc.yjs_state)
+    entries = decode_state_vector_for_test(server.encode_state_vector.unpack("C*")).to_a.reverse
     reordered = encode_state_vector_for_test(entries)
 
     persisted = YjsPersistence.persist_snapshot(
@@ -806,7 +858,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_not doc.yjs_document_updates.exists?, "compaction folds the tail"
     assert_equal "first second", text_of(doc)
     assert_equal Digest::SHA256.hexdigest(doc.yjs_state), doc.yjs_state_checksum
-    assert_equal doc_from(doc).state, doc.yjs_state_vector.unpack("C*")
+    assert_equal doc_from(doc).encode_state_vector, doc.yjs_state_vector
     assert_equal doc.yjs_state.bytesize, result[:after_bytes]
     assert_equal result[:outcome], event.payload[:outcome]
   end
@@ -841,7 +893,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert result[:changed]
     assert_equal blob, doc.yjs_state, "an equal-size re-encoding is not written over the stored blob"
     assert_equal "hello world", text_of(doc)
-    assert_equal doc_from(doc).state, doc.yjs_state_vector.unpack("C*")
+    assert_equal doc_from(doc).encode_state_vector, doc.yjs_state_vector
     assert_equal Digest::SHA256.hexdigest(blob), doc.yjs_state_checksum
     assert_not doc.yjs_state_archives.where(kind: YjsStateArchive::CHECKPOINT).exists?
 
@@ -857,9 +909,9 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     # A blob written before its deletions were garbage-collected: the
     # client's own encoding after deleting most of the text still carries
     # the tombstoned content when GC is skipped on that side.
-    client.get_text("t").slice!(0, 4990)
-    bloated = client.full_diff.pack("C*")
-    doc.reload.update_columns(yjs_state: bloated, yjs_state_vector: client.state.pack("C*"),
+    client.get_text("t").delete(0, 4990)
+    bloated = client.compacted_state_update
+    doc.reload.update_columns(yjs_state: bloated, yjs_state_vector: client.encode_state_vector,
                               yjs_state_checksum: Digest::SHA256.hexdigest(bloated))
     before = bloated.bytesize
 
@@ -941,7 +993,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
 
   test "a no-op merge emits a noop event" do
     doc = Document.create!(title: "Noop", seed_markdown: "# Template")
-    empty_update = Base64.strict_encode64(Y::Doc.new.full_diff.pack("C*"))
+    empty_update = Base64.strict_encode64(Y::Doc.new.compacted_state_update)
 
     assert_notification("merge.yjs", outcome: "noop") { YjsPersistence.merge(doc, empty_update) }
   end
@@ -1011,7 +1063,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
   test "snapshot outcomes are taxonomized in events" do
     doc = Document.create!(title: "Snapshot", content_snapshot: "current")
     YjsPersistence.merge(doc, b64_update_for("server content"))
-    stale_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+    stale_vector = Base64.strict_encode64(Y::Doc.new.encode_state_vector)
 
     assert_notification("snapshot.yjs", outcome: "rejected_stale_vector") do
       YjsPersistence.persist_snapshot(doc, state_vector_b64: stale_vector, content: "stale", spans: [])

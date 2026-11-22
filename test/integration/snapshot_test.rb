@@ -14,7 +14,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   test "snapshot with agent_name logs an agent updated_document activity" do
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "agent text"
-    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+    state_vector = Base64.strict_encode64(ydoc.encode_state_vector)
 
     assert_difference -> { @document.activities.count }, 1 do
       post document_snapshot_path(@document.slug), params: {
@@ -33,7 +33,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     kept = @document.suggestions.create!(author_name: "Gemini", author_kind: "ai", body: "y", replaces: "agent text")
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "agent text"
-    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+    state_vector = Base64.strict_encode64(ydoc.encode_state_vector)
 
     post document_snapshot_path(@document.slug), params: {
       content: "agent text", spans: [], state_vector:, agent_name: "Scout"
@@ -47,7 +47,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   test "snapshot without agent_name logs no activity" do
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "human text"
-    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+    state_vector = Base64.strict_encode64(ydoc.encode_state_vector)
 
     assert_no_difference -> { @document.activities.count } do
       post document_snapshot_path(@document.slug), params: { content: "human text", spans: [], state_vector:, agent_name: "   " }, as: :json
@@ -65,8 +65,8 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     )
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "forbidden"
-    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
-    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+    update = Base64.strict_encode64(ydoc.encode_state_as_update)
+    state_vector = Base64.strict_encode64(ydoc.encode_state_vector)
 
     post document_snapshot_path(@document.slug), params: {
       content: "changed", spans: [], state_vector:
@@ -133,7 +133,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
       content_format: "html",
       content_snapshot: "<p>original</p>"
     )
-    state_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+    state_vector = Base64.strict_encode64(Y::Doc.new.encode_state_vector)
 
     post document_snapshot_path(document.slug), params: {
       content: '<p onclick="bad()">Safe ' \
@@ -168,7 +168,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     post document_snapshot_path(document.slug), params: {
       content: "<p>Before</p>#{figure}<p>After</p>",
       spans: [],
-      state_vector: Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+      state_vector: Base64.strict_encode64(Y::Doc.new.encode_state_vector)
     }, as: :json
 
     assert_response :ok
@@ -201,7 +201,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     post document_snapshot_path(document.slug), params: {
       content: %(<p><img src="#{src}" alt="Snapshot"></p>),
       spans: [],
-      state_vector: Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+      state_vector: Base64.strict_encode64(Y::Doc.new.encode_state_vector)
     }, as: :json
 
     assert_response :ok
@@ -230,7 +230,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
          params: {
            markdown: "<p>wrong field</p>",
            spans: [],
-           state_vector: Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+           state_vector: Base64.strict_encode64(Y::Doc.new.encode_state_vector)
          },
          as: :json
 
@@ -271,8 +271,8 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   test "durable sync update persists and broadcasts the Yjs diff" do
     ydoc = Y::Doc.new
     ydoc.get_text("task") << "checked"
-    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
-    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+    update = Base64.strict_encode64(ydoc.encode_state_as_update)
+    state_vector = Base64.strict_encode64(ydoc.encode_state_vector)
 
     assert_broadcast_on(
       SyncChannel.broadcasting_for(@document),
@@ -289,7 +289,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert_response :no_content
     full_state, = YjsPersistence.state_b64(@document.reload)
     persisted = Y::Doc.new
-    persisted.sync(Base64.strict_decode64(full_state).unpack("C*"))
+    persisted.apply_update(Base64.strict_decode64(full_state))
     assert_equal "checked", persisted.get_text("task").to_s
     assert_equal "* [x] checked", @document.content_snapshot
   end
@@ -304,7 +304,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
 
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "resurrected stale content"
-    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
+    update = Base64.strict_encode64(ydoc.encode_state_as_update)
 
     assert_no_broadcasts(SyncChannel.broadcasting_for(@document)) do
       post document_sync_update_path(@document.slug),
@@ -321,7 +321,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     @document.update!(seed_content: "# Seed", content_snapshot: nil)
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "current content"
-    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
+    update = Base64.strict_encode64(ydoc.encode_state_as_update)
 
     post document_sync_update_path(@document.slug),
          params: { update:, generation: @document.content_generation },
@@ -334,7 +334,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   test "durable sync update with no generation key still merges (rollout compatibility)" do
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "legacy client, no generation field"
-    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
+    update = Base64.strict_encode64(ydoc.encode_state_as_update)
 
     post document_sync_update_path(@document.slug), params: { update: }, as: :json
 

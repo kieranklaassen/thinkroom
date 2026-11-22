@@ -125,10 +125,9 @@ class SyncChannel < ApplicationCable::Channel
   private
 
   # Action Cable dispatches channel actions on a worker pool, so a burst of
-  # causally dependent Yjs updates can enter #receive out of order. Applying
-  # one of those updates in isolation leaves pending structs that y-rb's
-  # full_diff does not serialize. Sequence and drain each subscription's
-  # frames in client order before persisting them.
+  # causally dependent Yjs updates can enter #receive out of order. Sequencing
+  # and draining each subscription's frames in client order avoids transient
+  # causal gaps before persistence and broadcast.
   def enqueue_update(sequence, message, update, generation)
     @sequence_lock.synchronize do
       return if sequence < @next_sequence
