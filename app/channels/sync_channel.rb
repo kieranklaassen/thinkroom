@@ -3,32 +3,38 @@
 # JSON wire envelope paired with `CableProvider` on the frontend.
 #
 # Protocol:
-#   server -> joining client : { type: "sync", update, sv, generation, seed?, content_format?, seed_content?, seed_author_kind?, seed_author_name? }
+#   client -> server (sub)   : { slug, cid?, client_id?, checksum?, sv?, generation? }
+#   server -> joining client : { type: "sync", update, sv, checksum?, generation, seed?, content_format?, seed_content?, seed_author_kind?, seed_author_name? }
+#                              { type: "awareness", update, cid }     # cached active peers, unicast on join
+#                              { type: "write-denied", reason: "stale", stale: true, locked: false, generation }
 #   client -> server         : { type: "sync-reply", update, cid, seq, generation }   # everything server was missing
 #                              { type: "update", update, cid, seq, generation }       # incremental edit
-#                              { type: "awareness", update, cid }    # presence/cursors, relay-only
-#                              { type: "awareness-query", cid }      # ask peers to re-announce
-#                              { type: "seed-decline", cid }         # hand back a seed claim this handshake granted
+#                              { type: "awareness", update, cid, client_id? }         # presence/cursors, cached + relayed (4 KiB cap)
+#                              { type: "seed-decline", cid }                          # hand back a seed claim this handshake granted
+#   server -> peers          : { type: "awareness-leave", cid, client_id }            # emitted on subscriber disconnect
 # All client messages are broadcast to every subscriber (sender filters its own
 # via cid); update/sync-reply are additionally merged into persistent storage.
 #
 # `generation` (Document#content_generation) is the client's last-known
 # content generation, learned from the initial "sync" message and echoed back
-# on every outgoing update/sync-reply frame. A client connected before an
-# owner CLI replacement (Document#replace_content!) still has a live
-# subscription — ActionCable has no way to know the content changed — but its
-# next outgoing frame carries the stale generation. YjsPersistence.merge
-# rejects (does not persist) a frame whose generation is behind the
-# document's current one, so a stale tab can never resurrect content a
+# on every outgoing update/sync-reply frame (and on reconnect subscribe params).
+# A client connected before an owner CLI replacement (Document#replace_content!)
+# still has a live subscription — ActionCable has no way to know the content
+# changed — but its next outgoing frame or reconnect subscribe carries the
+# stale generation. SyncChannel#subscribed rejects stale reconnects immediately
+# without loading yjs_state or claiming a seed, and YjsPersistence.merge
+# rejects live stale frames so a stale tab can never resurrect content a
 # replacement just wiped. A frame with no generation key (clients deployed
 # before this) is trusted, matching the existing seq-less rollout-compatibility
 # branch below.
 class SyncChannel < ApplicationCable::Channel
   MAX_SEQUENCE_GAP = 256
+  MAX_AWARENESS_BYTES = YjsAwarenessCache::MAX_AWARENESS_BYTES
 
   # In-process subscriber refcount per document id, driving the
-  # fold-on-last-disconnect compaction trigger. Entries are removed when
-  # the count reaches zero, so the map only holds actively-open documents.
+  # fold-on-last-disconnect compaction trigger and awareness cache eviction.
+  # Entries are removed when the count reaches zero, so the map only holds
+  # actively-open documents.
   ACTIVE_SUBSCRIBERS = Concurrent::Map.new
 
   def self.track_subscribe(document_id)
@@ -41,17 +47,32 @@ class SyncChannel < ApplicationCable::Channel
   end
 
   def subscribed
-    @document = Document.find_by(slug: params[:slug])
-    return reject unless @document
+    document = Document.find_by(slug: params[:slug])
+    return reject unless document
 
+    client_generation = Integer(params[:generation], exception: false) unless params[:generation].nil?
+    if client_generation && client_generation < document.content_generation
+      transmit({
+        type: "write-denied",
+        reason: "stale",
+        stale: true,
+        locked: false,
+        generation: document.content_generation
+      })
+      return
+    end
+
+    @document = document
+    @subscriber_key = SecureRandom.uuid
+    @subscriber_cid = params[:cid].presence&.to_s
+    @awareness_client_id = Integer(params[:client_id], exception: false) unless params[:client_id].nil?
     @sequence_lock = Mutex.new
     @next_sequence = 1
     @pending_updates = {}
     stream_for @document
     self.class.track_subscribe(@document.id)
 
-    full_state, state_vector = YjsPersistence.state_b64(@document)
-    message = { type: "sync", update: full_state, sv: state_vector, generation: @document.content_generation }
+    message = build_sync_message
     if claim_seed?
       # Remember the grant so a "seed-decline" from this subscriber can
       # release exactly this claim (and only at this generation).
@@ -67,17 +88,23 @@ class SyncChannel < ApplicationCable::Channel
       message[:seed_author_name] = @document.seed_author_name if @document.seed_author_name
     end
     transmit(message)
+
+    transmit_cached_awareness
   end
 
   def unsubscribed
     return unless @document
-    return unless self.class.track_unsubscribe(@document.id).zero?
 
-    # Last subscriber gone: fold the update tail into the snapshot so cold
-    # reads (instant-paint props, the next join) serve current state.
-    YjsPersistence.fold!(@document)
+    if self.class.track_unsubscribe(@document.id).zero?
+      YjsAwarenessCache.clear_document(@document.id)
+      # Last subscriber gone: fold the update tail into the snapshot so cold
+      # reads (instant-paint props, the next join) serve current state.
+      YjsPersistence.fold!(@document)
+    else
+      evict_awareness
+    end
   rescue StandardError => e
-    Rails.logger.warn("SyncChannel: fold on disconnect failed: #{e.class}: #{e.message}")
+    Rails.logger.warn("SyncChannel: unsubscribe cleanup failed: #{e.class}: #{e.message}")
   end
 
   def receive(data)
@@ -115,14 +142,128 @@ class SyncChannel < ApplicationCable::Channel
         # Rollout compatibility for clients deployed before ordered frames.
         persist_and_broadcast(message, update, generation)
       end
-    when "awareness", "awareness-query"
-      self.class.broadcast_to(@document, message)
+    when "awareness"
+      handle_awareness(data)
     when "seed-decline"
       decline_seed_claim
     end
   end
 
   private
+
+  def build_sync_message
+    client_checksum = params[:checksum].presence&.to_s
+    if checksum_matches?(client_checksum)
+      ActiveSupport::Notifications.instrument(
+        "state.yjs",
+        document_id: @document.id,
+        served_from: "checksum",
+        blob_bytes: 0,
+        outcome: "ok"
+      )
+      return {
+        type: "sync",
+        update: "",
+        sv: Base64.strict_encode64(@document.yjs_state_vector),
+        checksum: @document.yjs_state_checksum,
+        generation: @document.content_generation
+      }
+    end
+
+    update_b64, state_vector_b64 = if params[:sv].present?
+      YjsPersistence.diff_b64(@document, params[:sv].to_s)
+    else
+      YjsPersistence.state_b64(@document)
+    end
+
+    message = {
+      type: "sync",
+      update: update_b64,
+      sv: state_vector_b64,
+      generation: @document.content_generation
+    }
+    message[:checksum] = @document.yjs_state_checksum if @document.yjs_state_checksum.present?
+    message
+  end
+
+  # Match on yjs_state_checksum (SHA-256 of the full compacted blob including
+  # its DeleteSet) plus an empty update tail — never yjs_state_vector alone,
+  # because Yjs state vectors omit DeleteSets.
+  def checksum_matches?(client_checksum)
+    client_checksum.present? &&
+      @document.yjs_state_checksum.present? &&
+      @document.yjs_state_vector.present? &&
+      client_checksum == @document.yjs_state_checksum &&
+      !@document.yjs_document_updates.exists?
+  end
+
+  def handle_awareness(data)
+    update = data["update"].to_s
+    return if update.blank?
+
+    if update.bytesize > YjsAwarenessCache::MAX_AWARENESS_B64_BYTES
+      ActiveSupport::Notifications.instrument(
+        "frame_dropped.yjs",
+        document_id: @document.id,
+        outcome: "dropped_oversized_awareness",
+        update_bytes: update.bytesize
+      )
+      return
+    end
+
+    decoded = begin
+      Base64.strict_decode64(update)
+    rescue ArgumentError
+      ActiveSupport::Notifications.instrument(
+        "frame_dropped.yjs", document_id: @document.id, outcome: "dropped_malformed"
+      )
+      return
+    end
+
+    if decoded.bytesize > MAX_AWARENESS_BYTES
+      ActiveSupport::Notifications.instrument(
+        "frame_dropped.yjs",
+        document_id: @document.id,
+        outcome: "dropped_oversized_awareness",
+        update_bytes: decoded.bytesize
+      )
+      return
+    end
+
+    cid = data["cid"].presence&.to_s || @subscriber_cid
+    @subscriber_cid ||= cid
+    client_id =
+      (Integer(data["client_id"], exception: false) unless data["client_id"].nil?) ||
+      @awareness_client_id ||
+      YjsAwarenessCache.extract_client_id(decoded)
+    @awareness_client_id ||= client_id
+
+    YjsAwarenessCache.put(@document.id, @subscriber_key, update:, cid:, client_id:)
+    self.class.broadcast_to(@document, data.slice("type", "update", "cid"))
+  end
+
+  def transmit_cached_awareness
+    YjsAwarenessCache.peers_for(
+      @document.id,
+      exclude_key: @subscriber_key,
+      exclude_cid: @subscriber_cid
+    ).each do |entry|
+      transmit({ type: "awareness", update: entry.update, cid: entry.cid })
+    end
+  end
+
+  def evict_awareness
+    removed = YjsAwarenessCache.remove(@document.id, @subscriber_key)
+    client_id = removed&.client_id || @awareness_client_id
+    return unless removed && client_id
+    return if YjsAwarenessCache.active_client_id?(@document.id, client_id)
+
+    self.class.broadcast_to(@document, {
+      type: "awareness-leave",
+      cid: removed.cid || @subscriber_cid,
+      client_id:
+    })
+  end
 
   # Action Cable dispatches channel actions on a worker pool, so a burst of
   # causally dependent Yjs updates can enter #receive out of order. Sequencing

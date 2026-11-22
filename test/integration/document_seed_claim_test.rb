@@ -163,19 +163,25 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
 
     assert_inertia_props do |props|
       props[:document][:has_state] == true &&
-        props[:document][:yjs_state_b64] == Base64.strict_encode64(@document.reload.yjs_state)
+        props[:document][:yjs_state_b64] == Base64.strict_encode64(@document.reload.yjs_state) &&
+        props[:document][:yjs_state_checksum] == @document.yjs_state_checksum
     end
   end
 
   test "the page omits a Yjs state larger than the embed cap and leaves it to the handshake" do
     oversized = "\x00".b * (DocumentsController::MAX_EMBEDDED_STATE_BYTES + 1)
-    @document.update_columns(yjs_state: oversized, seed_state: "seeded")
+    @document.update_columns(
+      yjs_state: oversized,
+      yjs_state_checksum: Digest::SHA256.hexdigest(oversized),
+      seed_state: "seeded"
+    )
 
     get document_page_path(@document.slug), headers: browser
 
     assert_inertia_props do |props|
       props[:document][:has_state] == true &&
         props[:document][:yjs_state_b64].nil? &&
+        props[:document][:yjs_state_checksum].nil? &&
         props[:document][:seed_granted] == false
     end
   end

@@ -27,6 +27,7 @@ export function acquireSession(
   canWrite: boolean,
   connectionIdentity: string,
   initialStateB64?: string | null,
+  initialStateChecksum?: string | null,
 ): CollabSession {
   let session = sessions.get(slug)
   if (session && (session.canWrite !== canWrite || session.connectionIdentity !== connectionIdentity)) {
@@ -44,6 +45,7 @@ export function acquireSession(
     // The clients-empty guard is redundant for a just-created Y.Doc but
     // keeps the hydration idempotent if this block ever runs on a doc
     // that already carries state.
+    let hydratedChecksum: string | null = null
     if (initialStateB64 && ydoc.store.clients.size === 0) {
       try {
         Y.applyUpdate(
@@ -51,11 +53,16 @@ export function acquireSession(
           Uint8Array.from(atob(initialStateB64), (c) => c.charCodeAt(0)),
           SERVER_HYDRATE_ORIGIN,
         )
+        hydratedChecksum = initialStateChecksum ?? null
       } catch {
         // corrupt/stale prop — fall back to the wait-for-synced path
       }
     }
-    const provider = new CableProvider(ydoc, slug, { canWrite, connectionIdentity })
+    const provider = new CableProvider(ydoc, slug, {
+      canWrite,
+      connectionIdentity,
+      initialChecksum: hydratedChecksum,
+    })
     provider.awareness.setLocalStateField('user', identity)
     session = { ydoc, provider, refs: 0, destroyTimer: null, canWrite, connectionIdentity }
     sessions.set(slug, session)

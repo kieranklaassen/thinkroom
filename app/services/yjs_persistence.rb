@@ -32,6 +32,14 @@ class YjsPersistence
   # deletes) — what a joining client with nothing new sends as sync-reply.
   EMPTY_UPDATE = "\x00\x00".b.freeze
 
+  # The byte signature of an empty Yjs state vector (zero client clocks).
+  EMPTY_STATE_VECTOR = "\x00".b.freeze
+
+  # Matches DocumentsController::MAX_STATE_VECTOR_BYTES so a handshake sv param
+  # cannot force oversized decodes on subscribe.
+  MAX_STATE_VECTOR_BYTES = 64.kilobytes
+  MAX_STATE_VECTOR_B64_BYTES = ((MAX_STATE_VECTOR_BYTES + 2) / 3) * 4
+
   class << self
     # Merge a base64-encoded Yjs update into the document's persisted state.
     #
@@ -123,6 +131,32 @@ class YjsPersistence
         # Outcome is assigned last so an exception leaves it unset and the
         # log subscriber's exception fallback classifies the event as a
         # failure rather than a success.
+        payload[:outcome] = "ok"
+        encoded
+      end
+    end
+
+    # => [delta_or_full_b64, state_vector_b64] for a differential sync handshake.
+    #
+    # Computes only the missing Yjs delta relative to the client's state vector
+    # via yrby's `encode_state_as_update(client_sv)`. Falls back cleanly to full
+    # `state_b64(document)` when `client_sv_b64` is absent, oversized, or
+    # invalid, and delegates directly to `state_b64(document)` for the empty
+    # state vector so cold clients keep the zero-Y::Doc column fast path.
+    def diff_b64(document, client_sv_b64)
+      client_sv = decode_client_state_vector(client_sv_b64)
+      return state_b64(document) if client_sv.nil? || client_sv == EMPTY_STATE_VECTOR
+
+      ActiveSupport::Notifications.instrument("state.yjs", document_id: document.id) do |payload|
+        encoded = begin
+          if document.yjs_document_updates.exists?
+            fold_and_encode_diff(document, client_sv, payload)
+          else
+            encode_diff(document, client_sv, payload)
+          end
+        rescue CorruptStateError
+          heal_and_reencode_diff(document, client_sv, payload)
+        end
         payload[:outcome] = "ok"
         encoded
       end
@@ -458,6 +492,67 @@ class YjsPersistence
         Base64.strict_encode64(ydoc.compacted_state_update),
         Base64.strict_encode64(ydoc.encode_state_vector)
       ]
+    end
+
+    def encode_ydoc_diff_b64(ydoc, client_sv)
+      [
+        Base64.strict_encode64(ydoc.encode_state_as_update(client_sv)),
+        Base64.strict_encode64(ydoc.encode_state_vector)
+      ]
+    rescue Y::Error
+      encode_ydoc_b64(ydoc)
+    end
+
+    def decode_client_state_vector(client_sv_b64)
+      return nil if client_sv_b64.blank? || client_sv_b64.bytesize > MAX_STATE_VECTOR_B64_BYTES
+
+      bytes = decode(client_sv_b64)
+      return nil if bytes.empty? || bytes.bytesize > MAX_STATE_VECTOR_BYTES
+
+      decode_state_vector(bytes)
+      bytes
+    rescue ArgumentError
+      nil
+    end
+
+    def fold_and_encode_diff(document, client_sv, payload)
+      lock_for(document.id).synchronize do
+        document.with_lock do
+          document.reload
+          ydoc = perform_fold(document)
+          payload[:served_from] = "diff_fold"
+          payload[:blob_bytes] = document.yjs_state&.bytesize || 0
+          encode_ydoc_diff_b64(ydoc, client_sv)
+        end
+      end
+    end
+
+    def encode_diff(document, client_sv, payload)
+      payload[:blob_bytes] = document.yjs_state&.bytesize || 0
+      if document.yjs_state.blank?
+        payload[:served_from] = "diff_empty"
+        return [
+          Base64.strict_encode64(EMPTY_UPDATE),
+          Base64.strict_encode64(EMPTY_STATE_VECTOR)
+        ]
+      end
+
+      payload[:served_from] = "diff"
+      encode_ydoc_diff_b64(load_ydoc(document), client_sv)
+    end
+
+    def heal_and_reencode_diff(document, client_sv, payload)
+      lock_for(document.id).synchronize do
+        document.with_lock do
+          document.reload
+          begin
+            encode_diff(document, client_sv, payload)
+          rescue CorruptStateError => e
+            heal_corrupt_state!(document, e)
+            encode_diff(document, client_sv, payload)
+          end
+        end
+      end
     end
 
     def state_checksum(blob)

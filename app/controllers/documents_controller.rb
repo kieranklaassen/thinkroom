@@ -160,6 +160,7 @@ class DocumentsController < InertiaController
           editable: preview_editable,
           sketch_interactive: preview_sketch_interactive
         )
+        yjs_state_b64 = embedded_yjs_state_b64(document)
         document.slice(:id, :slug, :title, :content_format).merge(
         # Only the client that won the seed claim applies the template; on
         # every other load (every load of a live document) the seed is dead
@@ -170,7 +171,8 @@ class DocumentsController < InertiaController
         seed_author_kind: document.seed_author_kind,
         seed_author_name: document.seed_author_name,
         has_state: document.yjs_state.present?,
-        yjs_state_b64: embedded_yjs_state_b64(document),
+        yjs_state_b64:,
+        yjs_state_checksum: (document.yjs_state_checksum if yjs_state_b64),
         # Server-rendered prose for an instant first paint; the live editor
         # swaps in over it once Milkdown binds the hydrated Yjs state. The
         # block count lets the preview adopt the long-document rendering the

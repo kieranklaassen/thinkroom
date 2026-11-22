@@ -465,4 +465,218 @@ class SyncChannelTest < ActionCable::Channel::TestCase
 
     assert_nil doc.reload.yjs_state
   end
+
+  # --- Idea #4: Early stale-generation rejection & differential handshake ---
+
+  test "subscribing with a stale generation immediately transmits write-denied without loading state or claiming seed" do
+    doc = Document.create!(title: "Replaced", seed_markdown: "# Template")
+    doc.replace_content!(source: "# New template")
+    assert_equal 1, doc.reload.content_generation
+
+    original_new = Y::Doc.method(:new)
+    Y::Doc.define_singleton_method(:new) { |*| raise "stale subscribe must not build a Y::Doc" }
+    begin
+      subscribe slug: doc.slug, generation: 0
+    ensure
+      Y::Doc.define_singleton_method(:new, original_new)
+    end
+
+    assert subscription.confirmed?
+    assert_equal 1, transmissions.length
+    message = transmissions.last
+    assert_equal "write-denied", message["type"]
+    assert_equal "stale", message["reason"]
+    assert_equal true, message["stale"]
+    assert_equal 1, message["generation"]
+    assert_equal "pending", doc.reload.seed_state, "stale reconnect must not claim the new generation's seed"
+    assert_nil SyncChannel::ACTIVE_SUBSCRIBERS[doc.id], "stale reconnect must not increment subscriber count"
+
+    unsubscribe
+    assert_nil SyncChannel::ACTIVE_SUBSCRIBERS[doc.id]
+  end
+
+  test "subscribing with a matching checksum and empty tail returns a 0-byte sync without building a Y::Doc" do
+    doc = Document.create!(title: "ChecksumMatch")
+    YjsPersistence.merge(doc, build_update_b64("already hydrated"))
+    YjsPersistence.fold!(doc)
+    doc.reload
+
+    original_new = Y::Doc.method(:new)
+    Y::Doc.define_singleton_method(:new) { |*| raise "checksum match must not build a Y::Doc" }
+    begin
+      assert_notification("state.yjs", served_from: "checksum", blob_bytes: 0, outcome: "ok") do
+        subscribe slug: doc.slug, checksum: doc.yjs_state_checksum
+      end
+    ensure
+      Y::Doc.define_singleton_method(:new, original_new)
+    end
+
+    message = transmissions.last
+    assert_equal "sync", message["type"]
+    assert_equal "", message["update"]
+    assert_equal Base64.strict_encode64(doc.yjs_state_vector), message["sv"]
+    assert_equal doc.yjs_state_checksum, message["checksum"]
+    assert_equal doc.content_generation, message["generation"]
+  end
+
+  test "subscribing with a matching checksum still diffs when unfolded updates exist" do
+    doc = Document.create!(title: "ChecksumTail")
+    author = Y::Doc.new
+    author.get_text("t") << "initial "
+    base_update = author.encode_state_as_update
+    client_sv = author.encode_state_vector
+    YjsPersistence.merge(doc, Base64.strict_encode64(base_update))
+    YjsPersistence.fold!(doc)
+    old_checksum = doc.reload.yjs_state_checksum
+
+    author.get_text("t") << "unfolded"
+    YjsPersistence.merge(doc, Base64.strict_encode64(author.encode_state_as_update(client_sv)))
+    assert doc.reload.yjs_document_updates.exists?
+
+    subscribe slug: doc.slug, checksum: old_checksum, sv: Base64.strict_encode64(client_sv)
+
+    message = transmissions.last
+    assert_equal "sync", message["type"]
+    assert_not_equal "", message["update"], "unfolded tail must disable the 0-byte checksum fast path"
+    assert_equal doc.reload.yjs_state_checksum, message["checksum"]
+
+    client = Y::Doc.new
+    client.apply_update(base_update)
+    client.apply_update(Base64.strict_decode64(message["update"]))
+    assert_equal "initial unfolded", client.get_text("t").to_s
+  end
+
+  test "a delete-only change invalidates checksum match even though state vector is unchanged" do
+    doc = Document.create!(title: "DeleteChecksum")
+    author = Y::Doc.new
+    author.get_text("t") << "hello world"
+    base_update = author.encode_state_as_update
+    sv_before_delete = author.encode_state_vector
+    YjsPersistence.merge(doc, Base64.strict_encode64(base_update))
+    YjsPersistence.fold!(doc)
+    checksum_before_delete = doc.reload.yjs_state_checksum
+
+    author.get_text("t").delete(5, 6)
+    YjsPersistence.merge(doc, Base64.strict_encode64(author.encode_state_as_update(sv_before_delete)))
+    YjsPersistence.fold!(doc)
+    doc.reload
+
+    assert_equal sv_before_delete, doc.yjs_state_vector, "precondition: deletes do not advance the state vector"
+    assert_not_equal checksum_before_delete, doc.yjs_state_checksum
+
+    subscribe slug: doc.slug, checksum: checksum_before_delete, sv: Base64.strict_encode64(sv_before_delete)
+
+    message = transmissions.last
+    assert_not_equal "", message["update"]
+    assert_equal doc.yjs_state_checksum, message["checksum"]
+
+    client = Y::Doc.new
+    client.apply_update(base_update)
+    client.apply_update(Base64.strict_decode64(message["update"]))
+    assert_equal "hello", client.get_text("t").to_s
+  end
+
+  test "subscribing with an invalid sv param falls back cleanly to full state" do
+    doc = Document.create!(title: "InvalidSV")
+    YjsPersistence.merge(doc, build_update_b64("full state"))
+    YjsPersistence.fold!(doc)
+
+    subscribe slug: doc.slug, sv: "not!!base64!!"
+
+    message = transmissions.last
+    assert_equal "sync", message["type"]
+    client = Y::Doc.new
+    client.apply_update(Base64.strict_decode64(message["update"]))
+    assert_equal "full state", client.get_text("t").to_s
+  end
+
+  # --- Idea #6: Server-cached awareness, 4 KiB cap, disconnect eviction -----
+
+  test "joining subscriber receives cached peers' awareness directly without awareness-query" do
+    doc = Document.create!(title: "CachedPeers")
+    YjsAwarenessCache.put(doc.id, "peer-sub", update: "PEER_A==", cid: "peer-a", client_id: 111)
+    YjsAwarenessCache.put(doc.id, "self-sub", update: "SELF_B==", cid: "joiner-b", client_id: 222)
+
+    subscribe slug: doc.slug, cid: "joiner-b", client_id: 222
+
+    assert_equal "sync", transmissions.first["type"]
+    awareness_frames = transmissions.select { |msg| msg["type"] == "awareness" }
+    assert_equal [ { "type" => "awareness", "update" => "PEER_A==", "cid" => "peer-a" } ], awareness_frames
+  end
+
+  test "awareness-query messages are ignored and not broadcast" do
+    doc = Document.create!(title: "NoQueryStorm")
+    subscribe slug: doc.slug
+
+    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+      perform :receive, { "type" => "awareness-query", "cid" => "old-client" }
+    end
+  end
+
+  test "oversized awareness frames above 4 KiB are dropped without caching or broadcasting" do
+    doc = Document.create!(title: "CappedAwareness")
+    subscribe slug: doc.slug, cid: "big-client", client_id: 555
+
+    oversized = Base64.strict_encode64("x" * (SyncChannel::MAX_AWARENESS_BYTES + 1))
+    assert_notification("frame_dropped.yjs", document_id: doc.id, outcome: "dropped_oversized_awareness") do
+      assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+        perform :receive, { "type" => "awareness", "update" => oversized, "cid" => "big-client", "client_id" => 555 }
+      end
+    end
+    assert_empty YjsAwarenessCache.peers_for(doc.id)
+
+    at_limit = Base64.strict_encode64("x" * SyncChannel::MAX_AWARENESS_BYTES)
+    assert_broadcast_on(SyncChannel.broadcasting_for(doc), type: "awareness", update: at_limit, cid: "big-client") do
+      perform :receive, { "type" => "awareness", "update" => at_limit, "cid" => "big-client", "client_id" => 555 }
+    end
+    assert_equal 1, YjsAwarenessCache.peers_for(doc.id).length
+  end
+
+  test "unsubscribing while peers remain evicts awareness and broadcasts awareness-leave" do
+    doc = Document.create!(title: "PeerLeave")
+    SyncChannel.track_subscribe(doc.id) # another active subscriber
+    subscribe slug: doc.slug, cid: "leaving-peer", client_id: 777
+    perform :receive, { "type" => "awareness", "update" => "AAAA", "cid" => "leaving-peer", "client_id" => 777 }
+    assert_equal 1, YjsAwarenessCache.peers_for(doc.id).length
+
+    assert_broadcast_on(
+      SyncChannel.broadcasting_for(doc),
+      type: "awareness-leave", cid: "leaving-peer", client_id: 777
+    ) do
+      unsubscribe
+    end
+
+    assert_empty YjsAwarenessCache.peers_for(doc.id)
+  ensure
+    SyncChannel.track_unsubscribe(doc.id)
+  end
+
+  test "unsubscribing a replaced socket does not broadcast awareness-leave while the new socket holds client_id" do
+    doc = Document.create!(title: "ReconnectOverlap")
+    SyncChannel.track_subscribe(doc.id) # the newly reconnected socket
+    subscribe slug: doc.slug, cid: "tab-a", client_id: 888
+    perform :receive, { "type" => "awareness", "update" => "AAAA", "cid" => "tab-a", "client_id" => 888 }
+    # Simulate the successor socket already publishing awareness for the same Yjs client_id.
+    YjsAwarenessCache.put(doc.id, "successor-sub", update: "BBBB", cid: "tab-a", client_id: 888)
+
+    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+      unsubscribe
+    end
+    assert YjsAwarenessCache.active_client_id?(doc.id, 888)
+  ensure
+    SyncChannel.track_unsubscribe(doc.id)
+  end
+
+  test "last unsubscribe clears the document awareness cache without broadcasting" do
+    doc = Document.create!(title: "LastExit")
+    subscribe slug: doc.slug, cid: "solo", client_id: 999
+    perform :receive, { "type" => "awareness", "update" => "AAAA", "cid" => "solo", "client_id" => 999 }
+    assert_equal 1, YjsAwarenessCache.peers_for(doc.id).length
+
+    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+      unsubscribe
+    end
+
+    assert_nil YjsAwarenessCache::STORE[doc.id]
+  end
 end
