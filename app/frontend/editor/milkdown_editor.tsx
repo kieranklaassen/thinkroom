@@ -119,6 +119,9 @@ export interface EditorProps {
   /** Server-rendered Yjs state (base64) — hydrates the doc before the
    *  provider syncs, so the first paint is already populated. */
   initialStateB64?: string | null
+  /** SHA-256 checksum matching initialStateB64, enabling a 0-byte handshake
+   *  when the document has not changed between HTML render and WebSocket join. */
+  initialStateChecksum?: string | null
   /** Seed template for a never-edited document. Applied at bind time when
    *  the page response granted this client the seed claim. */
   seedContent?: string | null
@@ -293,6 +296,7 @@ function CollabEditor({
   contentFormat,
   contentGeneration,
   initialStateB64,
+  initialStateChecksum,
   seedContent,
   seedVersion,
   seedGranted,
@@ -450,6 +454,7 @@ function CollabEditor({
       canWriteRef.current,
       connectionIdentity,
       initialStateB64,
+      initialStateChecksum,
       contentGeneration,
     )
     callbacksRef.current.onStatus?.('connecting')

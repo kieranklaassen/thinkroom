@@ -26,17 +26,20 @@ type SyncMessage = {
     | 'ack'
     | 'nack'
     | 'awareness'
-    | 'awareness-query'
+    | 'awareness-leave'
     | 'write-denied'
   update?: string
   sv?: string
+  checksum?: string
   seed?: boolean
   content_format?: 'markdown' | 'html'
   seed_content?: string
   seed_author_kind?: CollaboratorKind | null
   seed_author_name?: string | null
   cid?: string
+  client_id?: number
   seq?: number
+  /** Reason string from nack frames or early subscribe-time rejections (e.g. 'retryable', 'invalid', 'stale'). */
   reason?: string
   /** Document#content_generation at the time of this message. */
   generation?: number
@@ -45,6 +48,8 @@ type SyncMessage = {
    *  locked-link permission denial. */
   stale?: boolean
 }
+
+const AWARENESS_THROTTLE_MS = 100
 
 export interface DurableSnapshotPayload {
   content: string
@@ -59,6 +64,7 @@ export interface CableProviderOptions {
   consumer?: Consumer
   canWrite?: boolean
   connectionIdentity?: string
+  initialChecksum?: string | null
   initialGeneration?: number | null
   ackTimeoutMs?: number
   retryBaseMs?: number
@@ -113,6 +119,13 @@ export class CableProvider {
   private listeners = new Map<ProviderEvent, Set<() => void>>()
   private destroyed = false
   private updateSequence = 0
+  // SHA-256 of the last server yjs_state blob hydrated or synced into this
+  // doc. Sent in SyncChannel subscribe params so an unchanged document skips
+  // re-sending state and instantiating Y::Doc server-side.
+  private serverChecksum: string | null = null
+  private awarenessPending = false
+  private awarenessThrottleTimer: ReturnType<typeof setTimeout> | null = null
+  private lastAwarenessSentAt = 0
   // Single-in-flight coalescing outbox: at most one frame awaits server ACK at
   // a time. Local edits produced while offline, awaiting ACK, or backing off
   // accumulate in `queuedUpdate` via `Y.mergeUpdates`. Exact unacked state
@@ -125,9 +138,9 @@ export class CableProvider {
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryAttempt = 0
   // Initialized from documents#show props and verified on each "sync" message,
-  // then echoed back on outgoing update/sync-reply frames and keepalive HTTP
-  // flushes so the server rejects any client whose local Yjs doc predates an
-  // owner CLI replacement (Document#replace_content!).
+  // then echoed back on outgoing update/sync-reply frames, reconnect subscribe
+  // params, and keepalive HTTP flushes so the server rejects any client whose
+  // local Yjs doc predates an owner CLI replacement (Document#replace_content!).
   private generation: number | null
   private readonly slug: string
   private readonly canWrite: boolean
@@ -139,6 +152,7 @@ export class CableProvider {
     this.doc = doc
     this.slug = slug
     this.canWrite = options?.canWrite ?? true
+    this.serverChecksum = options?.initialChecksum ?? null
     this.generation =
       typeof options?.initialGeneration === 'number' ? options.initialGeneration : null
     this.ackTimeoutMs = options?.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS
@@ -148,13 +162,22 @@ export class CableProvider {
     this.consumer = options?.consumer ?? getConsumer(options?.connectionIdentity)
 
     this.subscription = this.consumer.subscriptions.create(
-      { channel: 'SyncChannel', slug },
+      this.buildSubscribeParams(),
       {
         received: (data: SyncMessage) => this.handleReceived(data),
         disconnected: () => {
           this.synced = false
           this.clearRetryTimer()
           this.requeueInFlight()
+          this.clearAwarenessThrottle()
+          // Refresh the ActionCable subscription identifier while the socket is
+          // closed so the next automatic reload() carries our latest checksum,
+          // state vector, and content generation.
+          if (!this.destroyed && 'identifier' in this.subscription) {
+            ;(this.subscription as { identifier: string }).identifier = JSON.stringify(
+              this.buildSubscribeParams(),
+            )
+          }
           // Peers' presence is unknown while offline; drop all remote states.
           const remote = Array.from(this.awareness.getStates().keys()).filter(
             (id) => id !== this.doc.clientID,
@@ -167,6 +190,7 @@ export class CableProvider {
           // user keeps typing into a dead editor that will never sync.
           this.synced = false
           this.clearOutbox()
+          this.clearAwarenessThrottle()
           this.emit('rejected')
         },
       },
@@ -176,6 +200,7 @@ export class CableProvider {
     this.awareness.on('update', this.handleAwarenessUpdate)
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', this.handleUnload)
+      window.addEventListener('blur', this.handleBlur)
     }
   }
 
@@ -192,14 +217,32 @@ export class CableProvider {
     if (this.destroyed) return
     this.destroyed = true
     this.handleUnload()
+    this.flushAwareness()
+    this.clearAwarenessThrottle()
     this.clearTimers()
     if (typeof window !== 'undefined') {
       window.removeEventListener('beforeunload', this.handleUnload)
+      window.removeEventListener('blur', this.handleBlur)
     }
     this.doc.off('update', this.handleDocUpdate)
     this.awareness.off('update', this.handleAwarenessUpdate)
     this.subscription.unsubscribe()
     this.awareness.destroy()
+  }
+
+  private buildSubscribeParams(): { channel: 'SyncChannel'; [key: string]: unknown } {
+    const params: { channel: 'SyncChannel'; [key: string]: unknown } = {
+      channel: 'SyncChannel',
+      slug: this.slug,
+      cid: this.clientId,
+      client_id: this.doc.clientID,
+    }
+    if (this.serverChecksum) params.checksum = this.serverChecksum
+    if (this.doc.store.clients.size > 0) {
+      params.sv = toBase64(Y.encodeStateVector(this.doc))
+    }
+    if (this.generation !== null) params.generation = this.generation
+    return params
   }
 
   private emit(event: ProviderEvent): void {
@@ -405,9 +448,12 @@ export class CableProvider {
           this.emit('stale')
           break
         }
-        // Apply server's full state; any unacked local edits stay in the
-        // outbox and flush immediately once synced.
-        Y.applyUpdate(this.doc, fromBase64(data.update!), this)
+        // Apply server's delta or full state (empty string on checksum match);
+        // any unacked local edits stay in the outbox and flush immediately once synced.
+        if (data.update) {
+          Y.applyUpdate(this.doc, fromBase64(data.update), this)
+        }
+        this.serverChecksum = data.checksum ?? null
         this.clearRetryTimer()
         this.requeueInFlight()
         this.updateSequence = 0
@@ -429,9 +475,9 @@ export class CableProvider {
         this.synced = true
         this.flush('sync-reply')
         this.emit('synced')
-        // Announce ourselves and ask existing peers to re-announce.
+        // Announce ourselves to the server cache and existing peers; cached
+        // peer awareness arrives directly from SyncChannel#subscribed.
         this.broadcastAwareness()
-        this.send({ type: 'awareness-query' })
         break
       }
       case 'ack':
@@ -456,6 +502,7 @@ export class CableProvider {
         break
       case 'update':
       case 'sync-reply':
+        this.serverChecksum = null
         try {
           Y.applyUpdate(this.doc, fromBase64(data.update!), this)
         } catch (error) {
@@ -465,17 +512,25 @@ export class CableProvider {
         }
         break
       case 'awareness':
-        applyAwarenessUpdate(this.awareness, fromBase64(data.update!), this)
+        if (data.update) {
+          try {
+            applyAwarenessUpdate(this.awareness, fromBase64(data.update), this)
+          } catch (error) {
+            console.warn('CableProvider: dropped malformed awareness update', error)
+          }
+        }
         break
-      case 'awareness-query':
-        this.broadcastAwareness()
+      case 'awareness-leave':
+        if (typeof data.client_id === 'number' && data.client_id !== this.doc.clientID) {
+          removeAwarenessStates(this.awareness, [data.client_id], this)
+        }
         break
       case 'write-denied':
         this.clearOutbox()
         // Distinguish "this link is locked" from "your local doc predates an
         // owner CLI replacement" (Document#content_generation mismatch) —
         // each needs a different client recovery action (see show.tsx).
-        this.emit(data.stale ? 'stale' : 'write-denied')
+        this.emit(data.stale || data.reason === 'stale' ? 'stale' : 'write-denied')
         break
     }
   }
@@ -492,22 +547,65 @@ export class CableProvider {
     { added, updated, removed }: { added: number[]; updated: number[]; removed: number[] },
     origin: unknown,
   ): void => {
-    if (origin === this) return
-    const changed = added.concat(updated, removed)
-    if (!this.subscription || changed.length === 0) return
+    if (origin === this || !this.synced) return
+    const localChanged =
+      added.includes(this.doc.clientID) ||
+      updated.includes(this.doc.clientID) ||
+      removed.includes(this.doc.clientID)
+    if (!this.subscription || !localChanged) return
+
+    this.awarenessPending = true
+    if (origin === 'unload' || removed.includes(this.doc.clientID)) {
+      this.flushAwareness()
+      return
+    }
+
+    const elapsed = Date.now() - this.lastAwarenessSentAt
+    if (elapsed >= AWARENESS_THROTTLE_MS && this.awarenessThrottleTimer === null) {
+      this.flushAwareness()
+    } else if (this.awarenessThrottleTimer === null) {
+      this.awarenessThrottleTimer = setTimeout(
+        () => this.flushAwareness(),
+        Math.max(0, AWARENESS_THROTTLE_MS - elapsed),
+      )
+    }
+  }
+
+  private flushAwareness(): void {
+    if (this.awarenessThrottleTimer !== null) {
+      clearTimeout(this.awarenessThrottleTimer)
+      this.awarenessThrottleTimer = null
+    }
+    if (!this.awarenessPending || !this.subscription) return
+    this.awarenessPending = false
+    if (!this.awareness.meta.has(this.doc.clientID)) return
+    this.lastAwarenessSentAt = Date.now()
     this.send({
       type: 'awareness',
-      update: toBase64(encodeAwarenessUpdate(this.awareness, changed)),
+      client_id: this.doc.clientID,
+      update: toBase64(encodeAwarenessUpdate(this.awareness, [this.doc.clientID])),
     })
   }
 
-  private broadcastAwareness(): void {
-    if (this.awareness.getLocalState() !== null) {
-      this.send({
-        type: 'awareness',
-        update: toBase64(encodeAwarenessUpdate(this.awareness, [this.doc.clientID])),
-      })
+  private clearAwarenessThrottle(): void {
+    if (this.awarenessThrottleTimer !== null) {
+      clearTimeout(this.awarenessThrottleTimer)
+      this.awarenessThrottleTimer = null
     }
+    this.awarenessPending = false
+  }
+
+  private broadcastAwareness(): void {
+    if (this.awareness.getLocalState() === null) return
+    this.awarenessPending = true
+    this.flushAwareness()
+  }
+
+  private handleBlur = (): void => {
+    this.flushAwareness()
+    queueMicrotask(() => {
+      if (!this.destroyed) this.flushAwareness()
+    })
   }
 
   private handleUnload = (): void => {

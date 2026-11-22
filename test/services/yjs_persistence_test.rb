@@ -1032,6 +1032,125 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert state_vector.present?
   end
 
+  test "diff_b64 returns only the missing delta for a behind client" do
+    doc = Document.create!(title: "Diff")
+    author = Y::Doc.new
+    author.get_text("t") << ("base paragraph " * 50)
+    base_update = author.encode_state_as_update
+    client_sv = author.encode_state_vector
+
+    YjsPersistence.merge(doc, Base64.strict_encode64(base_update))
+    YjsPersistence.fold!(doc)
+
+    author.get_text("t") << "tail edit"
+    YjsPersistence.merge(doc, Base64.strict_encode64(author.encode_state_as_update(client_sv)))
+    fold_and_reload(doc)
+
+    full_state, = YjsPersistence.state_b64(doc)
+    delta = nil
+    server_sv = nil
+    assert_notification("state.yjs", served_from: "diff", outcome: "ok") do
+      delta, server_sv = YjsPersistence.diff_b64(doc, Base64.strict_encode64(client_sv))
+    end
+
+    assert_operator Base64.strict_decode64(delta).bytesize, :<, Base64.strict_decode64(full_state).bytesize
+    assert_equal Base64.strict_encode64(doc.yjs_state_vector), server_sv
+
+    client = Y::Doc.new
+    client.apply_update(base_update)
+    client.apply_update(Base64.strict_decode64(delta))
+    assert_equal ("base paragraph " * 50) + "tail edit", client.get_text("t").to_s
+  end
+
+  test "diff_b64 folds an unfolded tail and delivers missing deletes even when state vectors match" do
+    doc = Document.create!(title: "DeleteDiff")
+    author = Y::Doc.new
+    author.get_text("t") << "hello world"
+    base_update = author.encode_state_as_update
+    sv_before_delete = author.encode_state_vector
+
+    YjsPersistence.merge(doc, Base64.strict_encode64(base_update))
+    YjsPersistence.fold!(doc)
+
+    author.get_text("t").delete(5, 6)
+    YjsPersistence.merge(doc, Base64.strict_encode64(author.encode_state_as_update(sv_before_delete)))
+    assert doc.reload.yjs_document_updates.exists?
+
+    delta = nil
+    assert_notification("state.yjs", served_from: "diff_fold", outcome: "ok") do
+      delta, = YjsPersistence.diff_b64(doc, Base64.strict_encode64(sv_before_delete))
+    end
+
+    client = Y::Doc.new
+    client.apply_update(base_update)
+    client.apply_update(Base64.strict_decode64(delta))
+    assert_equal "hello", client.get_text("t").to_s
+  end
+
+  test "diff_b64 delegates empty state vector to state_b64 without building a Y::Doc" do
+    doc = Document.create!(title: "ColdDiff")
+    YjsPersistence.merge(doc, b64_update_for("column served"))
+    fold_and_reload(doc)
+    empty_sv = Base64.strict_encode64(YjsPersistence::EMPTY_STATE_VECTOR)
+
+    original = Y::Doc.method(:new)
+    Y::Doc.define_singleton_method(:new) { |*| raise "empty sv diff must use columns fast path" }
+    begin
+      assert_notification("state.yjs", served_from: "columns", outcome: "ok") do
+        full_state, state_vector = YjsPersistence.diff_b64(doc, empty_sv)
+        assert_equal Base64.strict_encode64(doc.yjs_state), full_state
+        assert_equal Base64.strict_encode64(doc.yjs_state_vector), state_vector
+      end
+    ensure
+      Y::Doc.define_singleton_method(:new, original)
+    end
+  end
+
+  test "diff_b64 falls back to full state_b64 when client state vector is malformed or blank" do
+    doc = Document.create!(title: "FallbackDiff")
+    YjsPersistence.merge(doc, b64_update_for("full content"))
+    fold_and_reload(doc)
+    expected_full, expected_sv = YjsPersistence.state_b64(doc)
+
+    [ nil, "", "not!!base64!!", Base64.strict_encode64("\x85\xff".b) ].each do |bad_sv|
+      assert_equal [ expected_full, expected_sv ], YjsPersistence.diff_b64(doc, bad_sv)
+    end
+  end
+
+  test "diff_b64 serves an empty document without building a Y::Doc" do
+    doc = Document.create!(title: "EmptyDiff")
+    client = Y::Doc.new
+    client.get_text("t") << "local only"
+    client_sv = Base64.strict_encode64(client.encode_state_vector)
+
+    original = Y::Doc.method(:new)
+    Y::Doc.define_singleton_method(:new) { |*| raise "empty doc diff must not build a Y::Doc" }
+    begin
+      delta, sv = YjsPersistence.diff_b64(doc, client_sv)
+      assert_equal Base64.strict_encode64(YjsPersistence::EMPTY_UPDATE), delta
+      assert_equal Base64.strict_encode64(YjsPersistence::EMPTY_STATE_VECTOR), sv
+    ensure
+      Y::Doc.define_singleton_method(:new, original)
+    end
+  end
+
+  test "diff_b64 heals a corrupt stored blob instead of raising" do
+    doc = Document.create!(title: "CorruptDiff")
+    client = Y::Doc.new
+    client.get_text("t") << "seed"
+    client_sv = Base64.strict_encode64(client.encode_state_vector)
+
+    YjsPersistence.merge(doc, b64_update_for("served"))
+    YjsPersistence.fold!(doc)
+    doc.reload.update_columns(yjs_state: "garbage-bytes")
+
+    assert_notification("recovered.yjs", restored_from: "empty") do
+      delta, sv = YjsPersistence.diff_b64(doc.reload, client_sv)
+      assert delta.present?
+      assert sv.present?
+    end
+  end
+
   test "replace_content! clears the stored state vector until the next fold" do
     doc = Document.create!(title: "Reset", seed_content: "# Seed")
     YjsPersistence.merge(doc, b64_update_for("live"))

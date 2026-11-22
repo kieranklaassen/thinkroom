@@ -23,6 +23,7 @@ module ActiveSupport
     setup do
       WriteRateLimited::STORE.clear
       SyncChannel::ACTIVE_SUBSCRIBERS.clear
+      YjsAwarenessCache.clear
     end
 
     # Add more helper methods to be used by all tests here...
