@@ -160,7 +160,8 @@ class DocumentsController < InertiaController
           editable: preview_editable,
           sketch_interactive: preview_sketch_interactive
         )
-        document.slice(:id, :slug, :title, :content_format).merge(
+        yjs_state_b64 = embedded_yjs_state_b64(document)
+        document.slice(:id, :slug, :title, :content_format, :content_generation).merge(
         # Only the client that won the seed claim applies the template; on
         # every other load (every load of a live document) the seed is dead
         # weight the size of the document, so it rides with the grant only.
@@ -170,7 +171,8 @@ class DocumentsController < InertiaController
         seed_author_kind: document.seed_author_kind,
         seed_author_name: document.seed_author_name,
         has_state: document.yjs_state.present?,
-        yjs_state_b64: embedded_yjs_state_b64(document),
+        yjs_state_b64:,
+        yjs_state_checksum: (document.yjs_state_checksum if yjs_state_b64),
         # Server-rendered prose for an instant first paint; the live editor
         # swaps in over it once Milkdown binds the hydrated Yjs state. The
         # block count lets the preview adopt the long-document rendering the
@@ -184,8 +186,7 @@ class DocumentsController < InertiaController
         render_hints: document.render_hints || {},
         # First-H1 title derived on the server so the header reads correctly on
         # first paint, before the editor mounts and derives the same title.
-        display_title: document.display_title,
-        **(seed_granted && document.content_format == "markdown" ? { seed_markdown: document.seed_content } : {})
+        display_title: document.display_title
       )
       },
       # Ownership rides its own lazy prop so claim events reload cheaply —
@@ -409,7 +410,8 @@ class DocumentsController < InertiaController
   # Agent API can read document state without a Yjs client.
   MAX_SNAPSHOT_BYTES = 2.megabytes
   MAX_STATE_VECTOR_BYTES = 64.kilobytes
-  MAX_SYNC_UPDATE_BYTES = 2.megabytes
+  MAX_SYNC_UPDATE_BYTES = YjsPersistence::MAX_UPDATE_BYTES
+  MAX_SYNC_UPDATE_B64_BYTES = YjsPersistence::MAX_UPDATE_B64_BYTES
   MAX_SNAPSHOT_SPANS = 2_000
   MAX_SNAPSHOT_SPAN_TEXT = 280
   PROVENANCE_KINDS = %w[human ai].freeze
@@ -456,11 +458,13 @@ class DocumentsController < InertiaController
     @write_document = document
     document.assert_write_access!(token: owner_token, user: current_user)
     update = params[:update].to_s
+    return head :content_too_large if update.bytesize > MAX_SYNC_UPDATE_B64_BYTES
+
     decoded = Base64.strict_decode64(update)
     return head :content_too_large if decoded.bytesize > MAX_SYNC_UPDATE_BYTES
 
-    generation = Integer(params[:generation], exception: false) if params.key?(:generation)
-    YjsPersistence.merge(document, update, generation:, token: owner_token, user: current_user)
+    generation = YjsPersistence.parse_generation(params[:generation])
+    YjsPersistence.merge_bytes(document, decoded, generation:, token: owner_token, user: current_user)
     SyncChannel.broadcast_to(document, {
       type: "update",
       update:,

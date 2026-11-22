@@ -16,7 +16,8 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     assert_inertia_props do |props|
       props[:document][:seed_granted] == true &&
         props[:document][:seed_content] == "# Template" &&
-        props[:document][:seed_markdown] == "# Template" &&
+        !props[:document].key?(:seed_markdown) &&
+        props[:document][:content_generation] == 0 &&
         props[:document][:content_format] == "markdown"
     end
     assert_equal "claimed", @document.reload.seed_state
@@ -132,6 +133,7 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     assert_inertia_props do |props|
       props[:document][:seed_version].present? &&
         props[:document][:seed_version] != first_version &&
+        props[:document][:content_generation] == 1 &&
         props[:document][:seed_content] == "# Replacement"
     end
   end
@@ -156,26 +158,32 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
   test "the page embeds the Yjs state when it is under the cap" do
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "small state"
-    YjsPersistence.merge(@document, Base64.strict_encode64(ydoc.diff.pack("C*")))
+    YjsPersistence.merge(@document, Base64.strict_encode64(ydoc.encode_state_as_update))
     YjsPersistence.fold!(@document)
 
     get document_page_path(@document.slug), headers: browser
 
     assert_inertia_props do |props|
       props[:document][:has_state] == true &&
-        props[:document][:yjs_state_b64] == Base64.strict_encode64(@document.reload.yjs_state)
+        props[:document][:yjs_state_b64] == Base64.strict_encode64(@document.reload.yjs_state) &&
+        props[:document][:yjs_state_checksum] == @document.yjs_state_checksum
     end
   end
 
   test "the page omits a Yjs state larger than the embed cap and leaves it to the handshake" do
     oversized = "\x00".b * (DocumentsController::MAX_EMBEDDED_STATE_BYTES + 1)
-    @document.update_columns(yjs_state: oversized, seed_state: "seeded")
+    @document.update_columns(
+      yjs_state: oversized,
+      yjs_state_checksum: Digest::SHA256.hexdigest(oversized),
+      seed_state: "seeded"
+    )
 
     get document_page_path(@document.slug), headers: browser
 
     assert_inertia_props do |props|
       props[:document][:has_state] == true &&
         props[:document][:yjs_state_b64].nil? &&
+        props[:document][:yjs_state_checksum].nil? &&
         props[:document][:seed_granted] == false
     end
   end

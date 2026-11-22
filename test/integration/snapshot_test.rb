@@ -14,7 +14,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   test "snapshot with agent_name logs an agent updated_document activity" do
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "agent text"
-    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+    state_vector = Base64.strict_encode64(ydoc.encode_state_vector)
 
     assert_difference -> { @document.activities.count }, 1 do
       post document_snapshot_path(@document.slug), params: {
@@ -33,7 +33,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     kept = @document.suggestions.create!(author_name: "Gemini", author_kind: "ai", body: "y", replaces: "agent text")
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "agent text"
-    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+    state_vector = Base64.strict_encode64(ydoc.encode_state_vector)
 
     post document_snapshot_path(@document.slug), params: {
       content: "agent text", spans: [], state_vector:, agent_name: "Scout"
@@ -47,7 +47,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   test "snapshot without agent_name logs no activity" do
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "human text"
-    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+    state_vector = Base64.strict_encode64(ydoc.encode_state_vector)
 
     assert_no_difference -> { @document.activities.count } do
       post document_snapshot_path(@document.slug), params: { content: "human text", spans: [], state_vector:, agent_name: "   " }, as: :json
@@ -65,8 +65,8 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     )
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "forbidden"
-    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
-    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+    update = Base64.strict_encode64(ydoc.encode_state_as_update)
+    state_vector = Base64.strict_encode64(ydoc.encode_state_vector)
 
     post document_snapshot_path(@document.slug), params: {
       content: "changed", spans: [], state_vector:
@@ -74,7 +74,9 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert_response :locked
     assert_equal "original", @document.reload.content_snapshot
 
-    post document_sync_update_path(@document.slug), params: { update: }, as: :json
+    post document_sync_update_path(@document.slug),
+         params: { update:, generation: @document.content_generation },
+         as: :json
     assert_response :locked
     assert_nil @document.reload.yjs_state
   end
@@ -133,7 +135,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
       content_format: "html",
       content_snapshot: "<p>original</p>"
     )
-    state_vector = Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+    state_vector = Base64.strict_encode64(Y::Doc.new.encode_state_vector)
 
     post document_snapshot_path(document.slug), params: {
       content: '<p onclick="bad()">Safe ' \
@@ -168,7 +170,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     post document_snapshot_path(document.slug), params: {
       content: "<p>Before</p>#{figure}<p>After</p>",
       spans: [],
-      state_vector: Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+      state_vector: Base64.strict_encode64(Y::Doc.new.encode_state_vector)
     }, as: :json
 
     assert_response :ok
@@ -201,7 +203,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     post document_snapshot_path(document.slug), params: {
       content: %(<p><img src="#{src}" alt="Snapshot"></p>),
       spans: [],
-      state_vector: Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+      state_vector: Base64.strict_encode64(Y::Doc.new.encode_state_vector)
     }, as: :json
 
     assert_response :ok
@@ -230,7 +232,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
          params: {
            markdown: "<p>wrong field</p>",
            spans: [],
-           state_vector: Base64.strict_encode64(Y::Doc.new.state.pack("C*"))
+           state_vector: Base64.strict_encode64(Y::Doc.new.encode_state_vector)
          },
          as: :json
 
@@ -271,8 +273,8 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   test "durable sync update persists and broadcasts the Yjs diff" do
     ydoc = Y::Doc.new
     ydoc.get_text("task") << "checked"
-    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
-    state_vector = Base64.strict_encode64(ydoc.state.pack("C*"))
+    update = Base64.strict_encode64(ydoc.encode_state_as_update)
+    state_vector = Base64.strict_encode64(ydoc.encode_state_vector)
 
     assert_broadcast_on(
       SyncChannel.broadcasting_for(@document),
@@ -280,8 +282,8 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     ) do
       post document_sync_update_path(@document.slug),
            params: {
-             update:, cid: "browser-1", content: "* [x] checked",
-             spans: [], state_vector:
+             update:, cid: "browser-1", generation: @document.content_generation,
+             content: "* [x] checked", spans: [], state_vector:
            },
            as: :json
     end
@@ -289,7 +291,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert_response :no_content
     full_state, = YjsPersistence.state_b64(@document.reload)
     persisted = Y::Doc.new
-    persisted.sync(Base64.strict_decode64(full_state).unpack("C*"))
+    persisted.apply_update(Base64.strict_decode64(full_state))
     assert_equal "checked", persisted.get_text("task").to_s
     assert_equal "* [x] checked", @document.content_snapshot
   end
@@ -304,7 +306,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
 
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "resurrected stale content"
-    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
+    update = Base64.strict_encode64(ydoc.encode_state_as_update)
 
     assert_no_broadcasts(SyncChannel.broadcasting_for(@document)) do
       post document_sync_update_path(@document.slug),
@@ -321,7 +323,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     @document.update!(seed_content: "# Seed", content_snapshot: nil)
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "current content"
-    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
+    update = Base64.strict_encode64(ydoc.encode_state_as_update)
 
     post document_sync_update_path(@document.slug),
          params: { update:, generation: @document.content_generation },
@@ -331,29 +333,53 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert @document.reload.yjs_document_updates.exists?
   end
 
-  test "durable sync update with no generation key still merges (rollout compatibility)" do
+  test "durable sync update rejects missing, nil, and malformed generation with 409 conflict" do
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "legacy client, no generation field"
-    update = Base64.strict_encode64(ydoc.diff.pack("C*"))
+    update = Base64.strict_encode64(ydoc.encode_state_as_update)
 
-    post document_sync_update_path(@document.slug), params: { update: }, as: :json
+    [
+      { update: },
+      { update:, generation: nil },
+      { update:, generation: "not-an-int" }
+    ].each do |params|
+      assert_no_broadcasts(SyncChannel.broadcasting_for(@document)) do
+        post document_sync_update_path(@document.slug), params:, as: :json
+      end
+      assert_response :conflict
+    end
 
-    assert_response :no_content
-    assert @document.reload.yjs_document_updates.exists?
+    assert_not @document.reload.yjs_document_updates.exists?
   end
 
   test "durable sync update rejects malformed and oversized payloads" do
     post document_sync_update_path(@document.slug),
-         params: { update: "not-base64" },
+         params: { update: "not-base64", generation: @document.content_generation },
          as: :json
     assert_response :unprocessable_entity
     assert_nil @document.reload.yjs_state
 
-    oversized = Base64.strict_encode64("x" * (DocumentsController::MAX_SYNC_UPDATE_BYTES + 1))
+    # Invalid base64 past the pre-decode cap must return 413 (not 422), proving
+    # the size firewall rejects before Base64.strict_decode64 allocates.
+    pre_decode_oversized = "!" * (DocumentsController::MAX_SYNC_UPDATE_B64_BYTES + 1)
     post document_sync_update_path(@document.slug),
-         params: { update: oversized },
+         params: { update: pre_decode_oversized, generation: @document.content_generation },
          as: :json
     assert_response :content_too_large
     assert_nil @document.reload.yjs_state
+
+    oversized = Base64.strict_encode64("x" * (DocumentsController::MAX_SYNC_UPDATE_BYTES + 1))
+    post document_sync_update_path(@document.slug),
+         params: { update: oversized, generation: @document.content_generation },
+         as: :json
+    assert_response :content_too_large
+    assert_nil @document.reload.yjs_state
+
+    undecodable = Base64.strict_encode64("yrs-garbage-bytes")
+    post document_sync_update_path(@document.slug),
+         params: { update: undecodable, generation: @document.content_generation },
+         as: :json
+    assert_response :unprocessable_entity
+    assert_not @document.reload.yjs_document_updates.exists?
   end
 end
