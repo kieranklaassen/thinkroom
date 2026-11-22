@@ -496,6 +496,243 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_not doc.yjs_document_updates.exists?
   end
 
+  test "retained pending rows do not trigger a fold storm on subsequent merges" do
+    doc = Document.create!(title: "NoFoldStorm")
+    pending_client = Y::Doc.new(500)
+    pending_client.get_text("t") << "missing-root"
+    root_sv = pending_client.encode_state_vector
+
+    # Append FOLD_THRESHOLD causally-pending updates (all missing root_sv).
+    # The 64th append triggers one fold that retains and stamps retained_at
+    # on all 64 rows.
+    fold_events = capture_notifications("fold.yjs") do
+      YjsPersistence::FOLD_THRESHOLD.times do |i|
+        pending_client.get_text("t") << "p#{i};"
+        dep = pending_client.encode_state_as_update(root_sv)
+        root_sv = pending_client.encode_state_vector
+        YjsPersistence.merge(doc, Base64.strict_encode64(dep))
+      end
+    end
+
+    assert_equal 1, fold_events.length
+    assert_equal YjsPersistence::FOLD_THRESHOLD, doc.yjs_document_updates.count
+    assert_equal 0, doc.yjs_document_updates.unexamined.count
+    assert doc.yjs_document_updates.all? { |row| row.retained_at.present? }
+
+    # Subsequent keystrokes must stay on the O(update) append path until
+    # another FOLD_THRESHOLD *new* unexamined rows accumulate.
+    writer = Y::Doc.new(600)
+    storm_events = capture_notifications("fold.yjs") do
+      (YjsPersistence::FOLD_THRESHOLD - 1).times do |i|
+        YjsPersistence.merge(doc, b64_update_for("w#{i};", from_doc: writer))
+      end
+    end
+    assert_empty storm_events, "lingering retained rows must not trigger folds on every merge"
+    assert_equal YjsPersistence::FOLD_THRESHOLD - 1, doc.yjs_document_updates.unexamined.count
+
+    # The 64th new unexamined row triggers exactly one inline fold,
+    # integrating the 64 valid rows while keeping the 64 retained rows stamped.
+    assert_notification("fold.yjs", outcome: "folded", integrated: YjsPersistence::FOLD_THRESHOLD, retained: YjsPersistence::FOLD_THRESHOLD) do
+      YjsPersistence.merge(doc, b64_update_for("trigger", from_doc: writer))
+    end
+    assert_equal 0, doc.yjs_document_updates.unexamined.count
+    assert_equal YjsPersistence::FOLD_THRESHOLD, doc.yjs_document_updates.count
+  end
+
+  test "an undecodable poison-pill row in the log is quarantined and deleted immediately" do
+    doc = Document.create!(title: "PoisonPill")
+    YjsPersistence.merge(doc, b64_update_for("healthy"))
+    YjsPersistence.fold!(doc)
+    before_state = doc.reload.yjs_state
+
+    # Simulate a permanently malformed row already in the WAL (e.g. legacy row
+    # or corruption bypassing ingress validation).
+    bad_bytes = "definitely-not-a-yjs-update".b
+    doc.yjs_document_updates.create!(
+      content_generation: doc.content_generation,
+      payload: bad_bytes
+    )
+
+    event = assert_notification("fold.yjs", outcome: "folded", integrated: 0, retained: 0, quarantined: 1) do
+      YjsPersistence.fold!(doc)
+    end
+    assert_equal 1, event.payload[:rows]
+
+    doc.reload
+    assert_not doc.yjs_document_updates.exists?, "poison-pill rows must be deleted immediately, not retained for ORPHAN_TTL"
+    assert_equal before_state, doc.yjs_state, "poison-pill-only fold must not rewrite yjs_state"
+    assert_not doc.yjs_state_archives.where(kind: YjsStateArchive::CHECKPOINT).exists?,
+               "poison-pill-only fold must not create a spurious checkpoint"
+
+    quarantined = doc.yjs_state_archives.where(kind: YjsStateArchive::QUARANTINE).sole
+    assert_equal bad_bytes, quarantined.yjs_state
+    assert_match(/undecodable update row/, quarantined.error)
+  end
+
+  test "a poison-pill row alongside valid rows quarantines the poison pill and integrates valid updates" do
+    doc = Document.create!(title: "MixedPoison")
+    doc.yjs_document_updates.create!(
+      content_generation: doc.content_generation,
+      payload: "corrupt-bytes".b
+    )
+    YjsPersistence.merge(doc, b64_update_for("good edit"))
+
+    assert_notification("fold.yjs", outcome: "folded", integrated: 1, retained: 0, quarantined: 1) do
+      YjsPersistence.fold!(doc)
+    end
+
+    assert_not doc.reload.yjs_document_updates.exists?
+    assert_equal "good edit", text_of(doc)
+    assert_equal 1, doc.yjs_state_archives.where(kind: YjsStateArchive::QUARANTINE).count
+  end
+
+  test "re-folding a multi-client doc with retained pending rows does not rewrite yjs_state or checkpoint" do
+    doc = Document.create!(title: "NoPhantomWrite")
+    c1 = Y::Doc.new(100)
+    c1.get_text("t") << "alpha "
+    c2 = Y::Doc.new(200)
+    c2.get_text("t") << "beta"
+    YjsPersistence.merge(doc, Base64.strict_encode64(c1.encode_state_as_update))
+    YjsPersistence.merge(doc, Base64.strict_encode64(c2.encode_state_as_update))
+    YjsPersistence.fold!(doc)
+
+    # Rewrite stored bytes with clients in the reverse encoding order to
+    # simulate non-deterministic cross-process yrs HashMap serialization where
+    # blob != document.yjs_state despite identical CRDT state.
+    reordered_doc = Y::Doc.new
+    reordered_doc.apply_update(c2.encode_state_as_update)
+    reordered_doc.apply_update(c1.encode_state_as_update)
+    reordered_blob = reordered_doc.compacted_state_update
+    doc.reload.update_columns(
+      yjs_state: reordered_blob,
+      yjs_state_vector: reordered_doc.encode_state_vector,
+      yjs_state_checksum: YjsRecovery.state_checksum(reordered_blob)
+    )
+    stored_blob = doc.yjs_state
+    stored_checksum = doc.yjs_state_checksum
+
+    # Append a causally-pending row that cannot integrate.
+    c3 = Y::Doc.new(300)
+    c3.get_text("t") << "root"
+    sv3 = c3.encode_state_vector
+    c3.get_text("t") << "child"
+    pending_update = c3.encode_state_as_update(sv3)
+    YjsPersistence.merge(doc, Base64.strict_encode64(pending_update))
+
+    event = assert_notification("fold.yjs", outcome: "folded", integrated: 0, retained: 1) do
+      YjsPersistence.fold!(doc)
+    end
+    assert_nil event.payload[:blob_bytes_after], "no-op fold must not report a persisted blob rewrite"
+
+    doc.reload
+    assert_equal stored_blob, doc.yjs_state, "non-deterministic serialization must not trigger a phantom rewrite"
+    assert_equal stored_checksum, doc.yjs_state_checksum
+    assert_not doc.yjs_state_archives.where(kind: YjsStateArchive::CHECKPOINT).exists?,
+               "no-op fold must not write a checkpoint"
+  end
+
+  test "a duplicate echo row is deleted without rewriting yjs_state or checkpointing" do
+    doc = Document.create!(title: "NoopEcho")
+    client = Y::Doc.new(100)
+    client.get_text("t") << "hello"
+    YjsPersistence.merge(doc, Base64.strict_encode64(client.encode_state_as_update))
+    YjsPersistence.fold!(doc)
+
+    stored_blob = doc.reload.yjs_state
+    stored_checksum = doc.yjs_state_checksum
+
+    YjsPersistence.merge(doc, Base64.strict_encode64(client.encode_state_as_update))
+    event = assert_notification("fold.yjs", outcome: "folded", integrated: 1, retained: 0) do
+      YjsPersistence.fold!(doc)
+    end
+    assert_nil event.payload[:blob_bytes_after]
+
+    doc.reload
+    assert_not doc.yjs_document_updates.exists?
+    assert_equal stored_blob, doc.yjs_state
+    assert_equal stored_checksum, doc.yjs_state_checksum
+    assert_not doc.yjs_state_archives.where(kind: YjsStateArchive::CHECKPOINT).exists?
+  end
+
+  test "a mixed frame with integrated delete and pending insert persists the delete on first fold and skips rewrite on second" do
+    doc = Document.create!(title: "MixedDeletePending")
+    c1 = Y::Doc.new(100)
+    c1.get_text("t") << "keep-me"
+    YjsPersistence.merge(doc, Base64.strict_encode64(c1.encode_state_as_update))
+    YjsPersistence.fold!(doc)
+
+    sv1 = c1.encode_state_vector
+    c1.get_text("t").delete(4, 3)
+    delete_u1 = c1.encode_state_as_update(sv1)
+
+    c2 = Y::Doc.new(200)
+    c2.get_text("t") << "root"
+    sv2 = c2.encode_state_vector
+    c2.get_text("t") << "dep"
+    pending_u2 = c2.encode_state_as_update(sv2)
+
+    mixed_doc = Y::Doc.new
+    mixed_doc.apply_update(delete_u1)
+    mixed_doc.apply_update(pending_u2)
+    YjsPersistence.merge(doc, Base64.strict_encode64(mixed_doc.encode_state_as_update))
+
+    first = assert_notification("fold.yjs", outcome: "folded", retained: 1) { YjsPersistence.fold!(doc) }
+    assert first.payload[:blob_bytes_after].present?, "the integrated delete must persist on the first fold"
+    assert_equal "keep", text_of(doc)
+
+    # Second fold while the pending half is still missing must not rewrite or checkpoint again.
+    checkpoints_after_first = doc.yjs_state_archives.where(kind: YjsStateArchive::CHECKPOINT).count
+    travel YjsPersistence::CHECKPOINT_INTERVAL + 1.minute do
+      second = assert_notification("fold.yjs", outcome: "folded", retained: 1) { YjsPersistence.fold!(doc.reload) }
+      assert_nil second.payload[:blob_bytes_after]
+    end
+    assert_equal checkpoints_after_first, doc.yjs_state_archives.where(kind: YjsStateArchive::CHECKPOINT).count
+  end
+
+  test "gapped fold verifies blob once by reusing the base Y::Doc" do
+    doc = Document.create!(title: "SingleDocVerify")
+    c1 = Y::Doc.new(100)
+    c1.get_text("t") << "integrated"
+    YjsPersistence.merge(doc, Base64.strict_encode64(c1.encode_state_as_update))
+
+    c2 = Y::Doc.new(200)
+    c2.get_text("t") << "root"
+    sv2 = c2.encode_state_vector
+    c2.get_text("t") << "pending"
+    YjsPersistence.merge(doc, Base64.strict_encode64(c2.encode_state_as_update(sv2)))
+
+    doc_allocations = 0
+    original_new = Y::Doc.method(:new)
+    Y::Doc.define_singleton_method(:new) do |*args, **kwargs|
+      doc_allocations += 1
+      original_new.call(*args, **kwargs)
+    end
+    begin
+      YjsPersistence.fold!(doc)
+    ensure
+      Y::Doc.define_singleton_method(:new, original_new)
+    end
+
+    # Exactly 2 Y::Doc instances: 1 for load_ydoc and 1 reused `base` doc
+    # verifying `blob` and classifying rows (never a 3rd doc for blob_loadable?).
+    assert_equal 2, doc_allocations
+    assert_equal "integrated", text_of(doc)
+  end
+
+  test "lock table is a fixed 64-stripe bounded array" do
+    assert_instance_of Array, YjsPersistence::LOCKS
+    assert_equal 64, YjsPersistence::LOCKS.length
+    assert YjsPersistence::LOCKS.frozen?
+    assert YjsPersistence::LOCKS.all? { |mutex| mutex.is_a?(Mutex) }
+
+    lock_a = YjsPersistence.send(:lock_for, 1)
+    lock_b = YjsPersistence.send(:lock_for, 2)
+    lock_same_stripe = YjsPersistence.send(:lock_for, 1 + YjsPersistence::LOCK_STRIPES)
+
+    assert_same lock_a, lock_same_stripe
+    assert_not_same lock_a, lock_b
+  end
+
   # --- Healing (durability layer) ------------------------------------------
 
   test "a corrupt blob heals from the latest same-generation checkpoint at fold time" do
