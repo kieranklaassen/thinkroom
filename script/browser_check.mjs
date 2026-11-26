@@ -2849,7 +2849,16 @@ try {
   const jumpCard = jumpWin.locator('.comment-card--linked', { hasText: 'Jump target comment.' })
   await jumpCard.waitFor({ timeout: 10000 })
   await jumpWin.mouse.move(400, 400)
-  await jumpWin.mouse.wheel(0, 100000)
+  // A wheel gesture keeps animating after it reaches the bottom and would pull
+  // the page back down under the jump, so let each scroll end before the next.
+  const armScrollEnd = () => jumpWin.evaluate(() => {
+    window.__scrollEnded = false
+    document.addEventListener('scrollend', () => { window.__scrollEnded = true }, { once: true })
+  })
+  const scrollEnded = () => jumpWin.waitForFunction(() => window.__scrollEnded)
+  await armScrollEnd()
+  await jumpWin.mouse.wheel(0, await jumpWin.evaluate(() => document.documentElement.scrollHeight - window.innerHeight))
+  await scrollEnded()
   // Agent pseudo-cursor widgets ("✦ check") inject their labels into
   // paragraph textContent — strip them before matching, as elsewhere.
   await jumpWin.waitForFunction(
@@ -2864,6 +2873,7 @@ try {
     jumpAnchorPara,
     { timeout: 5000 },
   )
+  await armScrollEnd()
   await jumpCard.locator('.comment-body').click()
   const jumpLanded = await jumpWin
     .waitForFunction(
@@ -2887,6 +2897,8 @@ try {
 
   // Multi-paragraph selection comments resolve through the multi-block span
   // fallback: the card links and jumps instead of reading as stale.
+  // The jump scrolls smoothly; boxes read before it ends put the drag on other text.
+  await scrollEnded()
   const jumpParaBox = (text) =>
     jumpWin.locator('.milkdown .ProseMirror p', { hasText: text }).first().boundingBox()
   const spanStart = await jumpParaBox('Filler paragraph 3 keeps')
@@ -2897,6 +2909,10 @@ try {
     steps: 8,
   })
   await jumpWin.mouse.up()
+  const spanText = await jumpWin.evaluate(() => String(getSelection()))
+  if (!/paragraph 3 keeps[^]*paragraph 4 keeps/.test(spanText)) {
+    throw new Error(`the drag selected other text: ${JSON.stringify(spanText.slice(0, 160))}`)
+  }
   await jumpWin.locator('.selection-toolbar button', { hasText: 'Comment' }).click()
   const spanComment = `Cross-paragraph comment ${Date.now()}`
   await jumpWin.getByPlaceholder('Say something about this…').fill(spanComment)
