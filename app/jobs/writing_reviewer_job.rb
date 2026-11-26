@@ -34,18 +34,18 @@ class WritingReviewerJob < ApplicationJob
     # The pass was replaced while this reviewer was running; its rows are gone.
     nil
   rescue CompoundWriting::JudgeError => e
-    fail_run(pass, reviewer_key, e.message, count)
+    fail_run(pass, reviewer_key, e.message, count, e)
   rescue StandardError => e
     # Anything else must not leave the reviewer "running" forever (the panel
     # would show a spinner that never resolves).
-    Rails.logger.error("[compound] #{reviewer_key} crashed on pass #{pass_id}: #{e.class}")
-    fail_run(pass, reviewer_key, "#{e.class.name.demodulize}: #{e.message.to_s.byteslice(0, 200)}", count)
+    Rails.logger.error("[compound] #{reviewer_key} crashed on pass #{pass_id}: #{LogContent.describe(e)}")
+    fail_run(pass, reviewer_key, "#{e.class.name.demodulize}: #{e.message.to_s.byteslice(0, 200)}", count, e)
   end
 
   private
 
-  def fail_run(pass, reviewer_key, message, count)
-    Rails.logger.warn("[compound] #{reviewer_key} failed on pass #{pass&.id}")
+  def fail_run(pass, reviewer_key, message, count, error)
+    Rails.logger.warn("[compound] #{reviewer_key} failed on pass #{pass&.id}: #{LogContent.describe(error)}")
     pass&.record_run!(reviewer_key, status: "failed", error: message, findings_count: count)
   rescue ActiveRecord::RecordNotFound
     nil

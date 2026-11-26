@@ -41,7 +41,7 @@ class LogContentTest < ActionDispatch::IntegrationTest
   end
 
   # Runs the block once per level on a fresh log; the log must be free of the
-  # marker and, at debug, must hold what was not meant to be filtered.
+  # marker and must hold what was not meant to be filtered.
   def assert_no_content_logged(keeps: [])
     %i[info debug].each do |level|
       log = capture_log(level) { yield level }
@@ -156,6 +156,8 @@ class LogContentTest < ActionDispatch::IntegrationTest
       send_frame(connection, command: "unsubscribe", identifier: id)
       send_frame(connection, command: "unsubscribe", identifier: meta)
       send_frame(late, command: "unsubscribe", identifier: identifier)
+      assert_empty connection.subscriptions.identifiers
+      assert_empty late.subscriptions.identifiers
     end
     assert_equal "seeded", @document.reload.seed_state
   end
@@ -186,11 +188,26 @@ class LogContentTest < ActionDispatch::IntegrationTest
   test "failed merges and unsubscribes on the sync channel" do
     update, = update_with(MARK)
 
-    assert_no_content_logged(keeps: /SyncChannel: merge failed: RuntimeError/) do
+    full = lambda do
+      raise SQLite3::FullException, MARK
+    rescue SQLite3::FullException
+      raise ActiveRecord::StatementInvalid, MARK
+    end
+    frame = /test\/integration\/log_content_test\.rb:\d+/
+    keeps = [ /SyncChannel: merge failed: RuntimeError \| .*#{frame}/, /SyncChannel: undecodable update dropped: ArgumentError \| .*#{frame}/,
+              /merge failed: ActiveRecord::StatementInvalid \| caused by SQLite3::FullException \| .*#{frame}/,
+              /merge failed: NoMethodError \(undefined method 'missing_method'/,
+              /SyncChannel: unsubscribe cleanup failed: RuntimeError \| .*#{frame}/ ]
+    assert_no_content_logged(keeps:) do
       connection, = connect_cable
       send_frame(connection, command: "subscribe", identifier:)
       [ RuntimeError, ArgumentError ].each do |error|
         failing(YjsPersistence, :merge_bytes, error) do
+          send_frame(connection, cable_message(identifier, type: "update", update:, seq: 1, generation: 0))
+        end
+      end
+      [ full, -> { nil.missing_method } ].each do |body|
+        calling(YjsPersistence, :merge_bytes, body) do
           send_frame(connection, cable_message(identifier, type: "update", update:, seq: 1, generation: 0))
         end
       end
@@ -242,7 +259,7 @@ class LogContentTest < ActionDispatch::IntegrationTest
   end
 
   test "agent and CLI endpoints" do
-    assert_no_content_logged(keeps: [ /"format" => "html"|as JSON/, /"status" => "active"/ ]) do
+    assert_no_content_logged(keeps: [ /as JSON/, /"status" => "active"/ ]) do
       post api_docs_path, as: :json, headers: AGENT, params: { title: MARK, content: LARGE }
       assert_response :created
       slug = response.parsed_body.fetch("slug")
@@ -271,7 +288,7 @@ class LogContentTest < ActionDispatch::IntegrationTest
             params = names.index_with(value)
             post api_docs_path, as: :json, headers: AGENT, params: params
             post api_docs_path, headers: AGENT, params: params
-            post api_docs_path, as: :json, headers: AGENT, params: { document: params, list: [ params ], ids: [ value, [ value ] ] }
+            post api_docs_path, as: :json, headers: AGENT, params: { document: params, list: [ params ], reviewers: [ value, [ value ] ] }
             get "/?#{params.to_query}"
           end
           WriteRateLimited::STORE.clear
@@ -283,6 +300,10 @@ class LogContentTest < ActionDispatch::IntegrationTest
         post api_docs_path, params: MARK, headers: form
         post api_docs_path, params: "See[the #{MARK}](url)=1&id[#{MARK}]=1", headers: form
         post document_writing_passes_path(@document.slug), params: { MARK => 1 }, headers: BROWSER
+        get "/?format=#{MARK}&_method=#{MARK}"
+        sign_in_as(featured_user!(email: "#{SecureRandom.hex(4)}@example.com"))
+        post document_writing_passes_path(@document.slug), params: { MARK => 1 }, headers: BROWSER
+        post signup_path, params: { MARK => 1, "#{MARK} text" => 1 }
         get "/?#{MARK}"
         get "/?mode=read&#{MARK};id=#{MARK}&#{MARK}%20more"
       end
@@ -295,8 +316,74 @@ class LogContentTest < ActionDispatch::IntegrationTest
     assert_not_includes log, "Parameters:"
   end
 
-  test "values that cannot be matched are masked" do
-    assert_equal({ "[FILTERED]" => "[FILTERED]" }, LogContent.redact("slug" => "\xFF"))
+  test "text in the shape of other values is masked" do
+    masked = { "[FILTERED]" => "[FILTERED]" }
+    [ 2**53 + 1, -(2**60), 1.5, MARK.unpack1("H*").hex, MARK.bytes, [ 1 ], [ true ] ].each do |value|
+      %w[id ids seq reviewers].each { |name| assert_equal masked, LogContent.redact(name => value), "#{name} #{value}" }
+    end
+    assert_equal masked, LogContent.redact("reviewers" => [ "compound-writing/cw-a" ] * 21)
+    assert_equal masked, LogContent.redact("slug" => "\xFF")
+    { "id" => 2**53, "seq" => 0, "locked" => true, "reviewers" => [ "compound-writing/cw-ai-check" ] }.each do |name, value|
+      assert_equal({ name => value }, LogContent.redact(name => value))
+    end
+  end
+
+  class OwnMessage < StandardError
+    def message = MARK
+    def exception = raise(MARK)
+  end
+
+  class Uncopyable < StandardError
+    def initialize_clone(*, **) = raise(MARK)
+  end
+
+  class RaisingJob < ActiveJob::Base
+    cattr_accessor :error
+    def perform = raise(self.class.error)
+  end
+
+  test "errors that cannot be changed or copied" do
+    errors = [ RuntimeError.new(MARK).freeze, OwnMessage.new, Uncopyable.new(MARK) ]
+    assert_no_content_logged(keeps: [ /Error performing .*: RuntimeError \(message not logged\)/, /Error performing .*OwnMessage \(/, /Error performing .*Uncopyable: message/ ]) do |level|
+      errors.each do |error|
+        RaisingJob.error = error
+        assert_raises(error.class) { RaisingJob.perform_now } unless error.is_a?(OwnMessage)
+        job = RaisingJob.new
+        ActiveSupport::Notifications.instrument("perform.active_job", job:, adapter: RaisingJob.queue_adapter, exception_object: error)
+        assert_nothing_raised { LogContent.describe(error) }
+      end
+    end
+    assert_equal MARK, errors.first.message
+  end
+
+  test "the error page and its copy text keep the message" do
+    update, = update_with("text")
+    with_env_config("action_dispatch.show_exceptions" => :all, "action_dispatch.show_detailed_exceptions" => true) do
+      assert_no_content_logged(keeps: /RuntimeError:/) do
+        failing(YjsPersistence, :merge_bytes, RuntimeError) do
+          post document_sync_update_path(@document.slug), params: { update:, generation: 0 }, headers: BROWSER
+        end
+        assert_includes css_select("textarea#exception-message-for-copy").text, "RuntimeError (#{MARK})"
+      end
+    end
+  end
+
+  test "development logs keep error messages" do
+    update, = update_with("text")
+    previous = Rails.env
+    log = capture_log(:info) do
+      Rails.env = "development"
+      with_env_config("action_dispatch.show_exceptions" => :all) do
+        failing(YjsPersistence, :merge_bytes, RuntimeError) do
+          post document_sync_update_path(@document.slug), params: { update:, generation: 0 }, headers: BROWSER
+        end
+      end
+      assert_raises(RuntimeError) { SteppingJob.perform_now(MARK.reverse) }
+    ensure
+      Rails.env = previous
+    end
+    assert_match(/RuntimeError \(#{MARK}\):/, log)
+    assert_match(/Error performing .*RuntimeError \(#{MARK}\)/, log)
   end
 
   test "upload objects under any part name" do
@@ -314,7 +401,7 @@ class LogContentTest < ActionDispatch::IntegrationTest
     params = { update:, generation: 0 }
     with_env_config("action_dispatch.show_exceptions" => :all) do
       without_error_details do
-        assert_no_content_logged(keeps: [ /RuntimeError:/, /sync_update/, /undefined method 'missing_method'/, /Caused by: ActiveRecord::StatementInvalid:/ ]) do
+        assert_no_content_logged(keeps: [ /RuntimeError:/, %r{^app/controllers/documents_controller\.rb:\d+:in }, /undefined method 'missing_method'/, /Caused by: ActiveRecord::StatementInvalid:/ ]) do
           failing(YjsPersistence, :merge_bytes, RuntimeError) { post document_sync_update_path(@document.slug), as: :json, params: }
           assert_response :internal_server_error
           calling(YjsPersistence, :merge_bytes, -> { nil.missing_method }) { post document_sync_update_path(@document.slug), as: :json, params: }
@@ -414,7 +501,7 @@ class LogContentTest < ActionDispatch::IntegrationTest
       post document_comments_path(@document.slug), params: { body: MARK },
            headers: BROWSER.merge("Referer" => "http://www.example.com/d/#{@document.slug}?mode=read&text=#{MARK}&a%5Bcontent%5D=#{MARK}")
       assert_response :redirect
-      [ "#:~:text=#{MARK}", "?#{MARK}", "?mode=read&#{MARK}", "?id=#{MARK}", "//rails//active_storage/blobs/x/#{MARK}.png" ].each do |tail|
+      [ "#:~:text=#{MARK}", "?#{MARK}", "?mode=read&#{MARK}", "?id=#{MARK}", "//rails//active_storage/blobs/x/#{MARK}.png", "/rails/active%5Fstorage/x/#{MARK}.png" ].each do |tail|
         post document_comments_path(@document.slug), params: { body: MARK },
              headers: BROWSER.merge("Referer" => "http://www.example.com/d/#{@document.slug}#{tail}")
         assert_response :redirect
@@ -426,7 +513,7 @@ class LogContentTest < ActionDispatch::IntegrationTest
     judge = Class.new { def judge(**) = raise(RuntimeError, MARK) }.new
     refusing = Class.new { def judge(**) = raise(CompoundWriting::JudgeError.new(MARK, reviewer_key: "x")) }.new
 
-    assert_no_content_logged(keeps: [ /crashed on pass \d+: RuntimeError/, /failed on pass \d+/ ]) do
+    assert_no_content_logged(keeps: [ /crashed on pass \d+: RuntimeError/, /failed on pass \d+: CompoundWriting::JudgeError \| .*log_content_test/ ]) do
       [ judge, refusing ].each do |current|
         CompoundWriting.judge = current
         pass = WritingPass.start!(
@@ -558,8 +645,12 @@ class LogContentTest < ActionDispatch::IntegrationTest
 
   test "an override of a method that a gem no longer has stops the boot" do
     replacement = Module.new { def perform_gone(data) = super }
-    assert_raises(RuntimeError) { LogContent.override(Class.new, replacement) }
-    assert_raises(RuntimeError) { LogContent.override(Class.new { def perform_gone = nil }, replacement) }
+    gone = assert_raises(RuntimeError) { LogContent.override(Class.new, replacement) }
+    assert_match(/perform_gone no longer exists.*config\/initializers\/log_content\.rb/, gone.message)
+    changed = assert_raises(RuntimeError) { LogContent.override(Class.new { def perform_gone = nil }, replacement) }
+    assert_match(/perform_gone now takes \[\] \(#{Regexp.escape(__FILE__)}:\d+\)/, changed.message)
+    keywords = Module.new { def perform_gone(data, via: nil) = super }
+    assert_raises(RuntimeError) { LogContent.override(Class.new { def perform_gone(data, from: nil) = nil }, keywords) }
     current = Class.new { def perform_gone(data) = data }
     LogContent.override(current, replacement)
     assert_equal 1, current.new.perform_gone(1)

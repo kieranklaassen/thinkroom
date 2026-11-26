@@ -1,20 +1,23 @@
 # Keeps document and save content out of the log. Requests and cable frames are
 # logged through an allowlist (READABLE); the framework lines that have no
 # setting are overridden below, each with a boot-time check that the method it
-# replaces still exists with the same parameters.
+# replaces still exists and takes the same kinds of parameters.
 module LogContent
   FILTERED = ActiveSupport::ParameterFilter::FILTERED
 
   flag = /\A(?:true|false|on|off|1|0)\z/
-  number = /\A\d{1,20}\z/
+  number = /\A\d{1,16}\z/
+  MAX_NUMBER = 2**53
+  MAX_VALUES = 20
   uuid = /\A\h{8}(?:-\h{4}){3}-\h{12}\z/
 
   # The only parameters and frame fields shown in the log, each with the shape a
-  # String value must have. Numbers, booleans, and nil pass as they are, and an
-  # Array passes when all its values do. Everything else, names included, is
-  # logged as one "[FILTERED]" entry.
+  # String value must have. Booleans, nil, and a single Integer up to MAX_NUMBER
+  # pass as they are; an Array passes when it is short and all its values are
+  # such Strings. Everything else, names included, is logged as one "[FILTERED]"
+  # entry.
   READABLE = {
-    "id" => number, "ids" => number, "index" => number, "seq" => number, "generation" => number,
+    "id" => number, "index" => number, "seq" => number, "generation" => number,
     "client_id" => number, "last_event_id" => number,
     "cid" => uuid, "session_id" => uuid,
     "slug" => /\A(?:demo|[1-9A-HJ-NP-Za-km-z]{10})\z/,
@@ -43,8 +46,16 @@ module LogContent
       end
     end
 
+    # One line for an error: class, cause classes, and the first frames.
     def describe(error)
-      DESCRIPTIVE.any? { |type| error.instance_of?(type) } ? "#{error.class} (#{error.message})" : error.class.name
+      causes = []
+      cause = error
+      causes << title(cause) while (cause = cause.cause)
+      [ title(error), *causes.map { |text| "caused by #{text}" }, *error.backtrace&.first(5) ].join(" | ")
+    end
+
+    def title(error, name = error.class.name)
+      descriptive?(error) ? "#{name} (#{error.message})" : name
     end
 
     def describe_command(data)
@@ -58,32 +69,52 @@ module LogContent
 
     # The same error, for a log line that would quote its message.
     def without_message(error, message = "message not logged")
-      return error if error.nil? || DESCRIPTIVE.any? { |type| error.instance_of?(type) }
+      return error if error.nil? || descriptive?(error)
 
-      error.exception(message).tap { |copy| copy.define_singleton_method(:message) { |*| message } }
+      copy = begin
+        error.clone(freeze: false)
+      rescue StandardError
+        message = "#{error.class.name}: #{message}"
+        RuntimeError.new(message)
+      end
+      copy.define_singleton_method(:message) { |*| message }
+      copy.set_backtrace(error.backtrace || [])
+      copy
     end
 
     def override(target, replacement)
       (replacement.instance_methods(false) + replacement.private_instance_methods(false)).each do |name|
         original = target.instance_method(name) if target.method_defined?(name) || target.private_method_defined?(name)
-        next if original && original.arity == replacement.instance_method(name).arity
+        next if original && signature(original) == signature(replacement.instance_method(name))
 
-        raise "log_content: #{target}##{name} is missing or takes other parameters. Re-verify its override " \
-              "in config/initializers/log_content.rb against the installed gem."
+        found = original ? "now takes #{original.parameters} (#{original.source_location&.join(":")})" : "no longer exists"
+        raise "log_content: #{target}##{name} #{found}. Its override #{replacement}##{name} takes " \
+              "#{replacement.instance_method(name).parameters}. Re-verify it in " \
+              "config/initializers/log_content.rb against the installed gem."
       end
       target.prepend(replacement)
     end
 
     private
 
+    # Development logs keep error messages.
+    def descriptive?(error)
+      Rails.env.development? || DESCRIPTIVE.any? { |type| error.instance_of?(type) }
+    end
+
+    # Parameter kinds in order, and keyword names.
+    def signature(method)
+      method.parameters.map { |kind, name| kind.start_with?("key") ? [ kind, name ] : kind }
+    end
+
     def readable?(name, value)
       shape = READABLE[name.to_s] or return false
 
-      (value.is_a?(Array) ? value : [ value ]).all? do |item|
-        case item
-        when String then item.valid_encoding? && item.match?(shape)
-        when Numeric, true, false, nil then true
-        end
+      case value
+      when String then value.valid_encoding? && value.match?(shape)
+      when Integer then value.abs <= MAX_NUMBER
+      when Array then value.size <= MAX_VALUES && value.all? { |item| item.is_a?(String) && readable?(name, item) }
+      when true, false, nil then true
       end
     end
   end
@@ -145,11 +176,18 @@ module LogContent
   module Exceptions
     private
 
-    def compose_exception_message(wrapper)
-      [ wrapper, *wrapper.wrapped_causes ].flat_map.with_index do |current, index|
-        [ "  ", "#{"Caused by: " if index.positive?}#{LogContent.describe(current.exception)}:",
+    # As in Action Dispatch, with lines of our own. The error page composes its
+    # copy text with the method these lines replace here.
+    def log_error(request, wrapper)
+      logger = logger(request)
+      return unless logger
+      return if !log_rescued_responses?(request) && wrapper.rescue_response?
+
+      lines = [ wrapper, *wrapper.wrapped_causes ].flat_map.with_index do |current, index|
+        [ "  ", "#{"Caused by: " if index.positive?}#{LogContent.title(current.exception, current.exception_class_name)}:",
           *current.annotated_source_code, "  ", *current.exception_trace ]
       end
+      log_array(logger, lines, request)
     end
   end
 
@@ -215,7 +253,7 @@ module LogContent
       end
     rescue Exception => e
       @connection.rescue_with_handler(e)
-      logger.error "Could not execute command from (#{LogContent.describe_command(data)}) [#{LogContent.describe(e)}]: #{e.backtrace.first(5).join(" | ")}"
+      logger.error "Could not execute command from (#{LogContent.describe_command(data)}) [#{LogContent.describe(e)}]"
     end
 
     def add(data)
