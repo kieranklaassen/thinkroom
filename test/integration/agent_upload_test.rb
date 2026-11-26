@@ -98,13 +98,14 @@ class AgentUploadTest < ActionDispatch::IntegrationTest
 
   test "upload response escapes a hostile filename in ready HTML" do
     post "/api/uploads",
-         params: { file: uploaded_file(%(plot" onerror="alert(1).png), "image/png", PNG) },
+         params: { file: uploaded_file(%(plot&" onerror="alert(1).png), "image/png", PNG) },
          headers: @agent
 
     assert_response :created
     body = response.parsed_body
     refute_includes body["html"], '" onerror="'
-    assert_includes body["html"], "&quot;"
+    # Active Storage replaces quotes itself; an ampersand reaches the view.
+    assert_includes body["html"], "plot&amp;"
   end
 
   test "upload requires agent identity with a copyable example" do

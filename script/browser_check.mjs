@@ -1,7 +1,7 @@
 // Two-window live-collaboration smoke check using Playwright.
 // Usage: BASE_URL=http://localhost:4123 node script/browser_check.mjs
 import { chromium } from 'playwright'
-import { waitForLive } from './lib/check_helpers.mjs'
+import { openSeeded, reloadSynced, waitForHome, waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 const SLUG = process.env.SLUG ?? 'demo'
@@ -573,8 +573,7 @@ try {
   // one state, without replacing the live editor or losing a saved choice.
   const appearance = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
   appearance.on('pageerror', (err) => errors.a.push(String(err)))
-  await appearance.goto(`${BASE}/d/${SLUG}`)
-  await waitForLive(appearance)
+  await openSeeded(appearance, `${BASE}/d/${SLUG}`)
   const themeTrigger = appearance.getByRole('button', { name: 'Change theme', exact: true })
   await themeTrigger.waitFor({ timeout: 5000 })
   await appearance.evaluate(() => { window.__themeEditor = document.querySelector('.doc-live-editor .ProseMirror') })
@@ -736,6 +735,7 @@ try {
     .context()
     .grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE })
   await landing.goto(BASE)
+  await waitForHome(landing)
   await landing.waitForSelector('.landing-wordmark')
   if ((await landing.locator('.landing-wordmark').innerText()) === 'Thinkroom') {
     ok('landing page uses the Thinkroom wordmark')
@@ -777,6 +777,7 @@ try {
   // appear inline so it can still be copied by hand.
   const refusedClipboard = await browser.newPage()
   await refusedClipboard.goto(BASE)
+  await waitForHome(refusedClipboard)
   await refusedClipboard.getByRole('button', { name: 'Copy agent prompt' }).click()
   await refusedClipboard.locator('#agent-start-instructions', { hasText: '/api/docs' }).waitFor()
   ok('a refused clipboard write reveals the agent instruction inline')
@@ -794,6 +795,7 @@ try {
     .locator('.doc-live-editor .ProseMirror p', { hasText: 'Start writing' })
     .waitFor({ timeout: 15000 })
   await landing.goto(BASE)
+  await waitForHome(landing)
   // Tag editing stays quiet until the contents row is hovered.
   await landing.locator('.contents-row').first().hover()
   await landing.getByRole('button', { name: /Add tag/ }).first().click()
@@ -847,6 +849,7 @@ try {
   await landing.locator('.pinned-row', { hasText: firstTitle }).waitFor()
   await landing.waitForLoadState('networkidle')
   await landing.reload()
+  await waitForHome(landing)
   await landing.locator('.pinned-row', { hasText: firstTitle }).waitFor()
   if ((await contentsRows.first().getByRole('button', { name: `Unpin ${firstTitle}` }).getAttribute('aria-pressed')) === 'true') {
     ok('a pinned page stays pinned after reload and its star reads pressed')
@@ -862,6 +865,7 @@ try {
     .locator('.doc-live-editor .ProseMirror p', { hasText: 'Start writing' })
     .waitFor({ timeout: 15000 })
   await landing.goto(BASE)
+  await waitForHome(landing)
   await landing.locator('.pinned-row', { hasText: firstTitle }).waitFor()
   const secondTitle = await contentsRows
     .filter({ hasNot: landing.getByRole('button', { name: /^Unpin / }) })
@@ -899,6 +903,7 @@ try {
   } else {
     fail('the background choice did not persist')
   }
+  await waitForHome(landing)
   await landing.locator('.contents-row .document-row-title').first().click()
   await landing.waitForURL(/\/d\//)
   // Let the document page finish its visit before going back; a Back fired
@@ -913,6 +918,7 @@ try {
   } else {
     fail('Back navigation restored a stale background')
   }
+  await waitForHome(landing)
   await landing.getByRole('button', { name: 'Background' }).click()
   await landing.getByRole('radio', { name: /Morning/ }).click()
 
@@ -1243,8 +1249,15 @@ try {
   const taskA = await browser.newPage()
   const taskB = await browser.newPage()
   let blockTaskWebSocketUpdates = false
+  let taskConnection = 0 // the newest socket, counted in the order they open
+  let taskSyncedConnection = 0 // the newest socket that has received its sync
   await taskA.routeWebSocket(/\/cable(?:\?|$)/, (socket) => {
     const server = socket.connectToServer()
+    const connection = (taskConnection += 1)
+    server.onMessage((message) => {
+      socket.send(message)
+      if (String(message).includes('"type":"sync"')) taskSyncedConnection = Math.max(taskSyncedConnection, connection)
+    })
     socket.onMessage((message) => {
       try {
         const command = JSON.parse(String(message))
@@ -1260,6 +1273,32 @@ try {
   await taskB.goto(`${BASE}/d/${taskDoc.slug}/edit`)
   await waitForLive(taskA)
   await waitForLive(taskB)
+  // The page starts from the last compacted state, which can match by chance,
+  // so judge a reload only after a socket opened by that reload has synced.
+  const reloadTaskSynced = async () => {
+    const before = taskConnection
+    await taskA.reload()
+    await waitForLive(taskA)
+    const deadline = Date.now() + 30000
+    while (taskSyncedConnection <= before) {
+      if (Date.now() > deadline) throw new Error('no sync arrived after the task reload')
+      await taskA.waitForTimeout(50)
+    }
+    await taskA.waitForTimeout(250) // the frame has been sent; let the editor apply it
+  }
+  // The toggle's own request can commit after the reload was served; it then
+  // reaches the live editor as an update.
+  const firstTaskBecomes = (checked) =>
+    taskA
+      .waitForFunction(
+        (want) => document.querySelector('.doc-live-editor .task-checkbox')?.checked === want,
+        checked,
+        { timeout: 10000 },
+      )
+      .then(async () => {
+        await taskA.waitForTimeout(500) // right for a moment is not durable
+        return (await taskA.locator('.doc-live-editor .task-checkbox').first().isChecked()) === checked
+      }, () => false)
   const taskCheckboxes = taskA.locator(
     '.milkdown .ProseMirror li[data-item-type="task"] input[type="checkbox"]',
   )
@@ -1300,9 +1339,8 @@ try {
   } else {
     fail(`checked task did not persist: ${JSON.stringify(taskMarkdown)}`)
   }
-  await taskA.reload()
-  await waitForLive(taskA)
-  if (await taskA.locator('.task-checkbox').nth(0).isChecked()) {
+  await reloadTaskSynced()
+  if (await firstTaskBecomes(true)) {
     ok('checked task survives reload')
   } else {
     fail('checked task did not survive reload')
@@ -1313,9 +1351,8 @@ try {
   // WebSocket and debounced source snapshot time to settle first.
   blockTaskWebSocketUpdates = true
   await taskA.locator('.task-checkbox').nth(0).uncheck()
-  await taskA.reload()
-  await waitForLive(taskA)
-  if (!(await taskA.locator('.task-checkbox').nth(0).isChecked())) {
+  await reloadTaskSynced()
+  if (await firstTaskBecomes(false)) {
     ok('task toggle survives an immediate reload')
   } else {
     fail('task toggle was lost during an immediate reload')
@@ -1332,9 +1369,8 @@ try {
     { timeout: 5000 },
   )
   await taskA.locator('.task-checkbox').nth(0).check()
-  await taskA.reload()
-  await waitForLive(taskA)
-  if (await taskA.locator('.task-checkbox').nth(0).isChecked()) {
+  await reloadTaskSynced()
+  if (await firstTaskBecomes(true)) {
     ok('task toggle persists in Suggest mode')
   } else {
     fail('task toggle was dropped by Suggest mode')
@@ -1735,11 +1771,18 @@ try {
   await sketchB.locator('.excalidraw canvas').last().click({ position: { x: 20, y: 20 } })
   await sketchB.keyboard.press('Delete')
   await sketchA.locator('.thinkroom-sketch').waitFor({ state: 'detached', timeout: 10000 })
-  await sketchB.reload()
-  // The derived server preview can lag the already-persisted Yjs deletion.
-  // Check the hydrated editor, not a transient preview (or an empty shell).
-  await waitForLive(sketchB)
-  if ((await sketchB.locator('.thinkroom-sketch').count()) === 0) {
+  // The server preview and the page's starting state can both lag the already
+  // persisted deletion, so judge the editor once the sync has arrived.
+  await reloadSynced(sketchB)
+  if (
+    await sketchB
+      .locator('.thinkroom-sketch')
+      .waitFor({ state: 'detached', timeout: 5000 })
+      .then(async () => {
+        await sketchB.waitForTimeout(500) // the sync may still put it back
+        return (await sketchB.locator('.thinkroom-sketch').count()) === 0
+      }, () => false)
+  ) {
     ok('deleting a sketch syncs and survives reload')
   } else {
     fail('deleted sketch returned after reload')
@@ -2305,31 +2348,39 @@ try {
     body: JSON.stringify({ status: 'active', location: 'provenance' }),
   })
   await a.locator('.agent-cursor-label', { hasText: overflowAgentName }).first().waitFor({ timeout: 5000 })
+  // Any redraw of the editor rebuilds the label, which is unclamped until the
+  // next frame, so a single read can land in that frame. Require the label to
+  // stay inside for 300 ms without a break.
+  const labelStaysInside = async (left, right, pageWidth) => {
+    await a.evaluate(() => { window.__labelInsideSince = null })
+    const error = await a
+      .waitForFunction(
+        ([agentName, left, right, pageWidth]) => {
+          const label = [...document.querySelectorAll('.agent-cursor-label')].find((el) => el.textContent?.includes(agentName))
+          const rect = label?.getBoundingClientRect()
+          const inside = rect && rect.width > 0 && rect.left >= left && rect.right <= right && document.documentElement.scrollWidth <= pageWidth
+          if (!inside) window.__labelInsideSince = null
+          else window.__labelInsideSince ??= performance.now()
+          return inside && performance.now() - window.__labelInsideSince >= 300
+        },
+        [overflowAgentName, left, right, pageWidth],
+        // Generous budget: the clamp reruns on a resize-scheduled animation
+        // frame, which lags under CI/VM load.
+        { timeout: 10000 },
+      )
+      .then(() => null, (failure) => failure)
+    if (!error) return null
+    const box = await a.locator('.agent-cursor-label', { hasText: overflowAgentName }).first().boundingBox().catch(() => null)
+    const width = await a.evaluate(() => document.documentElement.scrollWidth).catch(() => null)
+    return `box=${JSON.stringify(box)} pageWidth=${width} (${String(error).split('\n')[0]})`
+  }
   await a.setViewportSize({ width: 390, height: 844 })
-  await a
-    .waitForFunction(
-      (agentName) => {
-        const label = Array.from(document.querySelectorAll('.agent-cursor-label')).find((el) =>
-          el.textContent?.includes(agentName),
-        )
-        if (!label) return false
-        const rect = label.getBoundingClientRect()
-        // 1px tolerance: sub-pixel font metrics vary per platform.
-        return rect.left >= 7 && rect.right <= 383 && document.documentElement.scrollWidth <= 390
-      },
-      overflowAgentName,
-      // Generous budget: the clamp reruns on a resize-scheduled animation
-      // frame, which lags under CI/VM load.
-      { timeout: 10000 },
-    )
-    .catch(() => null)
-  const cursorBox = await a.locator('.agent-cursor-label', { hasText: overflowAgentName }).first().boundingBox()
-  const pageWidth = await a.evaluate(() => document.documentElement.scrollWidth)
   // 1px tolerance: sub-pixel font metrics vary per platform.
-  if (cursorBox && cursorBox.x >= 7 && cursorBox.x + cursorBox.width <= 383 && pageWidth <= 390) {
+  const mobileEscape = await labelStaysInside(7, 383, 390)
+  if (!mobileEscape) {
     ok('agent pseudo-cursor label stays inside the mobile viewport')
   } else {
-    fail(`agent pseudo-cursor label escapes mobile viewport: box=${JSON.stringify(cursorBox)} pageWidth=${pageWidth}`)
+    fail(`agent pseudo-cursor label escapes mobile viewport: ${mobileEscape}`)
   }
   const cursorMoveAnchor = await a.locator('.milkdown .ProseMirror h1').first().innerText()
   await fetch(`${api}/presence`, {
@@ -2364,27 +2415,11 @@ try {
   )
   // ResizeObserver and the cursor clamp settle after the panel transition.
   // Assert the resulting geometry rather than sampling a fixed animation frame.
-  await a.waitForFunction((agentName) => {
-    const label = [...document.querySelectorAll('.agent-cursor-label')].find((el) => el.textContent?.includes(agentName))
-    const rect = label?.getBoundingClientRect()
-    return rect && rect.left >= 8 && rect.right <= innerWidth - 8 && document.documentElement.scrollWidth <= innerWidth
-  }, overflowAgentName, { timeout: 10000 }).catch(() => null)
-  const shiftedCursorBox = await a
-    .locator('.agent-cursor-label', { hasText: overflowAgentName })
-    .first()
-    .boundingBox()
-  const shiftedPageWidth = await a.evaluate(() => document.documentElement.scrollWidth)
-  if (
-    shiftedCursorBox &&
-    shiftedCursorBox.x >= 8 &&
-    shiftedCursorBox.x + shiftedCursorBox.width <= 1272 &&
-    shiftedPageWidth <= 1280
-  ) {
+  const panelEscape = await labelStaysInside(8, 1272, 1280)
+  if (!panelEscape) {
     ok('agent pseudo-cursor stays clamped after the side panel changes layout')
   } else {
-    fail(
-      `agent pseudo-cursor escaped after panel layout: box=${JSON.stringify(shiftedCursorBox)} pageWidth=${shiftedPageWidth}`,
-    )
+    fail(`agent pseudo-cursor escaped after panel layout: ${panelEscape}`)
   }
   await a.keyboard.press('Meta+\\')
   await a.waitForFunction(
@@ -2829,7 +2864,16 @@ try {
   const jumpCard = jumpWin.locator('.comment-card--linked', { hasText: 'Jump target comment.' })
   await jumpCard.waitFor({ timeout: 10000 })
   await jumpWin.mouse.move(400, 400)
-  await jumpWin.mouse.wheel(0, 100000)
+  // A wheel gesture keeps animating after it reaches the bottom and would pull
+  // the page back down under the jump, so let each scroll end before the next.
+  const armScrollEnd = () => jumpWin.evaluate(() => {
+    window.__scrollEnded = false
+    document.addEventListener('scrollend', () => { window.__scrollEnded = true }, { once: true })
+  })
+  const scrollEnded = () => jumpWin.waitForFunction(() => window.__scrollEnded)
+  await armScrollEnd()
+  await jumpWin.mouse.wheel(0, await jumpWin.evaluate(() => document.documentElement.scrollHeight - window.innerHeight))
+  await scrollEnded()
   // Agent pseudo-cursor widgets ("✦ check") inject their labels into
   // paragraph textContent — strip them before matching, as elsewhere.
   await jumpWin.waitForFunction(
@@ -2844,6 +2888,7 @@ try {
     jumpAnchorPara,
     { timeout: 5000 },
   )
+  await armScrollEnd()
   await jumpCard.locator('.comment-body').click()
   const jumpLanded = await jumpWin
     .waitForFunction(
@@ -2867,6 +2912,8 @@ try {
 
   // Multi-paragraph selection comments resolve through the multi-block span
   // fallback: the card links and jumps instead of reading as stale.
+  // The jump scrolls smoothly; boxes read before it ends put the drag on other text.
+  await scrollEnded()
   const jumpParaBox = (text) =>
     jumpWin.locator('.milkdown .ProseMirror p', { hasText: text }).first().boundingBox()
   const spanStart = await jumpParaBox('Filler paragraph 3 keeps')
@@ -2877,6 +2924,10 @@ try {
     steps: 8,
   })
   await jumpWin.mouse.up()
+  const spanText = await jumpWin.evaluate(() => String(getSelection()))
+  if (!/paragraph 3 keeps[^]*paragraph 4 keeps/.test(spanText)) {
+    throw new Error(`the drag selected other text: ${JSON.stringify(spanText.slice(0, 160))}`)
+  }
   await jumpWin.locator('.selection-toolbar button', { hasText: 'Comment' }).click()
   const spanComment = `Cross-paragraph comment ${Date.now()}`
   await jumpWin.getByPlaceholder('Say something about this…').fill(spanComment)
