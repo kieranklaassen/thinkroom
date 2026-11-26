@@ -1,0 +1,14 @@
+# Shared Compound Engineering settings for this repository.
+
+autonomous_profile: hands-off
+autonomous_motions: [main-red, backlog, stack, climb]
+autonomous_landing: pull-request
+autonomous_ci: required
+autonomous_merge_method: squash
+autonomous_landing_steps:
+  - Keep each change focused, explain the user-facing outcome, and include tests for behavior changes.
+autonomous_checks:
+  - run: npm ci --no-audit --no-fund && npm run check
+  - run: bundle install --quiet && bin/rubocop
+  - run: bundle install --quiet && bin/bundler-audit
+  - run: export TMPDIR=$(mktemp -d /tmp/tr.XXXXXX) RAILS_ENV=test && trap 'rm -rf "$TMPDIR"' EXIT && bundle install --quiet && npm ci --no-audit --no-fund && bin/vite build --mode test && bin/rails db:test:prepare test
