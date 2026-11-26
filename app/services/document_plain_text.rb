@@ -7,6 +7,13 @@ class DocumentPlainText
 
   class << self
     def call(format:, content:)
+      text(fragment(format:, content:), format:)
+    end
+
+    # The parsed source. A caller that needs both the title and the text parses
+    # once and reads the title (DocumentTitle.in) before the text, which
+    # replaces sketches in place.
+    def fragment(format:, content:)
       source = content.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "�")
       html = if format == "html"
         source
@@ -14,18 +21,39 @@ class DocumentPlainText
         Commonmarker.to_html(source, plugins: MARKDOWN_PLUGINS)
       end
 
-      fragment = Nokogiri::HTML5.fragment(html)
+      Nokogiri::HTML5.fragment(html)
+    end
+
+    # With `at_least`, reading may stop once the result has that many
+    # characters; the result is then a prefix of the full text.
+    def text(fragment, format:, at_least: nil)
       replace_sketches(fragment, format:)
 
-      fragment
-        .xpath(".//text()")
-        .map(&:text)
-        .join(BLOCK_SEPARATOR)
-        .squish
-        .gsub(/\s+([.,;:!?])/, '\1')
+      pieces = []
+      collected = 0
+      enough = at_least
+      fragment.xpath(".//text()").each do |node|
+        piece = node.text
+        pieces << piece
+        next unless at_least
+
+        collected += piece.length
+        next if collected < enough
+
+        text = normalize(pieces)
+        return text if text.length >= at_least
+
+        # Whitespace collapsed below the target: read as much again.
+        enough = collected * 2
+      end
+      normalize(pieces)
     end
 
     private
+
+    def normalize(pieces)
+      pieces.join(BLOCK_SEPARATOR).squish.gsub(/\s+([.,;:!?])/, '\1')
+    end
 
     def replace_sketches(fragment, format:)
       if format == "html"
@@ -37,7 +65,8 @@ class DocumentPlainText
             format_version: node["data-format-version"]
           )
         end
-      else
+      elsif fragment.at_xpath(".//pre")
+        # A CSS search visits every top-level block, so it waits for a code block.
         fragment.css('pre[lang="excalidraw"] > code').each do |node|
           # A malformed body (unparseable, non-Hash, missing scene, or a value
           # that can't be re-encoded) returns nil and is left visible instead of

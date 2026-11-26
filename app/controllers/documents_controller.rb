@@ -125,8 +125,13 @@ class DocumentsController < InertiaController
 
     auto_claim_recent_document(document, link_preview_request:)
     remember_recent(document) unless link_preview_request
-    @agent_guide = AgentGuide.text(document, request.base_url)
-    @open_graph = document_open_graph(document)
+    # Only the HTML layout prints these. Inertia visits and the partial reloads
+    # behind every live event return JSON, so they skip the document parse.
+    unless request.inertia?
+      @agent_guide = AgentGuide.text(document, request.base_url)
+      social_preview = DocumentSocialPreview.new(document)
+      @open_graph = document_open_graph(document, social_preview)
+    end
 
     # Editor capabilities for THIS view, mirrored into the static preview so
     # mode-dependent chrome (Mermaid source visibility, sketch caption
@@ -191,7 +196,7 @@ class DocumentsController < InertiaController
         render_hints: document.render_hints || {},
         # First-H1 title derived on the server so the header reads correctly on
         # first paint, before the editor mounts and derives the same title.
-        display_title: document.display_title
+        display_title: social_preview&.display_title || document.display_title
       )
       },
       # Ownership rides its own lazy prop so claim events reload cheaply —
@@ -682,8 +687,7 @@ class DocumentsController < InertiaController
     }
   end
 
-  def document_open_graph(document)
-    preview = DocumentSocialPreview.new(document)
+  def document_open_graph(document, preview)
     {
       title: preview.title,
       page_title: preview.page_title,
