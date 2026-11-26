@@ -80,6 +80,7 @@ import { agentCursors } from './agent_cursors'
 import { scrollSettle } from './scroll_settle'
 import { longDocument } from './long_document'
 import { codeBlockView } from './code_block_view'
+import { tolerateMarkdownAttributes } from './schema_attributes'
 import { configureCleanClipboard } from './clipboard'
 import { renderSoftBreaks } from './line_breaks'
 import { interactiveTaskListItems, taskPersistenceCtx } from './task_list_items'
@@ -410,6 +411,7 @@ function CollabEditor({
         .use(commonmark)
         .use(codeBlockView)
         .use(gfm)
+        .use(tolerateMarkdownAttributes)
         .use(interactiveTaskListItems)
         .use(tableBlock)
         .use(listener)
