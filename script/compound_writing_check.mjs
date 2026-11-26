@@ -141,12 +141,21 @@ try {
   await page.waitForFunction(() => [...CSS.highlights.keys()].some((name) => /^cw-\d+-fill$/.test(name)), undefined, { timeout: 20000 })
     .catch(() => { throw new Error('no cw-<slot>-fill highlight arrived within 20s of the run') })
   ok('lenses paint fill highlights for their phrase findings')
-  const utilizeCard = page.locator('.compound-card').filter({ hasText: 'utilize' })
-  await utilizeCard.first().waitFor()
-  const cardText = (await utilizeCard.first().innerText()).toLowerCase()
-  check(cardText.includes('ai check') && cardText.includes('leverage'), 'the paragraph\'s margin card groups the AI check findings on "utilize" and "leverage"')
   await page.locator('.compound-status').filter({ hasText: /Finished/ }).waitFor({ timeout: 20000 })
   ok('the pass finishes and the panel says so')
+  // Until the pass finishes a card holds whichever lenses have answered, and
+  // afterwards it folds past three rows in an order the lenses' timing decides.
+  // Read every row of the finished cards.
+  const foldToggles = (label) => page.locator('.compound-card-more').filter({ hasText: label })
+  while (await foldToggles(/^Show \d+ more$/).count()) await foldToggles(/^Show \d+ more$/).first().click()
+  const cards = await page.locator('.compound-card').evaluateAll((elements) => elements.map((card) =>
+    [...card.querySelectorAll('.compound-card-row')].map((row) => [
+      row.querySelector('.compound-card-reviewer')?.textContent,
+      row.querySelector('.compound-card-quote')?.textContent,
+    ])))
+  const quotes = (rows, quote) => rows.some(([reviewer, text]) => reviewer === 'AI check' && text === quote)
+  check(cards.some((rows) => quotes(rows, 'utilize') && quotes(rows, 'leverage')), 'the paragraph\'s margin card groups the AI check findings on "utilize" and "leverage"')
+  while (await foldToggles('Show fewer').count()) await foldToggles('Show fewer').first().click()
   const aiCount = Number(await lensRow(page, 'AI check').locator('.compound-count').innerText())
   check(aiCount >= 4, `AI check reports its findings (${aiCount})`)
   check((await lensRow(page, 'Nemesis').locator('.compound-count').count()) === 0, 'a lens that is off has no count')
