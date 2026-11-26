@@ -530,7 +530,7 @@ function CollabEditor({
             )
           }
           // Persist the applied (and attributed) seed NOW over HTTP
-          // (keepalive) instead of waiting for the cable handshake. The cable
+          // (keepalive when it fits) instead of waiting for the cable handshake. The cable
           // path drops local updates until 'sync' arrives, so a claimant that
           // navigated away within the first seconds burned the seed claim and
           // left the document blank for every viewer until the claim timeout.
@@ -653,8 +653,8 @@ function CollabEditor({
   }, [suggesting, loading])
 
   // Sketch writes bypass the debounced snapshot: a closed sketch editor must
-  // be durable immediately (persistCurrentState uses keepalive so a save
-  // followed by navigation still lands).
+  // be durable immediately (persistCurrentState uses keepalive when the save
+  // fits, so one followed by navigation still lands).
   const persistSketchChange = (ctx: Ctx) => {
     const session = getSession(slug)
     if (session) {

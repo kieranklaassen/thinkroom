@@ -95,7 +95,6 @@ const DEFAULT_SEED_RETRY_MS = 3_000
 // Browsers refuse a keepalive request that takes the total of the page's
 // keepalive bodies in flight past 64 KiB.
 const KEEPALIVE_LIMIT_BYTES = 64 * 1024
-// Larger saves leave the derived snapshot to its debounce.
 const MAX_SAVE_WITH_SNAPSHOT_BYTES = 60 * 1024
 let keepaliveBytesInFlight = 0
 
