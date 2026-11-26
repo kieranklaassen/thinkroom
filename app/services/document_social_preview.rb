@@ -12,12 +12,18 @@ class DocumentSocialPreview
   ].freeze
   PAGE_TITLE_FALLBACK_SUFFIX = " · Thinkroom"
 
-  attr_reader :title, :description, :page_title, :author, :labels
+  # Code points read per grapheme kept; see #bound.
+  CODE_POINTS_PER_GRAPHEME = 4
+
+  attr_reader :title, :description, :page_title, :author, :labels, :display_title
 
   def initialize(document)
-    raw_title = document.display_title.to_s.squish.presence || "Untitled"
+    fragment = DocumentPlainText.fragment(format: document.content_format, content: document.current_content)
+    # Same value as Document#display_title, from the one parse this card needs.
+    @display_title = (DocumentTitle.in(fragment) if document.current_content.present?) || document.title
+    raw_title = @display_title.to_s.squish.presence || "Untitled"
     @title = bound(raw_title, TITLE_MAX_GRAPHEMES)
-    @description = description_for(document, raw_title)
+    @description = description_for(document, fragment, raw_title)
     @page_title = page_title_for(raw_title)
     @author = author_for(document)
     @labels = labels_for(document)
@@ -46,8 +52,11 @@ class DocumentSocialPreview
     Array(document.tags).filter_map { |tag| tag.to_s.squish.presence }.first(LABELS_MAX)
   end
 
-  def description_for(document, raw_title)
-    plain_text = document.plain_text.to_s.squish
+  def description_for(document, fragment, raw_title)
+    # Enough text that cutting the rest cannot change the clipped excerpt: the
+    # title it may start with, plus more than #bound reads.
+    at_least = raw_title.length + ((DESCRIPTION_MAX_GRAPHEMES + 1) * CODE_POINTS_PER_GRAPHEME)
+    plain_text = DocumentPlainText.text(fragment, format: document.content_format, at_least:).squish
     excerpt = if plain_text == raw_title || plain_text.start_with?("#{raw_title} ")
       plain_text.delete_prefix(raw_title).strip
     else
@@ -70,7 +79,7 @@ class DocumentSocialPreview
     # Grapheme-scan only what can matter: a whole long document's plain text
     # would cost more than the rest of the page render. Four code points per
     # grapheme comfortably covers the clusters that appear in prose.
-    prefix = text[0, maximum * 4]
+    prefix = text[0, maximum * CODE_POINTS_PER_GRAPHEME]
     graphemes = prefix.scan(/\X/)
     return text if prefix.length == text.length && graphemes.length <= maximum
 

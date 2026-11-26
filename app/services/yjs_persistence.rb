@@ -284,10 +284,8 @@ class YjsPersistence
 
     def with_document_lock(document)
       lock_for(document.id).synchronize do
-        document.with_lock do
-          document.reload
-          yield
-        end
+        # with_lock has just reloaded the row inside its transaction.
+        document.with_lock { yield }
       end
     end
 
@@ -308,7 +306,9 @@ class YjsPersistence
     #     out-of-order deletes whose target structs have not arrived) -> retain
     #     for the next fold (stamping retained_at), quarantine after ORPHAN_TTL
     def perform_fold(document)
-      rows = document.yjs_document_updates.order(:id).to_a
+      # Not through the association, which would wire every row back to the
+      # document; a fold reads only the rows' own columns.
+      rows = YjsDocumentUpdate.where(document_id: document.id).order(:id).to_a
       return load_or_heal_ydoc(document) if rows.empty?
 
       ActiveSupport::Notifications.instrument("fold.yjs", document_id: document.id, rows: rows.length) do |payload|
