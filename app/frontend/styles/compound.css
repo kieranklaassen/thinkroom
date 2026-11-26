@@ -39,41 +39,41 @@
 
 /* Phrase findings fill; sentence findings (and demoted overlaps) underline.
  * Highlight pseudo-elements inherit custom properties from the root. */
-::highlight(cw-0-fill) { background-color: rgb(var(--cw-0-rgb) / 0.25); }
-::highlight(cw-0-under) { text-decoration: underline 2px rgb(var(--cw-0-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-1-fill) { background-color: rgb(var(--cw-1-rgb) / 0.25); }
-::highlight(cw-1-under) { text-decoration: underline 2px rgb(var(--cw-1-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-2-fill) { background-color: rgb(var(--cw-2-rgb) / 0.25); }
-::highlight(cw-2-under) { text-decoration: underline 2px rgb(var(--cw-2-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-3-fill) { background-color: rgb(var(--cw-3-rgb) / 0.25); }
-::highlight(cw-3-under) { text-decoration: underline 2px rgb(var(--cw-3-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-4-fill) { background-color: rgb(var(--cw-4-rgb) / 0.25); }
-::highlight(cw-4-under) { text-decoration: underline 2px rgb(var(--cw-4-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-5-fill) { background-color: rgb(var(--cw-5-rgb) / 0.25); }
-::highlight(cw-5-under) { text-decoration: underline 2px rgb(var(--cw-5-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-6-fill) { background-color: rgb(var(--cw-6-rgb) / 0.25); }
-::highlight(cw-6-under) { text-decoration: underline 2px rgb(var(--cw-6-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-7-fill) { background-color: rgb(var(--cw-7-rgb) / 0.25); }
-::highlight(cw-7-under) { text-decoration: underline 2px rgb(var(--cw-7-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-8-fill) { background-color: rgb(var(--cw-8-rgb) / 0.25); }
-::highlight(cw-8-under) { text-decoration: underline 2px rgb(var(--cw-8-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-9-fill) { background-color: rgb(var(--cw-9-rgb) / 0.25); }
-::highlight(cw-9-under) { text-decoration: underline 2px rgb(var(--cw-9-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-10-fill) { background-color: rgb(var(--cw-10-rgb) / 0.25); }
-::highlight(cw-10-under) { text-decoration: underline 2px rgb(var(--cw-10-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-11-fill) { background-color: rgb(var(--cw-11-rgb) / 0.25); }
-::highlight(cw-11-under) { text-decoration: underline 2px rgb(var(--cw-11-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-12-fill) { background-color: rgb(var(--cw-12-rgb) / 0.25); }
-::highlight(cw-12-under) { text-decoration: underline 2px rgb(var(--cw-12-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-13-fill) { background-color: rgb(var(--cw-13-rgb) / 0.25); }
-::highlight(cw-13-under) { text-decoration: underline 2px rgb(var(--cw-13-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-14-fill) { background-color: rgb(var(--cw-14-rgb) / 0.25); }
-::highlight(cw-14-under) { text-decoration: underline 2px rgb(var(--cw-14-rgb) / 0.7); text-underline-offset: 3px; }
-::highlight(cw-15-fill) { background-color: rgb(var(--cw-15-rgb) / 0.25); }
-::highlight(cw-15-under) { text-decoration: underline 2px rgb(var(--cw-15-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-0-fill']) ::highlight(cw-0-fill) { background-color: rgb(var(--cw-0-rgb) / 0.25); }
+:where([data-highlights~='cw-0-under']) ::highlight(cw-0-under) { text-decoration: underline 2px rgb(var(--cw-0-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-1-fill']) ::highlight(cw-1-fill) { background-color: rgb(var(--cw-1-rgb) / 0.25); }
+:where([data-highlights~='cw-1-under']) ::highlight(cw-1-under) { text-decoration: underline 2px rgb(var(--cw-1-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-2-fill']) ::highlight(cw-2-fill) { background-color: rgb(var(--cw-2-rgb) / 0.25); }
+:where([data-highlights~='cw-2-under']) ::highlight(cw-2-under) { text-decoration: underline 2px rgb(var(--cw-2-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-3-fill']) ::highlight(cw-3-fill) { background-color: rgb(var(--cw-3-rgb) / 0.25); }
+:where([data-highlights~='cw-3-under']) ::highlight(cw-3-under) { text-decoration: underline 2px rgb(var(--cw-3-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-4-fill']) ::highlight(cw-4-fill) { background-color: rgb(var(--cw-4-rgb) / 0.25); }
+:where([data-highlights~='cw-4-under']) ::highlight(cw-4-under) { text-decoration: underline 2px rgb(var(--cw-4-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-5-fill']) ::highlight(cw-5-fill) { background-color: rgb(var(--cw-5-rgb) / 0.25); }
+:where([data-highlights~='cw-5-under']) ::highlight(cw-5-under) { text-decoration: underline 2px rgb(var(--cw-5-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-6-fill']) ::highlight(cw-6-fill) { background-color: rgb(var(--cw-6-rgb) / 0.25); }
+:where([data-highlights~='cw-6-under']) ::highlight(cw-6-under) { text-decoration: underline 2px rgb(var(--cw-6-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-7-fill']) ::highlight(cw-7-fill) { background-color: rgb(var(--cw-7-rgb) / 0.25); }
+:where([data-highlights~='cw-7-under']) ::highlight(cw-7-under) { text-decoration: underline 2px rgb(var(--cw-7-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-8-fill']) ::highlight(cw-8-fill) { background-color: rgb(var(--cw-8-rgb) / 0.25); }
+:where([data-highlights~='cw-8-under']) ::highlight(cw-8-under) { text-decoration: underline 2px rgb(var(--cw-8-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-9-fill']) ::highlight(cw-9-fill) { background-color: rgb(var(--cw-9-rgb) / 0.25); }
+:where([data-highlights~='cw-9-under']) ::highlight(cw-9-under) { text-decoration: underline 2px rgb(var(--cw-9-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-10-fill']) ::highlight(cw-10-fill) { background-color: rgb(var(--cw-10-rgb) / 0.25); }
+:where([data-highlights~='cw-10-under']) ::highlight(cw-10-under) { text-decoration: underline 2px rgb(var(--cw-10-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-11-fill']) ::highlight(cw-11-fill) { background-color: rgb(var(--cw-11-rgb) / 0.25); }
+:where([data-highlights~='cw-11-under']) ::highlight(cw-11-under) { text-decoration: underline 2px rgb(var(--cw-11-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-12-fill']) ::highlight(cw-12-fill) { background-color: rgb(var(--cw-12-rgb) / 0.25); }
+:where([data-highlights~='cw-12-under']) ::highlight(cw-12-under) { text-decoration: underline 2px rgb(var(--cw-12-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-13-fill']) ::highlight(cw-13-fill) { background-color: rgb(var(--cw-13-rgb) / 0.25); }
+:where([data-highlights~='cw-13-under']) ::highlight(cw-13-under) { text-decoration: underline 2px rgb(var(--cw-13-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-14-fill']) ::highlight(cw-14-fill) { background-color: rgb(var(--cw-14-rgb) / 0.25); }
+:where([data-highlights~='cw-14-under']) ::highlight(cw-14-under) { text-decoration: underline 2px rgb(var(--cw-14-rgb) / 0.7); text-underline-offset: 3px; }
+:where([data-highlights~='cw-15-fill']) ::highlight(cw-15-fill) { background-color: rgb(var(--cw-15-rgb) / 0.25); }
+:where([data-highlights~='cw-15-under']) ::highlight(cw-15-under) { text-decoration: underline 2px rgb(var(--cw-15-rgb) / 0.7); text-underline-offset: 3px; }
 
 /* Hovering a finding (panel row or margin card) spotlights its text. */
-::highlight(cw-hot) {
+:where([data-highlights~='cw-hot']) ::highlight(cw-hot) {
   background-color: rgb(var(--cw-9-rgb) / 0.32);
 }
 

@@ -29,6 +29,13 @@ export interface CommentAnchors {
   jumpToComment: (comment: CommentPayload) => void
 }
 
+const sameRanges = (a: Map<number, CommentRange>, b: Map<number, CommentRange>): boolean =>
+  a.size === b.size &&
+  [...b].every(([id, range]) => {
+    const other = a.get(id)
+    return other !== undefined && other.from === range.from && other.to === range.to
+  })
+
 /**
  * Connects rail comment cards to the text they discuss. Anchors resolve
  * through the same unique-quote matcher as the composer highlight, then
@@ -103,7 +110,7 @@ export function useCommentAnchors({
       if (dom && range) { ranges.set(comment.id, dom); positions.set(comment.id, range) }
     }
     rangesRef.current = ranges
-    setAnchorRanges(positions)
+    setAnchorRanges((prev) => (sameRanges(prev, positions) ? prev : positions))
     flashTimers.current.forEach(clearTimeout)
     flashTimers.current.length = 0
     clearHighlight('comment-anchor-flash')
