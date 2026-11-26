@@ -129,6 +129,8 @@ export interface EditorProps {
   /** True when documents#show atomically claimed the seed for this page
    *  load — the props-first path that skips the WebSocket round-trip. */
   seedGranted?: boolean
+  /** Identifies that grant; returned with the first seed write. */
+  seedClaim?: string | null
   /** Who authored the seed source. Non-human seeds get their text
    *  explicitly AI-attributed after the collab connection renders them —
    *  otherwise seeded text is unmarked and counts as human in the
@@ -164,6 +166,10 @@ export interface EditorProps {
   onSpans?: (spans: ProvenanceSpan[]) => void
   onSelection?: SelectionCallback
   onTitleChange?: (title: string) => void
+  /** The local doc no longer matches the server's and must be reloaded. */
+  onStale?: () => void
+  /** The document no longer exists on the server. */
+  onRejected?: () => void
   /** User-facing notices the editor cannot render itself: an edit refused
    *  for pushing the document past its size limit, a durable snapshot the
    *  server refused as too large. */
@@ -297,6 +303,7 @@ function CollabEditor({
   seedContent,
   seedVersion,
   seedGranted,
+  seedClaim,
   seedAuthorKind,
   seedAuthorName,
   canWrite = true,
@@ -310,14 +317,16 @@ function CollabEditor({
   onSpans,
   onSelection,
   onTitleChange,
+  onStale,
+  onRejected,
   onNotice,
 }: EditorProps) {
   const [sketchDraft, setSketchDraft] = useState<ActiveSketch | undefined>(undefined)
   const insertSketchRef = useRef<() => void>(() => undefined)
   const saveSketchRef = useRef<(data: SketchData) => void>(() => undefined)
   const deleteSketchRef = useRef<(id: string) => void>(() => undefined)
-  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onNotice })
-  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onNotice }
+  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onRejected, onNotice })
+  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onRejected, onNotice }
   // Ref so the editable() closure always reads the live value; the effect
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
@@ -454,6 +463,14 @@ function CollabEditor({
       contentGeneration,
     )
     callbacksRef.current.onStatus?.('connecting')
+    // Bound before the editor is ready: a client still waiting for content has
+    // no handle to report through.
+    const stale = () => callbacksRef.current.onStale?.()
+    const rejected = () => callbacksRef.current.onRejected?.()
+    provider.on('stale', stale)
+    provider.on('rejected', rejected)
+    // Discarded while no editor was listening (a remount reusing the session).
+    if (provider.discarded) stale()
 
     let cancelled = false
     let unbindMermaidHints: (() => void) | null = null
@@ -566,17 +583,21 @@ function CollabEditor({
       callbacksRef.current.onStatus?.('live')
     }
 
+    // Per grant, not per source: a refused claimant that reloads and wins the
+    // same source again must be able to apply it.
+    const seedGrant = `${seedVersion}:${seedClaim}`
     // A hydrated doc binds immediately — no visible empty-editor frame. A
     // fresh doc whose seed claim arrived with the page response also binds
     // immediately, applying the template from props (the one-shot consume in
     // start() plus applyTemplate's remote-empty guard keep this race-safe
     // against a channel-granted seeder). Only a fresh doc with no grant —
-    // someone else holds the claim — waits for the sync handshake.
+    // someone else holds the claim — waits for content or the channel's grant.
     if (provider.synced || ydoc.store.clients.size > 0) {
       start()
-    } else if (seedGranted && seedContent && !seedAlreadyApplied(slug, seedVersion)) {
-      markSeedApplied(slug, seedVersion)
+    } else if (seedGranted && seedContent && !seedAlreadyApplied(slug, seedGrant)) {
+      markSeedApplied(slug, seedGrant)
       provider.seedContent = seedContent
+      provider.seedClaim = seedClaim ?? null
       provider.seedFormat = contentFormat
       provider.seedAuthorKind = seedAuthorKind ?? null
       provider.seedAuthorName = seedAuthorName ?? null
@@ -588,6 +609,8 @@ function CollabEditor({
     return () => {
       cancelled = true
       provider.off('synced', start)
+      provider.off('stale', stale)
+      provider.off('rejected', rejected)
       unbindMermaidHints?.()
       snapshots.dispose()
       try {

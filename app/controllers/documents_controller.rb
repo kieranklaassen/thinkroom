@@ -143,6 +143,7 @@ class DocumentsController < InertiaController
     # a blank document until it expires.
     seed_granted = initial_render? && !prefetch_request? && !link_preview_request &&
       writable && document.try_claim_seed
+    seed_claim = document.seed_claim_token if seed_granted
     preview_editable = writable && %w[edit suggest].include?(mode)
     preview_sketch_interactive = writable && mode == "edit"
 
@@ -168,6 +169,8 @@ class DocumentsController < InertiaController
         seed_content: (document.seed_content if seed_granted),
         seed_version: document.updated_at.iso8601(6),
         seed_granted: seed_granted,
+        # Returned with the first seed write; see Document#seed_claim_token.
+        seed_claim: seed_claim,
         seed_author_kind: document.seed_author_kind,
         seed_author_name: document.seed_author_name,
         has_state: document.yjs_state.present?,
@@ -464,7 +467,9 @@ class DocumentsController < InertiaController
     return head :content_too_large if decoded.bytesize > MAX_SYNC_UPDATE_BYTES
 
     generation = YjsPersistence.parse_generation(params[:generation])
-    YjsPersistence.merge_bytes(document, decoded, generation:, token: owner_token, user: current_user)
+    YjsPersistence.merge_bytes(
+      document, decoded, generation:, seed_claim: params[:seed_claim], token: owner_token, user: current_user
+    )
     SyncChannel.broadcast_to(document, {
       type: "update",
       update:,
@@ -484,6 +489,8 @@ class DocumentsController < InertiaController
     end
 
     head :no_content
+  rescue Document::StaleSeedClaimError
+    render json: { error: "This seed was superseded; reload the document.", seed_refused: true }, status: :conflict
   rescue ArgumentError
     render json: { error: "Invalid Yjs update." }, status: :unprocessable_entity
   end

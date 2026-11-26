@@ -36,6 +36,82 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert doc.reload.yjs_state.present?, "the read path folds the tail into the snapshot"
   end
 
+  # Two independent claimants: A's claim expires before A writes, B takes over.
+  def expired_then_reclaimed(doc)
+    first = Document.find(doc.id)
+    assert first.try_claim_seed
+    second = nil
+    travel(Document::SEED_CLAIM_TIMEOUT + 1.second) do
+      second = Document.find(doc.id)
+      assert second.try_claim_seed
+    end
+    [ first.seed_claim_token, second.seed_claim_token ]
+  end
+
+  test "a slow claimant's seed is refused after the next claimant wrote, leaving one copy" do
+    doc = Document.create!(title: "Slow claimant", seed_markdown: "body")
+    claim_a, claim_b = expired_then_reclaimed(doc)
+
+    YjsPersistence.merge(doc, b64_update_for("body"), seed_claim: claim_b)
+    assert_raises(Document::StaleSeedClaimError) do
+      YjsPersistence.merge(doc, b64_update_for("body"), seed_claim: claim_a)
+    end
+
+    assert_equal "body", text_of(doc)
+  end
+
+  test "a superseded claimant's first write is accepted while nothing is stored, and the newer claimant's is refused" do
+    doc = Document.create!(title: "Slow claimant", seed_markdown: "body")
+    claim_a, claim_b = expired_then_reclaimed(doc)
+    author = Y::Doc.new
+
+    YjsPersistence.merge(doc, b64_update_for("body", from_doc: author), seed_claim: claim_a)
+    assert_equal "seeded", doc.reload.seed_state
+    assert_raises(Document::StaleSeedClaimError) do
+      YjsPersistence.merge(doc, b64_update_for("body"), seed_claim: claim_b)
+    end
+    assert_equal "body", text_of(doc)
+
+    YjsPersistence.merge(doc, b64_update_for(" edited", from_doc: author), seed_claim: claim_a)
+    assert_equal "body edited", text_of(doc)
+    assert_not Document.find(doc.id).try_claim_seed
+  end
+
+  test "a current claim is refused when someone else's content is already stored" do
+    doc = Document.create!(title: "Occupied", seed_markdown: "body")
+    assert doc.try_claim_seed
+    claim = doc.seed_claim_token
+    YjsPersistence.merge(doc, b64_update_for("body"))
+
+    assert_raises(Document::StaleSeedClaimError) do
+      YjsPersistence.merge(doc, b64_update_for("body"), seed_claim: claim)
+    end
+    assert_equal "body", text_of(doc)
+  end
+
+  test "a claimant repeating its own seed, with later edits, is accepted" do
+    doc = Document.create!(title: "Repeated", seed_markdown: "body")
+    assert doc.try_claim_seed
+    claim = doc.seed_claim_token
+    author = Y::Doc.new
+
+    YjsPersistence.merge(doc, b64_update_for("body", from_doc: author), seed_claim: claim)
+    YjsPersistence.merge(doc, b64_update_for(" edited", from_doc: author), seed_claim: claim)
+
+    assert_equal "body edited", text_of(doc)
+  end
+
+  test "a malformed seed claim is refused rather than treated as absent" do
+    doc = Document.create!(title: "Malformed", seed_markdown: "body")
+    assert doc.try_claim_seed
+
+    [ "", "nope", 7, {} ].each do |claim|
+      assert_raises(Document::StaleSeedClaimError) do
+        YjsPersistence.merge(doc, b64_update_for("body"), seed_claim: claim)
+      end
+    end
+  end
+
   test "merge appends to the update log without loading the stored document" do
     doc = Document.create!(title: "Appended")
 
@@ -974,6 +1050,32 @@ class YjsPersistenceTest < ActiveSupport::TestCase
   end
 
   # --- Handshake serving ----------------------------------------------------
+
+  test "a handshake serves state another connection folded after this row was loaded" do
+    doc = Document.create!(title: "Folded underneath")
+    joining = Document.find(doc.id)
+    YjsPersistence.merge(doc, b64_update_for("stored content"))
+    YjsPersistence.fold!(doc)
+
+    full_b64, = YjsPersistence.state_b64(joining)
+    client = Y::Doc.new
+    client.apply_update(Base64.strict_decode64(full_b64))
+    assert_equal "stored content", client.get_text("t").to_s
+  end
+
+  test "a differential handshake serves state another connection folded after this row was loaded" do
+    doc = Document.create!(title: "Folded underneath")
+    joining = Document.find(doc.id)
+    YjsPersistence.merge(doc, b64_update_for("stored content"))
+    YjsPersistence.fold!(doc)
+
+    other = Y::Doc.new
+    other.get_text("other") << "x"
+    diff_b64, = YjsPersistence.diff_b64(joining, Base64.strict_encode64(other.encode_state_vector))
+    client = Y::Doc.new
+    client.apply_update(Base64.strict_decode64(diff_b64))
+    assert_equal "stored content", client.get_text("t").to_s
+  end
 
   test "state_b64 serves the handshake from columns without building a doc" do
     doc = Document.create!(title: "Fast join")
