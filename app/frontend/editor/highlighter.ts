@@ -1,33 +1,28 @@
 import { createHighlighter } from 'shiki'
 import { createParser, type Parser } from '@milkdown/plugin-highlight/shiki'
+import { connectedImport, isOffline } from './connection'
 
 const LANGS = [
   'javascript', 'typescript', 'tsx', 'jsx', 'ruby', 'python', 'json',
   'bash', 'html', 'css', 'markdown', 'sql', 'yaml', 'go', 'rust',
 ]
 
-let parserPromise: Promise<Parser> | null = null
 let readyParser: Parser | null = null
 
 /** Singleton shiki-backed parser for code block highlighting. */
-export function loadShikiParser(): Promise<Parser> {
-  parserPromise ??= createHighlighter({ themes: ['github-light'], langs: LANGS }).then(
-    (highlighter) => {
-      const base = createParser(highlighter, { theme: 'github-light' })
-      // Unknown languages must degrade to plain text, not crash the editor.
-      const safe: Parser = (options) => {
-        try {
-          return base(options)
-        } catch {
-          return []
-        }
-      }
-      readyParser = safe
-      return safe
-    },
-  )
-  return parserPromise
-}
+const shikiParser = connectedImport<Parser>(async () => {
+  const highlighter = await createHighlighter({ themes: ['github-light'], langs: LANGS })
+  const base = createParser(highlighter, { theme: 'github-light' })
+  // Unknown languages must degrade to plain text, not crash the editor.
+  readyParser = (options) => {
+    try {
+      return base(options)
+    } catch {
+      return []
+    }
+  }
+  return readyParser
+})
 
 /**
  * The pending-parser promise handed to prosemirror-highlight while shiki
@@ -67,17 +62,33 @@ class CoalescedLoad extends Promise<void> {
 
 const NEVER = new Promise<never>(() => undefined)
 
-/**
- * Non-blocking parser so the editor never waits on shiki to paint.
- * While the highlighter loads, it returns the in-flight promise —
- * prosemirror-highlight's documented lazy protocol — and the plugin
- * re-renders decorations when it resolves. Once ready, it highlights
- * synchronously. If shiki fails to load, code blocks stay plain text.
- */
-let loadedPromise: Promise<void> | null = null
+let pendingParser: CoalescedLoad | null = null
 
+// One load per page, started only while connected. Browsers remember a failed
+// import, so a load that fails leaves code plain until the page is reloaded.
+const startLoading = (): CoalescedLoad => {
+  if (!pendingParser) {
+    const loaded = shikiParser.whenOnline().then(() => undefined)
+    loaded.catch(() => undefined)
+    pendingParser = new CoalescedLoad(loaded)
+  }
+  return pendingParser
+}
+
+/** Start loading shiki before the first code block asks for it. Skipped
+ * offline: a code block asks again and waits for the connection itself. */
+export const warmHighlighter = (): void => {
+  if (!isOffline()) startLoading()
+}
+
+/**
+ * Non-blocking parser so the editor never waits on shiki to paint, and a
+ * document without code never loads it. While the highlighter loads, it
+ * returns the in-flight promise — prosemirror-highlight's documented lazy
+ * protocol — and the plugin re-renders decorations when it resolves. Once
+ * ready, it highlights synchronously. If shiki fails to load, code blocks stay
+ * plain text.
+ */
 export function lazyShikiParser(): Parser {
-  loadedPromise ??= loadShikiParser().then(() => undefined)
-  const pending = new CoalescedLoad(loadedPromise)
-  return (options) => (readyParser ? readyParser(options) : pending)
+  return (options) => (readyParser ? readyParser(options) : startLoading())
 }

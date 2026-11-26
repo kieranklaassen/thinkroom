@@ -37,7 +37,7 @@ import {
 import { buildSnapshotPayload, createSnapshotScheduler } from './snapshots'
 import { firstHeadingTitle } from './document_title'
 import { gatedCursorAwareness } from './cursor_awareness'
-import { lazyShikiParser, loadShikiParser } from './highlighter'
+import { lazyShikiParser } from './highlighter'
 import { imageUploader } from './upload'
 import type { UserIdentity } from './identity'
 import {
@@ -242,11 +242,9 @@ function openEditorLink(view: EditorView, event: Event): boolean {
   return true
 }
 
-// Start loading shiki at import time so it's warm as early as possible. The
-// editor never waits on it: lazyShikiParser highlights synchronously once
-// ready and upgrades already-painted code blocks in place via the plugin's
-// lazy-parser protocol. Content paint is gated on nothing.
-void loadShikiParser()
+// The editor never waits on shiki: lazyShikiParser highlights synchronously
+// once ready and upgrades already-painted code blocks in place via the
+// plugin's lazy-parser protocol. Content paint is gated on nothing.
 const shikiParser = lazyShikiParser()
 
 // Attributes a freshly seeded document to its agent author. applyTemplate
