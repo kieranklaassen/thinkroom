@@ -26,7 +26,7 @@ applies_when:
 
 ## Context
 
-The document editor flickered on load: the content area sat blank in its reserved frame, then popped in once Milkdown finished its async boot, while the header title and connection dot changed a beat later. The instinct was "the websocket is redrawing everything." It wasn't — the whole document already ships in the first HTTP response as an Inertia prop (`yjs_state_b64`, the Yjs/CRDT binary) and hydrates the editor *before* the websocket connects. The blank frame was purely the **async editor boot**: the client editor mounts asynchronously, so there is always a window where React has rendered the page but the editor has not yet painted.
+The document editor flickered on load: the content area sat blank in its reserved frame, then popped in once Milkdown finished its async boot, while the header title and connection dot changed a beat later. The instinct was "the websocket is redrawing everything." It wasn't — a document with stored state up to `MAX_EMBEDDED_STATE_BYTES` already ships in the first HTTP response as an Inertia prop (`yjs_state_b64`, the Yjs/CRDT binary) and hydrates the editor *before* the websocket connects. The blank frame was purely the **async editor boot**: the client editor mounts asynchronously, so there is always a window where React has rendered the page but the editor has not yet painted.
 
 Principle the team settled on: **server is king — make first paint as fast and optimistic as possible, and lean into Inertia to ship rendered content, not just data.**
 
@@ -36,22 +36,22 @@ Principle the team settled on: **server is king — make first paint as fast and
 The CRDT binary (`yjs_state_b64`) is authoritative but invisible until JS boots and the editor binds it. Ship a *second, human-renderable projection* alongside it: a `content_html` prop (server-rendered, sanitized HTML of the current content) painted straight into the reserved editor frame at mount, plus a server-derived `display_title` (first H1) so the header is correct on first paint. The editor then overlays and replaces this preview once it has painted the same content.
 
 **2. Initialize state optimistically.**
-A hydrated doc is functionally live the moment it paints — the websocket only confirms it. Initialize the connection status to `live` when the doc has state, instead of `connecting → live`, to kill the status flash.
+A hydrated doc is functionally live the moment it paints — the websocket only confirms it. Initialize the connection status to `live` when the page can bind its content without waiting for the handshake, instead of `connecting → live`, to kill the status flash.
 
 **3. When you keep two renderers, normalize the server HTML to match the client DOM *exactly*.**
 The server (Commonmarker) and the client (ProseMirror) will never be byte-identical, and any difference becomes a layout shift on swap. The subtle one that bit us: ProseMirror's editable content uses `white-space: break-spaces`, and Commonmarker pretty-prints a literal `\n` text node between block elements. ProseMirror's DOM has no such whitespace, so the `\n` rendered as a **phantom blank line** and pushed the first paragraph ~30px down — only until the editor swapped in. Fix: strip inter-block whitespace from the server HTML (preserving `pre`/`code` contents) so its box model matches the editor's.
 
 **4. Swap by replace, never by blank.**
-Keep the static preview behind the live editor (transparent overlay) until the editor has actually painted, then drop the preview a couple of animation frames *after* `onReady`. Removing it the instant the handle arrives reintroduces a one-frame blank ("deletes instead of replaces").
+Keep the static preview behind the live editor (transparent overlay) until the editor has actually painted, then drop the preview a couple of animation frames *after* `onReady` and after the editor's images have loaded (`StagedDocumentEditor`). Removing it the instant the handle arrives reintroduces a one-frame blank ("deletes instead of replaces").
 
 **5. The end-state is SSR.**
-A React-rendered preview only covers the gap *after* React mounts. Measured on a warm load: React mounts ~220ms after navigation (JS download/parse/execute), and ProseMirror paints only ~14ms (one frame) after that. So the real "nothing on screen" window is the ~220ms before React mounts — which a React-rendered preview cannot fill. Truly "loaded in one go" requires **Inertia SSR**, which renders the shell + header + preview into the initial HTML response, with the browser-only editor hydrating client-side.
+A React-rendered preview only covers the gap *after* React mounts. Measured on a warm load: React mounts ~220ms after navigation (JS download/parse/execute), and ProseMirror paints only ~14ms (one frame) after that. So the real "nothing on screen" window is the ~220ms before React mounts — which a React-rendered preview cannot fill. Truly "loaded in one go" requires **Inertia SSR**, which renders the shell + header + preview into the initial HTML response, with the browser-only editor mounting client-side. The document and home pages do this (`ssr_enabled` in `DocumentsController`).
 
 ## Why This Matters
 
 Perceived performance is dominated by first paint, not by when the editor becomes interactive. Shipping the rendered content as a prop turns a blank-then-fill flicker into content that is simply there. Two-renderer parity is the trap: it looks done but drifts in subtle, measurable ways (a stray anchor, a `\n`, a trailing break) that read as jank. Measure it — per-frame element positions and CLS — rather than eyeballing a sub-300ms transition. And remember that the dominant blank window is pre-React; only SSR closes it.
 
-This also keeps the app **agent-native**: the same `content_html`/`plain_text` projection that paints instantly is what agents read over the HTTP API, since they have no CRDT runtime.
+This also keeps the app **agent-native**: the preview and the HTTP API's `content` and `plain_text` come from the same saved source (`Document#current_content`), so neither needs a CRDT runtime.
 
 ## When to Apply
 
@@ -59,28 +59,16 @@ Any time an async client component hydrates content the server already knows —
 
 ## Examples
 
-Strip inter-block whitespace so the server preview matches ProseMirror's DOM (`app/services/document_preview_html.rb`):
-
-```ruby
-# ProseMirror emits no whitespace text nodes between block elements, but
-# Commonmarker pretty-prints "\n" between them. Under white-space: break-spaces
-# those render as phantom blank lines and shift the first paragraph on swap.
-def collapse_block_whitespace(fragment)
-  fragment.xpath(".//text()").each do |node|
-    next unless node.content.match?(/\A\s*\z/)
-    parent = node.parent
-    next if parent.nil? || parent.name == "pre" || parent.name == "code"
-    node.remove if parent.name == "#document-fragment" ||
-      WHITESPACE_BLOCK_PARENTS.include?(parent.name)
-  end
-end
-```
+`collapse_block_whitespace` in `app/services/document_preview_html.rb` strips the inter-block whitespace.
 
 Optimistic status + server-derived title on first paint (`app/frontend/pages/documents/show.tsx`):
 
 ```tsx
-const [status] = useState(doc.has_state || doc.seed_granted ? 'live' : 'connecting')
-const [documentTitle] = useState(doc.display_title || doc.title)
+// doc.has_state is not enough: state too large to embed waits on the handshake.
+const [status, setStatus] = useState<ConnectionStatus>(
+  doc.yjs_state_b64 || doc.seed_granted ? 'live' : 'connecting',
+)
+const [documentTitle, setDocumentTitle] = useState(doc.display_title || doc.title)
 ```
 
 Verification that the swap is genuinely zero-shift: a CPU-throttled Playwright run sampling each element's `getBoundingClientRect().top` per frame plus a `layout-shift` PerformanceObserver — assert **0 blank frames** and **CLS 0.0000** with every element stable from the first painted frame.
@@ -89,13 +77,11 @@ Verification that the swap is genuinely zero-shift: a CPU-throttled Playwright r
 
 Re-measuring with a torture document (image, two Mermaid diagrams, two sketches, wide table, highlighted code) found the preview drifting from the editor by **up to 512px of cumulative block height** — every drift is a jump at the swap. The catalog of two-renderer traps, beyond the original `\n`-between-blocks one:
 
-- **`<br>\n`**: Commonmarker emits a newline after every `<br>`; under `white-space: break-spaces` that newline is a *second* forced break, so each soft line break made the preview one line taller. Strip the newline after each `<br>`.
-- **ProseMirror trailing breaks**: a textblock ending in a non-text inline (block image) or a hard break gets a separator + `ProseMirror-trailingBreak` — one extra line box the plain HTML doesn't have. Replicate the exact DOM.
-- **Chrome-wrapped blocks**: the editor renders tables inside `.milkdown-table-block` (UI font at 0.875em, own padding — +93px vs a bare prose table) and sketches inside a bordered figure with a caption bar (+53px vs a bare height box). The preview must emit the editor's own markup/classes, not simplified stand-ins. Any chrome CSS that ships in the code-split editor chunk needs a render-blocking replica for the preview (see `app/assets/stylesheets/application.css`).
+- **Line breaks and trailing breaks**: each can add one line box on one side only. The parity contract at the top of `app/services/document_preview_html.rb` lists these and the transforms that close them; `render` there says why raw HTML is rendered and then sanitized.
+- **Chrome-wrapped blocks**: the editor renders tables inside `.milkdown-table-block` (UI font at 0.875em, own padding — +93px vs a bare prose table) and sketches inside a bordered figure with a caption bar (+53px vs a bare height box). The preview must emit the editor's own markup/classes, not simplified stand-ins. CSS that sets their geometry belongs in `app/assets/stylesheets/application.css`, one copy for both layers, not in the code-split editor chunk.
 - **Content-dependent async heights** (Mermaid): nothing server-side can predict the rendered SVG height, so persist it — editor snapshots now carry measured figure heights keyed by an FNV hash of the diagram source (`documents.render_hints`), and both the preview skeleton and the next editor mount pre-size from the same hints. First-ever render still grows once; every load after is zero-shift.
 - **Marks vs attributes**: editor tints ride mark-derived classes (`.prov--ai`, `.sug-ins`); the preview only has sanitized data attributes. Style the attributes identically (including read-mode overrides) or the tint pops in at swap.
-- **Renderer scratch DOM**: `mermaid.render()` measures in a div appended to `<body>`, transiently extending the page by the diagram height (~100ms scrollbar jump). Render into a hidden `position:fixed` host.
-- **Raw HTML in markdown**: `Commonmarker` drops raw HTML by default (`unsafe: false`), silently deleting provenance spans from seed-only previews. Render unsafe and let `HtmlDocumentSanitizer` stay the security boundary — the editor shows dropped-tag content as literal text anyway.
+- **Renderer scratch DOM**: a renderer that measures in an element appended to `<body>` moves the page. See the hidden fixed host in `app/frontend/editor/mermaid.ts`.
 
 The block-by-block parity harness (materialize `content_html` inside the live `.doc-editor-stack`, diff every top-level block's outer height against the editor's) is the fastest way to find the next drift: it reports per-block deltas instead of a single CLS number.
 
