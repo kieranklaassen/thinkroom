@@ -1,4 +1,4 @@
-import { Plugin, PluginKey } from '@milkdown/kit/prose/state'
+import { Plugin, PluginKey, type EditorState, type Transaction } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { $prose } from '@milkdown/kit/utils'
 
@@ -11,7 +11,9 @@ import { $prose } from '@milkdown/kit/utils'
  * neighbourhood renders. Stops as soon as a frame shows no drift, so an
  * in-viewport edit costs one geometry read.
  */
-const scrollSettleKey = new PluginKey('SCROLL_SETTLE')
+const scrollSettleKey = new PluginKey<number>('SCROLL_SETTLE')
+// By name: the collab plugin can hold its own key object (collab_positions.ts).
+const Y_SYNC_META = 'y-sync$'
 const MAX_SETTLE_PASSES = 3
 
 const headTop = (view: EditorView): number | null => {
@@ -22,15 +24,37 @@ const headTop = (view: EditorView): number | null => {
   }
 }
 
+// Whether a transaction puts the selection on other text, rather than the
+// document changing around it. A remote edit replaces the whole body, so its
+// mapping says nothing: y-sync sets the selection back on the same text itself.
+// Where that text is gone it sets none, or a cursor on a neighbour.
+const movesSelection = (tr: Transaction, before: EditorState, after: EditorState): boolean => {
+  if (tr.docChanged && tr.getMeta(Y_SYNC_META)) {
+    return !tr.selectionSet || (after.selection.empty && !before.selection.empty)
+  }
+  const { pos, deletedBefore } = tr.mapping.mapResult(before.selection.head)
+  return deletedBefore || after.selection.head !== pos
+}
+
+/** A check for whether the selection has moved to other text since this call. */
+export const selectionMoves = (view: EditorView): (() => boolean) => {
+  const moves = scrollSettleKey.getState(view.state)
+  return () => scrollSettleKey.getState(view.state) !== moves
+}
+
+const headChanges = (view: EditorView): (() => boolean) => {
+  const { head } = view.state.selection
+  return () => view.isDestroyed || view.state.selection.head !== head
+}
+
 /** Keep the selection head where it is now while the next frames render, unless
  *  `isOver` says the scroll that put it there no longer stands. */
-export const holdHead = (view: EditorView, isOver = () => false) => {
-  const head = view.state.selection.head
+export const holdHead = (view: EditorView, isOver = headChanges(view)) => {
   const target = headTop(view)
   if (target === null) return
   let passes = 0
   const settle = () => {
-    if (view.isDestroyed || view.state.selection.head !== head || isOver()) return
+    if (isOver()) return
     const top = headTop(view)
     if (top === null) return
     const drift = top - target
@@ -72,18 +96,21 @@ export const blockOnScreen = (block: Element): boolean => {
   return rect.bottom > 0 && rect.top < window.innerHeight
 }
 
-const scrollSettleProse = $prose(
-  () =>
-    new Plugin({
-      key: scrollSettleKey,
-      props: {
-        handleScrollToSelection(view) {
-          const block = headBlock(view)
-          if (block && !blockOnScreen(block)) settleAfterScroll(view)
-          return false
-        },
+export const scrollSettlePlugin = () =>
+  new Plugin<number>({
+    key: scrollSettleKey,
+    // How often the selection has moved to other text.
+    state: {
+      init: () => 0,
+      apply: (tr, moves, before, after) => (movesSelection(tr, before, after) ? moves + 1 : moves),
+    },
+    props: {
+      handleScrollToSelection(view) {
+        const block = headBlock(view)
+        if (block && !blockOnScreen(block)) settleAfterScroll(view)
+        return false
       },
-    }),
-)
+    },
+  })
 
-export const scrollSettle = [scrollSettleProse].flat()
+export const scrollSettle = [$prose(scrollSettlePlugin)].flat()

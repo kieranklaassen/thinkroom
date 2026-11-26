@@ -152,12 +152,16 @@ export class CableProvider {
   private lastAwarenessSentAt = 0
   // Single-in-flight coalescing outbox: at most one frame awaits server ACK at
   // a time. Local edits produced while offline, awaiting ACK, or backing off
-  // accumulate in `queuedUpdate` via `Y.mergeUpdates`. Exact unacked state
-  // (`inFlight` + `queuedUpdate`) tells us deterministically whether local
+  // accumulate in `queued` via `Y.mergeUpdates`. Exact unacked state
+  // (`inFlight` + `queued`) tells us deterministically whether local
   // edits owe a flush on reconnect or unload — a read-only open has neither
   // and sends nothing.
-  private inFlight: { seq: number; update: Uint8Array } | null = null
-  private queuedUpdate: Uint8Array | null = null
+  //
+  // Both hold parts rather than one update: a part an HTTP save carried is never
+  // merged with later edits, so the save's success settles that part alone.
+  private inFlight: { seq: number; parts: Uint8Array[] } | null = null
+  private queued: Uint8Array[] = []
+  private carriedBySave = new WeakSet<Uint8Array>()
   private ackTimer: ReturnType<typeof setTimeout> | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryAttempt = 0
@@ -306,26 +310,36 @@ export class CableProvider {
   }
 
   private enqueue(update: Uint8Array): void {
-    this.queuedUpdate = this.queuedUpdate
-      ? Y.mergeUpdates([this.queuedUpdate, update])
-      : update
+    const last = this.queued[this.queued.length - 1]
+    if (last && !this.carriedBySave.has(last)) {
+      this.queued[this.queued.length - 1] = Y.mergeUpdates([last, update])
+    } else {
+      this.queued.push(update)
+    }
   }
 
   private requeueInFlight(): void {
     this.clearAckTimer()
     if (!this.inFlight) return
-    const { update } = this.inFlight
+    this.queued = [...this.inFlight.parts, ...this.queued]
     this.inFlight = null
-    this.queuedUpdate = this.queuedUpdate
-      ? Y.mergeUpdates([update, this.queuedUpdate])
-      : update
   }
 
-  private mergedUnackedUpdate(): Uint8Array | null {
-    if (this.inFlight && this.queuedUpdate) {
-      return Y.mergeUpdates([this.inFlight.update, this.queuedUpdate])
-    }
-    return this.inFlight?.update ?? this.queuedUpdate
+  private unackedParts(): Uint8Array[] {
+    return [...(this.inFlight?.parts ?? []), ...this.queued]
+  }
+
+  // Drops the parts a save stored, wherever they sit by now. A frame in flight
+  // with other parts still waits for its own receipt.
+  private settleParts(stored: Uint8Array[]): void {
+    const owed = (part: Uint8Array) => !stored.includes(part)
+    this.queued = this.queued.filter(owed)
+    if (!this.inFlight) return
+    this.inFlight.parts = this.inFlight.parts.filter(owed)
+    if (this.inFlight.parts.length > 0) return
+    this.clearAckTimer()
+    this.inFlight = null
+    this.retryAttempt = 0
   }
 
   private clearAckTimer(): void {
@@ -350,7 +364,7 @@ export class CableProvider {
   private clearOutbox(): void {
     this.clearTimers()
     this.inFlight = null
-    this.queuedUpdate = null
+    this.queued = []
     this.retryAttempt = 0
   }
 
@@ -426,18 +440,18 @@ export class CableProvider {
       !this.synced ||
       this.inFlight ||
       this.retryTimer ||
-      !this.queuedUpdate
+      this.queued.length === 0
     ) {
       return
     }
-    const update = this.queuedUpdate
-    this.queuedUpdate = null
+    const parts = this.queued
+    this.queued = []
     this.updateSequence += 1
     const seq = this.updateSequence
-    this.inFlight = { seq, update }
+    this.inFlight = { seq, parts }
     this.send({
       type,
-      update: toBase64(update),
+      update: toBase64(Y.mergeUpdates(parts)),
       seq,
       generation: this.generation,
       ...this.seedClaimParam(),
@@ -457,7 +471,7 @@ export class CableProvider {
   }
 
   private scheduleRetry(): void {
-    if (this.destroyed || !this.synced || this.retryTimer || !this.queuedUpdate) return
+    if (this.destroyed || !this.synced || this.retryTimer || this.queued.length === 0) return
     const exponent = Math.min(this.retryAttempt, 10)
     const delayMs = Math.min(this.retryBaseMs * 2 ** exponent, this.retryMaxMs)
     this.retryAttempt += 1
@@ -469,17 +483,17 @@ export class CableProvider {
 
   /**
    * Persist strictly the merged unacked outbox bytes (`inFlight` +
-   * `queuedUpdate`) over an HTTP request so discrete edits or an immediate
+   * `queued`) over an HTTP request so discrete edits or an immediate
    * navigation/unload survive ActionCable teardown: `keepalive` when the body
    * fits what browsers allow, ordinary otherwise.
    */
   persistCurrentState = (snapshot?: DurableSnapshotPayload): void => {
     if (!this.canWrite || this.discarded) return
-    const snapInFlight = this.inFlight
-    const snapQueued = this.queuedUpdate
-    const pending = this.mergedUnackedUpdate()
+    const parts = this.unackedParts()
+    const pending = parts.length > 0 ? Y.mergeUpdates(parts) : null
     const sentClaim = this.seedClaim
     if (!pending && !snapshot) return
+    parts.forEach((part) => this.carriedBySave.add(part))
 
     const updatePayload = {
       update: toBase64(pending ?? EMPTY_UPDATE),
@@ -526,22 +540,7 @@ export class CableProvider {
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         if (this.destroyed || this.discarded) return
         if (pending) this.settleSeedClaim()
-        // Reconcile only the exact outbox snapshots this request carried; any
-        // newer edits merged into `queuedUpdate` after fetch started remain.
-        if (snapInFlight && this.inFlight === snapInFlight) {
-          this.clearAckTimer()
-          this.inFlight = null
-          this.retryAttempt = 0
-        }
-        if (snapQueued) {
-          if (this.queuedUpdate === snapQueued) {
-            this.queuedUpdate = null
-          } else if (!snapInFlight && this.inFlight?.update === snapQueued) {
-            this.clearAckTimer()
-            this.inFlight = null
-            this.retryAttempt = 0
-          }
-        }
+        this.settleParts(parts)
         this.flush('update')
       })
       .catch((error) => console.warn('CableProvider: durable sync failed', error))
@@ -792,7 +791,7 @@ export class CableProvider {
 
   private handleUnload = (): void => {
     removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload')
-    if (this.inFlight || this.queuedUpdate) {
+    if (this.inFlight || this.queued.length > 0) {
       this.persistCurrentState()
     }
   }
