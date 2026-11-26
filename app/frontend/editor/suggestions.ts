@@ -15,6 +15,7 @@ import {
 } from './document_format'
 import type { SuggestionPayload } from '../types/payloads'
 import { documentSizeGuardCtx, exceedsDocumentSize } from './document_size_guard'
+import { clearHighlight, domRange, setHighlight } from '../lib/highlights'
 
 /**
  * First within-block occurrence of `search` as a doc position range.
@@ -403,23 +404,14 @@ export function applySuggestion(
  * so the fade is two steps — still reads as a single ease-out pulse.
  */
 export function flashMergedRange(editor: Editor, range: { from: number; to: number }): void {
-  if (typeof CSS === 'undefined' || !('highlights' in CSS)) return
   editor.action((ctx) => {
-    const view = ctx.get(editorViewCtx)
-    try {
-      const start = view.domAtPos(range.from)
-      const end = view.domAtPos(range.to)
-      const dom = document.createRange()
-      dom.setStart(start.node, start.offset)
-      dom.setEnd(end.node, end.offset)
-      CSS.highlights.set('sug-merged', new Highlight(dom))
-      setTimeout(() => {
-        CSS.highlights.delete('sug-merged')
-        CSS.highlights.set('sug-merged-soft', new Highlight(dom))
-      }, 260)
-      setTimeout(() => CSS.highlights.delete('sug-merged-soft'), 620)
-    } catch {
-      // best-effort flourish — never let it break an accept
-    }
+    const dom = domRange(ctx.get(editorViewCtx), range.from, range.to)
+    if (!dom) return // best-effort flourish — never let it break an accept
+    setHighlight('sug-merged', [dom])
+    setTimeout(() => {
+      clearHighlight('sug-merged')
+      setHighlight('sug-merged-soft', [dom])
+    }, 260)
+    setTimeout(() => clearHighlight('sug-merged-soft'), 620)
   })
 }
