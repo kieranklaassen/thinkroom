@@ -141,21 +141,21 @@ class GoogleOauthFlowTest < ActionDispatch::IntegrationTest
     assert_nil session[:user_id]
   end
 
-  test "a registration finishing during the callback does not stop the Google sign-in" do
+  test "a registration and another callback finishing first do not stop the Google sign-in" do
     create = User.method(:create!)
-    registered = false
-    lose_once = lambda do |**attributes|
-      unless registered
-        registered = true
-        create.call(name: "Registered", email: attributes[:email], password: PASSWORD)
-      end
-      create.call(**attributes)
+    meanwhile = [
+      ->(email) { create.call(name: "Registered", email:, password: PASSWORD) },
+      ->(_email) { create.call(name: "Other tab", email: "kieran@example.com.google-123.google.invalid", google_uid: "google-123") }
+    ]
+    # Skips validation so the unique index itself refuses the late insert.
+    User.define_singleton_method(:create!) do |**attributes|
+      step = meanwhile.shift or next create.call(**attributes)
+      step.call(attributes[:email])
+      new(**attributes).tap { |user| user.save!(validate: false) }
     end
-
-    User.define_singleton_method(:create!, &lose_once)
     sign_in_with_google
 
-    assert registered
+    assert_empty meanwhile
     assert_equal User.find_by!(google_uid: "google-123").id, session[:user_id]
     assert User.find_by!(email: "kieran@example.com").password_account?
   ensure

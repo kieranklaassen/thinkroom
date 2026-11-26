@@ -34,7 +34,7 @@ namespace :flags do
     feature = Flipper.feature(flag)
     puts "#{flag}: #{feature.state}"
     ids = feature.actors_value.filter_map { |actor_id| actor_id.delete_prefix("User;") if actor_id.start_with?("User;") }
-    User.where(id: ids).order(:email).each { |user| puts "  #{user.email}" }
+    User.where(id: ids).order(:email).each { |user| puts "  #{user.email} (id #{user.id})" }
     puts "  groups: #{feature.groups_value.to_a.join(', ')}" if feature.groups_value.any?
   end
 
@@ -45,11 +45,12 @@ namespace :flags do
     flag.to_sym
   end
 
-  # One account by email or id. A password account and a Google account can
-  # share an email, and then only an id says which.
+  # One account by id, email, or stored email. A password account and a Google
+  # account can share an email, and then an id says which.
   def flags_user!(reference)
     reference = reference.to_s.strip
     users = reference.match?(/\A\d+\z/) ? User.where(id: reference).to_a : User.with_account_email(reference)
+    users = User.where(email: reference.downcase).to_a if users.empty?
     return users.first if users.one?
 
     abort "No account with email or id #{reference.inspect}" if users.empty?
@@ -75,7 +76,7 @@ namespace :admin do
 
   desc "List admin accounts"
   task list: :environment do
-    admins = User.where(admin: true).order(:email).pluck(:email)
+    admins = User.where(admin: true).order(:email).map { |user| "#{user.email} (id #{user.id})" }
     puts admins.any? ? admins : "No admin accounts"
   end
 end

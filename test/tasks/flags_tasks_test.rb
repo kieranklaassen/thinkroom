@@ -46,6 +46,9 @@ class FlagsTasksTest < ActiveSupport::TestCase
 
     run_task("admin:grant", google_user.id.to_s)
     assert google_user.reload.admin?
+    assert_match(/#{google_user.email} \(id #{google_user.id}\)/, run_task("admin:list"))
+    run_task("admin:revoke", google_user.email)
+    assert_not google_user.reload.admin?
     run_task("admin:grant", @user.id.to_s)
     run_task("admin:revoke", @user.id.to_s)
     assert_not @user.reload.admin?

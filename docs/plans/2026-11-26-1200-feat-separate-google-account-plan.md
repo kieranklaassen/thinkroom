@@ -49,7 +49,7 @@ Today that sign-in ends at the login page with a request to use the password.
 
 - KTD1. **Reserved address.** `users.email` is unique and NOT NULL, so on R1 only, the Google user stores `<email>.<subject>.google.invalid`. `.invalid` is a reserved top-level domain, the value passes the existing format check, and the subject keeps it unique. Rejected: rewriting the password account's address, because reverting the release would then stop that person's password sign-in.
 - KTD2. **One reader.** `User#account_email` gives the plain address and `User#public_identity` gives id, name, and that address. The `email` attribute keeps the stored value so uniqueness validation is unaffected.
-- KTD3. **Retry once.** When the insert loses on the unique index, the callback resolves again from the start.
+- KTD3. **Resolve again.** When the insert loses on the unique index, the callback resolves from the start, up to twice, because a registration and another callback can each finish first.
 
 ### Assumptions
 

@@ -37,7 +37,7 @@ class User < ApplicationRecord
   # is never an existing password account, whatever email that account uses.
   # Nil when another Google account has the email.
   def self.for_google!(uid:, email:, name:)
-    retried = false
+    attempts = 0
     begin
       existing = find_by(google_uid: uid)
       return existing if existing
@@ -48,15 +48,16 @@ class User < ApplicationRecord
       stored = holders.any? ? "#{email}#{reserved_email_suffix(uid)}" : email
       create!(name:, email: stored, google_uid: uid)
     rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
-      # A sign-in or registration that finished in between decides the retry.
-      raise if retried
+      # A registration and a sign-in with the same subject can each finish in
+      # between, so the lookup runs again up to twice.
+      attempts += 1
+      raise if attempts > 2
 
-      retried = true
       retry
     end
   end
 
-  # At most one password account and one Google account.
+  # A password account and a Google account can answer to the same email.
   def self.with_account_email(email)
     email = email.to_s.strip.downcase
     where(email:)
