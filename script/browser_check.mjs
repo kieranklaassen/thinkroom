@@ -1,7 +1,7 @@
 // Two-window live-collaboration smoke check using Playwright.
 // Usage: BASE_URL=http://localhost:4123 node script/browser_check.mjs
 import { chromium } from 'playwright'
-import { waitForLive } from './lib/check_helpers.mjs'
+import { waitForHome, waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 const SLUG = process.env.SLUG ?? 'demo'
@@ -736,6 +736,7 @@ try {
     .context()
     .grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE })
   await landing.goto(BASE)
+  await waitForHome(landing)
   await landing.waitForSelector('.landing-wordmark')
   if ((await landing.locator('.landing-wordmark').innerText()) === 'Thinkroom') {
     ok('landing page uses the Thinkroom wordmark')
@@ -777,6 +778,7 @@ try {
   // appear inline so it can still be copied by hand.
   const refusedClipboard = await browser.newPage()
   await refusedClipboard.goto(BASE)
+  await waitForHome(refusedClipboard)
   await refusedClipboard.getByRole('button', { name: 'Copy agent prompt' }).click()
   await refusedClipboard.locator('#agent-start-instructions', { hasText: '/api/docs' }).waitFor()
   ok('a refused clipboard write reveals the agent instruction inline')
@@ -794,6 +796,7 @@ try {
     .locator('.doc-live-editor .ProseMirror p', { hasText: 'Start writing' })
     .waitFor({ timeout: 15000 })
   await landing.goto(BASE)
+  await waitForHome(landing)
   // Tag editing stays quiet until the contents row is hovered.
   await landing.locator('.contents-row').first().hover()
   await landing.getByRole('button', { name: /Add tag/ }).first().click()
@@ -847,6 +850,7 @@ try {
   await landing.locator('.pinned-row', { hasText: firstTitle }).waitFor()
   await landing.waitForLoadState('networkidle')
   await landing.reload()
+  await waitForHome(landing)
   await landing.locator('.pinned-row', { hasText: firstTitle }).waitFor()
   if ((await contentsRows.first().getByRole('button', { name: `Unpin ${firstTitle}` }).getAttribute('aria-pressed')) === 'true') {
     ok('a pinned page stays pinned after reload and its star reads pressed')
@@ -862,6 +866,7 @@ try {
     .locator('.doc-live-editor .ProseMirror p', { hasText: 'Start writing' })
     .waitFor({ timeout: 15000 })
   await landing.goto(BASE)
+  await waitForHome(landing)
   await landing.locator('.pinned-row', { hasText: firstTitle }).waitFor()
   const secondTitle = await contentsRows
     .filter({ hasNot: landing.getByRole('button', { name: /^Unpin / }) })
@@ -899,6 +904,7 @@ try {
   } else {
     fail('the background choice did not persist')
   }
+  await waitForHome(landing)
   await landing.locator('.contents-row .document-row-title').first().click()
   await landing.waitForURL(/\/d\//)
   // Let the document page finish its visit before going back; a Back fired
@@ -908,6 +914,7 @@ try {
   await landing.goBack()
   await landing.waitForURL((url) => new URL(url).pathname === '/', { timeout: 15000 })
   await landing.waitForSelector('.notebook')
+  await waitForHome(landing)
   if ((await landing.locator('.notebook').getAttribute('data-background')) === 'night') {
     ok('the background choice survives Back navigation')
   } else {
