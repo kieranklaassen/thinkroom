@@ -1,7 +1,6 @@
 require "test_helper"
 
-# Document and save content stays out of the log, at every level production can
-# be set to. Each test drives a real entry point with marker text and searches
+# Document and save content stays out of the application log at info and debug. Each test drives a real entry point with marker text and searches
 # the whole captured log for it in plain, Base64, and hex form.
 class LogContentTest < ActionDispatch::IntegrationTest
   include CompoundWritingHelpers
@@ -15,6 +14,7 @@ class LogContentTest < ActionDispatch::IntegrationTest
     *3.times.map { |pad| Base64.strict_encode64("#{"x" * pad}#{MARK}")[(pad.zero? ? 0 : 4)..-5].delete("=") }
   ].freeze
   LARGE = "#{MARK} " * (1_900_000 / (MARK.length + 1))
+  TAB = "0b9f1c9e-5d1c-4a57-9a43-2f2b1d1f7a10"
   BROWSER = { "User-Agent" => "Mozilla/5.0" }.freeze
   AGENT = { "X-Agent-Name" => "Scout" }.freeze
 
@@ -109,9 +109,9 @@ class LogContentTest < ActionDispatch::IntegrationTest
     update, state_vector = update_with(LARGE)
     assert_operator update.bytesize, :>, 2_000_000
 
-    assert_no_content_logged(keeps: [ /Parameters: .*#{@document.slug}/, /"generation" => 0/, /"cid" => "tab-1"/ ]) do
+    assert_no_content_logged(keeps: [ /Parameters: .*#{@document.slug}/, /"generation" => 0/, /"cid" => "#{TAB}"/ ]) do
       post document_sync_update_path(@document.slug), as: :json, headers: BROWSER, params: {
-        update:, updates: [ update, [ update ], { part: update } ], state_vector:, generation: 0, cid: "tab-1",
+        update:, updates: [ update, [ update ], { part: update } ], state_vector:, generation: 0, cid: TAB,
         content: LARGE, spans: [ { text: MARK, kind: "ai", state: "pending" } ], render_hints: { mermaid: { MARK => 1 } }
       }
       assert_response :no_content
@@ -143,6 +143,8 @@ class LogContentTest < ActionDispatch::IntegrationTest
       send_frame(connection, cable_message(id, type: "update", update: Base64.strict_encode64(MARK), seq: 3, generation: 0))
       send_frame(connection, cable_message(id, type: "awareness", update: Base64.strict_encode64(MARK), cid: "tab"))
       send_frame(connection, cable_message(id, action: "missing", update: MARK))
+      send_frame(connection, cable_message(id, action: MARK, MARK => 1))
+      send_frame(connection, cable_message(id, MARK => MARK, "#{MARK} key" => { MARK => 1 }, type: MARK, note: MARK))
       DocumentMetaChannel.broadcast_event(@document, :title, title: MARK)
       wait_for_frame(socket) { |frame| frame.include?('"title"') }
 
@@ -167,6 +169,10 @@ class LogContentTest < ActionDispatch::IntegrationTest
       send_frame(connection, command: "unsubscribe", identifier: identifier(sv: MARK))
       send_frame(connection, command: MARK, identifier: identifier, data: MARK)
       send_frame(connection, command: "subscribe", identifier: MARK)
+      send_frame(connection, command: "subscribe", identifier: identifier(MARK))
+      send_frame(connection, command: "subscribe", identifier: identifier("String"))
+      send_frame(connection, command: "unsubscribe", identifier: { channel: "SyncChannel", MARK => MARK, note: MARK }.to_json)
+      send_frame(connection, command: "unsubscribe", identifier: [ MARK ].to_json)
       send_frame(connection, command: "subscribe", identifier:)
       send_frame(connection, command: "message", identifier:, data: MARK)
       send_frame(connection, "#{MARK} is not JSON")
@@ -197,9 +203,11 @@ class LogContentTest < ActionDispatch::IntegrationTest
     end
   end
 
-  def failing(target, name, error)
+  def failing(target, name, error, &) = calling(target, name, -> { raise error, MARK }, &)
+
+  def calling(target, name, body)
     original = target.method(name)
-    target.define_singleton_method(name) { |*, **| raise error, MARK }
+    target.define_singleton_method(name) { |*, **| body.call }
     yield
   ensure
     target.define_singleton_method(name, original)
@@ -246,19 +254,128 @@ class LogContentTest < ActionDispatch::IntegrationTest
       post api_doc_presence_path(slug), as: :json, headers: AGENT, params: { status: "active", location: MARK }
       get api_doc_path(slug), headers: AGENT
       get api_doc_pending_events_path(slug), headers: AGENT
-      # Field names the API does not take, as a caller might guess them.
-      post api_docs_path, as: :json, headers: AGENT, params: { document: { source: LARGE }, text: MARK, unknown: LARGE }
+    end
+  end
+
+  # Field names the app does not take, as a caller might guess them, and names
+  # on the readable list that hold text.
+  GUESSED = %w[comment note message summary anchorText seedContent document source text unknown description value
+               error query q prompt reply heading label caption id_note with data].freeze
+
+  test "text under any other name, and text as a name" do
+    readable = LogContent::READABLE.keys - %w[_method format]
+    without_error_details do
+      assert_no_content_logged(keeps: [ /"status" => "active"/, /"last_event_id" => 7/ ]) do
+        (GUESSED + readable).each_slice(12) do |names|
+          [ MARK, "#{MARK} text", LARGE.first(300) ].each do |value|
+            params = names.index_with(value)
+            post api_docs_path, as: :json, headers: AGENT, params: params
+            post api_docs_path, headers: AGENT, params: params
+            post api_docs_path, as: :json, headers: AGENT, params: { document: params, list: [ params ], ids: [ value, [ value ] ] }
+            get "/?#{params.to_query}"
+          end
+          WriteRateLimited::STORE.clear
+        end
+        post api_doc_presence_path(@document.slug), as: :json, headers: AGENT, params: { status: "active" }
+        post api_doc_ack_events_path(@document.slug), as: :json, headers: AGENT, params: { last_event_id: 7 }
+        patch document_tags_path(@document.slug), as: :json, params: { MARK => 1, deep: { MARK => { MARK => true } } }
+        form = AGENT.merge("CONTENT_TYPE" => "application/x-www-form-urlencoded")
+        post api_docs_path, params: MARK, headers: form
+        post api_docs_path, params: "See[the #{MARK}](url)=1&id[#{MARK}]=1", headers: form
+        post document_writing_passes_path(@document.slug), params: { MARK => 1 }, headers: BROWSER
+        get "/?#{MARK}"
+        get "/?mode=read&#{MARK};id=#{MARK}&#{MARK}%20more"
+      end
+    end
+  end
+
+  test "a request without parameters has no parameters line" do
+    log = capture_log(:info) { get root_path }
+    assert_includes log, "Processing by DocumentsController#index"
+    assert_not_includes log, "Parameters:"
+  end
+
+  test "values that cannot be matched are masked" do
+    assert_equal({ "[FILTERED]" => "[FILTERED]" }, LogContent.redact("slug" => "\xFF"))
+  end
+
+  test "upload objects under any part name" do
+    assert_no_content_logged do
+      %w[file image upload files[] id archive document[file]].each do |name|
+        body = "--b\r\nContent-Disposition: form-data; name=\"#{name}\"; filename=\"#{MARK}.txt\"\r\n" \
+               "Content-Type: text/plain\r\n\r\n#{MARK}\r\n--b--\r\n"
+        post api_uploads_path, params: body, headers: AGENT.merge("CONTENT_TYPE" => "multipart/form-data; boundary=b")
+      end
+    end
+  end
+
+  test "messages of errors nothing handles" do
+    update, = update_with("text")
+    params = { update:, generation: 0 }
+    with_env_config("action_dispatch.show_exceptions" => :all) do
+      without_error_details do
+        assert_no_content_logged(keeps: [ /RuntimeError:/, /sync_update/, /undefined method 'missing_method'/, /Caused by: ActiveRecord::StatementInvalid:/ ]) do
+          failing(YjsPersistence, :merge_bytes, RuntimeError) { post document_sync_update_path(@document.slug), as: :json, params: }
+          assert_response :internal_server_error
+          calling(YjsPersistence, :merge_bytes, -> { nil.missing_method }) { post document_sync_update_path(@document.slug), as: :json, params: }
+          nested = lambda do
+            raise ActiveRecord::StatementInvalid, "no such table:\nINSERT #{MARK}"
+          rescue ActiveRecord::StatementInvalid
+            raise IOError, MARK
+          end
+          calling(YjsPersistence, :merge_bytes, nested) { post document_sync_update_path(@document.slug), as: :json, params: }
+          post "/rails/active_storage/blobs/redirect/x/#{MARK}.png"
+        end
+      end
+    end
+  end
+
+  class SteppingJob < ActiveJob::Base
+    include ActiveJob::Continuable
+
+    def perform(marker) = step(:only) { |_step| raise(marker.reverse) }
+  end
+
+  class FailingJob < ActiveJob::Base
+    class Retried < StandardError; end
+    class Discarded < StandardError; end
+    retry_on(Retried, attempts: 2, wait: 0)
+    discard_on(Discarded)
+
+    def perform(error, marker) = raise(error.constantize, marker.reverse)
+  end
+
+  test "messages of failed jobs and of handled errors" do
+    kinds = { "RuntimeError" => /Error performing .*RuntimeError/, "LogContentTest::FailingJob::Retried" => /Retrying .*Retried/,
+              "LogContentTest::FailingJob::Discarded" => /Discarded .*Discarded/ }
+    assert_no_content_logged(keeps: [ *kinds.values, /Error during step .*RuntimeError/, /Stopped retrying .*Retried/, /rescue_from handled Document::EditingLockedError/ ]) do
+      kinds.each_key do |kind|
+        perform_enqueued_jobs { FailingJob.perform_later(kind, MARK.reverse) }
+      rescue Minitest::UnexpectedError, RuntimeError, FailingJob::Retried
+        nil
+      end
+      [ {}, { wait: 1.minute } ].each do |options|
+        refusing = ->(*) { raise ActiveJob::EnqueueError, MARK }
+        calling(ActiveJob::Base.queue_adapter, :enqueue, refusing) do
+          calling(ActiveJob::Base.queue_adapter, :enqueue_at, refusing) { FailingJob.set(options).perform_later("RuntimeError", MARK.reverse) }
+        end
+      end
+      assert_raises(RuntimeError) { SteppingJob.perform_now(MARK.reverse) }
+      calling(YjsPersistence, :merge_bytes, -> { raise Document::EditingLockedError, MARK }) do
+        post document_sync_update_path(@document.slug), as: :json, params: { update: "AAA=", generation: 0 }
+      end
     end
   end
 
   # As in production: the error page shows no details.
-  def without_error_details
-    key = "action_dispatch.show_detailed_exceptions"
-    previous = Rails.application.env_config[key]
-    Rails.application.env_config[key] = false
+  def without_error_details(&) = with_env_config("action_dispatch.show_detailed_exceptions" => false, &)
+
+  def with_env_config(settings)
+    previous = Rails.application.env_config.slice(*settings.keys)
+    Rails.application.env_config.merge!(settings)
     yield
   ensure
-    Rails.application.env_config[key] = previous
+    Rails.application.env_config.merge!(previous)
   end
 
   test "bodies that are not the expected form or JSON" do
@@ -297,6 +414,11 @@ class LogContentTest < ActionDispatch::IntegrationTest
       post document_comments_path(@document.slug), params: { body: MARK },
            headers: BROWSER.merge("Referer" => "http://www.example.com/d/#{@document.slug}?mode=read&text=#{MARK}&a%5Bcontent%5D=#{MARK}")
       assert_response :redirect
+      [ "#:~:text=#{MARK}", "?#{MARK}", "?mode=read&#{MARK}", "?id=#{MARK}", "//rails//active_storage/blobs/x/#{MARK}.png" ].each do |tail|
+        post document_comments_path(@document.slug), params: { body: MARK },
+             headers: BROWSER.merge("Referer" => "http://www.example.com/d/#{@document.slug}#{tail}")
+        assert_response :redirect
+      end
     end
   end
 
@@ -335,12 +457,6 @@ class LogContentTest < ActionDispatch::IntegrationTest
         SolidCable::Message.broadcast("sync", { update: LARGE, title: MARK }.to_json)
       end
     end
-
-    ActiveRecord::Base.connection.execute("DROP TABLE solid_cable_messages") # keeps the cached schema
-    error = assert_raises(ActiveRecord::StatementInvalid) { SolidCable::Message.broadcast("sync", MARK) }
-    assert_match(/no such table/, error.message)
-    FORMS.each { |form| assert_not_includes error.full_message, form }
-    assert_nil error.cause
   ensure
     ActiveRecord::Base.connection.drop_table(:solid_cable_messages, if_exists: true)
   end
@@ -357,6 +473,16 @@ class LogContentTest < ActionDispatch::IntegrationTest
       assert_response :redirect
       get response.location
       assert_response :success
+      without_error_details do
+        with_env_config("action_dispatch.show_exceptions" => :all) do
+          %w[blobs/x representations/x/y blobs/proxy/x representations/redirect/x/y disk/x unknown].each do |route|
+            get "/rails/active_storage/#{route}/#{MARK}.png"
+            get "//rails//active_storage//#{route}//#{MARK}.png"
+            get "/rails/active%5Fstorage/#{route}/#{MARK}.png"
+            post "/rails/active_storage/#{route}/#{MARK}.png"
+          end
+        end
+      end
     end
   ensure
     image&.close!
@@ -382,16 +508,61 @@ class LogContentTest < ActionDispatch::IntegrationTest
     assert_equal false, RubyLLM.config.log_bodies
   end
 
-  test "names that only resemble content fields are still logged" do
-    filter = ActiveSupport::ParameterFilter.new(Rails.application.config.filter_parameters)
-    kept = %w[slug id ids mode format content_format content_type content_generation generation status access locked
-              archived updated_at created_at seq cid client_id last_event_id document_id reviewers
-              kind index intent_id context link_access profile metadata outcome by update_bytes query with_lock]
-    kept.each { |name| assert_equal "kept", filter.filter(name => "kept")[name], name }
+  # A new column that holds text must be added to the list that masks it.
+  SHOWN_COLUMNS = %w[
+    action actor_kind author_kind checksum client_session_id content_format content_type cursor_agent_id
+    cursor_agent_url cursor_pr_url cursor_run_id cursor_status description google_uid key kind link_access metadata
+    paragraphs_digest question_id record_type resolved_by scope seed_author_kind slug source_kind source_locator
+    source_ref source_sha status value variation_digest version
+  ].freeze
 
-    masked = %w[update updates state state_vector sv content markdown html text title body anchor_text replaces with
-                quote spans paragraphs seed_content content_snapshot provenance_spans password email token secret]
-    masked.each { |name| assert_equal "[FILTERED]", filter.filter(name => "x")[name], name }
+  test "text columns are masked in binds and inspect" do
+    connection = ActiveRecord::Base.connection
+    columns = connection.tables.flat_map { |table| connection.columns(table) }
+    text = columns.select { |column| %i[string text json binary].include?(column.type) }.map(&:name).uniq
+    shown = text.reject { |name| ActiveRecord::Base.inspection_filter.filter_param(name, "x").to_s == "[FILTERED]" }
+    assert_equal SHOWN_COLUMNS, shown.sort
+    assert_equal "[FILTERED]", ActiveRecord::Base.inspection_filter.filter_param(nil, "x").to_s
+
+    others = (columns.map(&:name) - text).uniq
+    assert_equal others, others.reject { |name| ActiveRecord::Base.inspection_filter.filter_param(name, "x").to_s == "[FILTERED]" }
+  end
+
+  test "messages that are not hashes are sent as they are, without their debug line" do
+    stream = SyncChannel.broadcasting_for(@document)
+    connection, socket = connect_cable
+    channel = SyncChannel.new(connection, identifier, { slug: @document.slug })
+    [ MARK, nil, [ MARK ], [ [ "a", MARK ] ], 7 ].each do |message|
+      assert_no_content_logged do
+        broadcasts = capture_broadcasts_raw(stream) { SyncChannel.broadcast_to(@document, message) }
+        assert_equal [ ActiveSupport::JSON.encode(message) ], broadcasts
+        channel.send(:transmit, message)
+        assert_includes socket.frames.pop, %("message":#{message.to_json})
+      end
+    end
+    hash = { type: "update", "update" => MARK, nested: { a: [ 1 ] } }
+    channel.send(:transmit, hash)
+    assert_equal hash.as_json, ActiveSupport::JSON.decode(socket.frames.pop)["message"]
+  end
+
+  def capture_broadcasts_raw(stream)
+    sent = []
+    subscriber = ActiveSupport::Notifications.subscribe("broadcast.action_cable") do |event|
+      sent << event.payload[:coder].encode(event.payload[:message]) if event.payload[:broadcasting] == stream
+    end
+    yield
+    sent
+  ensure
+    ActiveSupport::Notifications.unsubscribe(subscriber)
+  end
+
+  test "an override of a method that a gem no longer has stops the boot" do
+    replacement = Module.new { def perform_gone(data) = super }
+    assert_raises(RuntimeError) { LogContent.override(Class.new, replacement) }
+    assert_raises(RuntimeError) { LogContent.override(Class.new { def perform_gone = nil }, replacement) }
+    current = Class.new { def perform_gone(data) = data }
+    LogContent.override(current, replacement)
+    assert_equal 1, current.new.perform_gone(1)
   end
 
   test "filtering leaves what the app reads and stores unchanged" do

@@ -1,39 +1,137 @@
-# Keeps document and save content out of the log lines that
-# config.filter_parameters does not reach. Each piece drops or filters the
-# quoted payload of one framework line and leaves the rest of it in place.
+# Keeps document and save content out of the log. Requests and cable frames are
+# logged through an allowlist (READABLE); the framework lines that have no
+# setting are overridden below, each with a boot-time check that the method it
+# replaces still exists with the same parameters.
 module LogContent
   FILTERED = ActiveSupport::ParameterFilter::FILTERED
 
-  def self.filter
-    @filter ||= ActiveSupport::ParameterFilter.new(Rails.application.config.filter_parameters)
+  flag = /\A(?:true|false|on|off|1|0)\z/
+  number = /\A\d{1,20}\z/
+  uuid = /\A\h{8}(?:-\h{4}){3}-\h{12}\z/
+
+  # The only parameters and frame fields shown in the log, each with the shape a
+  # String value must have. Numbers, booleans, and nil pass as they are, and an
+  # Array passes when all its values do. Everything else, names included, is
+  # logged as one "[FILTERED]" entry.
+  READABLE = {
+    "id" => number, "ids" => number, "index" => number, "seq" => number, "generation" => number,
+    "client_id" => number, "last_event_id" => number,
+    "cid" => uuid, "session_id" => uuid,
+    "slug" => /\A(?:demo|[1-9A-HJ-NP-Za-km-z]{10})\z/,
+    "archived" => flag, "locked" => flag, "remember_me" => flag, "stale" => flag, "seed" => flag, "seed_pending" => flag,
+    "mode" => /\A(?:edit|suggest|comment|read)\z/,
+    "access" => /\A(?:edit|comment|view)\z/,
+    "format" => /\A(?:json|html|txt|markdown|png)\z/,
+    "content_format" => /\A(?:markdown|html)\z/,
+    "status" => /\A(?:active|done)\z/,
+    "provider" => /\Agoogle_oauth2\z/,
+    "reviewers" => %r{\Acompound-writing/cw-[a-z]{1,20}(?:-[a-z]{1,20}){0,3}\z},
+    "_method" => /\A(?:patch|put|delete)\z/,
+    "channel" => /\A(?:SyncChannel|DocumentMetaChannel)\z/,
+    "type" => /\A(?:sync|sync-reply|update|awareness|awareness-leave|ack|nack|write-denied|seed-decline|seed-request)\z/,
+    "event" => /\A(?:version|title|comments|suggestions|activities|presences|ownership|editing_lock|highlight_names|content_reset|document_deleted|writing_pass)\z/,
+    "reason" => /\A(?:retryable|invalid|stale)\z/
+  }.freeze
+
+  # Errors whose message names code rather than a value.
+  DESCRIPTIVE = [ NameError, NoMethodError, ActionController::ParameterMissing ].freeze
+
+  class << self
+    def redact(params)
+      params.each_with_object(params.class.new) do |(name, value), shown|
+        readable?(name, value) ? shown[name] = value : shown[FILTERED] = FILTERED
+      end
+    end
+
+    def describe(error)
+      DESCRIPTIVE.any? { |type| error.instance_of?(type) } ? "#{error.class} (#{error.message})" : error.class.name
+    end
+
+    def describe_command(data)
+      return data.class.name unless data.is_a?(Hash)
+
+      identifier = ActiveSupport::JSON.decode(data["identifier"].to_s)
+      "#{data["command"]} #{identifier.is_a?(Hash) ? redact(identifier) : FILTERED}"
+    rescue JSON::ParserError
+      FILTERED
+    end
+
+    # The same error, for a log line that would quote its message.
+    def without_message(error, message = "message not logged")
+      return error if error.nil? || DESCRIPTIVE.any? { |type| error.instance_of?(type) }
+
+      error.exception(message).tap { |copy| copy.define_singleton_method(:message) { |*| message } }
+    end
+
+    def override(target, replacement)
+      (replacement.instance_methods(false) + replacement.private_instance_methods(false)).each do |name|
+        original = target.instance_method(name) if target.method_defined?(name) || target.private_method_defined?(name)
+        next if original && original.arity == replacement.instance_method(name).arity
+
+        raise "log_content: #{target}##{name} is missing or takes other parameters. Re-verify its override " \
+              "in config/initializers/log_content.rb against the installed gem."
+      end
+      target.prepend(replacement)
+    end
+
+    private
+
+    def readable?(name, value)
+      shape = READABLE[name.to_s] or return false
+
+      (value.is_a?(Array) ? value : [ value ]).all? do |item|
+        case item
+        when String then item.valid_encoding? && item.match?(shape)
+        when Numeric, true, false, nil then true
+        end
+      end
+    end
   end
 
-  # A payload that reads as usual and is filtered only when inspected.
+  class Filter < ActiveSupport::ParameterFilter
+    def filter(params) = LogContent.redact(params)
+  end
+
+  # A hash that reads as usual and is redacted only when inspected.
   class Payload < Hash
-    def inspect = LogContent.filter.filter(to_h).inspect
+    def inspect = LogContent.redact(to_h).inspect
+
+    # Yields the message to log and send. Only a hash has fields to show; any
+    # other message is sent as it is, without its debug line.
+    def self.with(message)
+      return yield(self[message]) if message.is_a?(Hash)
+
+      ActionCable.server.logger.silence { yield message }
+    end
   end
 
   module Request
-    PARAMETER_NAME = /\A[\w.-]{1,64}\z/
+    STORAGE = %r{\A/+rails/+active_storage/+(?:(?<kind>blobs|representations|disk)/+)?(?:(?<how>redirect|proxy)/+)?}
 
-    # A body that is not the form it claims to be has no parameter names worth
-    # logging.
+    def parameter_filter = @parameter_filter ||= Filter.new
+
     def filtered_parameters
-      @filtered_parameters ||= if request_parameters.keys.all?(PARAMETER_NAME)
-        super
-      else
-        parameter_filter.filter(query_parameters.merge(path_parameters)).merge(FILTERED => FILTERED)
-      end
+      @filtered_parameters ||= parameter_filter.filter(parameters.except(:controller, :action))
+                                               .merge(path_parameters.slice(:controller, :action))
     rescue ActionDispatch::Http::Parameters::ParseError
-      super
+      @filtered_parameters = {}
     end
 
     # Storage paths end in the file's name, and disk keys encode it.
     def filtered_path
-      super.sub(%r{\A(/rails/active_storage/(?:blobs/|representations/)?(?:redirect|proxy|disk))/.*}m, "\\1/#{FILTERED}")
+      @filtered_path ||= begin
+        storage = STORAGE.match(CGI.unescapeURIComponent(path.b).b)
+        shown = storage ? [ "/rails/active_storage", storage[:kind], storage[:how], FILTERED ].compact.join("/") : path
+        query_string.empty? ? shown : "#{shown}?#{filtered_query_string}"
+      end
     end
 
     private
+
+    # Parts without a name are text.
+    def filtered_query_string
+      super.gsub(/(?<=\A|[&;])[^=&;]+(?=[&;]|\z)/, FILTERED)
+    end
 
     def log_parse_error_once
       @parse_error_logged ||= begin
@@ -43,20 +141,69 @@ module LogContent
     end
   end
 
-  # A request that cannot be parsed is logged by error class and backtrace.
-  module BadRequests
-    QUOTING = [ ActionDispatch::Http::Parameters::ParseError, ActionDispatch::ParamError, JSON::ParserError ].freeze
-
+  # Unhandled errors are logged by class, causes, and backtrace.
+  module Exceptions
     private
 
     def compose_exception_message(wrapper)
-      exceptions = [ wrapper, *wrapper.wrapped_causes ].map(&:exception)
-      return super unless exceptions.any? { |error| error.instance_of?(ActionController::BadRequest) || QUOTING.any? { |type| type === error } }
-
-      [ "  ", "#{exceptions.map(&:class).join(" caused by ")}:", "  ", *wrapper.exception_trace ]
+      [ wrapper, *wrapper.wrapped_causes ].flat_map.with_index do |current, index|
+        [ "  ", "#{"Caused by: " if index.positive?}#{LogContent.describe(current.exception)}:",
+          *current.annotated_source_code, "  ", *current.exception_trace ]
+      end
     end
   end
 
+  module RescuedExceptions
+    def rescue_from_callback(event)
+      super(event.dup.tap { |copy| copy.payload = event.payload.merge(exception: LogContent.without_message(event.payload[:exception])) })
+    end
+  end
+
+  module JobExceptions
+    %i[enqueue enqueue_at perform enqueue_retry retry_stopped discard step].each do |name|
+      define_method(name) do |event|
+        errors = event.payload.slice(:exception_object, :error).transform_values { |error| LogContent.without_message(error) }
+        refused = event.payload[:job]&.enqueue_error if name.in?(%i[enqueue enqueue_at])
+        errors[:exception_object] ||= LogContent.without_message(refused) if refused
+        super(event.dup.tap { |copy| copy.payload = event.payload.merge(errors) })
+      end
+    end
+  end
+
+  module CableChannel
+    private
+
+    def transmit(data, via: nil) = Payload.with(data) { |shown| super(shown, via:) }
+
+    def action_signature(action, data)
+      super(self.class.action_methods.include?(action.to_s) ? action : FILTERED, data)
+    end
+
+    def parameter_filter = @parameter_filter ||= Filter.new
+  end
+
+  module CableBroadcasts
+    def broadcast_to(broadcastables, message) = Payload.with(message) { |shown| super(broadcastables, shown) }
+  end
+
+  module CableConnection
+    # As in Action Cable, without quoting the frame.
+    def dispatch_websocket_message(websocket_message)
+      return handle_channel_command(decode(websocket_message)) if websocket.alive?
+
+      logger.error "Ignoring message processed after the WebSocket was closed (#{websocket_message.bytesize} bytes)"
+    end
+
+    private
+
+    def decode(websocket_message)
+      super
+    rescue JSON::ParserError
+      raise JSON::ParserError, "message is not valid JSON", cause: nil
+    end
+  end
+
+  # As in Action Cable, without quoting the command.
   module CableSubscriptions
     def execute_command(data)
       case data["command"]
@@ -68,33 +215,31 @@ module LogContent
       end
     rescue Exception => e
       @connection.rescue_with_handler(e)
-      logger.error "Could not execute command from (#{describe(data)}) [#{e.class}]: #{e.backtrace.first(5).join(" | ")}"
+      logger.error "Could not execute command from (#{LogContent.describe_command(data)}) [#{LogContent.describe(e)}]: #{e.backtrace.first(5).join(" | ")}"
+    end
+
+    def add(data)
+      channel = ActiveSupport::JSON.decode(data["identifier"]).with_indifferent_access[:channel].safe_constantize
+      return super if channel && ActionCable::Channel::Base > channel
+
+      logger.error "Subscription class not found"
     end
 
     def remove(data)
-      logger.info "Unsubscribing from channel: #{describe(data)}"
+      logger.info "Unsubscribing from channel: #{LogContent.describe_command(data)}"
       remove_subscription find(data)
-    end
-
-    private
-
-    def describe(data)
-      return data.class.name unless data.is_a?(Hash)
-
-      identifier = ActiveSupport::JSON.decode(data["identifier"].to_s)
-      identifier = FILTERED unless identifier.is_a?(Hash)
-      LogContent.filter.filter("command" => data["command"], "identifier" => identifier).inspect
-    rescue JSON::ParserError
-      FILTERED
     end
   end
 
   module CableMessages
     def broadcast(channel, payload)
       ActiveRecord::Base.logger ? ActiveRecord::Base.logger.silence { super } : super
-    rescue ActiveRecord::StatementInvalid => e
-      # A database error can continue with the statement on further lines.
-      raise e.class, e.message.lines.first.to_s.chomp, e.backtrace, cause: nil
+    end
+  end
+
+  module StorageUrls
+    def service_url(event)
+      debug event, "Generated URL for file at key: #{key_in(event)}"
     end
   end
 
@@ -106,20 +251,21 @@ module LogContent
 
       # The renderer wraps other errors, such as timeouts, before this.
       raised = $! unless $!.is_a?(InertiaRails::SSRError)
-      super(error.class.new((raised&.class || error.type || "render error").to_s, type: error.type))
+      super(LogContent.without_message(error, (raised&.class || error.type || "render error").to_s))
     end
   end
 
-  module StorageUrls
-    def service_url(event)
-      debug event, "Generated URL for file at key: #{key_in(event)}"
-    end
+  override ActionDispatch::Request, Request
+  override ActionDispatch::DebugExceptions, Exceptions
+  override ActionController::LogSubscriber, RescuedExceptions
+  override ActionCable::Connection::Subscriptions, CableSubscriptions
+  override ActiveStorage::LogSubscriber, StorageUrls
+  override InertiaRails::SSRRenderer, ServerRendering
+  ActiveSupport.on_load(:active_job) { LogContent.override ActiveJob::LogSubscriber, LogContent::JobExceptions }
+  ActiveSupport.on_load(:action_cable_connection) { LogContent.override self, LogContent::CableConnection }
+  ActiveSupport.on_load(:action_cable_channel) do
+    LogContent.override self, LogContent::CableChannel
+    LogContent.override singleton_class, LogContent::CableBroadcasts
   end
+  Rails.application.config.to_prepare { LogContent.override SolidCable::Message.singleton_class, LogContent::CableMessages }
 end
-
-ActionDispatch::Request.prepend LogContent::Request
-ActionDispatch::DebugExceptions.prepend LogContent::BadRequests
-ActionCable::Connection::Subscriptions.prepend LogContent::CableSubscriptions
-ActiveStorage::LogSubscriber.prepend LogContent::StorageUrls
-InertiaRails::SSRRenderer.prepend LogContent::ServerRendering
-Rails.application.config.to_prepare { SolidCable::Message.singleton_class.prepend LogContent::CableMessages }

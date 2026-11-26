@@ -8,27 +8,22 @@ Rails.application.config.filter_parameters += [
   :name, :code, :state # chosen names and OAuth callback credentials are sensitive
 ]
 
-# What people write and save: request and cable fields, and the columns that
-# store them (Active Record filters logged binds and #inspect by this list).
-# A name matches whole, or after a prefix ("anchor_text", "seed_content"), so
-# content_format, updated_at, or metadata stay readable. Query strings and
-# redirect locations are filtered before decoding, hence the bracket forms.
-content_fields = %w[
-  content markdown html text title body snapshot sketch
-  update updates sv payload data file archive _json
-  replaces with intent quote spans paragraphs render_hints
-  location detail tags error_message reviewer_runs
+# Columns that hold what people write and save. Active Record masks them in
+# logged binds and #inspect; binds without a column name are masked too.
+# Request and cable parameters go through the allowlist in log_content.rb.
+content_columns = %w[
+  content markdown html text title body snapshot update updates sv payload
+  replaces intent quote spans paragraphs render_hints
+  detail tags error error_message reviewer_runs lenses
 ]
 Rails.application.config.filter_parameters <<
-  /(?:\A|\[|%5B)(?:\w+_)?(?:#{content_fields.join("|")})(?:\z|\[|\]|%5B|%5D)/i
+  /\A(?:(?:\w+_)?(?:#{content_columns.join("|")}))?\z/i
 
-# A long value is text whatever its field is called.
-Rails.application.config.filter_parameters << lambda do |_name, value|
-  value.replace("[FILTERED]") if value.is_a?(String) && value.bytesize > 255
-end
-
-# Storage URLs end in the file's name, and disk keys encode it.
-Rails.application.config.filter_redirect << "/rails/active_storage/"
+# Storage URLs end in the file's name, and disk keys encode it. A fragment and
+# a query part without a name are text.
+Rails.application.config.filter_redirect.push(
+  %r{/rails/+active(?:_|%5f)storage}i, /#/, /[?&;][^=&;#]+(?:[&;#]|\z)/
+)
 
 # Rails copies the list to Active Record when that loads, which a gem does
 # before this file runs.
