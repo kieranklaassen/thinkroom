@@ -203,7 +203,7 @@ test('read-only hydrated open with deletion history sends zero update or sync-re
   assert.equal(fetchCalls.length, 0)
 })
 
-test('retryable NACK merges inFlight back ahead of queuedUpdate and retries with bounded backoff', async (t) => {
+test('retryable NACK merges inFlight back ahead of queued edits and retries with bounded backoff', async (t) => {
   const h = createHarness(t, { retryBaseMs: 25, retryMaxMs: 80, ackTimeoutMs: 5000 })
   h.receive(emptySyncFrame(0))
 
@@ -232,7 +232,7 @@ test('retryable NACK merges inFlight back ahead of queuedUpdate and retries with
   h.receive({ type: 'ack', seq: 2 })
 })
 
-test('ACK timeout requeues inFlight ahead of queuedUpdate and retries', async (t) => {
+test('ACK timeout requeues inFlight ahead of queued edits and retries', async (t) => {
   const h = createHarness(t, { ackTimeoutMs: 40, retryBaseMs: 20, retryMaxMs: 200 })
   h.receive(emptySyncFrame(0))
 
@@ -798,7 +798,7 @@ test('a sync_update refused after access was revoked keeps the unsent edits', as
   await pause(10)
 
   assert.ok(h.provider.inFlight, 'the refused update must not count as stored')
-  assert.ok(h.provider.queuedUpdate, 'the refused queued edit must not count as stored')
+  assert.equal(h.provider.queued.length, 1, 'the refused queued edit must not count as stored')
 })
 
 const KEEPALIVE_LIMIT = 64 * 1024
@@ -850,6 +850,12 @@ function editedHarness(t, characters) {
 function savedText(call) {
   const doc = new Y.Doc()
   Y.applyUpdate(doc, fromBase64(call.body.update))
+  return doc.getText('t').toString()
+}
+
+function savedByAll(calls) {
+  const doc = new Y.Doc()
+  for (const call of calls) Y.applyUpdate(doc, fromBase64(call.body.update))
   return doc.getText('t').toString()
 }
 
@@ -926,4 +932,81 @@ test('a large unsaved edit is still sent when its provider is destroyed', (t) =>
   assert.equal(calls.length, 1)
   assert.equal(calls[0].refused, false)
   assert.equal(savedText(calls[0]).length, 100_000)
+})
+
+test('a large save settles what it carried and leaves only what was typed while it was away', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = editedHarness(t, 100_000)
+  h.provider.persistCurrentState()
+  for (const letter of 'later ') h.doc.getText('t').insert(0, letter)
+  await calls[0].respond()
+
+  h.provider.destroy()
+  assert.equal(calls.length, 2)
+  assert.ok(calls[1].bytes < 1_000, `${calls[1].bytes} bytes`)
+  assert.equal(calls[1].keepalive, true)
+  assert.equal(savedByAll(calls), h.doc.getText('t').toString())
+})
+
+test('a deletion made while a large save is away is still owed after it', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = editedHarness(t, 100_000)
+  h.provider.persistCurrentState()
+  h.doc.getText('t').delete(10, 500)
+  await calls[0].respond()
+
+  h.provider.persistCurrentState()
+  assert.ok(calls[1].bytes < 1_000, `${calls[1].bytes} bytes`)
+  assert.equal(savedByAll(calls).length, 99_500)
+})
+
+test('overlapping saves each settle only what they carried, whichever answers first', async (t) => {
+  for (const [first, second, owed] of [[204, 423, ['b']], [423, 204, []], [204, 204, []], [423, 423, ['a', 'b']]]) {
+    for (const order of [[0, 1], [1, 0]]) {
+      const { calls } = stubLimitedFetch(t)
+      const h = createHarness(t, { initialGeneration: 1 })
+      h.doc.getText('a').insert(0, 'first')
+      h.provider.persistCurrentState()
+      h.doc.getText('b').insert(0, 'second')
+      h.provider.persistCurrentState()
+      h.doc.getText('c').insert(0, 'third')
+      for (const call of order) await calls[call].respond([first, second][call])
+
+      h.receive(emptySyncFrame(1))
+      const sent = Y.decodeUpdate(fromBase64(h.sentUpdates()[0].update))
+      const owedNames = sent.structs.filter((struct) => struct.parent).map((struct) => struct.parent)
+      assert.deepEqual(owedNames, [...owed, 'c'], `${first}/${second} answered ${order}`)
+    }
+  }
+})
+
+test('a save settles what it carried after that moved into a socket frame with later edits', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = editedHarness(t, 100_000)
+  h.provider.persistCurrentState()
+  h.doc.getText('t').insert(0, 'later ')
+  h.receive(emptySyncFrame(1))
+  assert.equal(h.sentUpdates().length, 1)
+  await calls[0].respond()
+  assert.equal(h.sentUpdates().length, 1, 'the later edit still waits for its own receipt')
+
+  h.disconnect()
+  h.receive(emptySyncFrame(1))
+  assert.ok(h.sentUpdates()[1].update.length < 1_000)
+  const server = new Y.Doc()
+  Y.applyUpdate(server, fromBase64(calls[0].body.update))
+  Y.applyUpdate(server, fromBase64(h.sentUpdates()[1].update))
+  assert.equal(server.getText('t').toString(), h.doc.getText('t').toString())
+})
+
+test('an edit typed during a save that was refused goes out with everything still owed', async (t) => {
+  for (const status of [409, 423]) {
+    const { calls } = stubLimitedFetch(t)
+    const h = editedHarness(t, 100_000)
+    h.provider.persistCurrentState()
+    h.doc.getText('t').insert(0, 'later ')
+    await calls[0].respond(status)
+    h.provider.persistCurrentState()
+    assert.equal(savedText(calls[1]), h.doc.getText('t').toString())
+  }
 })
