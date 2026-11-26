@@ -20,15 +20,6 @@ import {
   type ReviewState,
 } from '../../editor/provenance'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
-import {
-  HIGHLIGHT_COLORS,
-  applyHighlight,
-  collectHighlights,
-  removeHighlight,
-  selectionHighlightColor,
-  type HighlightGroup,
-  type HighlightSnippet,
-} from '../../editor/text_highlighter'
 import type { RenderHints } from '../../editor/cable_provider'
 import { bindReadModeCopy } from '../../editor/clipboard'
 import { bindReadPointerBroadcast } from '../../editor/read_pointers'
@@ -42,7 +33,7 @@ import { HighlightLegendPanel } from '../../components/highlight_legend_panel'
 import { ReviewPopover } from '../../components/review_popover'
 import { MarginAnnotations } from '../../components/margin_annotations'
 import type { FindingCardsSource } from '../../components/finding_margin_cards'
-import { CompoundPanel, type CompoundPanelProps } from '../../components/compound_panel'
+import { CompoundPanel } from '../../components/compound_panel'
 import { CommentsPanel } from '../../components/comments_panel'
 import { AnchoredComposer } from '../../components/anchored_composer'
 import { SelectionToolbar } from '../../components/selection_toolbar'
@@ -69,8 +60,8 @@ import { useDocumentIdentity } from './use_document_identity'
 import { useFollowPresence } from './use_follow_presence'
 import { useComments } from './use_comments'
 import { useCommentAnchors } from './use_comment_anchors'
-import { useWritingPass } from './use_writing_pass'
-import { useFindingAnchors } from './use_finding_anchors'
+import { useCompoundReview } from './use_compound_review'
+import { useHighlighter } from './use_highlighter'
 import { useFloatingChrome, type TextTarget } from './use_floating_chrome'
 import { NativeDocBridge } from './native_doc_bridge'
 import { StagedDocumentEditor } from './staged_document_editor'
@@ -91,7 +82,6 @@ import type {
   CommentPayload,
   OwnershipPayload,
   SuggestionPayload,
-  WritingFindingPayload,
   WritingPackPayload,
   WritingPassPayload,
   WritingReviewerPayload,
@@ -370,11 +360,12 @@ export default function DocumentShow({
   const reviewItemsRef = useRef(reviewItems)
   reviewItemsRef.current = reviewItems
 
-  // Compound writing: the account's packs and lens selection, the run
-  // request, and the pass prop (fetched only in Comment mode); findings
-  // anchor back into the live doc and paint through the Custom Highlight API
-  // while Comment mode is active for a featured account.
-  const writing = useWritingPass({
+  const {
+    reloadPass,
+    visibleFindingCount,
+    findingCards: findingCardsBase,
+    panelProps: compoundPanelProps,
+  } = useCompoundReview({
     slug: doc.slug,
     pass: writingPass,
     reviewers: writingReviewers,
@@ -386,40 +377,6 @@ export default function DocumentShow({
     identityName: identity.name,
     docTick,
   })
-  const visibleReviewerKeys = useMemo(
-    () => new Set(writingReviewers.filter((reviewer) => !writing.off.has(reviewer.key)).map((reviewer) => reviewer.key)),
-    [writingReviewers, writing.off],
-  )
-  const writingFindings = useMemo(() => writingPass?.findings ?? [], [writingPass])
-  // Findings name the lens they were judged with; the pass snapshot is the
-  // source of its name and colour even after the pack changes.
-  const passLenses = useMemo(() => {
-    const map = new Map<string, WritingReviewerPayload>()
-    for (const lens of writingReviewers) map.set(lens.key, lens)
-    for (const lens of writingPass?.lenses ?? []) map.set(lens.key, lens)
-    return map
-  }, [writingReviewers, writingPass])
-  const colorSlots = useMemo(() => new Map([...passLenses].map(([key, lens]) => [key, lens.color])), [passLenses])
-  const findingAnchors = useFindingAnchors({
-    findings: writingFindings,
-    handle,
-    docTick,
-    visibleKeys: visibleReviewerKeys,
-    colorSlots,
-    active: showCompound,
-  })
-  const visibleFindingCount = useMemo(
-    () => writingFindings.filter((finding) => visibleReviewerKeys.has(finding.reviewer_key)).length,
-    [writingFindings, visibleReviewerKeys],
-  )
-  const dismissFinding = useCallback((finding: WritingFindingPayload) => {
-    router.patch(`/writing_findings/${finding.id}/dismiss`, {}, {
-      preserveState: true,
-      preserveScroll: true,
-      only: ['writing_pass'],
-      async: true,
-    })
-  }, [])
 
   const exportMarkdown = useCallback(async () => {
     const live = handleRef.current
@@ -630,7 +587,7 @@ export default function DocumentShow({
     onVersionAvailable: () => setNewVersionAvailable(true),
     onEditingLock: reloadEditingAccess,
     onContentReset: reloadAfterContentReset,
-    onWritingPass: writing.reloadPass,
+    onWritingPass: reloadPass,
     connectionIdentity,
   })
 
@@ -857,72 +814,15 @@ export default function DocumentShow({
     if (isMobile && composerAnchor !== null) setActiveSheet('comments')
   }, [isMobile, composerAnchor])
 
-  // Highlighter legend content, re-scanned from the live doc whenever it
-  // changes (docTick — the same recompute signal the review surfaces use).
-  const highlightGroups = useMemo<HighlightGroup[]>(() => {
-    void docTick
-    if (!handle) return []
-    let groups: HighlightGroup[] = []
-    try {
-      handle.editor.action((ctx) => {
-        groups = collectHighlights(ctx.get(editorViewCtx).state.doc)
-      })
-    } catch {
-      // view not mounted yet
-    }
-    return groups
-  }, [handle, docTick])
-
-  // Applying colors mutates document content, so the swatches follow the
-  // write capability, not just the visible toolbar (Comment mode selections
-  // keep offering Comment only).
-  const canHighlight = ownership.can_write && effectiveMode === 'edit'
-  // The selection's uniform color (drives the active-swatch styling).
-  // textTarget is recreated on every selection/doc change, so this stays
-  // fresh after a swatch click without a dedicated subscription.
-  const activeHighlightColor = useMemo(() => {
-    void docTick
-    const view = viewRef.current
-    if (!canHighlight || !view || textTarget?.kind !== 'selection') return null
-    return selectionHighlightColor(view.state)
-  }, [canHighlight, textTarget, docTick])
-
-  const highlightSwatches = useMemo(() => {
-    if (!canHighlight) return undefined
-    return HIGHLIGHT_COLORS.map((color) => ({
-      id: color.id,
-      label: highlightNames[color.id] || color.label,
-      color: color.swatch,
-      active: activeHighlightColor === color.id,
-      onClick: () => {
-        const view = viewRef.current
-        if (!view) return
-        // Decide apply-vs-remove from the live editor state, not the memoized
-        // activeHighlightColor — a click can land before React re-renders
-        // (docTick is rAF-deferred), and a stale snapshot would re-apply
-        // instead of toggling off.
-        if (selectionHighlightColor(view.state) === color.id) removeHighlight(view)
-        else applyHighlight(view, color.id)
-        view.focus()
-      },
-    }))
-  }, [canHighlight, highlightNames, activeHighlightColor])
-
-  const jumpToHighlight = useCallback((snippet: HighlightSnippet) => {
-    const view = viewRef.current
-    if (!view) return
-    // Positions come from the last scan; a remote edit landing between scan
-    // and click could shift them. TextSelection.between snaps to the nearest
-    // valid inline positions instead of throwing on a stale range.
-    const max = view.state.doc.content.size
-    if (snippet.from >= snippet.to || snippet.to > max) return
-    const tr = view.state.tr.setSelection(
-      TextSelection.between(view.state.doc.resolve(snippet.from), view.state.doc.resolve(snippet.to)),
-    )
-    tr.scrollIntoView()
-    view.dispatch(tr)
-    view.focus()
-  }, [])
+  const { highlightGroups, highlightSwatches, jumpToHighlight } = useHighlighter({
+    handle,
+    viewRef,
+    docTick,
+    textTarget,
+    names: highlightNames,
+    canWrite: ownership.can_write,
+    effectiveMode,
+  })
 
   // One floating form at a time: an open composer suppresses the selection
   // chrome, as do share and theme popovers (z-60, above chrome's z-50).
@@ -968,45 +868,12 @@ export default function DocumentShow({
     return () => window.removeEventListener('keydown', escape)
   }, [textTarget, closeReview])
 
-  // Finding cards join the comment and suggestion stack in the margin. The
-  // object identity is a remeasure signal for that stack, so it changes only
-  // when the anchored paragraphs, the lens snapshot, or the handlers do.
-  const { paragraphs: anchoredParagraphs, jumpToFinding, hoverFinding } = findingAnchors
+  // A marker tap opens the page's own sheet, so that one handler joins the
+  // cards here. The object identity is a remeasure signal (see useCompoundReview).
   const findingCards = useMemo<FindingCardsSource>(() => ({
-    paragraphs: anchoredParagraphs,
-    lenses: passLenses,
-    canWrite: ownership.can_write,
-    onJumpTo: jumpToFinding,
-    onHover: hoverFinding,
-    onDismiss: dismissFinding,
+    ...findingCardsBase,
     onMarkerSelect: isMobile ? () => setActiveSheet('reviewers') : undefined,
-  }), [anchoredParagraphs, passLenses, ownership.can_write, jumpToFinding, hoverFinding, dismissFinding, isMobile])
-  // One prop bag for the desktop rail and the compact sheet.
-  const compoundPanelProps: CompoundPanelProps = {
-    reviewers: writingReviewers,
-    packs: writingPacks,
-    pass: writingPass,
-    enabled: writingEnabled,
-    canWrite: ownership.can_write,
-    onToggleLens: writing.toggleLens,
-    onAddPack: writing.addPack,
-    onRemovePack: writing.removePack,
-    packBusy: writing.packBusy,
-    packError: writing.packError,
-    onDismissPackError: writing.clearPackError,
-    onRun: writing.run,
-    canRun: writing.canRun,
-    requesting: writing.requesting,
-    textChanged: writing.textChanged,
-    error: writing.error,
-    notice: writing.notice,
-    onDismissError: writing.clearError,
-    anchoredIds: findingAnchors.anchoredIds,
-    changedIds: findingAnchors.changedIds,
-    onJumpTo: findingAnchors.jumpToFinding,
-    onHover: findingAnchors.hoverFinding,
-    onDismiss: dismissFinding,
-  }
+  }), [findingCardsBase, isMobile])
 
   const documentStyle = {
     ...(documentWidth === null ? {} : { '--document-width': `${documentWidth}px` }),
@@ -1373,7 +1240,7 @@ export default function DocumentShow({
             <CompoundPanel
               {...compoundPanelProps}
               onJumpTo={(finding) => {
-                findingAnchors.jumpToFinding(finding)
+                compoundPanelProps.onJumpTo(finding)
                 setActiveSheet(null)
               }}
             />
