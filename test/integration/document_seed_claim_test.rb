@@ -5,6 +5,8 @@ require "test_helper"
 # waiting for the SyncChannel round-trip. The channel path keeps the same
 # claim (delegated to Document#try_claim_seed) as the stale-claim fallback.
 class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
+  include CompoundWritingHelpers
+
   setup do
     @document = Document.create!(title: "Fresh", seed_markdown: "# Template")
   end
@@ -224,6 +226,30 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     assert_equal "pending", @document.reload.seed_state
   end
 
+  %w[view comment].each do |access|
+    test "every page a #{access}-only viewer can open leaves the claim for a writer" do
+      @document.update!(owner_token: "owner", owner_name: "Owner", link_access: access)
+
+      assert_pages_leave_claim
+      sign_in_as User.create!(name: "Guest", email: "guest@example.com", password: PASSWORD)
+      assert_pages_leave_claim
+    end
+  end
+
+  test "a comment-only viewer of an unopened document gets its text and can comment" do
+    @document.update!(owner_token: "owner", owner_name: "Owner", link_access: "comment")
+
+    get document_mode_path(@document.slug, "comment"), headers: browser
+    assert_inertia_props do |props|
+      props[:document][:content_html].include?("Template") && props[:ownership][:can_comment] == true
+    end
+
+    assert_difference -> { @document.comments.count } do
+      post document_comments_path(@document.slug), params: { body: "First", anchor_text: "Template" }
+    end
+    assert_equal "pending", @document.reload.seed_state
+  end
+
   test "documents without seed markdown never grant the seed" do
     doc = Document.create!(title: "Blank", seed_markdown: nil)
 
@@ -267,6 +293,24 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
   end
 
   private
+
+  def assert_pages_leave_claim
+    inertia = { "X-Inertia" => "true", "X-Inertia-Version" => InertiaRails.configuration.version.to_s }
+    requests = [
+      {},
+      { "Sec-Purpose" => "prefetch" },
+      inertia,
+      inertia.merge("X-Inertia-Partial-Component" => "documents/show", "X-Inertia-Partial-Data" => "document"),
+      { "User-Agent" => "curl/8.6.0" }
+    ]
+    paths = [ document_page_path(@document.slug) ] +
+      %w[read comment suggest edit].map { |mode| "/d/#{@document.slug}/#{mode}" }
+    paths.product(requests).each do |path, headers|
+      get path, headers: browser.merge(headers)
+      assert_not_equal 409, response.status, "#{path} #{headers}"
+      assert_equal "pending", @document.reload.seed_state, "#{path} #{headers}"
+    end
+  end
 
   def browser
     { "User-Agent" => "Mozilla/5.0" }
