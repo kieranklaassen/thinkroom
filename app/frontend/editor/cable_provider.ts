@@ -647,9 +647,9 @@ export class CableProvider {
           // Binding the editor now would replace the painted body with an
           // empty document.
           this.waitForSeed()
-          // Only viewers who cannot write are sent the seed with a pending
-          // handshake, so it tells the access this connection has now.
-          if (this.canWrite === Boolean(seedContent)) this.emit('access-changed')
+          // A pending handshake carries the seed only for those who cannot write.
+          const serverAllowsWrites = !seedContent
+          if (this.canWrite !== serverAllowsWrites) this.emit('access-changed')
           break
         }
         this.completeSync()

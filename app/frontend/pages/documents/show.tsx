@@ -1100,8 +1100,6 @@ export default function DocumentShow({
                 // real state. Same recovery action as content_reset, reached via
                 // the sync channel or a refused durable save of the seed.
                 onStale={reloadAfterContentReset}
-                // A client still waiting for content has no handle to bind
-                // write-denied through, so this arrives as a prop.
                 onAccessChanged={reloadChangedAccess}
                 // The sync channel rejects its resubscription when the doc is
                 // gone; same exit path as the deleted broadcast.
