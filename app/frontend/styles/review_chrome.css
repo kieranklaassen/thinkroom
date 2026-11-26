@@ -165,7 +165,7 @@
 .prov-summary-compact .prov-summary-part { min-height: 44px; }
 .review-notice { font-size: 0.8rem; text-align: center; color: var(--ink-soft); }
 .review-notice:not(:empty) { padding: 0.5rem 1rem; }
-::highlight(review-target) { background: var(--prov-pending-bg); text-decoration: underline; }
+:where([data-highlights~='review-target']) ::highlight(review-target) { background: var(--prov-pending-bg); text-decoration: underline; }
 
 /* ------------------------------ Review popover --------------------------- */
 .review-popover {

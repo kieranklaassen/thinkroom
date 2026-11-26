@@ -469,6 +469,7 @@ function CollabEditor({
 
     let cancelled = false
     let unbindMermaidHints: (() => void) | null = null
+    let spansFrame = 0
     const snapshots = createSnapshotScheduler({
       editor,
       ydoc,
@@ -540,8 +541,13 @@ function CollabEditor({
 
         ctx.set(selectionCallbackCtx.key, {
           fn: (view, cause) => {
-            if (cause === 'document') {
-              callbacksRef.current.onSpans?.(collectSpans(view.state.doc, { excludePendingInsertions: true }))
+            // Once per frame, with the page's other per-edit updates: a
+            // synchronous push rendered the page an extra time per keystroke.
+            if (cause === 'document' && !spansFrame) {
+              spansFrame = requestAnimationFrame(() => {
+                spansFrame = 0
+                callbacksRef.current.onSpans?.(collectSpans(view.state.doc, { excludePendingInsertions: true }))
+              })
             }
             callbacksRef.current.onSelection?.(view, cause)
           },
@@ -607,6 +613,7 @@ function CollabEditor({
       provider.off('stale', stale)
       provider.off('rejected', rejected)
       unbindMermaidHints?.()
+      if (spansFrame) cancelAnimationFrame(spansFrame)
       snapshots.dispose()
       try {
         editor.action((ctx) => ctx.get(collabServiceCtx).disconnect())

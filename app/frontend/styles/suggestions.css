@@ -213,36 +213,36 @@
 
 /* Anchor tint via the CSS Custom Highlight API — same hue family as the
  * AI-provenance marks (purple on proof, blue on whitey). */
-::highlight(sug-anchor) {
+:where([data-highlights~='sug-anchor']) ::highlight(sug-anchor) {
   background-color: rgb(157 78 221 / 0.12);
 }
 
-::highlight(sug-anchor-hot) {
+:where([data-highlights~='sug-anchor-hot']) ::highlight(sug-anchor-hot) {
   background-color: rgb(157 78 221 / 0.3);
 }
 
-[data-theme='whitey'] ::highlight(sug-anchor) {
+[data-theme='whitey']:where([data-highlights~='sug-anchor']) ::highlight(sug-anchor) {
   background-color: rgb(65 131 196 / 0.12);
 }
 
-[data-theme='whitey'] ::highlight(sug-anchor-hot) {
+[data-theme='whitey']:where([data-highlights~='sug-anchor-hot']) ::highlight(sug-anchor-hot) {
   background-color: rgb(65 131 196 / 0.3);
 }
 
 /* Merge pulse: a freshly accepted suggestion flashes strong, steps down,
  * then clears — registered transiently from flashMergedRange. */
-::highlight(sug-merged) {
+:where([data-highlights~='sug-merged']) ::highlight(sug-merged) {
   background-color: rgb(157 78 221 / 0.38);
 }
 
-::highlight(sug-merged-soft) {
+:where([data-highlights~='sug-merged-soft']) ::highlight(sug-merged-soft) {
   background-color: rgb(157 78 221 / 0.16);
 }
 
-[data-theme='whitey'] ::highlight(sug-merged) {
+[data-theme='whitey']:where([data-highlights~='sug-merged']) ::highlight(sug-merged) {
   background-color: rgb(65 131 196 / 0.38);
 }
 
-[data-theme='whitey'] ::highlight(sug-merged-soft) {
+[data-theme='whitey']:where([data-highlights~='sug-merged-soft']) ::highlight(sug-merged-soft) {
   background-color: rgb(65 131 196 / 0.16);
 }

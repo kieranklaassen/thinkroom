@@ -17,12 +17,27 @@ export function domRange(view: EditorView, from: number, to: number): Range | nu
   }
 }
 
+/**
+ * Let `::highlight(name)` rules match from now on. The browser computes a
+ * style per matching highlight rule for every element it styles, used or not,
+ * so dozens of unconditional rules multiplied the style work of a long
+ * document. Each rule instead waits for its name in this attribute. Names stay
+ * once added: taking one away would restyle the page again.
+ */
+function enableHighlightStyles(name: string): void {
+  const root = document.documentElement
+  const names = root.dataset.highlights?.split(' ') ?? []
+  if (!names.includes(name)) root.dataset.highlights = [...names, name].join(' ')
+}
+
+/** The only place highlights are registered: the CSS rules depend on it. */
 export function setHighlight(name: string, ranges: Range[], priority = 0): void {
   if (!supportsHighlights) return
   if (ranges.length === 0) {
     CSS.highlights.delete(name)
     return
   }
+  enableHighlightStyles(name)
   const highlight = new Highlight(...ranges)
   // Overlapping highlights resolve conflicting properties by priority; the
   // default 0 keeps every existing caller's behaviour.

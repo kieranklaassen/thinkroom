@@ -162,47 +162,47 @@
  * distinct from the purple suggestion/provenance tints. */
 
 /* The anchored text stays tinted while its composer is open. */
-::highlight(comment-anchor-draft) {
+:where([data-highlights~='comment-anchor-draft']) ::highlight(comment-anchor-draft) {
   background-color: rgb(182 92 61 / 0.2);
 }
 
 /* Every open comment's anchor, tinted while in Comment mode. */
-::highlight(comment-anchor) {
+:where([data-highlights~='comment-anchor']) ::highlight(comment-anchor) {
   background-color: rgb(182 92 61 / 0.12);
 }
 
 /* Hovering a linked rail card spotlights its anchor. */
-::highlight(comment-anchor-hot) {
+:where([data-highlights~='comment-anchor-hot']) ::highlight(comment-anchor-hot) {
   background-color: rgb(182 92 61 / 0.3);
 }
 
 /* Jump pulse: strong tint stepping down to resting (two steps — highlight
  * pseudo-elements can't transition). */
-::highlight(comment-anchor-flash) {
+:where([data-highlights~='comment-anchor-flash']) ::highlight(comment-anchor-flash) {
   background-color: rgb(182 92 61 / 0.38);
 }
 
-::highlight(comment-anchor-flash-soft) {
+:where([data-highlights~='comment-anchor-flash-soft']) ::highlight(comment-anchor-flash-soft) {
   background-color: rgb(182 92 61 / 0.16);
 }
 
-[data-theme='whitey'] ::highlight(comment-anchor-draft) {
+[data-theme='whitey']:where([data-highlights~='comment-anchor-draft']) ::highlight(comment-anchor-draft) {
   background-color: rgb(65 131 196 / 0.2);
 }
 
-[data-theme='whitey'] ::highlight(comment-anchor) {
+[data-theme='whitey']:where([data-highlights~='comment-anchor']) ::highlight(comment-anchor) {
   background-color: rgb(65 131 196 / 0.12);
 }
 
-[data-theme='whitey'] ::highlight(comment-anchor-hot) {
+[data-theme='whitey']:where([data-highlights~='comment-anchor-hot']) ::highlight(comment-anchor-hot) {
   background-color: rgb(65 131 196 / 0.3);
 }
 
-[data-theme='whitey'] ::highlight(comment-anchor-flash) {
+[data-theme='whitey']:where([data-highlights~='comment-anchor-flash']) ::highlight(comment-anchor-flash) {
   background-color: rgb(65 131 196 / 0.38);
 }
 
-[data-theme='whitey'] ::highlight(comment-anchor-flash-soft) {
+[data-theme='whitey']:where([data-highlights~='comment-anchor-flash-soft']) ::highlight(comment-anchor-flash-soft) {
   background-color: rgb(65 131 196 / 0.16);
 }
 

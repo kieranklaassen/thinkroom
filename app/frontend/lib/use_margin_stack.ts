@@ -56,8 +56,21 @@ export function useMarginStack<K extends string | number>(
     }
   }, [])
 
+  // Observing an element always reports it once, resized or not, and every
+  // document change observes the stack again. Only a size that differs from
+  // the last one seen needs another measure.
+  const sizes = useRef(new WeakMap<Element, string>())
   useEffect(() => {
-    const observer = new ResizeObserver(() => setResizeTick((tick) => tick + 1))
+    const observer = new ResizeObserver((entries) => {
+      let changed = false
+      for (const { target, contentRect } of entries) {
+        const size = `${contentRect.width}x${contentRect.height}`
+        if (sizes.current.get(target) === size) continue
+        sizes.current.set(target, size)
+        changed = true
+      }
+      if (changed) setResizeTick((tick) => tick + 1)
+    })
     cardRefs.current.forEach((element) => observer.observe(element))
     if (layoutElement) observer.observe(layoutElement)
     return () => observer.disconnect()
