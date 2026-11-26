@@ -116,8 +116,25 @@ class Document < ApplicationRecord
     yjs_state.present? || yjs_document_updates.exists?
   end
 
-  def plain_text
-    DocumentPlainText.call(format: content_format, content: current_content)
+  # A write renders its new source more than once (auto-rejecting suggestions,
+  # then the response), so this instance keeps the text of the last source it
+  # rendered and reuses it only for that exact source.
+  def plain_text(content = current_content)
+    key = [ content_format, content ]
+    unless @plain_text && @plain_text_key == key
+      fragment = @parsed_source[1] if @parsed_source && @parsed_source[0] == content
+      fragment ||= DocumentPlainText.fragment(format: content_format, content:)
+      @plain_text = DocumentPlainText.text(fragment, format: content_format).freeze
+      @plain_text_key = [ content_format, content.dup ]
+      @parsed_source = nil # reading the text replaced the fragment's sketches
+    end
+    @plain_text
+  end
+
+  # Hands over a source the caller has already parsed
+  # (DocumentPlainText.fragment in this document's format).
+  def use_parsed_source(source, fragment)
+    @parsed_source = [ source, fragment ]
   end
 
   # Sanitized HTML of the current content, painted on first load so the editor

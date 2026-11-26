@@ -94,6 +94,9 @@ class HtmlDocumentSanitizer
     end
 
     def sanitize_thinkroom_metadata(node, trusted:)
+      # Most elements carry none of these: nothing to strip or restore.
+      return if THINKROOM_ATTRIBUTES.none? { |attribute| node.key?(attribute) }
+
       metadata = THINKROOM_ATTRIBUTES.to_h { |attribute| [ attribute, node[attribute] ] }
       strip_thinkroom_metadata(node)
       return unless trusted
