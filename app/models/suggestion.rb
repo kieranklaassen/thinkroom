@@ -131,8 +131,9 @@ class Suggestion < ApplicationRecord
   # against, not an edge case to swallow.
   def self.auto_reject_stale!(document, new_content:)
     rejected = 0
-    new_plain_text = DocumentPlainText.call(format: document.content_format, content: new_content)
+    new_plain_text = nil
     document.suggestions.pending.where.not(replaces: [ nil, "" ]).find_each do |suggestion|
+      new_plain_text ||= document.plain_text(new_content)
       next if new_plain_text.include?(suggestion.replaces)
 
       suggestion.reject!

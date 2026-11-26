@@ -29,7 +29,7 @@ module Api
       end
       return if reject_oversized_content(content)
 
-      source, normalized, warning = normalized_source_and_signal(format, content, fallback: Document::DEFAULT_SEED)
+      source, normalized, warning, parsed = normalized_source_and_signal(format, content, fallback: Document::DEFAULT_SEED)
       kind, name = agent_seed_attribution(content)
       doc = Document.create!(
         title: params[:title].presence || "Untitled",
@@ -40,6 +40,7 @@ module Api
         user: current_api_user,
         owner_name: current_api_user&.name
       )
+      doc.use_parsed_source(source, parsed) if parsed
       DocumentAsset.claim_from_html!(document: doc, source:) if doc.html?
 
       if current_agent
@@ -110,7 +111,8 @@ module Api
       source = nil
       content_reset = false
       if content.present?
-        source, normalized, warning = normalized_source_and_signal(document.content_format, content)
+        source, normalized, warning, parsed = normalized_source_and_signal(document.content_format, content)
+        document.use_parsed_source(source, parsed) if parsed
         # Only (re)attribute when an agent identifies itself; an anonymous
         # update preserves the original seed authorship rather than erasing it.
         kind, name = agent_seed_attribution(content)
@@ -311,11 +313,13 @@ module Api
     # the stored source so the response can report it instead of looking
     # byte-for-byte identical to a recognized sketch. `fallback` seeds the
     # source when no content was supplied (create's DEFAULT_SEED); callers with
-    # guaranteed content omit it.
+    # guaranteed content omit it. The last value is the parsed Markdown, for
+    # the response's plain_text to read without parsing again.
     def normalized_source_and_signal(format, content, fallback: nil)
       normalization = format == "html" ? HtmlDocumentSanitizer.external(content) : nil
       source = normalization&.content || content || fallback
-      sketch_audit = format == "html" ? nil : MarkdownSketchAudit.call(source)
+      parsed = DocumentPlainText.fragment(format:, content: source) unless format == "html"
+      sketch_audit = parsed && MarkdownSketchAudit.in(parsed)
       normalized = normalization&.changed? || sketch_audit&.unrecognized? || false
       warning =
         if normalization&.changed?
@@ -323,7 +327,7 @@ module Api
         else
           sketch_audit&.warning_message
         end
-      [ source, normalized, warning ]
+      [ source, normalized, warning, parsed ]
     end
 
     # Authorship is recorded only for agent-supplied source: the seeding client
