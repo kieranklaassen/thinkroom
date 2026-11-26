@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { Head, Link, router, useForm } from '@inertiajs/react'
 import { NativeNavbar, NativeButton, NativeMenuItem, NativeFab, nativeHaptic } from '@ruby-native/react'
 import { FeedbackButton } from '../../components/feedback_button'
@@ -10,6 +10,7 @@ import { userIdentity } from '../../editor/identity'
 import { setCookie } from '../../lib/cookies'
 import { useClaim } from '../../lib/use_claim'
 import { useIsClient } from '../../lib/use_is_client'
+import { useNotReady } from '../../lib/use_not_ready'
 import { usePin, type PinnableDocument } from '../../lib/use_pin'
 import { useWebmcpTools } from '../../lib/use_webmcp_tools'
 import { executeManifestTool } from '../../lib/webmcp_execute'
@@ -83,6 +84,8 @@ function PinStar({
   onToggle: () => void
   buttonRef?: (button: HTMLButtonElement | null) => void
 }) {
+  const notReady = useNotReady()
+
   return (
     <button
       ref={buttonRef}
@@ -92,6 +95,7 @@ function PinStar({
       aria-busy={pending || undefined}
       aria-label={`${pinned ? 'Unpin' : 'Pin'} ${title}`}
       title={pinned ? 'Unpin' : 'Pin'}
+      {...notReady}
       onClick={onToggle}
     >
       <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
@@ -109,6 +113,7 @@ function PinStar({
 
 function ClaimButton({ slug, claimerName }: { slug: string; claimerName: string }) {
   const { claim, claiming, claimFailed } = useClaim(slug, claimerName, { only: LIST_PROPS })
+  const notReady = useNotReady()
 
   return (
     <button
@@ -116,6 +121,7 @@ function ClaimButton({ slug, claimerName }: { slug: string; claimerName: string 
       type="button"
       disabled={claiming}
       title={claimFailed ? 'Claim failed — try again' : 'Make this document yours'}
+      {...notReady}
       onClick={claim}
     >
       {claiming ? 'Claiming…' : claimFailed ? 'Try again' : 'Claim'}
@@ -197,6 +203,7 @@ function ContentsRow({
   onDelete: () => void
   swipe?: { deleting: boolean; onDelete: () => void; closeSignal: number }
 }) {
+  const notReady = useNotReady()
   const [editingTags, setEditingTags] = useState(false)
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
@@ -219,6 +226,7 @@ function ContentsRow({
           className="document-tag-edit"
           type="button"
           aria-expanded={editingTags}
+          {...notReady}
           onClick={() => setEditingTags((open) => !open)}
         >
           {document.tags.length > 0 ? 'Edit tags' : '+ Add tag'}
@@ -234,6 +242,7 @@ function ContentsRow({
           aria-label={`More actions for ${document.title}`}
           aria-haspopup="menu"
           aria-expanded={menu !== null}
+          {...notReady}
           onClick={(event) => {
             const box = event.currentTarget.getBoundingClientRect()
             setMenu({ x: box.right - 208, y: box.bottom + 4 })
@@ -346,6 +355,7 @@ export default function DocumentsIndex({
     name: identityName,
   }))
   const isClient = useIsClient()
+  const notReady = useNotReady()
   // The choice lives in the page props (and so the history entry), not local
   // state, so Back navigation restores the current background.
   const background = ui.background
@@ -422,6 +432,12 @@ export default function DocumentsIndex({
   // --- Contents filters: tag and search combine (AND).
   const [selectedTag, setSelectedTag] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  // Text typed before hydration is in the DOM but not in state; take it up
+  // before the next render writes the empty state over it.
+  const searchRef = useRef<HTMLInputElement>(null)
+  useLayoutEffect(() => {
+    if (searchRef.current?.value) setQuery(searchRef.current.value)
+  }, [])
   const [showAllEarlier, setShowAllEarlier] = useState(false)
   const availableTags = yours.reduce<string[]>((tags, document) => {
     document.tags.forEach((tag) => {
@@ -607,6 +623,7 @@ export default function DocumentsIndex({
                 <path d="M20 20l-3.5-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
               </svg>
               <input
+                ref={searchRef}
                 type="search"
                 value={query}
                 placeholder="Search your pages"
@@ -660,6 +677,7 @@ export default function DocumentsIndex({
                 className="notebook-text-button"
                 type="button"
                 aria-controls={copyState === 'refused' ? 'agent-start-instructions' : undefined}
+                {...notReady}
                 onClick={copyInstruction}
               >
                 {copyState === 'copied' ? 'Copied' : 'Copy agent prompt'}
@@ -770,6 +788,7 @@ export default function DocumentsIndex({
                   <button
                     type="button"
                     aria-pressed={activeTag === null}
+                    {...notReady}
                     onClick={() => {
                       touchFilters()
                       setSelectedTag(null)
@@ -782,6 +801,7 @@ export default function DocumentsIndex({
                       type="button"
                       key={tag.toLowerCase()}
                       aria-pressed={activeTag === tag}
+                      {...notReady}
                       onClick={() => {
                         touchFilters()
                         setSelectedTag(tag)
@@ -849,6 +869,7 @@ export default function DocumentsIndex({
                   <button
                     className="document-reveal"
                     type="button"
+                    {...notReady}
                     onClick={() => setShowAllEarlier(true)}
                   >
                     Turn the page, {hiddenEarlierCount} more
@@ -868,6 +889,7 @@ export default function DocumentsIndex({
                     type="button"
                     aria-expanded={showArchived}
                     aria-controls="archived-pages"
+                    {...notReady}
                     onClick={toggleArchived}
                   >
                     Archived ({archived_count})

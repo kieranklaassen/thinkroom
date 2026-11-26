@@ -634,6 +634,20 @@
   font-size: 0.8rem;
 }
 
+/* --- Controls waiting for the page script (useNotReady). The dimming waits,
+   so a quick load never flickers, and uses filter so a control that is hidden
+   until its row is hovered stays hidden. The native app keeps its look. --- */
+html:not([data-native-app]) .notebook [aria-disabled='true'] {
+  cursor: progress;
+  animation: notebook-not-ready 1ms 300ms forwards;
+}
+
+@keyframes notebook-not-ready {
+  to {
+    filter: opacity(0.5);
+  }
+}
+
 /* --- Row actions: a ⋯ button and the same menu on right-click. --- */
 .row-menu-button {
   display: inline-flex;
