@@ -4,6 +4,8 @@ require "test_helper"
 # These costs grow with an account and a document's history, so they are easy
 # to add back without noticing.
 class DocumentPageCostTest < ActionDispatch::IntegrationTest
+  include CompoundWritingHelpers
+
   BROWSER = { "User-Agent" => "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36" }.freeze
   HEAVY_COLUMNS = %w[yjs_state content_markdown seed_markdown provenance_spans].freeze
 
@@ -38,8 +40,8 @@ class DocumentPageCostTest < ActionDispatch::IntegrationTest
   end
 
   def sign_in
-    @user = User.create!(name: "Owner", email: "owner@example.com", password: "correct horse battery")
-    post login_path, params: { email: @user.email, password: "correct horse battery" }, headers: BROWSER
+    @user = User.create!(name: "Owner", email: "owner@example.com", password: PASSWORD)
+    sign_in_as(@user)
   end
 
   def fill_home
