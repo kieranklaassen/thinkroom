@@ -5,7 +5,7 @@ import type { EditorHandle } from '../../editor/milkdown_editor'
 import { paragraphDigest, paragraphPayload, projectParagraphs } from '../../editor/paragraph_projection'
 import type { WritingPackPayload, WritingPassPayload, WritingReviewerPayload } from '../../types/payloads'
 
-interface Options {
+export interface WritingPassOptions {
   slug: string
   /** undefined: not loaded (optional prop outside Comment mode); null: no pass yet. */
   pass: WritingPassPayload | null | undefined
@@ -60,7 +60,7 @@ const SELECTION_PROPS = ['writing_reviewers', 'writing_packs']
  * live editor, lens keys, the viewer's name), and reloading the
  * `writing_pass` prop, which other modes never fetch.
  */
-export function useWritingPass({ slug, pass, reviewers, packs, active, enabled, canWrite, handle, identityName, docTick }: Options): WritingPassControls {
+export function useWritingPass({ slug, pass, reviewers, packs, active, enabled, canWrite, handle, identityName, docTick }: WritingPassOptions): WritingPassControls {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [requesting, setRequesting] = useState(false)
