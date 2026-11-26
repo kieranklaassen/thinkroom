@@ -14,12 +14,12 @@ class ReturnPathTest < ActionDispatch::IntegrationTest
     "https://example.com/page", "HTTPS://example.com", "https:/page", "https:page", "http://user@example.com/page",
     "http://www.example.com/d/page", "javascript:void(0)", "data:text/html,page",
     "user@example.com/page", "@example.com", "example.com/page", "d/page", "?q=1", "#top", "/d/%zz",
-    "/d/%#{"25" * 600}41"
+    "/d/%#{"25" * 600}41", "/d/#{"a" * 1022}", "/?#{"&" * 171}", "mailto:x", "mailto:", "mailto:x?y"
   ].freeze
 
   ACCEPTED = [
     "/", "/d/page", "/d/page/edit", "/d/page?view=1&next=%2Fd%2Fother", "/d/page?q=%5C%0A#part-2",
-    "/d/page#part%2Ftwo", "/d/page?url=https://example.com//page", "/d/page%20one", "/d/page/", "/?q=1", "/d/100%25", "/d/%FF", "/d/#{"a" * 1021}",
+    "/d/page#part%2Ftwo", "/d/page?url=https://example.com//page", "/d/page%20one", "/d/page/", "/?q=1", "/d/100%25", "/d/%FF", "/d/#{"a" * 1021}", "/?#{"&" * 170}",
     "/cli/authorize?code=ABCD-EFGH", "/cli/authorize?code=ABCD-EFGH#confirm"
   ].freeze
 
@@ -89,6 +89,20 @@ class ReturnPathTest < ActionDispatch::IntegrationTest
       follow_redirect!
       assert_equal value, page_return_to
     end
+  end
+
+  ENTRY_POINTS.each do |name, sign_in|
+    test "return path keeps local paths: #{name} with a path in the session" do
+      put_return_path_in_session("/d/page?view=1#part-2")
+      send(sign_in)
+      assert_redirected_to "http://www.example.com/d/page?view=1#part-2"
+    end
+  end
+
+  test "return path given a long query continues to the default page" do
+    get login_path, params: { return_to: "/?#{"&" * 600}" }
+    assert_response :success
+    assert_nil session[:return_to]
   end
 
   test "return path accepts text only" do
