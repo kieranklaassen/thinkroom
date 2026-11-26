@@ -33,6 +33,66 @@ class CompoundWriting::JudgeTest < ActiveSupport::TestCase
     Array.new(count) { |index| CompoundWriting::Prompts.phrase(question, reviewer, "phrase #{index}") }
   end
 
+  # One HTTP exchange on a free local port: answers with body, yields the base
+  # URL, and returns the request line, headers and JSON the client sent.
+  def capture_request(body)
+    server = TCPServer.new("127.0.0.1", 0)
+    exchange = Thread.new do
+      socket = server.accept
+      line = socket.gets.chomp
+      headers = {}
+      while (header = socket.gets.chomp).present?
+        name, value = header.split(": ", 2)
+        headers[name.downcase] = value
+      end
+      payload = JSON.parse(socket.read(headers["content-length"].to_i))
+      json = body.to_json
+      socket.write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n" \
+        "Content-Length: #{json.bytesize}\r\nConnection: close\r\n\r\n#{json}")
+      socket.close
+      [ line, headers, payload ]
+    end
+    exchange.report_on_exception = false
+    yield "http://127.0.0.1:#{server.addr[1]}"
+    exchange.value
+  ensure
+    exchange&.kill
+    server&.close
+  end
+
+  def with_typesafe(base)
+    config = RubyLLM.config
+    before = [ config.typesafe_api_key, config.typesafe_api_base ]
+    config.typesafe_api_key = "ts-test"
+    config.typesafe_api_base = base
+    yield
+  ensure
+    config.typesafe_api_key, config.typesafe_api_base = before
+  end
+
+  # RubyLLM has a TypeSafe provider of its own under the same name. It does not
+  # answer structured-output chats, which is how the judge asks.
+  test "the typesafe gem's provider carries the judge's questions" do
+    noul = nouls(1).first
+    probabilities = nil
+    answer = { model: "jev-latest", answers: { q0: { type: "noul", noul: 0.75 } }, usage: { input_tokens: 1, output_tokens: 1 } }
+
+    line, headers, payload = capture_request(answer) do |base|
+      with_typesafe(base) do
+        probabilities = CompoundWriting::Judge.new(model: "jev-latest").judge(state: { paragraph: "A paragraph." }, nouls: [ noul ])
+      end
+    end
+
+    assert_equal [ 0.75 ], probabilities
+    assert_equal "POST /v1/systemone HTTP/1.1", line
+    assert_equal "Bearer ts-test", headers["authorization"]
+    assert_equal({
+      "model" => "jev-latest",
+      "state" => { "paragraph" => "A paragraph." },
+      "questions" => { "q0" => { "type" => "noul", "instructions" => noul.instruction, "criteria" => noul.criteria }.compact }
+    }.as_json, payload)
+  end
+
   test "asks q0..qN over the state and returns probabilities in order" do
     chat = ChatDouble.new(answers: ->(ids) { ids.to_h { |id| [ id, { "type" => "noul", "noul" => id.delete_prefix("q").to_f / 10 } ] } })
 
