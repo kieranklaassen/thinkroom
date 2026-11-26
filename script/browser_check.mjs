@@ -2348,31 +2348,39 @@ try {
     body: JSON.stringify({ status: 'active', location: 'provenance' }),
   })
   await a.locator('.agent-cursor-label', { hasText: overflowAgentName }).first().waitFor({ timeout: 5000 })
+  // Any redraw of the editor rebuilds the label, which is unclamped until the
+  // next frame, so a single read can land in that frame. Require the label to
+  // stay inside for 300 ms without a break.
+  const labelStaysInside = async (left, right, pageWidth) => {
+    await a.evaluate(() => { window.__labelInsideSince = null })
+    const error = await a
+      .waitForFunction(
+        ([agentName, left, right, pageWidth]) => {
+          const label = [...document.querySelectorAll('.agent-cursor-label')].find((el) => el.textContent?.includes(agentName))
+          const rect = label?.getBoundingClientRect()
+          const inside = rect && rect.width > 0 && rect.left >= left && rect.right <= right && document.documentElement.scrollWidth <= pageWidth
+          if (!inside) window.__labelInsideSince = null
+          else window.__labelInsideSince ??= performance.now()
+          return inside && performance.now() - window.__labelInsideSince >= 300
+        },
+        [overflowAgentName, left, right, pageWidth],
+        // Generous budget: the clamp reruns on a resize-scheduled animation
+        // frame, which lags under CI/VM load.
+        { timeout: 10000 },
+      )
+      .then(() => null, (failure) => failure)
+    if (!error) return null
+    const box = await a.locator('.agent-cursor-label', { hasText: overflowAgentName }).first().boundingBox().catch(() => null)
+    const width = await a.evaluate(() => document.documentElement.scrollWidth).catch(() => null)
+    return `box=${JSON.stringify(box)} pageWidth=${width} (${String(error).split('\n')[0]})`
+  }
   await a.setViewportSize({ width: 390, height: 844 })
-  await a
-    .waitForFunction(
-      (agentName) => {
-        const label = Array.from(document.querySelectorAll('.agent-cursor-label')).find((el) =>
-          el.textContent?.includes(agentName),
-        )
-        if (!label) return false
-        const rect = label.getBoundingClientRect()
-        // 1px tolerance: sub-pixel font metrics vary per platform.
-        return rect.left >= 7 && rect.right <= 383 && document.documentElement.scrollWidth <= 390
-      },
-      overflowAgentName,
-      // Generous budget: the clamp reruns on a resize-scheduled animation
-      // frame, which lags under CI/VM load.
-      { timeout: 10000 },
-    )
-    .catch(() => null)
-  const cursorBox = await a.locator('.agent-cursor-label', { hasText: overflowAgentName }).first().boundingBox()
-  const pageWidth = await a.evaluate(() => document.documentElement.scrollWidth)
   // 1px tolerance: sub-pixel font metrics vary per platform.
-  if (cursorBox && cursorBox.x >= 7 && cursorBox.x + cursorBox.width <= 383 && pageWidth <= 390) {
+  const mobileEscape = await labelStaysInside(7, 383, 390)
+  if (!mobileEscape) {
     ok('agent pseudo-cursor label stays inside the mobile viewport')
   } else {
-    fail(`agent pseudo-cursor label escapes mobile viewport: box=${JSON.stringify(cursorBox)} pageWidth=${pageWidth}`)
+    fail(`agent pseudo-cursor label escapes mobile viewport: ${mobileEscape}`)
   }
   const cursorMoveAnchor = await a.locator('.milkdown .ProseMirror h1').first().innerText()
   await fetch(`${api}/presence`, {
@@ -2407,27 +2415,11 @@ try {
   )
   // ResizeObserver and the cursor clamp settle after the panel transition.
   // Assert the resulting geometry rather than sampling a fixed animation frame.
-  await a.waitForFunction((agentName) => {
-    const label = [...document.querySelectorAll('.agent-cursor-label')].find((el) => el.textContent?.includes(agentName))
-    const rect = label?.getBoundingClientRect()
-    return rect && rect.left >= 8 && rect.right <= innerWidth - 8 && document.documentElement.scrollWidth <= innerWidth
-  }, overflowAgentName, { timeout: 10000 }).catch(() => null)
-  const shiftedCursorBox = await a
-    .locator('.agent-cursor-label', { hasText: overflowAgentName })
-    .first()
-    .boundingBox()
-  const shiftedPageWidth = await a.evaluate(() => document.documentElement.scrollWidth)
-  if (
-    shiftedCursorBox &&
-    shiftedCursorBox.x >= 8 &&
-    shiftedCursorBox.x + shiftedCursorBox.width <= 1272 &&
-    shiftedPageWidth <= 1280
-  ) {
+  const panelEscape = await labelStaysInside(8, 1272, 1280)
+  if (!panelEscape) {
     ok('agent pseudo-cursor stays clamped after the side panel changes layout')
   } else {
-    fail(
-      `agent pseudo-cursor escaped after panel layout: box=${JSON.stringify(shiftedCursorBox)} pageWidth=${shiftedPageWidth}`,
-    )
+    fail(`agent pseudo-cursor escaped after panel layout: ${panelEscape}`)
   }
   await a.keyboard.press('Meta+\\')
   await a.waitForFunction(
