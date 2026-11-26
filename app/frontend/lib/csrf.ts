@@ -17,6 +17,8 @@ async function jsonRequest(method: string, url: string, body: unknown): Promise<
   return fetch(url, {
     method,
     headers: {
+      // Without it a refusal is a redirect, which fetch follows to another answer.
+      Accept: 'application/json',
       'Content-Type': 'application/json',
       'X-CSRF-Token': csrfToken(),
     },

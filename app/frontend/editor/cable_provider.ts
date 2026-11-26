@@ -492,6 +492,8 @@ export class CableProvider {
     void fetch(`/d/${this.slug}/sync_update`, {
       method: 'POST',
       headers: {
+        // Without it a refusal is a redirect, which fetch follows to another answer.
+        Accept: 'application/json',
         'Content-Type': 'application/json',
         'X-CSRF-Token': csrfToken(),
       },

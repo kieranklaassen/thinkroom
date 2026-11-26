@@ -81,6 +81,37 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert_nil @document.reload.yjs_state
   end
 
+  test "refused writes answer the page's request headers with 423, not a redirect" do
+    suggestion = @document.suggestions.create!(author_name: "Gemini", author_kind: "ai", body: "x")
+    @document.update!(
+      owner_token: "someone-else",
+      owner_name: "Owner",
+      link_access: "view",
+      content_snapshot: "original"
+    )
+
+    # as: :json would add .json to the path, which the page's own requests do
+    # not have: for them only the Accept header asks for JSON.
+    headers = { "Content-Type" => "application/json", "Accept" => "application/json" }
+    {
+      document_snapshot_path(@document.slug) => [ :post, { content: "changed", spans: [] } ],
+      document_sync_update_path(@document.slug) => [ :post, { update: "" } ],
+      document_highlight_names_path(@document.slug) => [ :patch, { names: { yellow: "Changed" } } ],
+      accept_all_document_suggestions_path(@document.slug) => [ :patch, { by: "Guest" } ],
+      reopen_suggestion_path(suggestion) => [ :patch, { by: "Guest" } ]
+    }.each do |path, (verb, body)|
+      public_send(verb, path, params: body.to_json, headers:)
+      assert_response :locked, path
+      assert_equal "application/json", response.media_type, path
+      assert response.parsed_body["error"].present?, path
+    end
+
+    @document.reload
+    assert_equal "original", @document.content_snapshot
+    assert_nil @document.yjs_state
+    assert_equal "pending", suggestion.reload.status
+  end
+
   test "locked requests are denied before snapshot and sync payload validation" do
     @document.update!(
       owner_token: "someone-else",
