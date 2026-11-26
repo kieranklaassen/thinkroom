@@ -41,7 +41,57 @@ class DocumentCreateTest < ActionDispatch::IntegrationTest
     assert_equal "markdown", Document.order(:created_at).last.content_format
   end
 
+  test "the home page's form creates a page without JavaScript" do
+    with_forgery_protection do
+      get root_path, headers: browser
+      assert_difference -> { Document.count } do
+        post documents_path,
+             params: { authenticity_token: inertia.props[:csrf_token], name: "Quiet Falcon" },
+             headers: browser
+      end
+    end
+
+    document = Document.order(:created_at).last
+    assert_redirected_to document_mode_path(document.slug, "edit")
+    assert_equal "Quiet Falcon", document.owner_name
+  end
+
+  test "the home page's form is refused without its token" do
+    with_forgery_protection do
+      get root_path, headers: browser
+      assert_no_difference -> { Document.count } do
+        post documents_path, params: { name: "Quiet Falcon" }, headers: browser
+      end
+    end
+
+    assert_response :unprocessable_entity
+  end
+
+  test "the home page's token is private to its viewer" do
+    with_forgery_protection do
+      get root_path, headers: browser
+      assert_match(/\bprivate\b/, response.headers["Cache-Control"])
+      token = inertia.props[:csrf_token]
+      assert token.present?
+
+      other_viewer = open_session
+      other_viewer.get root_path, headers: browser
+      assert_no_difference -> { Document.count } do
+        other_viewer.post documents_path, params: { authenticity_token: token }, headers: browser
+      end
+      other_viewer.assert_response :unprocessable_entity
+    end
+  end
+
   private
+
+  def with_forgery_protection
+    original = ActionController::Base.allow_forgery_protection
+    ActionController::Base.allow_forgery_protection = true
+    yield
+  ensure
+    ActionController::Base.allow_forgery_protection = original
+  end
 
   def browser
     { "User-Agent" => "Mozilla/5.0" }

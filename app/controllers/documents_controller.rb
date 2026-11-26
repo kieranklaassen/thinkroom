@@ -83,6 +83,8 @@ class DocumentsController < InertiaController
       today_label: now.strftime("%A, %-d %B"),
       day_part: day_part(now),
       ui: { background: cookies[:pruf_background].to_s.presence_in(INDEX_BACKGROUNDS) || INDEX_BACKGROUNDS.first },
+      # For the New page form when it is submitted before hydration.
+      csrf_token: -> { form_authenticity_token },
       webmcp: -> { AgentGuide.webmcp_index_tools(request.base_url) }
     }
   end
