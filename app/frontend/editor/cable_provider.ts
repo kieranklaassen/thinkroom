@@ -155,6 +155,8 @@ export class CableProvider {
   // arrives or this client is granted the claim.
   private seedWaiting = false
   private seedTimer: ReturnType<typeof setTimeout> | null = null
+  // A seed-request is unanswered, so the next handshake may be its answer.
+  private seedRequested = false
   // A viewer who cannot write is showing the seed from its own local copy.
   // Merging real state into that copy would duplicate the text.
   private localSeed = false
@@ -354,6 +356,7 @@ export class CableProvider {
     if (!this.canWrite) return
     this.seedTimer = setTimeout(() => {
       // Answered with a whole new handshake: content, a grant, or still pending.
+      this.seedRequested = true
       this.send({ type: 'seed-request' })
       this.seedTimer = setTimeout(() => this.waitForSeed(), this.ackTimeoutMs)
     }, this.seedRetryMs)
@@ -532,6 +535,8 @@ export class CableProvider {
 
     switch (data.type) {
       case 'sync': {
+        const answersSeedRequest = this.seedRequested
+        this.seedRequested = false
         // A reconnect handshake reporting a different generation means an
         // owner CLI replacement (Document#replace_content!) reset this
         // document while this client was disconnected — it missed both the
@@ -563,18 +568,25 @@ export class CableProvider {
           }
           if (stateVector.size > 0) this.settleSeedClaim()
         }
-        // A late answer to a seed-request, not a new subscription: the
-        // outbox and its sequence are live and must not be reset.
-        if (this.synced) {
-          if (data.seed) this.send({ type: 'seed-decline' })
-          if (data.update) Y.applyUpdate(this.doc, fromBase64(data.update), this)
-          break
-        }
         if (this.localSeed) {
-          if (data.seed || data.seed_pending) this.completeSync()
+          const hasContent = Boolean(data.update) && !isEmptyUpdate(fromBase64(data.update!))
+          if ((data.seed || data.seed_pending) && !hasContent) this.completeSync()
           else this.discardLocalSeed()
           break
         }
+        // A late answer to a seed-request, not a new subscription: the
+        // outbox and its sequence are live and must not be reset.
+        if (this.synced && answersSeedRequest) {
+          if (data.seed && this.seedClaim !== null) this.seedClaim = data.seed_claim ?? null
+          else if (data.seed) this.send({ type: 'seed-decline' })
+          if (data.update) Y.applyUpdate(this.doc, fromBase64(data.update), this)
+          break
+        }
+        // Still synced means a half-open socket was replaced without
+        // `disconnected`. Numbering continues then, so a receipt for the old
+        // send cannot settle the new one.
+        if (this.synced) this.synced = false
+        else this.updateSequence = 0
         // Apply server's delta or full state (empty string on checksum match);
         // any unacked local edits stay in the outbox and flush immediately once synced.
         if (data.update) {
@@ -583,7 +595,6 @@ export class CableProvider {
         this.serverChecksum = data.checksum ?? null
         this.clearRetryTimer()
         this.requeueInFlight()
-        this.updateSequence = 0
         this.retryAttempt = 0
         if (typeof data.generation === 'number') this.generation = data.generation
         const seedContent = data.seed_content

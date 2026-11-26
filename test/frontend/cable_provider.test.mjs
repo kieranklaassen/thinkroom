@@ -464,9 +464,11 @@ test('a reader whose local seed was superseded while offline reloads on reconnec
   assert.deepEqual(events, ['synced', 'stale'])
 })
 
-test('a late answer to a seed-request leaves the live outbox and its sequence alone', (t) => {
-  const h = createHarness(t, { ackTimeoutMs: 5000 })
+test('a late answer to a seed-request leaves the live outbox and its sequence alone', async (t) => {
+  const h = createHarness(t, { ackTimeoutMs: 5000, seedRetryMs: 5 })
   h.receive(pendingSyncFrame())
+  await pause(30)
+  assert.ok(h.sent.some((frame) => frame.type === 'seed-request'))
   const peer = contentUpdate()
   h.receive({ type: 'update', update: peer, cid: 'peer' })
 
@@ -637,4 +639,100 @@ test('an accepted HTTP seed write settles the claim', async (t) => {
   h.provider.persistCurrentState()
   await pause(10)
   assert.equal(h.provider.seedClaim, null)
+})
+
+// A half-open socket: ActionCable reopens it without `disconnected`, so the
+// next handshake arrives while the provider still counts as synced.
+test('a second handshake without a disconnect makes a reader with a local seed reload, not merge', (t) => {
+  for (const extra of [{}, { seed_pending: true }]) {
+    const h = createHarness(t, { canWrite: false })
+    const events = recordEvents(h)
+    h.receive(pendingSyncFrame({ seed_content: 'hello' }))
+    h.doc.getText('t').insert(0, 'hello')
+    const real = new Y.Doc()
+    real.getText('t').insert(0, 'hello')
+    h.receive(syncFrameFrom(real, extra))
+    assert.equal(h.doc.getText('t').toString(), 'hello')
+    assert.equal(events.at(-1), 'stale')
+  }
+})
+
+test('a second handshake without a disconnect renews the claim of unsaved seed edits', (t) => {
+  const h = claimantHarness(t)
+  h.receive(pendingSyncFrame())
+  h.doc.getText('t').insert(4, ' edited')
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: 'body', seed_claim: 'claim-b' })
+  assert.equal(h.provider.seedClaim, 'claim-b')
+  assert.equal(h.provider.seedContent, null)
+  assert.ok(!h.sent.some((frame) => frame.type === 'seed-decline'))
+
+  const resent = h.sentUpdates()[1]
+  assert.equal(resent.seed_claim, 'claim-b')
+  const stored = new Y.Doc()
+  Y.applyUpdate(stored, fromBase64(resent.update))
+  assert.equal(stored.getText('t').toString(), 'body edited')
+})
+
+test('a second handshake without a disconnect resends unacked edits under a new number', (t) => {
+  const h = createHarness(t, { ackTimeoutMs: 5000 })
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'one ')
+  h.doc.getText('t').insert(4, 'two')
+  h.receive(emptySyncFrame(1))
+  assert.deepEqual(h.sentUpdates().map((frame) => frame.seq), [1, 2])
+
+  h.receive({ type: 'ack', seq: 1 })
+  h.disconnect()
+  h.receive(emptySyncFrame(1))
+  const last = new Y.Doc()
+  Y.applyUpdate(last, fromBase64(h.sentUpdates().at(-1).update))
+  assert.equal(last.getText('t').toString(), 'one two', 'an ack of the first send must not settle the second')
+})
+
+test('a late grant to a claimant with unsaved seed edits is adopted, and to a synced one is declined', async (t) => {
+  const grant = { ...emptySyncFrame(1), seed: true, seed_content: 'body', seed_claim: 'claim-b' }
+  const waiting = async () => {
+    const h = createHarness(t, { seedRetryMs: 5, ackTimeoutMs: 5000 })
+    h.receive(pendingSyncFrame())
+    await pause(30)
+    assert.ok(h.sent.some((frame) => frame.type === 'seed-request'))
+    h.receive({ type: 'update', update: contentUpdate(), cid: 'peer' })
+    return h
+  }
+  const declined = await waiting()
+  declined.receive(grant)
+  assert.equal(declined.provider.seedClaim, null)
+  assert.equal(declined.sent.at(-1).type, 'seed-decline')
+
+  const adopted = await waiting()
+  adopted.provider.seedClaim = 'claim-a'
+  adopted.receive(grant)
+  assert.equal(adopted.provider.seedClaim, 'claim-b')
+  assert.ok(!adopted.sent.some((frame) => frame.type === 'seed-decline'))
+})
+
+test('a replaced document makes a claimant hand back a new grant and drop its edits', (t) => {
+  const h = claimantHarness(t)
+  const events = recordEvents(h)
+  h.receive(pendingSyncFrame())
+  h.disconnect()
+  h.receive({ ...emptySyncFrame(2), seed: true, seed_content: 'new', seed_claim: 'claim-b' })
+  assert.deepEqual(events, ['synced', 'stale'])
+  assert.equal(h.sent.at(-1).type, 'seed-decline')
+  assert.equal(h.sentUpdates().length, 1)
+})
+
+test('an ordinary 409 does not discard a claimant', async (t) => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => ({ ok: false, status: 409, json: async () => ({ error: 'stale' }) })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+  const h = claimantHarness(t)
+  const events = recordEvents(h)
+  h.receive(pendingSyncFrame())
+  h.provider.persistCurrentState()
+  await pause(10)
+  assert.deepEqual(events, ['synced'])
+  assert.equal(h.provider.seedClaim, 'claim-a')
 })
