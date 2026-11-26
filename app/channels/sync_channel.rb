@@ -7,8 +7,9 @@
 #   server -> joining client : { type: "sync", update, sv, checksum?, generation, seed?, seed_claim?, seed_pending?, content_format?, seed_content?, seed_author_kind?, seed_author_name? }
 #                              # seed_claim: identifies the claim `seed` granted; returned on the claimant's frames until its
 #                              # seed is stored, and refused (write-denied stale) once another claimant's seed is.
-#                              # seed_pending: nothing is stored yet and another subscriber holds the seed claim, so the
-#                              # empty state is not the document. Viewers who cannot write also get the seed_* fields to show.
+#                              # seed_pending: nothing is stored yet and this subscriber holds no seed claim (another does, or it
+#                              # cannot write), so the empty state is not the document. Viewers who cannot write also get the
+#                              # seed_* fields to show.
 #                              { type: "awareness", update, cid }     # cached active peers, unicast on join
 #                              { type: "write-denied", reason: "stale", stale: true, locked: false, generation }
 #   server -> sender         : { type: "ack", seq }                            # durable merge receipt (when seq was sent)
@@ -367,8 +368,9 @@ class SyncChannel < ApplicationCable::Channel
   # Exactly one client seeds an empty document from its markdown template.
   # The atomic claim lives on Document (shared with the HTTP grant path in
   # documents#show); this channel path remains as the stale-claim fallback.
+  # Only a writer can store a seed, so only a writer takes the claim.
   def claim_seed?
-    @document.try_claim_seed
+    writable? && @document.try_claim_seed
   end
 
   # A subscriber granted the seed claim in its handshake hands it back when it

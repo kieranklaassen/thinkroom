@@ -7,6 +7,11 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     Base64.strict_encode64(ydoc.encode_state_as_update)
   end
 
+  def shared_seed_document(link_access)
+    Document.create!(title: "Shared", seed_markdown: "# Template",
+                     owner_token: "owner", owner_name: "Owner", link_access:)
+  end
+
   def build_sequential_updates
     ydoc = Y::Doc.new
     text = ydoc.get_text("t")
@@ -370,6 +375,94 @@ class SyncChannelTest < ActionCable::Channel::TestCase
         perform :receive, { "type" => "seed-request", "cid" => "reader" }
       end
       assert_equal claimed_at, doc.reload.seed_claimed_at
+    end
+  end
+
+  %w[view comment].each do |access|
+    test "a #{access}-only subscriber receives the seed and leaves the claim for a writer" do
+      doc = shared_seed_document(access)
+
+      subscribe slug: doc.slug
+
+      message = transmissions.last
+      assert_equal "# Template", message["seed_content"]
+      assert_equal "markdown", message["content_format"]
+      assert_equal true, message["seed_pending"]
+      assert_not message.key?("seed")
+      assert_not message.key?("seed_claim")
+      assert_equal "pending", doc.reload.seed_state
+
+      assert_no_difference -> { transmissions.length } do
+        perform :receive, { "type" => "seed-request", "cid" => "reader" }
+      end
+      assert_equal "pending", doc.reload.seed_state
+
+      stub_connection(owner_token: "owner", current_user: nil)
+      subscribe slug: doc.slug
+
+      assert_equal true, transmissions.last["seed"]
+      assert_equal doc.reload.seed_claim_token, transmissions.last["seed_claim"]
+    end
+  end
+
+  test "a signed-in subscriber takes the claim only as the document's owner" do
+    owner, guest = %w[owner guest].map do |name|
+      User.create!(name:, email: "#{name}@example.com", password: CompoundWritingHelpers::PASSWORD)
+    end
+    doc = Document.create!(title: "Account", seed_markdown: "# Template", user: owner,
+                           owner_name: "Owner", link_access: "comment")
+
+    stub_connection(owner_token: "browser", current_user: guest)
+    subscribe slug: doc.slug
+    assert_equal "pending", doc.reload.seed_state
+
+    stub_connection(owner_token: "browser", current_user: owner)
+    subscribe slug: doc.slug
+    assert_equal true, transmissions.last["seed"]
+  end
+
+  test "a subscriber given write access takes the claim with its next seed-request" do
+    doc = shared_seed_document("view")
+    subscribe slug: doc.slug
+    assert_equal "pending", doc.reload.seed_state
+
+    doc.update!(link_access: "edit")
+    perform :receive, { "type" => "seed-request", "cid" => "writer" }
+
+    assert_equal true, transmissions.last["seed"]
+    assert_equal "claimed", doc.reload.seed_state
+  end
+
+  test "seed-request after write access ends takes no claim" do
+    doc = shared_seed_document("edit")
+    assert doc.try_claim_seed
+    subscribe slug: doc.slug
+    assert_equal true, transmissions.last["seed_pending"]
+    doc.update!(link_access: "comment", seed_state: "pending", seed_claimed_at: nil)
+
+    assert_no_difference -> { transmissions.length } do
+      perform :receive, { "type" => "seed-request", "cid" => "reader" }
+    end
+    assert_equal "pending", doc.reload.seed_state
+  end
+
+  test "a claimant who becomes a reader resubscribes to the text without a claim" do
+    doc = shared_seed_document("edit")
+    subscribe slug: doc.slug
+    assert_equal true, transmissions.last["seed"]
+    claimed_at = doc.reload.seed_claimed_at
+    doc.update!(link_access: "view")
+
+    travel Document::SEED_CLAIM_TIMEOUT + 1.second do
+      subscribe slug: doc.slug
+
+      assert_not transmissions.last.key?("seed")
+      assert_equal "# Template", transmissions.last["seed_content"]
+      assert_equal claimed_at, doc.reload.seed_claimed_at
+
+      stub_connection(owner_token: "owner", current_user: nil)
+      subscribe slug: doc.slug
+      assert_equal true, transmissions.last["seed"]
     end
   end
 
