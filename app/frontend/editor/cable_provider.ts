@@ -623,6 +623,14 @@ export class CableProvider {
         if (typeof data.generation === 'number') this.generation = data.generation
         const seedContent = data.seed_content
         const localDocEmpty = this.doc.store.clients.size === 0
+        if (data.seed && !this.canWrite && localDocEmpty) {
+          // Only a writer is granted the claim. This session cannot use it, so
+          // it goes back for the one the page opens with its current access.
+          this.send({ type: 'seed-decline' })
+          this.waitForSeed()
+          this.emit('access-changed')
+          break
+        }
         if (data.seed && this.canWrite) {
           // A claim is for a seed still to be stored. With content here and
           // none of this client's own unsettled there is nothing to claim, and

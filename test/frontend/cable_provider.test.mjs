@@ -432,6 +432,29 @@ test('a waiting reader whose access widened while it was offline reports it on r
   assert.deepEqual(events, ['access-changed'])
 })
 
+test('a waiting reader granted the seed hands the claim back once and reports its access', async (t) => {
+  const h = createHarness(t, { canWrite: false, seedRetryMs: 10 })
+  const events = recordEvents(h)
+  const types = () => h.sent.map((frame) => frame.type)
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: '# Template', seed_claim: 'claim-a' })
+  assert.deepEqual(events, ['access-changed'])
+  assert.deepEqual(types(), ['seed-decline'])
+  assert.equal(h.provider.seedContent, null)
+  assert.equal(h.provider.seedClaim, null)
+  await pause(60)
+  h.provider.destroy()
+  assert.deepEqual(types(), ['seed-decline'], 'no second decline could reach a claim taken since')
+})
+
+test('a reader that handed a claim back still goes live on content from another writer', (t) => {
+  const h = createHarness(t, { canWrite: false })
+  const events = recordEvents(h)
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: '# Template', seed_claim: 'claim-a' })
+  h.receive({ type: 'update', update: contentUpdate(), cid: 'peer' })
+  assert.deepEqual(events, ['access-changed', 'synced'])
+  assert.equal(h.doc.getText('t').toString(), 'body')
+})
+
 test('a reconnect with unchanged access or with local content does not report an access change', (t) => {
   const waiting = createHarness(t)
   const holding = createHarness(t)
@@ -491,7 +514,7 @@ test('a reader shows the seed locally and reloads instead of merging real state 
 test('a reader whose local seed was superseded while offline reloads on reconnect', (t) => {
   const h = createHarness(t, { canWrite: false })
   const events = recordEvents(h)
-  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: '# Template' })
+  h.receive(pendingSyncFrame({ seed_content: '# Template' }))
   h.doc.getText('t').insert(0, 'Template')
   h.disconnect()
   h.receive({ ...emptySyncFrame(1), update: contentUpdate() })
