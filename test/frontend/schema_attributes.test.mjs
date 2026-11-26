@@ -51,6 +51,14 @@ test('markdown lists, tasks and untitled images parse into the document', async 
   }
 })
 
+test('an image may have no alt text, but not one that is no text', async () => {
+  const { schema: built } = await buildParser()
+  const image = (alt) => built.nodes.image.create({ src: '/image.png', alt })
+  image(null).check()
+  image('A picture').check()
+  assert.throws(() => image(5).check(), RangeError)
+})
+
 // A shared document as the editor stored it before ProseMirror validated
 // attributes on creation: nested bullet, ordered and task lists whose `spread`
 // is "true" or "false", titled and untitled images, code and a table.

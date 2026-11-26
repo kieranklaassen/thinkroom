@@ -18,7 +18,9 @@ class NodeSuiteTest < ActiveSupport::TestCase
       )
 
       assert status.success?, output
-      assert_operator output[/^# pass (\d+)$/, 1].to_i, :>=, 1, output
+      # A floor: a test registered in a loop is declared once and runs more often.
+      declared = File.read(file).scan(/^\s*test\(/).size
+      assert_operator output[/^# pass (\d+)$/, 1].to_i, :>=, [ declared, 1 ].max, output
       assert_match(/^# skipped 0$/, output)
       assert_match(/^# todo 0$/, output)
       assert_no_match(/^\s*ok .*# (SKIP|TODO)/, output)

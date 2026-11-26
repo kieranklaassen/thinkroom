@@ -12,10 +12,11 @@ const VALIDATORS: Record<string, Record<string, string>> = {
 
 /**
  * The Markdown presets declare `spread` as a boolean but write it as "true" or
- * "false", and give an untitled image a null title. ProseMirror validates
- * attributes whenever a node is created, so those nodes fail to parse, and
- * y-prosemirror deletes any stored node it cannot create. Accept the values
- * that parsing produces and that stored documents already contain.
+ * "false", and give an untitled image a null title. ProseMirror rejects such
+ * attributes in `check()`, and from prosemirror-model 1.25.12 on whenever a node
+ * is created: those nodes then fail to parse, and y-prosemirror deletes any
+ * stored node it cannot create. Accept the values that parsing produces and
+ * that stored documents already contain.
  */
 const tolerateMarkdownAttributes: MilkdownPlugin = (ctx) => async () => {
   ctx.update(nodesCtx, (nodes) => nodes.map(([name, schema]) => {

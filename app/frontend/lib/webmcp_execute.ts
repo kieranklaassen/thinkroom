@@ -140,6 +140,7 @@ async function requestResult(
     ? AbortSignal.any([options.signal, timeout.signal])
     : timeout.signal
   init.signal = signal
+  if (signal.aborted) return errorResult({ error: 'cancelled' })
   const timer = setTimeout(() => timeout.abort(), CALL_TIMEOUT_MS)
 
   let response: Response
@@ -149,18 +150,15 @@ async function requestResult(
       response = await fetch(url.value, init)
     } catch (error) {
       if (signal.aborted) throw error
-      return errorResult({ error: 'unreachable', detail: errorMessage(error) })
+      return errorResult(unanswered(request.method, 'unreachable', errorMessage(error)))
     }
     text = await response.text()
   } catch (error) {
-    if (!signal.aborted) throw error
+    if (!signal.aborted) return errorResult(unanswered(request.method, errorMessage(error)))
     // The combined signal keeps the reason of whichever abort came first. The
     // thrown value cannot tell them apart: callers pick their own reason.
-    return errorResult(
-      signal.reason === timeout.signal.reason
-        ? timedOut(request.method)
-        : { error: 'cancelled' },
-    )
+    if (signal.reason === timeout.signal.reason) return errorResult(timedOut(request.method))
+    return errorResult(unanswered(request.method, 'cancelled'))
   } finally {
     clearTimeout(timer)
   }
@@ -196,15 +194,23 @@ async function requestResult(
 
 function timedOut(method: WebmcpRequest['method']): Record<string, unknown> {
   const seconds = CALL_TIMEOUT_MS / 1000
-  const detail = `No complete response within ${seconds} seconds.`
   return {
-    error: 'timed out',
-    detail:
-      method === 'POST'
-        ? `${detail} The write may still have been applied; check before retrying.`
-        : detail,
+    ...unanswered(method, 'timed out', `No complete response within ${seconds} seconds.`),
     timeout_seconds: seconds,
   }
+}
+
+/** The server may have finished a write whose answer never arrived whole. */
+function unanswered(
+  method: WebmcpRequest['method'],
+  error: string,
+  reason?: string,
+): Record<string, unknown> {
+  if (method !== 'POST') return reason ? { error, detail: reason } : { error }
+  const warning = 'The write may still have been applied; check before retrying.'
+  if (!reason) return { error, detail: warning }
+  const sentence = /[.!?]$/.test(reason) ? reason : `${reason}.`
+  return { error, detail: `${sentence} ${warning}` }
 }
 
 type Outcome<T> = { value: T } | { error: string; [key: string]: unknown }

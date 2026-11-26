@@ -28,9 +28,11 @@ function holdLimitTimer(t) {
   const { setTimeout: realSetTimeout, clearTimeout: realClearTimeout } = globalThis
   const held = new Map()
   let now = 0
+  let started = 0
   globalThis.setTimeout = (callback, delay, ...args) => {
     if (delay !== LIMIT_MS) return realSetTimeout(callback, delay, ...args)
     const timer = {}
+    started += 1
     held.set(timer, { callback, at: now + delay })
     return timer
   }
@@ -41,13 +43,17 @@ function holdLimitTimer(t) {
     globalThis.setTimeout = realSetTimeout
     globalThis.clearTimeout = realClearTimeout
   })
-  return (ms) => {
-    now += ms
-    for (const [timer, { callback, at }] of held) {
-      if (at > now) continue
-      held.delete(timer)
-      callback()
-    }
+  return {
+    started: () => started,
+    pending: () => held.size,
+    tick: (ms) => {
+      now += ms
+      for (const [timer, { callback, at }] of held) {
+        if (at > now) continue
+        held.delete(timer)
+        callback()
+      }
+    },
   }
 }
 
@@ -58,6 +64,7 @@ async function setup(t) {
   const waiting = []
   const server = createServer((request, response) => {
     if (request.url === '/api/fast') return response.end('{"ok":true}')
+    if (request.url === '/api/fail') return response.writeHead(500).end('{"error":"broken"}')
     if (request.url === '/api/stall') {
       response.writeHead(200, { 'Content-Type': 'application/json' })
       response.write('{"half":')
@@ -96,10 +103,9 @@ async function setup(t) {
     globalThis.fetch = originalFetch
   })
 
-  const tick = holdLimitTimer(t)
   return {
     headers,
-    tick,
+    ...holdLimitTimer(t),
     arrived: () =>
       arrivals.length ? Promise.resolve(arrivals.shift()) : new Promise((resolve) => waiting.push(resolve)),
     call: (route, { method = 'GET', signal } = {}) =>
@@ -213,4 +219,70 @@ for (const [label, reason] of [
 test('a signal aborted before the call returns cancelled', bounded, async (t) => {
   const h = await setup(t)
   assert.deepEqual(errorOf(await h.call('fast', { signal: AbortSignal.abort() })), { error: 'cancelled' })
+})
+
+// Each ending of a call, driven to completion.
+const ENDINGS = {
+  success: (h, options) => h.call('fast', options),
+  'error status': (h, options) => h.call('fail', options),
+  'connection lost before the headers': async (h, options) => {
+    const result = h.call('hang', options)
+    ;(await h.arrived()).response.destroy()
+    return result
+  },
+  'connection lost in the body': async (h, options) => {
+    const result = h.call('stall', options)
+    await h.headers
+    ;(await h.arrived()).response.destroy()
+    return result
+  },
+  'caller abort before the headers': async (h, options) => {
+    const controller = new AbortController()
+    const result = h.call('hang', { ...options, signal: controller.signal })
+    await h.arrived()
+    controller.abort()
+    return result
+  },
+  'caller abort in the body': async (h, options) => {
+    const controller = new AbortController()
+    const result = h.call('stall', { ...options, signal: controller.signal })
+    await h.headers
+    controller.abort()
+    return result
+  },
+}
+
+for (const [ending, run] of Object.entries(ENDINGS)) {
+  test(`no limit timer is left after: ${ending}`, bounded, async (t) => {
+    const h = await setup(t)
+    await run(h)
+    assert.deepEqual([h.started(), h.pending()], [1, 0])
+  })
+}
+
+const UNANSWERED = {
+  'connection lost before the headers': 'unreachable',
+  'connection lost in the body': null, // the runtime's own message
+  'caller abort before the headers': 'cancelled',
+  'caller abort in the body': 'cancelled',
+}
+
+for (const [ending, code] of Object.entries(UNANSWERED)) {
+  test(`a write warns that it may have been applied: ${ending}`, bounded, async (t) => {
+    const h = await setup(t)
+    const error = errorOf(await ENDINGS[ending](h, { method: 'POST' }))
+    if (code) assert.equal(error.error, code)
+    assert.match(error.detail, /(^|\. )The write may still have been applied; check before retrying\.$/)
+  })
+
+  test(`a read does not warn: ${ending}`, bounded, async (t) => {
+    const h = await setup(t)
+    assert.doesNotMatch(JSON.stringify(errorOf(await ENDINGS[ending](h))), /applied/)
+  })
+}
+
+test('a write that was never sent does not warn that it may have been applied', bounded, async (t) => {
+  const h = await setup(t)
+  const result = h.call('fast', { method: 'POST', signal: AbortSignal.abort() })
+  assert.deepEqual(errorOf(await result), { error: 'cancelled' })
 })
