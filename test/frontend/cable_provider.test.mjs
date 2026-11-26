@@ -1167,6 +1167,43 @@ test('a refusal ends when another save stores its edit', async (t) => {
   assert.equal(h.sentUpdates().length, 1)
 })
 
+test('a refusal does not outlive its edit: a later large edit that only fails is still retried', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t, { retryBaseMs: 40, retryMaxMs: 40, uploadWarnMs: 10 })
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, LARGE)
+  h.provider.persistCurrentState()
+  await calls[0].respond(413)
+  await calls[1].respond()
+  h.doc.getText('t').insert(0, LARGE)
+  assert.equal(calls.length, 3)
+  await calls[2].respond(503)
+  await pause(20)
+  assert.equal(h.provider.saveState, 'stuck')
+  await pause(60)
+  assert.equal(calls.length, 4, 'nothing refused this one')
+  await calls[3].respond()
+  assert.equal(h.provider.saveState, null)
+})
+
+test('each large edit has its own time before it is called unsaved', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t, { retryBaseMs: 5, retryMaxMs: 5, uploadWarnMs: 600 })
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, LARGE)
+  h.doc.getText('t').insert(0, LARGE)
+  await calls[0].fail()
+  await pause(300)
+  await calls[1].respond()
+  await calls[2].fail()
+  const failedAt = Date.now()
+  let warnedAt = null
+  h.provider.on('save-state', () => { warnedAt ??= h.provider.saveState === 'stuck' ? Date.now() : null })
+  await pause(900)
+  assert.ok(warnedAt, 'the first edit left no timer that swallows the warning')
+  assert.ok(warnedAt - failedAt >= 590, `${warnedAt - failedAt} ms`)
+})
+
 test('a large edit refused as stale or locked recovers the way a frame does', async (t) => {
   for (const [status, event, state] of [[409, 'stale', null], [423, 'write-denied', 'stuck']]) {
     const { calls } = stubLimitedFetch(t)

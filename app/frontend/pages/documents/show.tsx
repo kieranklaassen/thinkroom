@@ -21,6 +21,8 @@ import {
 } from '../../editor/provenance'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
 import type { RenderHints, SaveState } from '../../editor/cable_provider'
+import { sessionAccess } from './session_access'
+import { UnsavedEditNotice } from '../../components/unsaved_edit_notice'
 import { bindReadModeCopy } from '../../editor/clipboard'
 import { bindReadPointerBroadcast } from '../../editor/read_pointers'
 import {
@@ -312,12 +314,9 @@ export default function DocumentShow({
   // Compound writing rides inside Comment mode for featured accounts.
   const showCompound = effectiveMode === 'comment' && writingAvailable
   const connectionIdentity = viewer.account ? `account:${viewer.account.id}` : 'guest'
-  // A remount drops what the editor has not saved. While that is a large edit,
-  // losing write access only makes the editor read-only, so it can be copied.
-  const [sessionCanWrite, setSessionCanWrite] = useState(ownership.can_write)
-  if (saveState === null && sessionCanWrite !== ownership.can_write) {
-    setSessionCanWrite(ownership.can_write)
-  }
+  const [heldCanWrite, setHeldCanWrite] = useState(ownership.can_write)
+  const sessionCanWrite = sessionAccess(heldCanWrite, ownership.can_write, saveState)
+  if (sessionCanWrite !== heldCanWrite) setHeldCanWrite(sessionCanWrite)
   const editorSessionKey = `${doc.slug}:${sessionCanWrite ? 'write' : 'read'}`
   // Live handle for code that runs after awaits or inside stable callbacks —
   // a closure-captured handle goes stale when the editor remounts mid-flight.
@@ -1021,14 +1020,7 @@ export default function DocumentShow({
         {!isReading && (
           <ClaimBanner slug={doc.slug} ownership={ownership} claimerName={identity.name} />
         )}
-        {saveState === 'stuck' && (
-          <div className="doc-notice" role="alert">
-            <span>
-              Your latest changes are not saved: one is too large, was refused, or could not be sent.
-              Copy what you need before you reload or leave this page.
-            </span>
-          </div>
-        )}
+        <UnsavedEditNotice saveState={saveState} />
         {!isReading && (suggestionNotice || editorNotice) && (
           <div className="doc-notice" role="status">
             <span>{suggestionNotice ?? editorNotice}</span>

@@ -64,13 +64,22 @@ class YjsPersistence
 
     # Merge a base64-encoded Yjs update into the document's persisted state.
     # Convenience wrapper over merge_bytes for callers holding a base64 frame;
-    # transport boundaries (SyncChannel, DocumentsController) decode once and
-    # call merge_bytes directly.
+    # transport boundaries decode once and call merge_bytes (SyncChannel) or
+    # merge_updates (DocumentsController) directly.
     def merge(document, base64_update, generation: document.content_generation, seed_claim: nil, token: nil, user: nil)
       merge_bytes(document, decode(base64_update), generation:, seed_claim:, token:, user:)
     end
 
-    # Merge raw binary Yjs update bytes into the document's persisted state.
+    # Merge one raw binary Yjs update; see merge_updates.
+    def merge_bytes(document, update, **)
+      merge_updates(document, [ update ], **)
+    end
+
+    # Merge raw binary Yjs updates into the document's persisted state: one edit,
+    # in clock order, that its client split when no single update could hold it.
+    # All or nothing, and under one lock: yrs may integrate a later
+    # piece without the earlier one, so a fold in between could lose it. Folded
+    # at once, so the same edit sent again leaves no rows behind.
     #
     # `generation` is the sending client's required Document#content_generation
     # integer. A missing, malformed, or mismatched generation means the client
@@ -80,14 +89,6 @@ class YjsPersistence
     #
     # `seed_claim` is present on a claimant's writes until its seed is known to
     # be stored. The first seed stored wins; see seed_claim_holds?.
-    def merge_bytes(document, update, **)
-      merge_updates(document, [ update ], **)
-    end
-
-    # Merge one edit its client split because no single update could hold it, in
-    # clock order. All or nothing, and under one lock: yrs may integrate a later
-    # piece without the earlier one, so a fold in between could lose it. Folded
-    # at once, so the same edit sent again leaves no rows behind.
     def merge_updates(document, updates, generation:, seed_claim: nil, token: nil, user: nil)
       updates = updates.map(&:b)
       raise ArgumentError, "no Yjs update for document #{document.id}" if updates.empty?

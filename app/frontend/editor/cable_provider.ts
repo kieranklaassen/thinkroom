@@ -217,12 +217,13 @@ export class CableProvider {
   private upload: { part: Uint8Array; abort: AbortController } | null = null
   /** Changes with the 'save-state' event. */
   saveState: SaveState = null
-  // An edit that was refused or keeps failing, until it leaves the outbox.
-  private stuckPart: Uint8Array | null = null
-  // The stuck edit was refused: nothing more is sent on this connection, since
-  // every later edit builds on it.
-  private refusedHere = false
-  private uploadWarnTimer: ReturnType<typeof setTimeout> | null = null
+  // Large edits to call unsaved until they are stored: refused, or failing for
+  // a while. Each has its own time to fail.
+  private unsaved = new WeakSet<Uint8Array>()
+  private unsavedTimers = new Map<Uint8Array, ReturnType<typeof setTimeout>>()
+  // The edit refused on this connection. Nothing more is sent while it is owed,
+  // since every later edit builds on it.
+  private refusedPart: Uint8Array | null = null
   private ackTimer: ReturnType<typeof setTimeout> | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryAttempt = 0
@@ -280,7 +281,7 @@ export class CableProvider {
           this.clearRetryTimer()
           this.stopSeedWait()
           this.requeueInFlight()
-          this.refusedHere = false
+          this.refusedPart = null
           // Its connection may be gone too, and nothing else would end it.
           this.upload?.abort.abort()
           this.clearAwarenessThrottle()
@@ -380,7 +381,7 @@ export class CableProvider {
   private enqueue(update: Uint8Array): void {
     const last = this.queued[this.queued.length - 1]
     const fits = last && last.length + update.length + MERGE_BYTES_PER_PART <= MAX_UPDATE_BYTES
-    if (last && fits && last !== this.stuckPart && !this.carriedBySave.has(last)) {
+    if (last && fits && !this.carriedBySave.has(last)) {
       this.queued[this.queued.length - 1] = Y.mergeUpdates([last, update])
     } else {
       this.queued.push(update)
@@ -409,14 +410,14 @@ export class CableProvider {
 
   private refreshSaveState(): void {
     const unacked = this.unackedParts()
-    if (this.stuckPart && !unacked.includes(this.stuckPart)) {
-      this.stuckPart = null
-      this.clearUploadWarnTimer()
+    for (const [part, timer] of this.unsavedTimers) {
+      if (unacked.includes(part)) continue
+      clearTimeout(timer)
+      this.unsavedTimers.delete(part)
     }
     const large = unacked.filter((part) => part.length > MAX_UPDATE_BYTES)
-    const stuck = this.stuckPart !== null || large.some((part) => this.pieces.get(part) === null)
+    const stuck = large.some((part) => this.unsaved.has(part) || this.pieces.get(part) === null)
     const state = stuck ? 'stuck' : large.length > 0 ? 'sending' : null
-    if (state === null) this.clearUploadWarnTimer()
     if (state === this.saveState) return
     this.saveState = state
     this.emit('save-state')
@@ -452,13 +453,9 @@ export class CableProvider {
     }
   }
 
-  private clearUploadWarnTimer(): void {
-    if (this.uploadWarnTimer) clearTimeout(this.uploadWarnTimer)
-    this.uploadWarnTimer = null
-  }
-
   private clearTimers(): void {
-    this.clearUploadWarnTimer()
+    this.unsavedTimers.forEach((timer) => clearTimeout(timer))
+    this.unsavedTimers.clear()
     this.clearAckTimer()
     this.clearRetryTimer()
   }
@@ -468,7 +465,7 @@ export class CableProvider {
     this.inFlight = null
     this.queued = []
     this.retryAttempt = 0
-    this.refusedHere = false
+    this.refusedPart = null
     this.refreshSaveState()
   }
 
@@ -571,12 +568,12 @@ export class CableProvider {
   }
 
   private refused(): boolean {
-    return this.refusedHere && this.stuckPart !== null && this.unackedParts().includes(this.stuckPart)
+    return this.refusedPart !== null && this.unackedParts().includes(this.refusedPart)
   }
 
   private refuse(part: Uint8Array): void {
-    this.stuckPart = part
-    this.refusedHere = true
+    this.refusedPart = part
+    this.unsaved.add(part)
     this.refreshSaveState()
   }
 
@@ -610,11 +607,12 @@ export class CableProvider {
   }
 
   private warnIfStillUnsaved(part: Uint8Array): void {
-    this.uploadWarnTimer ??= setTimeout(() => {
-      this.uploadWarnTimer = null
-      if (this.unackedParts().includes(part)) this.stuckPart = part
+    if (this.unsavedTimers.has(part)) return
+    this.unsavedTimers.set(part, setTimeout(() => {
+      this.unsavedTimers.delete(part)
+      this.unsaved.add(part)
       this.refreshSaveState()
-    }, this.uploadWarnMs)
+    }, this.uploadWarnMs))
   }
 
   private seedClaimParam(): { seed_claim?: string } {
@@ -675,7 +673,7 @@ export class CableProvider {
         : { update: toBase64(pending) }),
       cid: this.clientId,
       // Same staleness guard as flush(): this beforeunload/keepalive
-      // fallback merges through the identical YjsPersistence.merge_bytes path
+      // fallback merges through the same YjsPersistence.merge_updates
       // as SyncChannel, so it always carries content_generation (initialized
       // from page props even before the WebSocket handshake completes).
       generation: this.generation,
@@ -910,7 +908,8 @@ export class CableProvider {
         if (!data.stale && data.reason !== 'stale' && this.saveState !== null) {
           // Holding a large edit: kept readable, as when its upload is refused.
           this.requeueInFlight()
-          this.refuse(this.queued.find((part) => part.length > MAX_UPDATE_BYTES) ?? this.queued[0])
+          const large = this.queued.find((part) => part.length > MAX_UPDATE_BYTES)
+          if (large) this.refuse(large)
           this.emit('write-denied')
           break
         }

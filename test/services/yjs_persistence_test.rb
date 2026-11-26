@@ -1,4 +1,5 @@
 require "test_helper"
+require "open3"
 
 class YjsPersistenceTest < ActiveSupport::TestCase
   def b64_update_for(text, from_doc: nil)
@@ -480,6 +481,50 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal YjsPersistence::FOLD_THRESHOLD + 1, fold.payload[:rows]
     assert_equal 0, fold.payload[:retained]
     assert_includes text_of(doc), "first second"
+  end
+
+  test "what the page's splitter makes of an edit is stored as that edit" do
+    script = <<~JS
+      import * as Y from 'yjs'
+      import { splitUpdate } from './app/frontend/editor/split_update.ts'
+      const b64 = (bytes) => Buffer.from(bytes).toString('base64')
+      const peer = new Y.Doc()
+      peer.getText('t').insert(0, 'kept by the peer, replaced by the writer')
+      const writer = new Y.Doc()
+      Y.applyUpdate(writer, Y.encodeStateAsUpdate(peer))
+      const edits = []
+      writer.on('update', (update) => edits.push(update))
+      const text = writer.getText('t')
+      writer.transact(() => {
+        text.delete(18, 22)
+        text.insert(18, 'long text cut in the middle 漢😀 '.repeat(60))
+        for (let i = 0; i < 20; i += 1) text.insert(40, `run ${i} `, { bold: true })
+        text.format(0, 12, { italic: true })
+        text.delete(100, 50)
+        text.insert(text.length, 'end')
+        text.delete(text.length - 2, 1)
+      })
+      const pieces = splitUpdate(edits[0], 700)
+      console.log(JSON.stringify({
+        base: b64(Y.encodeStateAsUpdate(peer)), pieces: pieces.map(b64), text: text.toString()
+      }))
+    JS
+    output, errors, status = Open3.capture3(
+      "node", "--input-type=module", "-e", script, chdir: Rails.root.to_s
+    )
+    assert status.success?, errors
+    edit = JSON.parse(output)
+    assert_operator edit["pieces"].size, :>, 2
+
+    doc = Document.create!(title: "Split by the page")
+    YjsPersistence.merge(doc, edit["base"])
+    YjsPersistence.merge_updates(
+      doc.reload, edit["pieces"].map { |piece| Base64.strict_decode64(piece) },
+      generation: doc.content_generation
+    )
+    assert_not doc.reload.yjs_document_updates.exists?
+    assert_not doc_from(doc).pending?
+    assert_equal edit["text"], text_of(doc)
   end
 
   test "a split edit sent again leaves no rows and no second copy" do
