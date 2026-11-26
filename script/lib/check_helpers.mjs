@@ -31,6 +31,26 @@ export const openSeeded = async (page, url) => {
   }
 }
 
+// Reload a document and wait until the server's sync has reached the page. The
+// page starts from the last compacted state; edits made since then arrive with
+// the sync frame, after the editor is already live.
+export const reloadSynced = async (page) => {
+  let deadline
+  const synced = new Promise((resolve, reject) => {
+    deadline = setTimeout(() => reject(new Error('no sync arrived after the reload')), 30000)
+    const onSocket = (socket) => {
+      if (!/\/cable(?:\?|$)/.test(socket.url())) return
+      page.off('websocket', onSocket)
+      socket.on('framereceived', ({ payload }) => {
+        if (String(payload).includes('"type":"sync"')) resolve()
+      })
+    }
+    page.on('websocket', onSocket)
+  })
+  await Promise.all([synced, page.reload().then(() => waitForLive(page))])
+    .finally(() => clearTimeout(deadline))
+}
+
 // Dev-environment console noise, verified not to reproduce on clean loads or
 // in production builds (docs/dogfood-reports/2026-07-01-main-two-week-release-dogfood.md):
 // - React's recoverable hydration de-opt fires when automation interacts
