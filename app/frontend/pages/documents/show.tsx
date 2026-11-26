@@ -1222,12 +1222,12 @@ export default function DocumentShow({
                 onSelection={isReading ? undefined : handleSelection}
                 onTitleChange={setDocumentTitle}
                 // This tab's local doc predates an owner CLI replacement (a frame
-              // it sent was rejected for staleness, or a reconnect handshake
-              // reported a different generation), or a viewer's local copy of
-              // the seed was superseded by real state. Same recovery action
-              // as content_reset, reached via the sync channel.
-              onStale={reloadAfterContentReset}
-              onNotice={setEditorNotice}
+                // it sent was rejected for staleness, or a reconnect handshake
+                // reported a different generation), or a viewer's local copy of
+                // the seed was superseded by real state. Same recovery action
+                // as content_reset, reached via the sync channel.
+                onStale={reloadAfterContentReset}
+                onNotice={setEditorNotice}
               />
             </article>
             <DocumentWidthHandle

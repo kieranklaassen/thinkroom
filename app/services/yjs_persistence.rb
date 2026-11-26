@@ -184,7 +184,7 @@ class YjsPersistence
           if document.yjs_document_updates.exists?
             fold_and_encode_diff(document, client_sv, payload)
           else
-            document.reload # see state_b64
+            document.reload
             encode_diff(document, client_sv, payload)
           end
         rescue CorruptStateError

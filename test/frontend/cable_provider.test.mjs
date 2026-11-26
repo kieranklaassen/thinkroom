@@ -447,6 +447,8 @@ test('a reader shows the seed locally and reloads instead of merging real state 
   assert.ok(!events.includes('stale'))
 
   h.receive({ type: 'update', update: contentUpdate(), cid: 'peer' })
+  h.receive({ type: 'update', update: contentUpdate('typing'), cid: 'peer' })
+  assert.equal(events.filter((event) => event === 'stale').length, 1, 'a typing peer must not restart the reload')
   assert.equal(events.at(-1), 'stale')
   assert.equal(h.doc.getText('t').toString(), 'Template', 'real state must not merge into the local copy')
   assert.equal(h.sentUpdates().length, 0)

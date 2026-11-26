@@ -93,7 +93,7 @@ const DEFAULT_SEED_RETRY_MS = 3_000
 
 // The exact v1 update carrying no structs and no deletes.
 const isEmptyUpdate = (update: Uint8Array): boolean =>
-  update.length === 2 && update[0] === 0 && update[1] === 0
+  update.length === EMPTY_UPDATE.length && update.every((byte, i) => byte === EMPTY_UPDATE[i])
 
 export type ProviderEvent = 'synced' | 'seed' | 'rejected' | 'write-denied' | 'stale'
 
@@ -154,6 +154,7 @@ export class CableProvider {
   // A viewer who cannot write is showing the seed from its own local copy.
   // Merging real state into that copy would duplicate the text.
   private localSeed = false
+  private localSeedDiscarded = false
   // Initialized from documents#show props and verified on each "sync" message,
   // then echoed back on outgoing update/sync-reply frames, reconnect subscribe
   // params, and keepalive HTTP flushes so the server rejects any client whose
@@ -343,7 +344,6 @@ export class CableProvider {
     this.seedWaiting = true
     if (!this.canWrite) return
     this.seedTimer = setTimeout(() => {
-      this.seedTimer = null
       // Answered with a whole new handshake: content, a grant, or still pending.
       this.send({ type: 'seed-request' })
       this.seedTimer = setTimeout(() => this.waitForSeed(), this.ackTimeoutMs)
@@ -360,8 +360,11 @@ export class CableProvider {
     this.broadcastAwareness()
   }
 
+  // Once only: the page reloads in response, and later frames from a typing
+  // peer must not keep restarting that reload.
   private discardLocalSeed(): void {
-    this.clearOutbox()
+    if (this.localSeedDiscarded) return
+    this.localSeedDiscarded = true
     this.emit('stale')
   }
 

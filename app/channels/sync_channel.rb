@@ -174,7 +174,6 @@ class SyncChannel < ApplicationCable::Channel
     message[:seed_author_name] = @document.seed_author_name if @document.seed_author_name
   end
 
-  # No durable content yet, but a seed another subscriber is expected to apply.
   def seed_pending?
     @document.seed_content.present? && !@document.live_crdt?
   end
