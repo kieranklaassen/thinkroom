@@ -79,6 +79,8 @@ class SyncChannel < ApplicationCable::Channel
     transmit_handshake
 
     transmit_cached_awareness
+  rescue ActiveRecord::RecordNotFound
+    reject # deleted during the handshake
   end
 
   def unsubscribed
@@ -151,14 +153,18 @@ class SyncChannel < ApplicationCable::Channel
   private
 
   def transmit_handshake
+    granted = claim_seed?
+    # Decided before the state is read: content landing in between then travels
+    # with the flag, where the other order would send an unmarked empty state.
+    pending = !granted && seed_pending?
     message = build_sync_message
-    if claim_seed?
+    if granted
       # Remember the grant so a "seed-decline" from this subscriber can
       # release exactly this claim (and only at this generation).
       @granted_seed_generation = @document.content_generation
       message[:seed] = true
       add_seed(message)
-    elsif seed_pending?
+    elsif pending
       message[:seed_pending] = true
       add_seed(message) unless writable?
     end
@@ -188,6 +194,8 @@ class SyncChannel < ApplicationCable::Channel
   def retry_seed_claim
     @document.reload
     transmit_handshake if writable?
+  rescue ActiveRecord::RecordNotFound
+    # Deleted since; DocumentMetaChannel tells the client.
   end
 
   def build_sync_message

@@ -502,8 +502,16 @@ export class CableProvider {
           // replaces this discarded session can claim and apply the new
           // template instead of everyone waiting out SEED_CLAIM_TIMEOUT.
           if (data.seed) this.send({ type: 'seed-decline' })
+          this.stopSeedWait()
           this.clearOutbox()
           this.emit('stale')
+          break
+        }
+        // A late answer to a seed-request, not a new subscription: the
+        // outbox and its sequence are live and must not be reset.
+        if (this.synced) {
+          if (data.seed) this.send({ type: 'seed-decline' })
+          if (data.update) Y.applyUpdate(this.doc, fromBase64(data.update), this)
           break
         }
         if (this.localSeed) {
@@ -524,7 +532,8 @@ export class CableProvider {
         if (typeof data.generation === 'number') this.generation = data.generation
         const seedContent = data.seed_content
         // An unshared seed is safe to show only where it can never be sent.
-        const showLocally = Boolean(data.seed_pending) && !this.canWrite
+        const showLocally =
+          Boolean(data.seed_pending) && !this.canWrite && this.doc.store.clients.size === 0
         if ((data.seed || showLocally) && seedContent) {
           this.localSeed = !this.canWrite
           // No one listens to 'seed' by design: the editor reads

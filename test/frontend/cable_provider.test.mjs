@@ -463,3 +463,31 @@ test('a reader whose local seed was superseded while offline reloads on reconnec
   h.receive({ ...emptySyncFrame(1), update: contentUpdate() })
   assert.deepEqual(events, ['synced', 'stale'])
 })
+
+test('a late answer to a seed-request leaves the live outbox and its sequence alone', (t) => {
+  const h = createHarness(t, { ackTimeoutMs: 5000 })
+  h.receive(pendingSyncFrame())
+  const peer = contentUpdate()
+  h.receive({ type: 'update', update: peer, cid: 'peer' })
+
+  h.doc.getText('t').insert(0, 'one ')
+  h.doc.getText('t').insert(0, 'two ')
+  h.receive({ ...emptySyncFrame(1), update: contentUpdate('late') })
+  assert.equal(h.sentUpdates().length, 1, 'the in-flight edit must not be resent under its own number')
+  assert.match(h.doc.getText('t').toString(), /late/)
+
+  h.receive({ type: 'ack', seq: 1 })
+  assert.deepEqual(h.sentUpdates().map((frame) => frame.seq), [1, 2])
+  const received = new Y.Doc()
+  Y.applyUpdate(received, fromBase64(peer))
+  for (const frame of h.sentUpdates()) Y.applyUpdate(received, fromBase64(frame.update))
+  assert.equal(received.getText('t').toString(), 'two one body')
+})
+
+test('a reader whose pending handshake already carries content shows that content, not the seed', (t) => {
+  const h = createHarness(t, { canWrite: false })
+  const events = recordEvents(h)
+  h.receive(pendingSyncFrame({ update: contentUpdate(), seed_content: '# Template' }))
+  assert.deepEqual(events, ['synced'])
+  assert.equal(h.provider.seedContent, null)
+})

@@ -633,18 +633,14 @@ export default function DocumentShow({
     connectionIdentity,
   })
 
-  // The sync channel rejects its resubscription when the doc is gone —
-  // same exit path.
   useEffect(() => {
     if (!handle) return
     const provider = handle.provider
-    provider.on('rejected', onDocumentGone)
     provider.on('write-denied', recoverDeniedWrite)
     return () => {
-      provider.off('rejected', onDocumentGone)
       provider.off('write-denied', recoverDeniedWrite)
     }
-  }, [handle, onDocumentGone, recoverDeniedWrite])
+  }, [handle, recoverDeniedWrite])
 
   // Priority-ordered dispatch: text selection → mobile suggestion tap →
   // click-to-comment → AI review span. Exactly one target (or none) comes
@@ -1227,6 +1223,9 @@ export default function DocumentShow({
                 // the seed was superseded by real state. Same recovery action
                 // as content_reset, reached via the sync channel.
                 onStale={reloadAfterContentReset}
+                // The sync channel rejects its resubscription when the doc is
+                // gone; same exit path as the deleted broadcast.
+                onRejected={onDocumentGone}
                 onNotice={setEditorNotice}
               />
             </article>

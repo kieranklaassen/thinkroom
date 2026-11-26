@@ -167,6 +167,8 @@ export interface EditorProps {
   onTitleChange?: (title: string) => void
   /** The local doc no longer matches the server's and must be reloaded. */
   onStale?: () => void
+  /** The document no longer exists on the server. */
+  onRejected?: () => void
   /** User-facing notices the editor cannot render itself: an edit refused
    *  for pushing the document past its size limit, a durable snapshot the
    *  server refused as too large. */
@@ -316,14 +318,15 @@ function CollabEditor({
   onSelection,
   onTitleChange,
   onStale,
+  onRejected,
   onNotice,
 }: EditorProps) {
   const [sketchDraft, setSketchDraft] = useState<ActiveSketch | undefined>(undefined)
   const insertSketchRef = useRef<() => void>(() => undefined)
   const saveSketchRef = useRef<(data: SketchData) => void>(() => undefined)
   const deleteSketchRef = useRef<(id: string) => void>(() => undefined)
-  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onNotice })
-  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onNotice }
+  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onRejected, onNotice })
+  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onRejected, onNotice }
   // Ref so the editable() closure always reads the live value; the effect
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
@@ -464,7 +467,9 @@ function CollabEditor({
     // Bound before the editor is ready: a client still waiting for content has
     // no handle to report through.
     const stale = () => callbacksRef.current.onStale?.()
+    const rejected = () => callbacksRef.current.onRejected?.()
     provider.on('stale', stale)
+    provider.on('rejected', rejected)
 
     let cancelled = false
     let unbindMermaidHints: (() => void) | null = null
@@ -600,6 +605,7 @@ function CollabEditor({
       cancelled = true
       provider.off('synced', start)
       provider.off('stale', stale)
+      provider.off('rejected', rejected)
       unbindMermaidHints?.()
       snapshots.dispose()
       try {

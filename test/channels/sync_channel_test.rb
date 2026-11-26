@@ -167,6 +167,49 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert_not transmissions.last.key?("seed_pending")
   end
 
+  test "content persisted while the empty handshake is built is not served as a plain empty sync" do
+    doc = Document.create!(title: "PersistedDuringJoin", seed_markdown: "# Template")
+    assert doc.try_claim_seed
+    content = build_update_b64("content")
+
+    original = YjsPersistence.method(:state_b64)
+    YjsPersistence.define_singleton_method(:state_b64) do |document|
+      original.call(document).tap { YjsPersistence.merge(Document.find(document.id), content) }
+    end
+    begin
+      subscribe slug: doc.slug
+    ensure
+      YjsPersistence.define_singleton_method(:state_b64, original)
+    end
+
+    assert_equal true, transmissions.last["seed_pending"]
+  end
+
+  test "a document deleted while its handshake is built rejects the subscription" do
+    doc = Document.create!(title: "DeletedDuringJoin", seed_markdown: "# Template")
+
+    original = SyncChannel.method(:track_subscribe)
+    SyncChannel.define_singleton_method(:track_subscribe) do |id|
+      original.call(id).tap { Document.find(id).destroy! }
+    end
+    begin
+      subscribe slug: doc.slug
+    ensure
+      SyncChannel.define_singleton_method(:track_subscribe, original)
+    end
+
+    assert subscription.rejected?
+  end
+
+  test "seed-request for a deleted document is ignored" do
+    doc = Document.create!(title: "DeletedWhileWaiting", seed_markdown: "# Template")
+    assert doc.try_claim_seed
+    subscribe slug: doc.slug
+    Document.find(doc.id).destroy!
+
+    assert_nothing_raised { perform :receive, { "type" => "seed-request", "cid" => "waiting" } }
+  end
+
   test "seed-request retries an abandoned claim and answers with a fresh handshake" do
     doc = Document.create!(title: "Abandoned", seed_markdown: "# Template")
     assert doc.try_claim_seed
