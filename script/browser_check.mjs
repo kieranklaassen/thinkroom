@@ -1249,15 +1249,14 @@ try {
   const taskA = await browser.newPage()
   const taskB = await browser.newPage()
   let blockTaskWebSocketUpdates = false
-  let taskConnectionsSynced = 0
+  let taskConnection = 0 // the newest socket, counted in the order they open
+  let taskSyncedConnection = 0 // the newest socket that has received its sync
   await taskA.routeWebSocket(/\/cable(?:\?|$)/, (socket) => {
     const server = socket.connectToServer()
-    let synced = false
+    const connection = (taskConnection += 1)
     server.onMessage((message) => {
       socket.send(message)
-      if (synced || !String(message).includes('"type":"sync"')) return
-      synced = true
-      taskConnectionsSynced += 1
+      if (String(message).includes('"type":"sync"')) taskSyncedConnection = Math.max(taskSyncedConnection, connection)
     })
     socket.onMessage((message) => {
       try {
@@ -1275,13 +1274,13 @@ try {
   await waitForLive(taskA)
   await waitForLive(taskB)
   // The page starts from the last compacted state, which can match by chance,
-  // so judge a reload only after its own connection has received the sync.
+  // so judge a reload only after a socket opened by that reload has synced.
   const reloadTaskSynced = async () => {
-    const before = taskConnectionsSynced
+    const before = taskConnection
     await taskA.reload()
     await waitForLive(taskA)
     const deadline = Date.now() + 30000
-    while (taskConnectionsSynced === before) {
+    while (taskSyncedConnection <= before) {
       if (Date.now() > deadline) throw new Error('no sync arrived after the task reload')
       await taskA.waitForTimeout(50)
     }
@@ -1296,7 +1295,10 @@ try {
         checked,
         { timeout: 10000 },
       )
-      .then(() => true, () => false)
+      .then(async () => {
+        await taskA.waitForTimeout(500) // right for a moment is not durable
+        return (await taskA.locator('.doc-live-editor .task-checkbox').first().isChecked()) === checked
+      }, () => false)
   const taskCheckboxes = taskA.locator(
     '.milkdown .ProseMirror li[data-item-type="task"] input[type="checkbox"]',
   )
@@ -1776,7 +1778,10 @@ try {
     await sketchB
       .locator('.thinkroom-sketch')
       .waitFor({ state: 'detached', timeout: 5000 })
-      .then(() => true, () => false)
+      .then(async () => {
+        await sketchB.waitForTimeout(500) // the sync may still put it back
+        return (await sketchB.locator('.thinkroom-sketch').count()) === 0
+      }, () => false)
   ) {
     ok('deleting a sketch syncs and survives reload')
   } else {

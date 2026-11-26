@@ -16,5 +16,8 @@ class NodeSuiteTest < ActiveSupport::TestCase
     # A run that executes nothing also exits 0.
     assert_operator output[/^# pass (\d+)$/, 1].to_i, :>=, files.size, output
     assert_match(/^# skipped 0$/, output)
+    assert_match(/^# todo 0$/, output)
+    # Node reports a file that registers no test as one passing test with the file's name.
+    assert_no_match(/^ok \d+ - .*\.test\.mjs$/, output)
   end
 end
