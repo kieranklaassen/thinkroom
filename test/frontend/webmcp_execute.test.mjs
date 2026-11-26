@@ -259,3 +259,30 @@ for (const [ending, run] of Object.entries(ENDINGS)) {
     assert.deepEqual([h.started(), h.pending()], [1, 0])
   })
 }
+
+const UNANSWERED = {
+  'connection lost before the headers': 'unreachable',
+  'connection lost in the body': null, // the runtime's own message
+  'caller abort before the headers': 'cancelled',
+  'caller abort in the body': 'cancelled',
+}
+
+for (const [ending, code] of Object.entries(UNANSWERED)) {
+  test(`a write warns that it may have been applied: ${ending}`, bounded, async (t) => {
+    const h = await setup(t)
+    const error = errorOf(await ENDINGS[ending](h, { method: 'POST' }))
+    if (code) assert.equal(error.error, code)
+    assert.match(error.detail, /(^|\. )The write may still have been applied; check before retrying\.$/)
+  })
+
+  test(`a read does not warn: ${ending}`, bounded, async (t) => {
+    const h = await setup(t)
+    assert.doesNotMatch(JSON.stringify(errorOf(await ENDINGS[ending](h))), /applied/)
+  })
+}
+
+test('a write that was never sent does not warn that it may have been applied', bounded, async (t) => {
+  const h = await setup(t)
+  const result = h.call('fast', { method: 'POST', signal: AbortSignal.abort() })
+  assert.deepEqual(errorOf(await result), { error: 'cancelled' })
+})
