@@ -21,6 +21,36 @@ const { executeManifestTool } = await import('../../app/frontend/lib/webmcp_exec
 
 const LIMIT_MS = 60_000
 
+// Holds only the call's own limit. Node's mocked timers would also capture the
+// HTTP client's keep-alive timers, which outlive a test: clearing one under a
+// later test's mock removes whatever sits at the same queue position there.
+function holdLimitTimer(t) {
+  const { setTimeout: realSetTimeout, clearTimeout: realClearTimeout } = globalThis
+  const held = new Map()
+  let now = 0
+  globalThis.setTimeout = (callback, delay, ...args) => {
+    if (delay !== LIMIT_MS) return realSetTimeout(callback, delay, ...args)
+    const timer = {}
+    held.set(timer, { callback, at: now + delay })
+    return timer
+  }
+  globalThis.clearTimeout = (timer) => {
+    if (!held.delete(timer)) realClearTimeout(timer)
+  }
+  t.after(() => {
+    globalThis.setTimeout = realSetTimeout
+    globalThis.clearTimeout = realClearTimeout
+  })
+  return (ms) => {
+    now += ms
+    for (const [timer, { callback, at }] of held) {
+      if (at > now) continue
+      held.delete(timer)
+      callback()
+    }
+  }
+}
+
 // A real server, so fetch and the body stream honor the abort signal for real.
 // `hang` sends nothing; `stall` sends headers and half a body, then nothing.
 async function setup(t) {
@@ -66,10 +96,10 @@ async function setup(t) {
     globalThis.fetch = originalFetch
   })
 
-  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const tick = holdLimitTimer(t)
   return {
     headers,
-    tick: (ms) => t.mock.timers.tick(ms),
+    tick,
     arrived: () =>
       arrivals.length ? Promise.resolve(arrivals.shift()) : new Promise((resolve) => waiting.push(resolve)),
     call: (route, { method = 'GET', signal } = {}) =>
