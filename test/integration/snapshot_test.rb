@@ -81,6 +81,16 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert_nil @document.reload.yjs_state
   end
 
+  test "a refused write answers the client's fetch headers with a status, not a redirect" do
+    @document.update!(owner_token: "someone-else", owner_name: "Owner", link_access: "view")
+    body = { content: "changed", spans: [] }.to_json
+
+    [ document_snapshot_path(@document.slug), document_sync_update_path(@document.slug) ].each do |path|
+      post path, params: body, headers: { "Content-Type" => "application/json", "Accept" => "application/json" }
+      assert_response :locked
+    end
+  end
+
   test "locked requests are denied before snapshot and sync payload validation" do
     @document.update!(
       owner_token: "someone-else",

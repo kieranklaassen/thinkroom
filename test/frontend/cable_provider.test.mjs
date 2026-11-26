@@ -284,7 +284,7 @@ test('persistCurrentState flushes strictly unacked outbox bytes and keeps newer 
   let resolveFetch
   const originalFetch = globalThis.fetch
   globalThis.fetch = (url, init) => {
-    fetchCalls.push({ url, body: JSON.parse(init.body), keepalive: init.keepalive })
+    fetchCalls.push({ url, body: JSON.parse(init.body), keepalive: init.keepalive, headers: init.headers })
     return new Promise((resolve) => {
       resolveFetch = () => resolve({ ok: true, status: 204 })
     })
@@ -309,6 +309,7 @@ test('persistCurrentState flushes strictly unacked outbox bytes and keeps newer 
   assert.equal(fetchCalls.length, 1)
   assert.equal(fetchCalls[0].url, '/d/demo-slug/sync_update')
   assert.equal(fetchCalls[0].keepalive, true)
+  assert.equal(fetchCalls[0].headers.Accept, 'application/json')
   assert.equal(fetchCalls[0].body.generation, 3)
 
   // Payload is strictly the unacked outbox, NOT the full initial doc or already-acked edit.
@@ -354,4 +355,20 @@ test('write-denied and stale responses clear the outbox and emit the matching ev
   h.receive(emptySyncFrame(2))
   assert.deepEqual(events, ['write-denied', 'stale'])
   assert.equal(h.sentUpdates().length, 2) // only the one edit before disconnect; nothing on stale reconnect
+})
+
+test('JSON writes ask for JSON, so a refusal is not a redirect that looks saved', async (t) => {
+  const { postJSON } = await import('../../app/frontend/lib/csrf.ts')
+  const originalFetch = globalThis.fetch
+  let headers
+  globalThis.fetch = async (_url, init) => {
+    headers = init.headers
+    return { ok: false, status: 423 }
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  await postJSON('/d/demo-slug/snapshot', {})
+  assert.equal(headers.Accept, 'application/json')
 })
