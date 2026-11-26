@@ -5,6 +5,11 @@ no stable release series; changes under development are listed as unreleased.
 
 ## Unreleased
 
+- Fixed: A browser tool call on a page with WebMCP no longer hangs when the
+  server never finishes answering. After 60 seconds, headers and body
+  included, it returns a `timed out` error; a timed-out write says it may still
+  have been applied. Leaving the page or cancelling the call still returns
+  `cancelled`.
 - Changed: `TYPESAFE_API_KEY` ships with every Kamal deploy (the
   `KAMAL_COMPOUND_WRITING` switch is gone, since the feature is gated per
   account by Flipper). `.kamal/secrets` resolves it with `bin/typesafe-key`

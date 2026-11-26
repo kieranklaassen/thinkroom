@@ -5,6 +5,7 @@ import {
   textResult,
   type WebmcpEditorTool,
   type WebmcpManifestTool,
+  type WebmcpRequest,
   type WebmcpRequestTool,
   type WebmcpResult,
 } from './webmcp'
@@ -24,6 +25,16 @@ interface ExecuteOptions {
 export const IDENTITY_ERROR =
   'Set your agent identity before writing so this edit is attributed to you. ' +
   'Pass agent_name (for example agent_name: "Claude") on every write tool call.'
+
+/**
+ * Bound on one tool call, from sending the request to the last body byte. It
+ * exists for a backend that hangs, so it sits well above anything a working
+ * one takes: no tool long-polls, a write waits at most 5 s for the SQLite
+ * lock, and the production proxy normally answers 504 for a silent app at
+ * about 30 s, which says more than a client timeout. The rest of the minute
+ * covers a 2 MB document travelling over a slow link.
+ */
+const CALL_TIMEOUT_MS = 60_000
 
 const PATH_PARAM_PATTERN = /^\d+$/
 const encoder = new TextEncoder()
@@ -53,7 +64,7 @@ export function byteCapError(
  * Turns a manifest tool plus arguments into a same-origin, cookie-less fetch
  * and an MCP-style result. Never throws and never returns `undefined`: one
  * outer boundary converts every failure — identity, allowlist, params,
- * headers, abort, network, parse — into an `isError` envelope (KTD4).
+ * headers, abort, timeout, network, parse — into an `isError` envelope (KTD4).
  */
 export async function executeManifestTool(
   tool: WebmcpInterpretedTool,
@@ -115,7 +126,6 @@ async function requestResult(
     // The browser session grants no authorship: every write is attributed to
     // the named agent, never to the viewer, and the API stays Bearer-only.
     credentials: 'omit',
-    signal: options.signal,
   }
 
   if (request.method === 'POST') {
@@ -125,15 +135,39 @@ async function requestResult(
     init.body = JSON.stringify(body.value)
   }
 
+  const timeout = new AbortController()
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, timeout.signal])
+    : timeout.signal
+  init.signal = signal
+  const timer = setTimeout(
+    () => timeout.abort(new DOMException('timed out', 'TimeoutError')),
+    CALL_TIMEOUT_MS,
+  )
+
   let response: Response
+  let text: string
   try {
-    response = await fetch(url.value, init)
+    try {
+      response = await fetch(url.value, init)
+    } catch (error) {
+      if (signal.aborted) throw error
+      return errorResult({ error: 'unreachable', detail: errorMessage(error) })
+    }
+    text = await response.text()
   } catch (error) {
-    if (isAbortError(error)) return errorResult({ error: 'cancelled' })
-    return errorResult({ error: 'unreachable', detail: errorMessage(error) })
+    if (!signal.aborted) throw error
+    // The combined signal keeps the reason of whichever abort came first. The
+    // thrown value cannot tell them apart: callers pick their own reason.
+    return errorResult(
+      signal.reason === timeout.signal.reason
+        ? timedOut(request.method)
+        : { error: 'cancelled' },
+    )
+  } finally {
+    clearTimeout(timer)
   }
 
-  const text = await response.text()
   const parsed = parseJson(text)
   const body = parsed.ok ? parsed.value : undefined
 
@@ -161,6 +195,20 @@ async function requestResult(
     failure.retry_after_seconds = request.rate_limit_window_seconds
   }
   return errorResult(failure)
+}
+
+function timedOut(method: WebmcpRequest['method']): Record<string, unknown> {
+  const seconds = CALL_TIMEOUT_MS / 1000
+  const detail = `No complete response within ${seconds} seconds.`
+  return {
+    error: 'timed out',
+    // Aborting the fetch does not undo work the server already started.
+    detail:
+      method === 'POST'
+        ? `${detail} The write may still have been applied; check before retrying.`
+        : detail,
+    timeout_seconds: seconds,
+  }
 }
 
 type Outcome<T> = { value: T } | { error: string; [key: string]: unknown }
