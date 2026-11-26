@@ -25,15 +25,14 @@ const shikiParser = connectedImport<Parser>(async () => {
 })
 
 /**
- * The pending-parser promise handed to prosemirror-highlight while shiki
- * loads. The plugin subscribes to it once per code block on every view
- * update and dispatches a full refresh transaction from every subscription
- * when it settles, so a document with N code blocks rebuilt every code
- * decoration N times per boot update (360 rebuilds on a 60-block document).
- * Subscriptions made in one synchronous burst (one plugin check) share a
- * single settlement; the rest never settle. The plugin only uses these to
- * learn that loading finished, so one wake-up per check is all it needs.
- * Extends Promise because the plugin identifies pending results with
+ * The pending-parser promise handed to one editor's prosemirror-highlight
+ * while shiki loads. The plugin subscribes to it once per code block on every
+ * view update and dispatches a full refresh transaction from every
+ * subscription when it settles, so a document with N code blocks rebuilt every
+ * code decoration N times, and an offline edit queued one more refresh per
+ * view update. While a subscription waits, later ones never settle: the plugin
+ * only uses them to learn that loading finished, so one wake-up is all it
+ * needs. Extends Promise because the plugin identifies pending results with
  * `instanceof Promise`.
  */
 class CoalescedLoad extends Promise<void> {
@@ -53,26 +52,26 @@ class CoalescedLoad extends Promise<void> {
   ): Promise<TResult1 | TResult2> {
     if (this.claimed) return NEVER.then(onfulfilled, onrejected)
     this.claimed = true
-    queueMicrotask(() => {
+    const release = () => {
       this.claimed = false
-    })
+    }
+    this.loaded.then(release, release)
     return this.loaded.then(onfulfilled, onrejected)
   }
 }
 
 const NEVER = new Promise<never>(() => undefined)
 
-let pendingParser: CoalescedLoad | null = null
+let loading: Promise<void> | null = null
 
 // One load per page, started only while connected. Browsers remember a failed
 // import, so a load that fails leaves code plain until the page is reloaded.
-const startLoading = (): CoalescedLoad => {
-  if (!pendingParser) {
-    const loaded = shikiParser.whenOnline().then(() => undefined)
-    loaded.catch(() => undefined)
-    pendingParser = new CoalescedLoad(loaded)
+const startLoading = (): Promise<void> => {
+  if (!loading) {
+    loading = shikiParser.whenOnline().then(() => undefined)
+    loading.catch(() => undefined)
   }
-  return pendingParser
+  return loading
 }
 
 /** Start loading shiki before the first code block asks for it. Skipped
@@ -87,8 +86,14 @@ export const warmHighlighter = (): void => {
  * returns the in-flight promise — prosemirror-highlight's documented lazy
  * protocol — and the plugin re-renders decorations when it resolves. Once
  * ready, it highlights synchronously. If shiki fails to load, code blocks stay
- * plain text.
+ * plain text. Each editor needs a parser of its own: a shared one would wake
+ * only the first editor.
  */
 export function lazyShikiParser(): Parser {
-  return (options) => (readyParser ? readyParser(options) : startLoading())
+  let pending: CoalescedLoad | null = null
+  return (options) => {
+    if (readyParser) return readyParser(options)
+    pending ??= new CoalescedLoad(startLoading())
+    return pending
+  }
 }

@@ -153,6 +153,20 @@ test('a code block seen offline waits, then colors itself on reconnecting', asyn
   assert.deepEqual(parse(code), ['colored'])
 })
 
+test('a long offline edit leaves one pending refresh per editor', async () => {
+  const { lazyShikiParser } = await fresh()
+  const refreshes = [0, 0]
+  const editors = [lazyShikiParser(), lazyShikiParser()]
+  connection.onLine = false
+  for (let update = 0; update < 1000; update += 1) {
+    editors.forEach((parse, editor) => void parse(code).then(() => (refreshes[editor] += 1)))
+    await null
+  }
+  reconnect()
+  await settle()
+  assert.deepEqual(refreshes, [1, 1])
+})
+
 test('a highlighter load that fails while connected is not tried again', async () => {
   const { lazyShikiParser, warmHighlighter } = await fresh()
   const parse = lazyShikiParser()

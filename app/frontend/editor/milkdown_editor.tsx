@@ -242,11 +242,6 @@ function openEditorLink(view: EditorView, event: Event): boolean {
   return true
 }
 
-// The editor never waits on shiki: lazyShikiParser highlights synchronously
-// once ready and upgrades already-painted code blocks in place via the
-// plugin's lazy-parser protocol. Content paint is gated on nothing.
-const shikiParser = lazyShikiParser()
-
 // Attributes a freshly seeded document to its agent author. applyTemplate
 // writes the Yjs fragment directly; the content reaches the ProseMirror view
 // via ySyncPlugin's init render (a remote-tagged transaction the provenance
@@ -378,7 +373,9 @@ function CollabEditor({
           }))
           ctx.update(highlightPluginConfig.key, (prev) => ({
             ...prev,
-            parser: shikiParser,
+            // Highlights at once when shiki is ready and upgrades painted code
+            // in place otherwise, so content paint never waits on it.
+            parser: lazyShikiParser(),
             languageExtractor: (node) => (node.attrs.language as string) ?? '',
           }))
           ctx.update(uploadConfig.key, (prev) => ({
