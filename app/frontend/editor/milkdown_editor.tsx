@@ -26,7 +26,7 @@ import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
 import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight'
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import type { CableProvider, RenderHints } from './cable_provider'
+import type { CableProvider, RenderHints, SaveState } from './cable_provider'
 import {
   acquireSession,
   getSession,
@@ -174,12 +174,12 @@ export interface EditorProps {
    *  for pushing the document past its size limit, a durable snapshot the
    *  server refused as too large. */
   onNotice?: (message: string) => void
+  /** A large edit is being sent or is stuck, or none is. */
+  onSaveState?: (state: SaveState) => void
 }
 
 const REFUSED_EDIT_NOTICE =
   'That edit was not applied: it would push this document past its 2 MB limit.'
-const UNSAVEABLE_NOTICE =
-  'Your latest changes are not saved: one of them is too large or was refused. Copy what you need before you reload or leave this page.'
 const SNAPSHOT_TOO_LARGE_NOTICE =
   'This document is over the 2 MB source limit, so its saved copy is stale. Shorten it to keep agents and previews current.'
 
@@ -317,13 +317,14 @@ function CollabEditor({
   onStale,
   onRejected,
   onNotice,
+  onSaveState,
 }: EditorProps) {
   const [sketchDraft, setSketchDraft] = useState<ActiveSketch | undefined>(undefined)
   const insertSketchRef = useRef<() => void>(() => undefined)
   const saveSketchRef = useRef<(data: SketchData) => void>(() => undefined)
   const deleteSketchRef = useRef<(id: string) => void>(() => undefined)
-  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onRejected, onNotice })
-  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onRejected, onNotice }
+  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onRejected, onNotice, onSaveState })
+  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onRejected, onNotice, onSaveState }
   // Ref so the editable() closure always reads the live value; the effect
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
@@ -465,9 +466,10 @@ function CollabEditor({
     const stale = () => callbacksRef.current.onStale?.()
     const rejected = () => callbacksRef.current.onRejected?.()
     provider.on('stale', stale)
-    const unsaveable = () => callbacksRef.current.onNotice?.(UNSAVEABLE_NOTICE)
+    const saveState = () => callbacksRef.current.onSaveState?.(provider.saveState)
     provider.on('rejected', rejected)
-    provider.on('unsaveable', unsaveable)
+    provider.on('save-state', saveState)
+    saveState()
     // Discarded while no editor was listening (a remount reusing the session).
     if (provider.discarded) stale()
 
@@ -616,7 +618,7 @@ function CollabEditor({
       provider.off('synced', start)
       provider.off('stale', stale)
       provider.off('rejected', rejected)
-      provider.off('unsaveable', unsaveable)
+      provider.off('save-state', saveState)
       unbindMermaidHints?.()
       if (spansFrame) cancelAnimationFrame(spansFrame)
       snapshots.dispose()

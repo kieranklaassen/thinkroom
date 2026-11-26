@@ -45,7 +45,7 @@ type SyncMessage = {
   cid?: string
   client_id?: number
   seq?: number
-  /** Reason string from nack frames or early subscribe-time rejections (e.g. 'retryable', 'invalid', 'oversized', 'stale'). */
+  /** Reason string from nack frames or early subscribe-time rejections (e.g. 'retryable', 'invalid', 'stale'). */
   reason?: string
   /** Document#content_generation at the time of this message. */
   generation?: number
@@ -78,6 +78,8 @@ export interface CableProviderOptions {
   retryBaseMs?: number
   retryMaxMs?: number
   seedRetryMs?: number
+  uploadDeadlineMs?: (bytes: number) => number
+  uploadWarnMs?: number
 }
 
 const toBase64 = (u8: Uint8Array): string => {
@@ -86,8 +88,12 @@ const toBase64 = (u8: Uint8Array): string => {
   return btoa(binary)
 }
 
-const fromBase64 = (b64: string): Uint8Array =>
-  Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+const fromBase64 = (b64: string): Uint8Array => {
+  const binary = atob(b64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+  return bytes
+}
 
 const EMPTY_UPDATE = new Uint8Array([0, 0])
 const DEFAULT_ACK_TIMEOUT_MS = 10_000
@@ -100,6 +106,27 @@ const DEFAULT_SEED_RETRY_MS = 3_000
 const MAX_UPDATE_BYTES = 2 * 1024 * 1024
 // What merging may add to a part: a filler for a gap before it.
 const MERGE_BYTES_PER_PART = 16
+
+// A minute to answer, and time to send the body at 50 KB/s.
+const defaultUploadDeadlineMs = (bytes: number): number => 60_000 + bytes / 50
+// How long a large edit may keep failing before the page says it is not saved.
+const DEFAULT_UPLOAD_WARN_MS = 30_000
+
+// Groups neighbours whose merge one frame holds. An update larger than that
+// stands alone.
+const packUpdates = (updates: Uint8Array[]): Uint8Array[][] => {
+  const groups: Uint8Array[][] = []
+  let size = Infinity
+  for (const update of updates) {
+    size += update.length + MERGE_BYTES_PER_PART
+    if (size > MAX_UPDATE_BYTES) {
+      groups.push([])
+      size = update.length
+    }
+    groups[groups.length - 1].push(update)
+  }
+  return groups
+}
 
 // Browsers refuse a keepalive request that takes the total of the page's
 // keepalive bodies in flight past 64 KiB.
@@ -118,7 +145,10 @@ const isEmptyUpdate = (update: Uint8Array): boolean =>
 /** What an HTTP save came back with. */
 type SaveAnswer = { status: number; seedRefused: boolean }
 
-export type ProviderEvent = 'synced' | 'seed' | 'rejected' | 'write-denied' | 'stale' | 'unsaveable'
+export type ProviderEvent = 'synced' | 'seed' | 'rejected' | 'write-denied' | 'stale' | 'save-state'
+
+/** A large edit not yet stored: still being sent, or stuck. */
+export type SaveState = 'sending' | 'stuck' | null
 
 /** Origin tag for the page's server-rendered Yjs state applied at session
  *  creation (collab_session.ts). It is server state, never a local change. */
@@ -178,9 +208,14 @@ export class CableProvider {
   // it cannot be split.
   private pieces = new WeakMap<Uint8Array, Uint8Array[] | null>()
   private upload: { part: Uint8Array; abort: AbortController } | null = null
-  // An edit the server refused. Not sent again on this connection, and every
-  // later edit builds on it.
-  private refusedPart: Uint8Array | null = null
+  /** Changes with the 'save-state' event. */
+  saveState: SaveState = null
+  // An edit that was refused or keeps failing, until it leaves the outbox.
+  private stuckPart: Uint8Array | null = null
+  // The stuck edit was refused: nothing more is sent on this connection, since
+  // every later edit builds on it.
+  private refusedHere = false
+  private uploadWarnTimer: ReturnType<typeof setTimeout> | null = null
   private ackTimer: ReturnType<typeof setTimeout> | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryAttempt = 0
@@ -210,6 +245,8 @@ export class CableProvider {
   private readonly retryBaseMs: number
   private readonly retryMaxMs: number
   private readonly seedRetryMs: number
+  private readonly uploadDeadlineMs: (bytes: number) => number
+  private readonly uploadWarnMs: number
 
   constructor(doc: Y.Doc, slug: string, options?: CableProviderOptions) {
     this.doc = doc
@@ -222,6 +259,8 @@ export class CableProvider {
     this.retryBaseMs = options?.retryBaseMs ?? DEFAULT_RETRY_BASE_MS
     this.retryMaxMs = options?.retryMaxMs ?? DEFAULT_RETRY_MAX_MS
     this.seedRetryMs = options?.seedRetryMs ?? DEFAULT_SEED_RETRY_MS
+    this.uploadDeadlineMs = options?.uploadDeadlineMs ?? defaultUploadDeadlineMs
+    this.uploadWarnMs = options?.uploadWarnMs ?? DEFAULT_UPLOAD_WARN_MS
     this.awareness = new Awareness(doc)
     this.consumer = options?.consumer ?? getConsumer(options?.connectionIdentity)
 
@@ -234,7 +273,7 @@ export class CableProvider {
           this.clearRetryTimer()
           this.stopSeedWait()
           this.requeueInFlight()
-          this.refusedPart = null
+          this.refusedHere = false
           // Its connection may be gone too, and nothing else would end it.
           this.upload?.abort.abort()
           this.clearAwarenessThrottle()
@@ -334,7 +373,7 @@ export class CableProvider {
   private enqueue(update: Uint8Array): void {
     const last = this.queued[this.queued.length - 1]
     const fits = last && last.length + update.length + MERGE_BYTES_PER_PART <= MAX_UPDATE_BYTES
-    if (last && fits && last !== this.refusedPart && !this.carriedBySave.has(last)) {
+    if (last && fits && last !== this.stuckPart && !this.carriedBySave.has(last)) {
       this.queued[this.queued.length - 1] = Y.mergeUpdates([last, update])
     } else {
       this.queued.push(update)
@@ -354,18 +393,26 @@ export class CableProvider {
 
   private piecesOf(part: Uint8Array): Uint8Array[] | null {
     if (part.length <= MAX_UPDATE_BYTES) return [part]
-    if (!this.pieces.has(part)) this.pieces.set(part, splitUpdate(part, MAX_UPDATE_BYTES))
+    if (!this.pieces.has(part)) {
+      this.pieces.set(part, splitUpdate(part, MAX_UPDATE_BYTES))
+      this.refreshSaveState()
+    }
     return this.pieces.get(part) ?? null
   }
 
-  // The leading parts that fit one frame; none when the first one does not.
-  private nextBatch(): Uint8Array[] {
-    let size = 0
-    for (const [i, part] of this.queued.entries()) {
-      size += part.length + (i > 0 ? MERGE_BYTES_PER_PART : 0)
-      if (size > MAX_UPDATE_BYTES) return this.queued.slice(0, i)
+  private refreshSaveState(): void {
+    const unacked = this.unackedParts()
+    if (this.stuckPart && !unacked.includes(this.stuckPart)) {
+      this.stuckPart = null
+      this.clearUploadWarnTimer()
     }
-    return this.queued
+    const large = unacked.filter((part) => part.length > MAX_UPDATE_BYTES)
+    const stuck = this.stuckPart !== null || large.some((part) => this.pieces.get(part) === null)
+    const state = stuck ? 'stuck' : large.length > 0 ? 'sending' : null
+    if (state === null) this.clearUploadWarnTimer()
+    if (state === this.saveState) return
+    this.saveState = state
+    this.emit('save-state')
   }
 
   // Drops the parts a save stored, wherever they sit by now. A frame in flight
@@ -373,12 +420,15 @@ export class CableProvider {
   private settleParts(stored: Uint8Array[]): void {
     const owed = (part: Uint8Array) => !stored.includes(part)
     this.queued = this.queued.filter(owed)
-    if (!this.inFlight) return
-    this.inFlight.parts = this.inFlight.parts.filter(owed)
-    if (this.inFlight.parts.length > 0) return
-    this.clearAckTimer()
-    this.inFlight = null
-    this.retryAttempt = 0
+    if (this.inFlight) {
+      this.inFlight.parts = this.inFlight.parts.filter(owed)
+      if (this.inFlight.parts.length === 0) {
+        this.clearAckTimer()
+        this.inFlight = null
+        this.retryAttempt = 0
+      }
+    }
+    this.refreshSaveState()
   }
 
   private clearAckTimer(): void {
@@ -395,7 +445,13 @@ export class CableProvider {
     }
   }
 
+  private clearUploadWarnTimer(): void {
+    if (this.uploadWarnTimer) clearTimeout(this.uploadWarnTimer)
+    this.uploadWarnTimer = null
+  }
+
   private clearTimers(): void {
+    this.clearUploadWarnTimer()
     this.clearAckTimer()
     this.clearRetryTimer()
   }
@@ -405,7 +461,8 @@ export class CableProvider {
     this.inFlight = null
     this.queued = []
     this.retryAttempt = 0
-    this.refusedPart = null
+    this.refusedHere = false
+    this.refreshSaveState()
   }
 
   private stopSeedWait(): void {
@@ -484,14 +541,10 @@ export class CableProvider {
     ) {
       return
     }
-    const batch = this.nextBatch()
-    const oversized = batch.length === 0
-    const parts = oversized ? this.queued.slice(0, 1) : batch
+    const [parts] = packUpdates(this.queued)
+    const oversized = parts[0].length > MAX_UPDATE_BYTES
     if (this.upload?.part === parts[0]) return
-    if (this.refused() || !this.piecesOf(parts[0])) {
-      this.emit('unsaveable')
-      return
-    }
+    if (this.refused() || !this.piecesOf(parts[0])) return
     this.queued = this.queued.slice(parts.length)
     this.updateSequence += 1
     const seq = this.updateSequence
@@ -511,14 +564,22 @@ export class CableProvider {
   }
 
   private refused(): boolean {
-    return this.refusedPart !== null && this.unackedParts().includes(this.refusedPart)
+    return this.refusedHere && this.stuckPart !== null && this.unackedParts().includes(this.stuckPart)
+  }
+
+  private refuse(part: Uint8Array): void {
+    this.stuckPart = part
+    this.refusedHere = true
+    this.refreshSaveState()
   }
 
   // No frame holds this part, so it goes over HTTP, whose answer is its receipt.
   private startUpload(part: Uint8Array): void {
     const upload = { part, abort: new AbortController() }
     this.upload = upload
+    const deadline = setTimeout(() => upload.abort.abort(), this.uploadDeadlineMs(part.length))
     void this.save([part], undefined, upload.abort.signal).then(({ status, seedRefused }) => {
+      clearTimeout(deadline)
       if (this.upload === upload) this.upload = null
       if (this.destroyed || this.discarded) return
       if (this.inFlight?.parts.includes(part)) this.requeueInFlight()
@@ -528,17 +589,25 @@ export class CableProvider {
         return
       }
       if (status < 400 || status >= 500 || status === 408 || status === 429 || seedRefused) {
+        this.warnIfStillUnsaved(part)
         this.scheduleRetry()
       } else if (status === 409) {
         // As for a frame refused as stale: the document was replaced.
         this.clearOutbox()
         this.emit('stale')
       } else {
-        this.refusedPart = part
-        this.emit('unsaveable')
+        this.refuse(part)
         if (status === 423) this.emit('write-denied')
       }
     })
+  }
+
+  private warnIfStillUnsaved(part: Uint8Array): void {
+    this.uploadWarnTimer ??= setTimeout(() => {
+      this.uploadWarnTimer = null
+      if (this.unackedParts().includes(part)) this.stuckPart = part
+      this.refreshSaveState()
+    }, this.uploadWarnMs)
   }
 
   private seedClaimParam(): { seed_claim?: string } {
@@ -575,7 +644,6 @@ export class CableProvider {
     const stuck = this.refused() ? 0 : unacked.findIndex((part) => !this.piecesOf(part))
     const parts = stuck === -1 ? unacked : unacked.slice(0, stuck)
     const withheld = parts.length < unacked.length
-    if (withheld) this.emit('unsaveable')
     if (parts.length > 0 || (snapshot && !withheld)) void this.save(parts, withheld ? undefined : snapshot)
   }
 
@@ -592,7 +660,11 @@ export class CableProvider {
     const updatePayload = {
       // The server stores what it gets in `updates` together or not at all.
       ...(pending.length > MAX_UPDATE_BYTES
-        ? { updates: parts.flatMap((part) => this.piecesOf(part) ?? []).map(toBase64) }
+        ? {
+            updates: packUpdates(parts.flatMap((part) => this.piecesOf(part) ?? [])).map((group) =>
+              toBase64(Y.mergeUpdates(group)),
+            ),
+          }
         : { update: toBase64(pending) }),
       cid: this.clientId,
       // Same staleness guard as flush(): this beforeunload/keepalive
@@ -758,6 +830,7 @@ export class CableProvider {
         this.clearAckTimer()
         this.inFlight = null
         this.retryAttempt = 0
+        this.refreshSaveState()
         this.settleSeedClaim()
         this.flush('update')
         break
@@ -766,10 +839,6 @@ export class CableProvider {
         if (data.reason === 'retryable') {
           this.requeueInFlight()
           this.scheduleRetry()
-        } else if (data.reason === 'oversized') {
-          this.requeueInFlight()
-          this.refusedPart = this.queued[0]
-          this.emit('unsaveable')
         } else {
           console.warn('CableProvider: server rejected update', data.reason)
           this.clearAckTimer()
@@ -820,6 +889,13 @@ export class CableProvider {
           this.discardLocalSeed()
           break
         }
+        if (!data.stale && data.reason !== 'stale' && this.saveState !== null) {
+          // Holding a large edit: kept readable, as when its upload is refused.
+          this.requeueInFlight()
+          this.refuse(this.queued.find((part) => part.length > MAX_UPDATE_BYTES) ?? this.queued[0])
+          this.emit('write-denied')
+          break
+        }
         this.clearOutbox()
         // Distinguish "this link is locked" from "your local doc predates an
         // owner CLI replacement" (Document#content_generation mismatch) —
@@ -834,6 +910,7 @@ export class CableProvider {
     // them; the page's server-rendered hydration is server state too.
     if (origin === this || origin === SERVER_HYDRATE_ORIGIN || !this.canWrite) return
     this.enqueue(update)
+    this.refreshSaveState()
     this.flush('update')
   }
 
@@ -905,7 +982,7 @@ export class CableProvider {
   private handleUnload = (event?: BeforeUnloadEvent): void => {
     // Too large to outlive the page, so ask before it goes.
     const unacked = this.unackedParts().reduce((bytes, part) => bytes + part.length, 0)
-    const ask = event !== undefined && (this.refused() || unacked > MAX_UPDATE_BYTES)
+    const ask = event !== undefined && (this.saveState !== null || unacked > MAX_UPDATE_BYTES)
     if (ask) event.preventDefault()
     // Whoever stays is still here.
     else removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload')

@@ -86,7 +86,8 @@ class YjsPersistence
 
     # Merge one edit its client split because no single update could hold it, in
     # clock order. All or nothing, and under one lock: yrs may integrate a later
-    # piece without the earlier one, so a fold in between could lose it.
+    # piece without the earlier one, so a fold in between could lose it. Folded
+    # at once, so the same edit sent again leaves no rows behind.
     def merge_updates(document, updates, generation:, seed_claim: nil, token: nil, user: nil)
       updates = updates.map(&:b)
       raise ArgumentError, "no Yjs update for document #{document.id}" if updates.empty?
@@ -155,7 +156,7 @@ class YjsPersistence
             end
             payload[:outcome] = "appended"
             payload[:tail_rows] = document.yjs_document_updates.unexamined.count
-            perform_fold(document) if payload[:tail_rows] >= FOLD_THRESHOLD
+            perform_fold(document) if updates.many? || payload[:tail_rows] >= FOLD_THRESHOLD
             true
           end
         end

@@ -1064,53 +1064,183 @@ test('a large edit is retried after a failed request and after a lost connection
   assert.equal(h.provider.unackedParts().length, 0)
 })
 
-test('a large edit the server refuses is reported and kept without another request', async (t) => {
+const statesOf = (h) => {
+  const states = []
+  h.provider.on('save-state', () => states.push(h.provider.saveState))
+  return states
+}
+
+test('a large edit the server refuses is stuck, kept, and not sent again on this connection', async (t) => {
   for (const status of [413, 422, 403, 423]) {
     const { calls } = stubLimitedFetch(t)
     const h = createHarness(t, { retryBaseMs: 5 })
-    const events = []
-    h.provider.on('unsaveable', () => events.push('unsaveable'))
+    const states = statesOf(h)
     h.receive(emptySyncFrame(1))
     h.doc.getText('t').insert(0, LARGE)
     await calls[0].respond(status)
     h.doc.getText('t').insert(0, 'later ')
+    h.provider.persistCurrentState()
     await pause(40)
     assert.equal(calls.length, 1)
-    assert.ok(events.length > 0)
+    assert.equal(h.sentUpdates().length, 0)
+    assert.deepEqual(states, ['sending', 'stuck'], 'said once, not on every edit')
     assert.ok(h.provider.unackedParts().length > 0)
+
+    h.disconnect()
+    assert.equal(h.provider.saveState, 'stuck', 'still unsaved while offline')
+    h.receive(emptySyncFrame(1))
+    assert.equal(calls.length, 2)
+    await calls[1].respond()
+    assert.equal(h.provider.saveState, null)
+    assert.equal(h.sentUpdates().length, 1, 'what was typed after it follows')
   }
 })
 
-test('a refusal ends with its edit, or with its connection', async (t) => {
+test('a refusal ends when another save stores its edit', async (t) => {
   const { calls } = stubLimitedFetch(t)
   const h = createHarness(t)
   h.receive(emptySyncFrame(1))
   h.doc.getText('t').insert(0, LARGE)
   h.provider.persistCurrentState()
   await calls[0].respond(413)
+  assert.equal(h.provider.saveState, 'stuck')
   await calls[1].respond()
+  assert.equal(h.provider.saveState, null)
   h.doc.getText('t').insert(0, 'later ')
-  assert.equal(h.sentUpdates().length, 1, 'the edit it was about is saved')
-
-  h.receive({ type: 'nack', seq: h.sentUpdates()[0].seq, reason: 'oversized' })
-  h.disconnect()
-  h.receive(emptySyncFrame(1))
-  assert.equal(h.sentUpdates().length, 2)
+  assert.equal(h.sentUpdates().length, 1)
 })
 
 test('a large edit refused as stale or locked recovers the way a frame does', async (t) => {
-  for (const [status, event, kept] of [[409, 'stale', false], [423, 'write-denied', true]]) {
+  for (const [status, event, state] of [[409, 'stale', null], [423, 'write-denied', 'stuck']]) {
     const { calls } = stubLimitedFetch(t)
     const h = createHarness(t)
     const events = []
-    for (const name of ['stale', 'write-denied']) h.provider.on(name, () => events.push(name))
+    for (const name of ['stale', 'write-denied']) h.provider.on(name, () => events.push([name, h.provider.saveState]))
     h.receive(emptySyncFrame(1))
     h.doc.getText('t').insert(0, LARGE)
     await calls[0].respond(status)
     await pause(5)
-    assert.deepEqual(events, [event])
-    assert.equal(h.provider.unackedParts().length > 0, kept)
+    assert.deepEqual(events, [[event, state]], 'stuck is known before access is reloaded')
+    assert.equal(h.provider.unackedParts().length > 0, state !== null)
   }
+})
+
+test('a frame refused as locked keeps the large edit queued behind it', (t) => {
+  stubLimitedFetch(t)
+  const h = createHarness(t)
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'small')
+  h.doc.getText('t').insert(0, LARGE)
+  h.receive({ type: 'write-denied', locked: true })
+  assert.equal(h.provider.saveState, 'stuck')
+  const kept = new Y.Doc()
+  Y.applyUpdate(kept, Y.mergeUpdates(h.provider.unackedParts()))
+  assert.equal(kept.getText('t').toString(), h.doc.getText('t').toString())
+})
+
+test('5xx, 408, 429 and lost answers are retried with backoff and said only after a while', async (t) => {
+  for (const status of [500, 503, 408, 429, 0]) {
+    const { calls } = stubLimitedFetch(t)
+    const h = createHarness(t, { retryBaseMs: 10, retryMaxMs: 20, uploadWarnMs: 60 })
+    h.receive(emptySyncFrame(1))
+    h.doc.getText('t').insert(0, LARGE)
+    for (let i = 0; i < 8; i += 1) {
+      if (i < 2) assert.equal(h.provider.saveState, 'sending')
+      const answered = calls.length
+      await (status ? calls[answered - 1].respond(status) : calls[answered - 1].fail())
+      await pause(5)
+      assert.ok(calls.length <= answered + 1, 'one request at a time')
+      while (calls.length === answered) await pause(5)
+    }
+    assert.equal(h.provider.saveState, 'stuck')
+    await calls.at(-1).respond()
+    assert.equal(h.provider.saveState, null)
+    assert.equal(h.provider.unackedParts().length, 0)
+  }
+})
+
+test('a request that never answers is given up at its deadline and sent again', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const deadlines = []
+  const h = createHarness(t, {
+    retryBaseMs: 5,
+    uploadDeadlineMs: (bytes) => { deadlines.push(bytes); return 20 },
+  })
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, LARGE)
+  await pause(30)
+  assert.equal(calls[0].signal.aborted, true)
+  await calls[0].fail()
+  await pause(15)
+  assert.equal(calls.length, 2)
+  assert.ok(deadlines[0] > MAX_UPDATE)
+  await calls[1].respond()
+  await pause(30)
+  assert.equal(calls[1].signal.aborted, false, 'an answered request keeps no deadline')
+})
+
+test('a second handshake during an upload does not send it twice', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t)
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, LARGE)
+  h.receive(emptySyncFrame(1))
+  assert.equal(calls.length, 1)
+  await calls[0].respond()
+  h.doc.getText('t').insert(0, 'later ')
+  assert.equal(h.sentUpdates().length, 1)
+})
+
+test('a save withholds an edit that cannot be split and everything after it', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t)
+  const states = statesOf(h)
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'small')
+  h.doc.getMap('m').set('value', 'x'.repeat(MAX_UPDATE + 1))
+  h.doc.getText('t').insert(0, 'later ')
+  h.provider.persistCurrentState(snapshotOf(10))
+  assert.equal(calls.length, 1)
+  assert.equal(savedText(calls[0]), 'small')
+  assert.equal(calls[0].body.content, undefined, 'no source is saved ahead of the edits it shows')
+  await calls[0].respond()
+  h.provider.persistCurrentState(snapshotOf(10))
+  await pause(5)
+  assert.equal(calls.length, 1)
+  assert.equal(h.sentUpdates().length, 1)
+  assert.deepEqual(states.at(-1), 'stuck')
+  assert.ok(h.provider.unackedParts().length > 0)
+})
+
+test('medium edits are sent in frames that fit', (t) => {
+  const h = createHarness(t)
+  h.receive(emptySyncFrame(1))
+  for (let i = 0; i < 4; i += 1) h.doc.getText('t').insert(0, 'x'.repeat(900_000))
+  const server = new Y.Doc()
+  for (let i = 0; i < h.sentUpdates().length; i += 1) {
+    const frame = h.sentUpdates()[i]
+    assert.ok(fromBase64(frame.update).length <= MAX_UPDATE)
+    Y.applyUpdate(server, fromBase64(frame.update))
+    h.receive({ type: 'ack', seq: frame.seq })
+  }
+  assert.equal(server.getText('t').length, 3_600_000)
+  assert.equal(h.provider.saveState, null)
+})
+
+test('small edits beside a large one do not count towards the pieces of a save', (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t, { initialGeneration: 1 })
+  h.doc.getText('t').insert(0, LARGE)
+  for (let i = 0; i < 12; i += 1) {
+    h.provider.persistCurrentState()
+    h.doc.getText('t').insert(0, `edit ${i} `)
+  }
+  h.provider.persistCurrentState()
+  assert.ok(h.provider.unackedParts().length > 8)
+  assert.ok(calls.at(-1).body.updates.length <= 4, `${calls.at(-1).body.updates.length} pieces`)
+  const server = new Y.Doc()
+  applySave(calls.at(-1), server)
+  assert.equal(server.getText('t').toString(), h.doc.getText('t').toString())
 })
 
 test('a peer applies the pieces of a split edit together', (t) => {
@@ -1151,35 +1281,6 @@ test('leaving the page asks first while a large edit is unsaved', async (t) => {
   for (const call of calls) await call.respond()
   h.doc.getText('t').insert(0, 'small')
   assert.equal(leave(), false)
-})
-
-test('an edit that fits no frame is reported, kept, and not sent', async (t) => {
-  const h = createHarness(t, { ackTimeoutMs: 20, retryBaseMs: 5 })
-  const events = []
-  h.provider.on('unsaveable', () => events.push('unsaveable'))
-  h.receive(emptySyncFrame(1))
-  h.doc.getText('t').insert(0, 'small')
-  h.receive({ type: 'ack', seq: 1 })
-  h.doc.getMap('m').set('value', 'x'.repeat(MAX_UPDATE + 1))
-  h.doc.getText('t').insert(0, 'later ')
-  await pause(80)
-  assert.equal(h.sentUpdates().length, 1)
-  assert.ok(events.length > 0)
-  assert.ok(h.provider.unackedParts().length > 0)
-})
-
-test('an edit the server calls oversized is reported and kept without a resend', async (t) => {
-  const h = createHarness(t, { ackTimeoutMs: 20, retryBaseMs: 5 })
-  const events = []
-  h.provider.on('unsaveable', () => events.push('unsaveable'))
-  h.receive(emptySyncFrame(1))
-  h.doc.getText('t').insert(0, 'edit')
-  h.receive({ type: 'nack', seq: 1, reason: 'oversized' })
-  h.doc.getText('t').insert(0, 'later ')
-  await pause(80)
-  assert.equal(h.sentUpdates().length, 1)
-  assert.deepEqual([...new Set(events)], ['unsaveable'])
-  assert.ok(h.provider.unackedParts().length > 0)
 })
 
 test('a large edit left when its provider is destroyed is saved', (t) => {

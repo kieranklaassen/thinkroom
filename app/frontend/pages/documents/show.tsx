@@ -20,7 +20,7 @@ import {
   type ReviewState,
 } from '../../editor/provenance'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
-import type { RenderHints } from '../../editor/cable_provider'
+import type { RenderHints, SaveState } from '../../editor/cable_provider'
 import { bindReadModeCopy } from '../../editor/clipboard'
 import { bindReadPointerBroadcast } from '../../editor/read_pointers'
 import {
@@ -236,6 +236,7 @@ export default function DocumentShow({
   // Editor-originated notices (refused oversized edit, snapshot refused as
   // too large); share the doc-notice slot with suggestion notices.
   const [editorNotice, setEditorNotice] = useState<string | null>(null)
+  const [saveState, setSaveState] = useState<SaveState>(null)
   // Hydration-safe init from server-rendered prefs: cookies supply panel/focus/
   // width while the URL supplies mode, so SSR and the first client render agree.
   const [panelOpen, setPanelOpen] = useState(ui.panel_open)
@@ -311,7 +312,13 @@ export default function DocumentShow({
   // Compound writing rides inside Comment mode for featured accounts.
   const showCompound = effectiveMode === 'comment' && writingAvailable
   const connectionIdentity = viewer.account ? `account:${viewer.account.id}` : 'guest'
-  const editorSessionKey = `${doc.slug}:${ownership.can_write ? 'write' : 'read'}`
+  // A remount drops what the editor has not saved. While that is a large edit,
+  // losing write access only makes the editor read-only, so it can be copied.
+  const [sessionCanWrite, setSessionCanWrite] = useState(ownership.can_write)
+  if (saveState === null && sessionCanWrite !== ownership.can_write) {
+    setSessionCanWrite(ownership.can_write)
+  }
+  const editorSessionKey = `${doc.slug}:${sessionCanWrite ? 'write' : 'read'}`
   // Live handle for code that runs after awaits or inside stable callbacks —
   // a closure-captured handle goes stale when the editor remounts mid-flight.
   const handleRef = useRef<EditorHandle | null>(null)
@@ -1014,6 +1021,14 @@ export default function DocumentShow({
         {!isReading && (
           <ClaimBanner slug={doc.slug} ownership={ownership} claimerName={identity.name} />
         )}
+        {saveState === 'stuck' && (
+          <div className="doc-notice" role="alert">
+            <span>
+              Your latest changes are not saved: one is too large, was refused, or could not be sent.
+              Copy what you need before you reload or leave this page.
+            </span>
+          </div>
+        )}
         {!isReading && (suggestionNotice || editorNotice) && (
           <div className="doc-notice" role="status">
             <span>{suggestionNotice ?? editorNotice}</span>
@@ -1072,7 +1087,7 @@ export default function DocumentShow({
                 onHandle={setHandle}
                 slug={doc.slug}
                 identity={identity}
-                canWrite={ownership.can_write}
+                canWrite={sessionCanWrite}
                 connectionIdentity={connectionIdentity}
                 contentFormat={doc.content_format}
                 contentGeneration={doc.content_generation}
@@ -1104,6 +1119,7 @@ export default function DocumentShow({
                 // gone; same exit path as the deleted broadcast.
                 onRejected={onDocumentGone}
                 onNotice={setEditorNotice}
+                onSaveState={setSaveState}
               />
             </article>
             <DocumentWidthHandle

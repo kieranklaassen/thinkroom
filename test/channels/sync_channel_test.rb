@@ -867,9 +867,10 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert_not doc.reload.yjs_document_updates.exists?
   end
 
-  test "a sequenced oversized frame is answered so the sender knows it was not saved" do
-    doc = Document.create!(title: "Oversized answer")
+  test "an oversized frame gets no answer, which a page could take for a refusal of its edit" do
+    doc = Document.create!(title: "Oversized unanswered")
     subscribe slug: doc.slug
+    handshake = transmissions.last
 
     boundary = Base64.strict_encode64("x" * (YjsPersistence::MAX_UPDATE_BYTES + 1))
     [ "!" * (YjsPersistence::MAX_UPDATE_B64_BYTES + 1), boundary ].each.with_index(1) do |update, seq|
@@ -877,9 +878,9 @@ class SyncChannelTest < ActionCable::Channel::TestCase
         "type" => "update", "update" => update, "cid" => "x",
         "seq" => seq, "generation" => doc.content_generation
       }
-      assert_equal({ "type" => "nack", "seq" => seq, "reason" => "oversized" }, transmissions.last)
     end
-    assert_not doc.reload.yjs_document_updates.exists?
+    assert_equal handshake, transmissions.last
+    assert_equal 1, transmissions.size
   end
 
   test "valid update frame decodes base64 once at the channel boundary" do

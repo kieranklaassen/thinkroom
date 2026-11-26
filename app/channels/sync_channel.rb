@@ -13,7 +13,7 @@
 #                              { type: "awareness", update, cid }     # cached active peers, unicast on join
 #                              { type: "write-denied", reason: "stale", stale: true, locked: false, generation }
 #   server -> sender         : { type: "ack", seq }                            # durable merge receipt (when seq was sent)
-#                              { type: "nack", seq, reason: "retryable" | "invalid" | "oversized" }
+#                              { type: "nack", seq, reason: "retryable" | "invalid" }
 #                              { type: "write-denied", locked: true }          # read-only link
 #                              { type: "write-denied", locked: false, stale: true } # document was replaced, generation missing, or a seed frame not matching the stored content or its claim
 #   client -> server         : { type: "sync-reply", update, cid, seq?, generation, seed_claim? } # unacked edits flushed on reconnect
@@ -115,7 +115,12 @@ class SyncChannel < ApplicationCable::Channel
       update = data["update"].to_s
       return if update.blank?
 
-      return drop_oversized(data) if update.bytesize > YjsPersistence::MAX_UPDATE_B64_BYTES
+      if update.bytesize > YjsPersistence::MAX_UPDATE_B64_BYTES
+        ActiveSupport::Notifications.instrument(
+          "frame_dropped.yjs", document_id: @document.id, outcome: "dropped_oversized"
+        )
+        return
+      end
 
       decoded = begin
         Base64.strict_decode64(update)
@@ -126,7 +131,12 @@ class SyncChannel < ApplicationCable::Channel
         return
       end
 
-      return drop_oversized(data) if decoded.bytesize > YjsPersistence::MAX_UPDATE_BYTES
+      if decoded.bytesize > YjsPersistence::MAX_UPDATE_BYTES
+        ActiveSupport::Notifications.instrument(
+          "frame_dropped.yjs", document_id: @document.id, outcome: "dropped_oversized"
+        )
+        return
+      end
       generation = YjsPersistence.parse_generation(data["generation"])
 
       seq = nil
@@ -246,15 +256,6 @@ class SyncChannel < ApplicationCable::Channel
     @document.yjs_state_checksum.present? &&
       @document.yjs_state_vector.present? &&
       client_checksum == @document.yjs_state_checksum
-  end
-
-  # Answered, so the sender reports the edit as unsaved instead of resending it.
-  def drop_oversized(data)
-    ActiveSupport::Notifications.instrument(
-      "frame_dropped.yjs", document_id: @document.id, outcome: "dropped_oversized"
-    )
-    seq = Integer(data["seq"], exception: false)
-    transmit({ type: "nack", seq:, reason: "oversized" }) if seq&.positive?
   end
 
   def handle_awareness(data)

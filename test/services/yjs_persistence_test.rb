@@ -472,7 +472,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     end
     assert_not doc.reload.yjs_document_updates.exists?
 
-    # No fold may run between the pieces, so one must not be due until both are in.
+    # One fold, with every piece in: none may run between them.
     (YjsPersistence::FOLD_THRESHOLD - 1).times { |i| YjsPersistence.merge(doc, b64_update_for("row #{i} ")) }
     fold = assert_notification("fold.yjs") do
       YjsPersistence.merge_updates(doc.reload, [ first, second ], generation: doc.content_generation)
@@ -480,6 +480,65 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal YjsPersistence::FOLD_THRESHOLD + 1, fold.payload[:rows]
     assert_equal 0, fold.payload[:retained]
     assert_includes text_of(doc), "first second"
+  end
+
+  test "a split edit sent again leaves no rows and no second copy" do
+    doc = Document.create!(title: "Split repeat")
+    client = Y::Doc.new
+    text = client.get_text("t")
+    text << "first "
+    first = client.encode_state_as_update
+    vector = client.encode_state_vector
+    text << "second"
+    second = client.encode_state_as_update(vector)
+
+    3.times do
+      YjsPersistence.merge_updates(doc.reload, [ first, second ], generation: doc.content_generation)
+      assert_not doc.reload.yjs_document_updates.exists?
+    end
+    assert_equal "first second", text_of(doc)
+  end
+
+  test "a failure while storing a split edit stores none of it" do
+    doc = Document.create!(title: "Split rollback")
+    updates = [ b64_update_for("one"), b64_update_for("two") ].map { |update| Base64.strict_decode64(update) }
+    original = YjsPersistence.method(:perform_fold)
+    YjsPersistence.define_singleton_method(:perform_fold) { |_document| raise "fold failed" }
+    begin
+      assert_raises(RuntimeError) do
+        YjsPersistence.merge_updates(doc, updates, generation: doc.content_generation)
+      end
+    ensure
+      YjsPersistence.define_singleton_method(:perform_fold, original)
+    end
+    assert_not doc.reload.yjs_document_updates.exists?
+    assert_equal "pending", doc.seed_state
+  end
+
+  test "a split seed is stored under its claim, and refused once another seed is" do
+    doc = Document.create!(title: "Split seed", seed_content: "# Seed")
+    assert doc.try_claim_seed
+    claim = doc.seed_claim_token
+    pieces = lambda do |content|
+      client = Y::Doc.new
+      text = client.get_text("t")
+      text << content
+      first = client.encode_state_as_update
+      vector = client.encode_state_vector
+      text << " end"
+      [ first, client.encode_state_as_update(vector) ]
+    end
+    own = pieces.call("seed")
+    2.times do
+      YjsPersistence.merge_updates(doc.reload, own, generation: doc.content_generation, seed_claim: claim)
+    end
+    assert_equal "seeded", doc.reload.seed_state
+    assert_raises(Document::StaleSeedClaimError) do
+      YjsPersistence.merge_updates(
+        doc, pieces.call("other"), generation: doc.content_generation, seed_claim: claim
+      )
+    end
+    assert_equal "seed end", text_of(doc)
   end
 
   test "a pending row is retained across folds and quarantined after the TTL" do
