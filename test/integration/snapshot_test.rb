@@ -90,8 +90,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
       content_snapshot: "original"
     )
 
-    # as: :json would add .json to the path, which the page's own requests do
-    # not have: for them only the Accept header asks for JSON.
+    # Spelled out to match the page's requests: without Accept this is a redirect.
     headers = { "Content-Type" => "application/json", "Accept" => "application/json" }
     {
       document_snapshot_path(@document.slug) => [ :post, { content: "changed", spans: [] } ],

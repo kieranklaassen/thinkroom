@@ -1,6 +1,6 @@
 import type { Consumer, Subscription } from '@rails/actioncable'
 import { getConsumer } from '../lib/cable'
-import { csrfToken } from '../lib/csrf'
+import { jsonHeaders } from '../lib/csrf'
 import type { MermaidRenderHints } from './mermaid'
 import type { CollaboratorKind } from '../types/payloads'
 import * as Y from 'yjs'
@@ -491,12 +491,7 @@ export class CableProvider {
 
     void fetch(`/d/${this.slug}/sync_update`, {
       method: 'POST',
-      headers: {
-        // Without it a refusal is a redirect, which fetch follows to another answer.
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrfToken(),
-      },
+      headers: jsonHeaders(),
       body,
       keepalive: true,
     })
