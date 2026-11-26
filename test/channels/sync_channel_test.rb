@@ -19,6 +19,29 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     [ first, second ].map { |update| Base64.strict_encode64(update) }
   end
 
+  def text_in(message)
+    client = Y::Doc.new
+    client.apply_update(Base64.strict_decode64(message["update"]))
+    client.get_text("t").to_s
+  end
+
+  # The first join recovers the row; later ones meet what recovery left behind.
+  def assert_served_editable(doc)
+    subscribe slug: doc.slug
+    unsubscribe
+    doc.reload
+    assert_not doc.live_crdt?
+    assert_equal "seeded", doc.seed_state
+
+    subscribe slug: doc.slug
+    perform :receive, { "type" => "seed-request", "cid" => "writer" }
+    transmissions.last(2).each do |message|
+      assert_equal "sync", message["type"]
+      assert_not message.key?("seed_pending")
+      assert_not message.key?("seed")
+    end
+  end
+
   test "subscribing transmits the sync handshake" do
     doc = Document.create!(title: "Live")
 
@@ -119,6 +142,259 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert subscription.confirmed?
     assert_nil transmissions.last["seed"],
                "channel must not re-grant a seed freshly claimed by documents#show"
+  end
+
+  test "an empty handshake held back by another claim is marked seed_pending without the template" do
+    doc = Document.create!(title: "HeldElsewhere", seed_markdown: "# Template")
+    assert doc.try_claim_seed
+
+    subscribe slug: doc.slug
+
+    message = transmissions.last
+    assert_equal true, message["seed_pending"]
+    assert_nil message["seed"]
+    assert_not message.key?("seed_content"), "a second writer must not be able to apply the template"
+  end
+
+  test "a reader without a grant receives the seed to show and claims nothing" do
+    doc = Document.create!(
+      title: "ReaderSeed", seed_markdown: "# Template",
+      seed_author_kind: "agent", seed_author_name: "Scout",
+      owner_token: "owner", owner_name: "Owner", link_access: "view"
+    )
+    assert doc.try_claim_seed
+    claimed_at = doc.reload.seed_claimed_at
+
+    subscribe slug: doc.slug
+
+    message = transmissions.last
+    assert_equal true, message["seed_pending"]
+    assert_nil message["seed"]
+    assert_equal "# Template", message["seed_content"]
+    assert_equal "agent", message["seed_author_kind"]
+    assert_equal claimed_at, doc.reload.seed_claimed_at
+  end
+
+  test "a granted, seedless or live handshake is never seed_pending" do
+    granted = Document.create!(title: "Granted", seed_markdown: "# Template")
+    subscribe slug: granted.slug
+    assert_not transmissions.last.key?("seed_pending")
+
+    seedless = Document.create!(title: "Seedless", seed_markdown: nil)
+    subscribe slug: seedless.slug
+    assert_not transmissions.last.key?("seed_pending")
+
+    live = Document.create!(title: "Live", seed_markdown: "# Template")
+    YjsPersistence.merge(live, build_update_b64("content"))
+    subscribe slug: live.slug
+    assert_not transmissions.last.key?("seed_pending")
+  end
+
+  test "content persisted while the empty handshake is built is not served as a plain empty sync" do
+    doc = Document.create!(title: "PersistedDuringJoin", seed_markdown: "# Template")
+    assert doc.try_claim_seed
+    content = build_update_b64("content")
+
+    original = YjsPersistence.method(:state_b64)
+    YjsPersistence.define_singleton_method(:state_b64) do |document|
+      original.call(document).tap { YjsPersistence.merge(Document.find(document.id), content) }
+    end
+    begin
+      subscribe slug: doc.slug
+    ensure
+      YjsPersistence.define_singleton_method(:state_b64, original)
+    end
+
+    assert_equal true, transmissions.last["seed_pending"]
+  end
+
+  test "a document deleted while its handshake is built rejects the subscription" do
+    doc = Document.create!(title: "DeletedDuringJoin", seed_markdown: "# Template")
+
+    original = SyncChannel.method(:track_subscribe)
+    SyncChannel.define_singleton_method(:track_subscribe) do |id|
+      original.call(id).tap { Document.find(id).destroy! }
+    end
+    begin
+      subscribe slug: doc.slug
+    ensure
+      SyncChannel.define_singleton_method(:track_subscribe, original)
+    end
+
+    assert subscription.rejected?
+  end
+
+  test "seed-request for a deleted document is ignored" do
+    doc = Document.create!(title: "DeletedWhileWaiting", seed_markdown: "# Template")
+    assert doc.try_claim_seed
+    subscribe slug: doc.slug
+    Document.find(doc.id).destroy!
+
+    assert_nothing_raised { perform :receive, { "type" => "seed-request", "cid" => "waiting" } }
+  end
+
+  test "a granted handshake carries the claim, and a slow claimant's seed is refused as stale" do
+    doc = Document.create!(title: "SlowChannelClaimant", seed_markdown: "# Template")
+    subscribe slug: doc.slug
+    claim = transmissions.last["seed_claim"]
+    assert_equal doc.reload.seed_claim_token, claim
+    assert claim.present?
+
+    travel Document::SEED_CLAIM_TIMEOUT + 1.second do
+      other = Document.find(doc.id)
+      assert other.try_claim_seed
+      YjsPersistence.merge(other, build_update_b64("body"), seed_claim: other.seed_claim_token)
+    end
+    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+      perform :receive, {
+        "type" => "update", "update" => build_update_b64("body"), "cid" => "slow", "seq" => 1,
+        "generation" => doc.content_generation, "seed_claim" => claim
+      }
+    end
+
+    assert_equal "write-denied", transmissions.last["type"]
+    assert_equal true, transmissions.last["stale"]
+    assert_equal 1, doc.reload.yjs_document_updates.count
+  end
+
+  test "a claimant superseded by a slower first write is refused and resyncs to the stored content" do
+    doc = Document.create!(title: "FirstStoredWins", seed_markdown: "# Template")
+    slow = Document.find(doc.id)
+    assert slow.try_claim_seed
+
+    travel Document::SEED_CLAIM_TIMEOUT + 1.second do
+      subscribe slug: doc.slug
+      claim = transmissions.last["seed_claim"]
+      assert claim.present?
+      YjsPersistence.merge(slow, build_update_b64("slow body"), seed_claim: slow.seed_claim_token)
+
+      perform :receive, {
+        "type" => "update", "update" => build_update_b64("body"), "cid" => "newer", "seq" => 1,
+        "generation" => doc.content_generation, "seed_claim" => claim
+      }
+      assert_equal "write-denied", transmissions.last["type"]
+      assert_equal true, transmissions.last["stale"]
+
+      perform :receive, { "type" => "seed-decline", "cid" => "newer" }
+      assert_equal "seeded", doc.reload.seed_state
+
+      unsubscribe
+      subscribe slug: doc.slug
+    end
+    message = transmissions.last
+    assert_not message.key?("seed")
+    assert_not message.key?("seed_pending")
+    assert_equal "slow body", text_in(message)
+  end
+
+  test "a seeded document emptied by corruption recovery is served editable, not seed_pending" do
+    doc = Document.create!(title: "HealedEmpty", seed_markdown: "# Template")
+    YjsPersistence.merge(doc, build_update_b64("content"))
+    YjsPersistence.fold!(doc)
+    doc.reload.update_columns(yjs_state: "corrupt".b)
+
+    assert_served_editable(doc)
+    assert_equal 1, doc.yjs_state_archives.where(kind: YjsStateArchive::QUARANTINE).count
+  end
+
+  test "a seeded document whose only rows were quarantined is served editable, not seed_pending" do
+    doc = Document.create!(title: "QuarantinedEmpty", seed_markdown: "# Template")
+    YjsPersistence.merge(doc, build_update_b64("content"))
+    doc.yjs_document_updates.sole.update_columns(payload: "corrupt".b)
+
+    assert_served_editable(doc)
+    assert_equal 1, doc.yjs_state_archives.where(kind: YjsStateArchive::QUARANTINE).count
+  end
+
+  test "a late seed-decline leaves a newer claim at the same generation alone" do
+    doc = Document.create!(title: "LateDecline", seed_markdown: "# Template")
+    subscribe slug: doc.slug
+
+    travel Document::SEED_CLAIM_TIMEOUT + 1.second do
+      other = Document.find(doc.id)
+      assert other.try_claim_seed
+      perform :receive, { "type" => "seed-decline", "cid" => "late" }
+      assert_equal "claimed", doc.reload.seed_state
+      assert_equal other.seed_claim_token, doc.seed_claim_token
+    end
+  end
+
+  test "an ungranted handshake carries no claim" do
+    doc = Document.create!(title: "NoClaim", seed_markdown: "# Template")
+    assert doc.try_claim_seed
+    subscribe slug: doc.slug
+    assert_not transmissions.last.key?("seed_claim")
+  end
+
+  test "seed-request retries an abandoned claim and answers with a fresh handshake" do
+    doc = Document.create!(title: "Abandoned", seed_markdown: "# Template")
+    assert doc.try_claim_seed
+    subscribe slug: doc.slug
+
+    perform :receive, { "type" => "seed-request", "cid" => "waiting" }
+    assert_equal true, transmissions.last["seed_pending"], "the claim is still held"
+
+    travel Document::SEED_CLAIM_TIMEOUT + 1.second do
+      perform :receive, { "type" => "seed-request", "cid" => "waiting" }
+      assert_equal true, transmissions.last["seed"]
+      assert_equal "# Template", transmissions.last["seed_content"]
+    end
+  end
+
+  test "seed-request delivers content the claimant has since persisted" do
+    doc = Document.create!(title: "Arrived", seed_markdown: "# Template")
+    assert doc.try_claim_seed
+    subscribe slug: doc.slug
+    YjsPersistence.merge(Document.find(doc.id), build_update_b64("content"))
+
+    perform :receive, { "type" => "seed-request", "cid" => "waiting" }
+
+    message = transmissions.last
+    assert_not message.key?("seed_pending")
+    client = Y::Doc.new
+    client.apply_update(Base64.strict_decode64(message["update"]))
+    assert_equal "content", client.get_text("t").to_s
+  end
+
+  test "seed-request from a reader never takes the claim" do
+    doc = Document.create!(
+      title: "ReaderRequest", seed_markdown: "# Template",
+      owner_token: "owner", owner_name: "Owner", link_access: "view"
+    )
+    assert doc.try_claim_seed
+    subscribe slug: doc.slug
+
+    travel Document::SEED_CLAIM_TIMEOUT + 1.second do
+      claimed_at = doc.reload.seed_claimed_at
+      assert_no_difference -> { transmissions.length } do
+        perform :receive, { "type" => "seed-request", "cid" => "reader" }
+      end
+      assert_equal claimed_at, doc.reload.seed_claimed_at
+    end
+  end
+
+  test "a checksum the joining row no longer stores is not answered as up to date" do
+    doc = Document.create!(title: "FoldedDuringJoin")
+    YjsPersistence.merge(doc, build_update_b64("first"))
+    YjsPersistence.fold!(doc)
+    old_checksum = doc.reload.yjs_state_checksum
+    late = build_update_b64("second")
+
+    original = SyncChannel.method(:track_subscribe)
+    SyncChannel.define_singleton_method(:track_subscribe) do |id|
+      other = Document.find(id)
+      YjsPersistence.merge(other, late)
+      YjsPersistence.fold!(other)
+      original.call(id)
+    end
+    begin
+      subscribe slug: doc.slug, checksum: old_checksum
+    ensure
+      SyncChannel.define_singleton_method(:track_subscribe, original)
+    end
+
+    assert_not_equal "", transmissions.last["update"]
+    assert_equal doc.reload.yjs_state_checksum, transmissions.last["checksum"]
   end
 
   test "documents with existing state never seed" do

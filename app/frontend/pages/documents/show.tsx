@@ -116,6 +116,7 @@ export interface DocumentProps {
     seed_content: string | null
     seed_version: string
     seed_granted: boolean
+    seed_claim: string | null
     seed_author_kind: CollaboratorKind | null
     seed_author_name: string | null
     has_state: boolean
@@ -633,26 +634,14 @@ export default function DocumentShow({
     connectionIdentity,
   })
 
-  // The sync channel rejects its resubscription when the doc is gone —
-  // same exit path.
   useEffect(() => {
     if (!handle) return
     const provider = handle.provider
-    provider.on('rejected', onDocumentGone)
     provider.on('write-denied', recoverDeniedWrite)
-    // This tab's local doc predates an owner CLI replacement: either a frame
-    // it sent was rejected for staleness (its content_generation is behind),
-    // or a reconnect handshake reported a generation different from the one
-    // it last synced. Both fire when the content_reset broadcast was missed
-    // or raced — same recovery action as content_reset, reached via the
-    // sync channel instead.
-    provider.on('stale', reloadAfterContentReset)
     return () => {
-      provider.off('rejected', onDocumentGone)
       provider.off('write-denied', recoverDeniedWrite)
-      provider.off('stale', reloadAfterContentReset)
     }
-  }, [handle, onDocumentGone, recoverDeniedWrite, reloadAfterContentReset])
+  }, [handle, recoverDeniedWrite])
 
   // Priority-ordered dispatch: text selection → mobile suggestion tap →
   // click-to-comment → AI review span. Exactly one target (or none) comes
@@ -1220,6 +1209,7 @@ export default function DocumentShow({
                 seedContent={doc.seed_content}
                 seedVersion={doc.seed_version}
                 seedGranted={doc.seed_granted}
+                seedClaim={doc.seed_claim}
                 seedAuthorKind={doc.seed_author_kind}
                 seedAuthorName={doc.seed_author_name}
                 editable={ownership.can_write && (effectiveMode === 'edit' || effectiveMode === 'suggest')}
@@ -1229,6 +1219,15 @@ export default function DocumentShow({
                 onSpans={setSpans}
                 onSelection={isReading ? undefined : handleSelection}
                 onTitleChange={setDocumentTitle}
+                // This tab's local doc predates an owner CLI replacement (a frame
+                // it sent was rejected for staleness, or a reconnect handshake
+                // reported a different generation), or a viewer's local copy of
+                // the seed was superseded by real state. Same recovery action
+                // as content_reset, reached via the sync channel.
+                onStale={reloadAfterContentReset}
+                // The sync channel rejects its resubscription when the doc is
+                // gone; same exit path as the deleted broadcast.
+                onRejected={onDocumentGone}
                 onNotice={setEditorNotice}
               />
             </article>

@@ -32,6 +32,11 @@ type SyncMessage = {
   sv?: string
   checksum?: string
   seed?: boolean
+  seed_claim?: string
+  /** Nothing is stored yet and another client holds the seed claim, so this
+   *  empty state is not the document. Viewers who cannot write also get the
+   *  seed fields, to show locally. */
+  seed_pending?: boolean
   content_format?: 'markdown' | 'html'
   seed_content?: string
   seed_author_kind?: CollaboratorKind | null
@@ -69,6 +74,7 @@ export interface CableProviderOptions {
   ackTimeoutMs?: number
   retryBaseMs?: number
   retryMaxMs?: number
+  seedRetryMs?: number
 }
 
 const toBase64 = (u8: Uint8Array): string => {
@@ -84,6 +90,11 @@ const EMPTY_UPDATE = new Uint8Array([0, 0])
 const DEFAULT_ACK_TIMEOUT_MS = 10_000
 const DEFAULT_RETRY_BASE_MS = 250
 const DEFAULT_RETRY_MAX_MS = 8_000
+const DEFAULT_SEED_RETRY_MS = 3_000
+
+// The exact v1 update carrying no structs and no deletes.
+const isEmptyUpdate = (update: Uint8Array): boolean =>
+  update.length === EMPTY_UPDATE.length && update.every((byte, i) => byte === EMPTY_UPDATE[i])
 
 export type ProviderEvent = 'synced' | 'seed' | 'rejected' | 'write-denied' | 'stale'
 
@@ -107,6 +118,9 @@ export class CableProvider {
   readonly clientId = crypto.randomUUID()
   synced = false
   seedContent: string | null = null
+  /** Held from the seed grant until the server is known to store this
+   *  client's seed; sent with every write in between. */
+  seedClaim: string | null = null
   seedFormat: 'markdown' | 'html' = 'markdown'
   // Seed authorship rides alongside seedContent with the same one-shot
   // consume semantics: the editor reads and nulls all three together so a
@@ -137,6 +151,21 @@ export class CableProvider {
   private ackTimer: ReturnType<typeof setTimeout> | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryAttempt = 0
+  // Waiting for another client to apply the seed: no 'synced' until content
+  // arrives or this client is granted the claim.
+  private seedWaiting = false
+  private seedTimer: ReturnType<typeof setTimeout> | null = null
+  // A seed-request is unanswered, so the next handshake may be its answer.
+  private seedRequested = false
+  // A viewer who cannot write is showing the seed from its own local copy.
+  // Merging real state into that copy would duplicate the text.
+  private localSeed = false
+  // The local doc was superseded and the page is reloading: nothing more is
+  // sent from it or merged into it.
+  discarded = false
+  // Peer updates that arrived while `seedClaim` was unsettled. Merging them
+  // into a seed the server then refuses would double the text.
+  private heldUpdates: Uint8Array[] = []
   // Initialized from documents#show props and verified on each "sync" message,
   // then echoed back on outgoing update/sync-reply frames, reconnect subscribe
   // params, and keepalive HTTP flushes so the server rejects any client whose
@@ -147,6 +176,7 @@ export class CableProvider {
   private readonly ackTimeoutMs: number
   private readonly retryBaseMs: number
   private readonly retryMaxMs: number
+  private readonly seedRetryMs: number
 
   constructor(doc: Y.Doc, slug: string, options?: CableProviderOptions) {
     this.doc = doc
@@ -158,6 +188,7 @@ export class CableProvider {
     this.ackTimeoutMs = options?.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS
     this.retryBaseMs = options?.retryBaseMs ?? DEFAULT_RETRY_BASE_MS
     this.retryMaxMs = options?.retryMaxMs ?? DEFAULT_RETRY_MAX_MS
+    this.seedRetryMs = options?.seedRetryMs ?? DEFAULT_SEED_RETRY_MS
     this.awareness = new Awareness(doc)
     this.consumer = options?.consumer ?? getConsumer(options?.connectionIdentity)
 
@@ -168,6 +199,7 @@ export class CableProvider {
         disconnected: () => {
           this.synced = false
           this.clearRetryTimer()
+          this.stopSeedWait()
           this.requeueInFlight()
           this.clearAwarenessThrottle()
           // Refresh the ActionCable subscription identifier while the socket is
@@ -190,6 +222,7 @@ export class CableProvider {
           // user keeps typing into a dead editor that will never sync.
           this.synced = false
           this.clearOutbox()
+          this.stopSeedWait()
           this.clearAwarenessThrottle()
           this.emit('rejected')
         },
@@ -220,6 +253,7 @@ export class CableProvider {
     this.flushAwareness()
     this.clearAwarenessThrottle()
     this.clearTimers()
+    this.stopSeedWait()
     if (typeof window !== 'undefined') {
       window.removeEventListener('beforeunload', this.handleUnload)
       window.removeEventListener('blur', this.handleBlur)
@@ -310,9 +344,69 @@ export class CableProvider {
     this.retryAttempt = 0
   }
 
+  private stopSeedWait(): void {
+    this.seedWaiting = false
+    if (this.seedTimer) clearTimeout(this.seedTimer)
+    this.seedTimer = null
+  }
+
+  private waitForSeed(): void {
+    this.stopSeedWait()
+    this.seedWaiting = true
+    if (!this.canWrite) return
+    this.seedTimer = setTimeout(() => {
+      // Answered with a whole new handshake: content, a grant, or still pending.
+      this.seedRequested = true
+      this.send({ type: 'seed-request' })
+      this.seedTimer = setTimeout(() => this.waitForSeed(), this.ackTimeoutMs)
+    }, this.seedRetryMs)
+  }
+
+  private completeSync(): void {
+    this.stopSeedWait()
+    this.synced = true
+    this.flush('sync-reply')
+    this.emit('synced')
+    // Announce ourselves to the server cache and existing peers; cached
+    // peer awareness arrives directly from SyncChannel#subscribed.
+    this.broadcastAwareness()
+  }
+
+  // Once only: the page reloads in response, and later frames from a typing
+  // peer must not keep restarting that reload.
+  private discardLocalSeed(): void {
+    if (this.discarded) return
+    this.discarded = true
+    this.stopSeedWait()
+    this.clearOutbox()
+    this.heldUpdates = []
+    this.emit('stale')
+  }
+
+  private settleSeedClaim(): void {
+    if (this.seedClaim === null) return
+    this.seedClaim = null
+    const held = this.heldUpdates
+    this.heldUpdates = []
+    for (const update of held) {
+      try {
+        Y.applyUpdate(this.doc, update, this)
+      } catch (error) {
+        console.warn('CableProvider: dropped malformed update', error)
+      }
+    }
+  }
+
+  // Peer updates are held while a claim is unsettled, so every struct in the
+  // local doc is this client's own.
+  private serverHoldsOwnSeed(stateVector: Map<number, number>): boolean {
+    return [...this.doc.store.clients.keys()].some((client) => stateVector.has(client))
+  }
+
   private flush(type: 'sync-reply' | 'update' = 'update'): void {
     if (
       this.destroyed ||
+      this.discarded ||
       !this.canWrite ||
       !this.synced ||
       this.inFlight ||
@@ -331,8 +425,13 @@ export class CableProvider {
       update: toBase64(update),
       seq,
       generation: this.generation,
+      ...this.seedClaimParam(),
     })
     this.ackTimer = setTimeout(() => this.handleAckTimeout(seq), this.ackTimeoutMs)
+  }
+
+  private seedClaimParam(): { seed_claim?: string } {
+    return this.seedClaim === null ? {} : { seed_claim: this.seedClaim }
   }
 
   private handleAckTimeout(seq: number): void {
@@ -359,10 +458,11 @@ export class CableProvider {
    * immediate navigation/unload survive ActionCable teardown.
    */
   persistCurrentState = (snapshot?: DurableSnapshotPayload): void => {
-    if (!this.canWrite) return
+    if (!this.canWrite || this.discarded) return
     const snapInFlight = this.inFlight
     const snapQueued = this.queuedUpdate
     const pending = this.mergedUnackedUpdate()
+    const sentClaim = this.seedClaim
     if (!pending && !snapshot) return
 
     const updatePayload = {
@@ -373,6 +473,7 @@ export class CableProvider {
       // as SyncChannel, so it always carries content_generation (initialized
       // from page props even before the WebSocket handshake completes).
       generation: this.generation,
+      ...this.seedClaimParam(),
     }
     let body: string
     if (snapshot) {
@@ -397,9 +498,17 @@ export class CableProvider {
       body,
       keepalive: true,
     })
-      .then((response) => {
+      .then(async (response) => {
+        if (response.status === 409) {
+          const refusal = (await response.json().catch(() => null)) as { seed_refused?: boolean } | null
+          // Before the handshake this client may still be granted the claim
+          // anew, so the handshake decides.
+          const current = this.synced && this.seedClaim === sentClaim
+          if (refusal?.seed_refused && current && !this.destroyed) this.discardLocalSeed()
+        }
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        if (this.destroyed) return
+        if (this.destroyed || this.discarded) return
+        if (pending) this.settleSeedClaim()
         // Reconcile only the exact outbox snapshots this request carried; any
         // newer edits merged into `queuedUpdate` after fetch started remain.
         if (snapInFlight && this.inFlight === snapInFlight) {
@@ -422,10 +531,12 @@ export class CableProvider {
   }
 
   private handleReceived(data: SyncMessage): void {
-    if (data.cid === this.clientId) return
+    if (data.cid === this.clientId || this.discarded) return
 
     switch (data.type) {
       case 'sync': {
+        const answersSeedRequest = this.seedRequested
+        this.seedRequested = false
         // A reconnect handshake reporting a different generation means an
         // owner CLI replacement (Document#replace_content!) reset this
         // document while this client was disconnected — it missed both the
@@ -444,10 +555,38 @@ export class CableProvider {
           // replaces this discarded session can claim and apply the new
           // template instead of everyone waiting out SEED_CLAIM_TIMEOUT.
           if (data.seed) this.send({ type: 'seed-decline' })
+          this.stopSeedWait()
           this.clearOutbox()
           this.emit('stale')
           break
         }
+        if (this.seedClaim !== null && data.sv) {
+          const stateVector = Y.decodeStateVector(fromBase64(data.sv))
+          if (stateVector.size > 0 && !this.serverHoldsOwnSeed(stateVector)) {
+            this.discardLocalSeed()
+            break
+          }
+          if (stateVector.size > 0) this.settleSeedClaim()
+        }
+        if (this.localSeed) {
+          const hasContent = Boolean(data.update) && !isEmptyUpdate(fromBase64(data.update!))
+          if ((data.seed || data.seed_pending) && !hasContent) this.completeSync()
+          else this.discardLocalSeed()
+          break
+        }
+        // A late answer to a seed-request, not a new subscription: the
+        // outbox and its sequence are live and must not be reset.
+        if (this.synced && answersSeedRequest) {
+          if (data.seed && this.seedClaim !== null) this.seedClaim = data.seed_claim ?? null
+          else if (data.seed) this.send({ type: 'seed-decline' })
+          if (data.update) Y.applyUpdate(this.doc, fromBase64(data.update), this)
+          break
+        }
+        // Still synced means a half-open socket was replaced without
+        // `disconnected`. Numbering continues then, so a receipt for the old
+        // send cannot settle the new one.
+        if (this.synced) this.synced = false
+        else this.updateSequence = 0
         // Apply server's delta or full state (empty string on checksum match);
         // any unacked local edits stay in the outbox and flush immediately once synced.
         if (data.update) {
@@ -456,11 +595,21 @@ export class CableProvider {
         this.serverChecksum = data.checksum ?? null
         this.clearRetryTimer()
         this.requeueInFlight()
-        this.updateSequence = 0
         this.retryAttempt = 0
         if (typeof data.generation === 'number') this.generation = data.generation
         const seedContent = data.seed_content
-        if (data.seed && seedContent) {
+        const localDocEmpty = this.doc.store.clients.size === 0
+        if (data.seed && this.canWrite) {
+          // A claim is for a seed still to be stored. With content here and
+          // none of this client's own unsettled there is nothing to claim, and
+          // holding it would keep peer edits back and get the next edit refused.
+          if (localDocEmpty || this.seedClaim !== null) this.seedClaim = data.seed_claim ?? null
+          else this.send({ type: 'seed-decline' })
+        }
+        // An unshared seed is safe to show only where it can never be sent.
+        const showLocally = Boolean(data.seed_pending) && !this.canWrite
+        if ((data.seed || showLocally) && seedContent && localDocEmpty) {
+          this.localSeed = !this.canWrite
           // No one listens to 'seed' by design: the editor reads
           // provider.seedContent directly inside its bind step, which runs
           // on the 'synced' emit below — this assignment is ordered before
@@ -471,13 +620,13 @@ export class CableProvider {
           this.seedAuthorKind = data.seed_author_kind ?? null
           this.seedAuthorName = data.seed_author_name ?? null
           this.emit('seed')
+        } else if (data.seed_pending && localDocEmpty) {
+          // Binding the editor now would replace the painted body with an
+          // empty document.
+          this.waitForSeed()
+          break
         }
-        this.synced = true
-        this.flush('sync-reply')
-        this.emit('synced')
-        // Announce ourselves to the server cache and existing peers; cached
-        // peer awareness arrives directly from SyncChannel#subscribed.
-        this.broadcastAwareness()
+        this.completeSync()
         break
       }
       case 'ack':
@@ -485,6 +634,7 @@ export class CableProvider {
         this.clearAckTimer()
         this.inFlight = null
         this.retryAttempt = 0
+        this.settleSeedClaim()
         this.flush('update')
         break
       case 'nack':
@@ -504,12 +654,22 @@ export class CableProvider {
       case 'sync-reply':
         this.serverChecksum = null
         try {
-          Y.applyUpdate(this.doc, fromBase64(data.update!), this)
+          const update = fromBase64(data.update!)
+          if (this.localSeed) {
+            if (!isEmptyUpdate(update)) this.discardLocalSeed()
+            break
+          }
+          if (this.seedClaim !== null) {
+            this.heldUpdates.push(update)
+            break
+          }
+          Y.applyUpdate(this.doc, update, this)
         } catch (error) {
           // A malformed frame from a peer must not break this client's
           // sync handler; the doc itself is untouched by a failed apply.
           console.warn('CableProvider: dropped malformed update', error)
         }
+        if (this.seedWaiting && this.doc.store.clients.size > 0) this.completeSync()
         break
       case 'awareness':
         if (data.update) {
@@ -526,6 +686,10 @@ export class CableProvider {
         }
         break
       case 'write-denied':
+        if (this.seedClaim !== null && (data.stale || data.reason === 'stale')) {
+          this.discardLocalSeed()
+          break
+        }
         this.clearOutbox()
         // Distinguish "this link is locked" from "your local doc predates an
         // owner CLI replacement" (Document#content_generation mismatch) —

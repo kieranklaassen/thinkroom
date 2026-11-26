@@ -4,17 +4,22 @@
 #
 # Protocol:
 #   client -> server (sub)   : { slug, cid?, client_id?, checksum?, sv?, generation? }
-#   server -> joining client : { type: "sync", update, sv, checksum?, generation, seed?, content_format?, seed_content?, seed_author_kind?, seed_author_name? }
+#   server -> joining client : { type: "sync", update, sv, checksum?, generation, seed?, seed_claim?, seed_pending?, content_format?, seed_content?, seed_author_kind?, seed_author_name? }
+#                              # seed_claim: identifies the claim `seed` granted; returned on the claimant's frames until its
+#                              # seed is stored, and refused (write-denied stale) once another claimant's seed is.
+#                              # seed_pending: nothing is stored yet and another subscriber holds the seed claim, so the
+#                              # empty state is not the document. Viewers who cannot write also get the seed_* fields to show.
 #                              { type: "awareness", update, cid }     # cached active peers, unicast on join
 #                              { type: "write-denied", reason: "stale", stale: true, locked: false, generation }
 #   server -> sender         : { type: "ack", seq }                            # durable merge receipt (when seq was sent)
 #                              { type: "nack", seq, reason: "retryable" | "invalid" }
 #                              { type: "write-denied", locked: true }          # read-only link
 #                              { type: "write-denied", locked: false, stale: true } # document was replaced
-#   client -> server         : { type: "sync-reply", update, cid, seq?, generation } # unacked edits flushed on reconnect
-#                              { type: "update", update, cid, seq?, generation }     # incremental edit
+#   client -> server         : { type: "sync-reply", update, cid, seq?, generation, seed_claim? } # unacked edits flushed on reconnect
+#                              { type: "update", update, cid, seq?, generation, seed_claim? } # incremental edit
 #                              { type: "awareness", update, cid, client_id? }        # presence/cursors, cached + relayed (4 KiB cap)
 #                              { type: "seed-decline", cid }                         # hand back a seed claim this handshake granted
+#                              { type: "seed-request", cid }                         # waiting writer retries the claim; answered with a "sync"
 #   server -> peers          : { type: "awareness-leave", cid, client_id }           # emitted on subscriber disconnect
 # All client messages are broadcast to every subscriber (sender filters its own
 # via cid); update/sync-reply are persisted before broadcast and acknowledged
@@ -73,22 +78,11 @@ class SyncChannel < ApplicationCable::Channel
     stream_for @document
     self.class.track_subscribe(@document.id)
 
-    message = build_sync_message
-    if claim_seed?
-      # Remember the grant so a "seed-decline" from this subscriber can
-      # release exactly this claim (and only at this generation).
-      @granted_seed_generation = @document.content_generation
-      message[:seed] = true
-      message[:content_format] = @document.content_format
-      message[:seed_content] = @document.seed_content
-      # Omitted (not null) for legacy docs without recorded authorship —
-      # keeps the wire format minimal and presence-of-key meaningful.
-      message[:seed_author_kind] = @document.seed_author_kind if @document.seed_author_kind
-      message[:seed_author_name] = @document.seed_author_name if @document.seed_author_name
-    end
-    transmit(message)
+    transmit_handshake
 
     transmit_cached_awareness
+  rescue ActiveRecord::RecordNotFound
+    reject # deleted during the handshake
   end
 
   def unsubscribed
@@ -148,15 +142,69 @@ class SyncChannel < ApplicationCable::Channel
         return unless seq&.positive?
       end
 
-      persist_and_broadcast(message, decoded, generation:, seq:)
+      persist_and_broadcast(message, decoded, generation:, seed_claim: data["seed_claim"], seq:)
     when "awareness"
       handle_awareness(data)
     when "seed-decline"
       decline_seed_claim
+    when "seed-request"
+      retry_seed_claim
     end
   end
 
   private
+
+  def transmit_handshake
+    granted = claim_seed?
+    claimed_at = @document.seed_claimed_at if granted
+    seed_claim = @document.seed_claim_token if granted
+    # Decided before the state is read: content landing in between then travels
+    # with the flag, where the other order would send an unmarked empty state.
+    pending = !granted && seed_pending?
+    message = build_sync_message
+    if granted
+      # Remember the grant so a "seed-decline" from this subscriber can
+      # release exactly this claim (and only at this generation).
+      @granted_seed_generation = @document.content_generation
+      @granted_seed_claimed_at = claimed_at
+      message[:seed] = true
+      message[:seed_claim] = seed_claim
+      add_seed(message)
+    elsif pending
+      message[:seed_pending] = true
+      add_seed(message) unless writable?
+    end
+    transmit(message)
+  end
+
+  def add_seed(message)
+    message[:content_format] = @document.content_format
+    message[:seed_content] = @document.seed_content
+    # Omitted (not null) for legacy docs without recorded authorship —
+    # keeps the wire format minimal and presence-of-key meaningful.
+    message[:seed_author_kind] = @document.seed_author_kind if @document.seed_author_kind
+    message[:seed_author_name] = @document.seed_author_name if @document.seed_author_name
+  end
+
+  # A seeded document can be emptied again by recovery (YjsRecovery). No claim
+  # can be won there, so waiting for one would never end.
+  def seed_pending?
+    @document.seed_state != "seeded" && @document.seed_content.present? && !@document.live_crdt?
+  end
+
+  def writable?
+    @document.writable_by?(connection_owner_token, user: connection_current_user)
+  end
+
+  # Sent by a writer whose handshake was seed_pending. The claimant may have
+  # persisted, replaced, or abandoned the seed since, so answer from current
+  # rows with a whole new handshake.
+  def retry_seed_claim
+    @document.reload
+    transmit_handshake if writable?
+  rescue ActiveRecord::RecordNotFound
+    # Deleted since; DocumentMetaChannel tells the client.
+  end
 
   def build_sync_message
     client_checksum = params[:checksum].presence&.to_s
@@ -197,11 +245,14 @@ class SyncChannel < ApplicationCable::Channel
   # its DeleteSet) plus an empty update tail — never yjs_state_vector alone,
   # because Yjs state vectors omit DeleteSets.
   def checksum_matches?(client_checksum)
-    client_checksum.present? &&
-      @document.yjs_state_checksum.present? &&
+    return false if client_checksum.blank? || @document.yjs_document_updates.exists?
+
+    # Reload after the tail check: another join may have folded the tail into
+    # the columns since this row was loaded.
+    @document.reload
+    @document.yjs_state_checksum.present? &&
       @document.yjs_state_vector.present? &&
-      client_checksum == @document.yjs_state_checksum &&
-      !@document.yjs_document_updates.exists?
+      client_checksum == @document.yjs_state_checksum
   end
 
   def handle_awareness(data)
@@ -272,11 +323,12 @@ class SyncChannel < ApplicationCable::Channel
     })
   end
 
-  def persist_and_broadcast(message, decoded, generation:, seq: nil)
+  def persist_and_broadcast(message, decoded, generation:, seed_claim: nil, seq: nil)
     YjsPersistence.merge_bytes(
       @document,
       decoded,
       generation:,
+      seed_claim:,
       token: connection_owner_token,
       user: connection_current_user
     )
@@ -325,14 +377,15 @@ class SyncChannel < ApplicationCable::Channel
   # SEED_CLAIM_TIMEOUT expires. The conditional UPDATE only releases a
   # still-unconsumed claim at the granted generation: a merge that already
   # flipped seed_state to "seeded", or a replacement that advanced the
-  # generation, leaves the row untouched.
+  # generation, or another client's newer claim, leaves the row untouched.
   def decline_seed_claim
     generation = @granted_seed_generation
     return unless generation
 
     @granted_seed_generation = nil
     Document
-      .where(id: @document.id, seed_state: "claimed", content_generation: generation)
+      .where(id: @document.id, seed_state: "claimed", content_generation: generation,
+             seed_claimed_at: @granted_seed_claimed_at)
       .update_all(seed_state: "pending", seed_claimed_at: nil)
   end
 end

@@ -355,3 +355,425 @@ test('write-denied and stale responses clear the outbox and emit the matching ev
   assert.deepEqual(events, ['write-denied', 'stale'])
   assert.equal(h.sentUpdates().length, 2) // only the one edit before disconnect; nothing on stale reconnect
 })
+
+function pendingSyncFrame(extra = {}) {
+  return { ...emptySyncFrame(1), seed_pending: true, ...extra }
+}
+
+function contentUpdate(text = 'body') {
+  const doc = new Y.Doc()
+  doc.getText('t').insert(0, text)
+  return toBase64(Y.encodeStateAsUpdate(doc))
+}
+
+function recordEvents(h) {
+  const events = []
+  for (const event of ['synced', 'stale']) h.provider.on(event, () => events.push(event))
+  return events
+}
+
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+test('an ungranted empty handshake does not sync the editor and finishes on the first real content', (t) => {
+  const h = createHarness(t)
+  const events = recordEvents(h)
+
+  h.receive(pendingSyncFrame())
+  assert.equal(h.provider.synced, false)
+  assert.deepEqual(events, [], 'binding here would replace the painted body with an empty editor')
+
+  h.receive({ type: 'update', update: 'AAA=', cid: 'peer' })
+  assert.deepEqual(events, [], 'an empty update is not content')
+
+  h.receive({ type: 'update', update: contentUpdate(), cid: 'peer' })
+  assert.deepEqual(events, ['synced'])
+  assert.equal(h.doc.getText('t').toString(), 'body')
+
+  h.receive({ type: 'update', update: contentUpdate('more'), cid: 'peer' })
+  assert.deepEqual(events, ['synced'])
+})
+
+test('a waiting writer retries the claim until it is granted, then stops', async (t) => {
+  const h = createHarness(t, { seedRetryMs: 10 })
+  const events = recordEvents(h)
+  const requests = () => h.sent.filter((frame) => frame.type === 'seed-request').length
+
+  h.receive(pendingSyncFrame())
+  await pause(60)
+  assert.ok(requests() >= 1)
+  h.receive(pendingSyncFrame())
+  const before = requests()
+  await pause(60)
+  assert.ok(requests() > before, 'a still-pending answer re-arms the retry')
+
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: '# Template' })
+  assert.deepEqual(events, ['synced'])
+  assert.equal(h.provider.seedContent, '# Template')
+  const settled = requests()
+  await pause(60)
+  assert.equal(requests(), settled)
+})
+
+test('a waiting writer stops retrying when disconnected', async (t) => {
+  const h = createHarness(t, { seedRetryMs: 10 })
+  h.receive(pendingSyncFrame())
+  h.disconnect()
+  await pause(60)
+  assert.equal(h.sent.filter((frame) => frame.type === 'seed-request').length, 0)
+})
+
+test('a writer that already holds content syncs normally on a pending handshake', (t) => {
+  const h = createHarness(t)
+  const events = recordEvents(h)
+  h.doc.getText('t').insert(0, 'template applied from the page grant')
+  h.receive(pendingSyncFrame())
+  assert.deepEqual(events, ['synced'])
+  assert.equal(h.sentUpdates().length, 1)
+})
+
+test('a reader shows the seed locally and reloads instead of merging real state over it', (t) => {
+  const h = createHarness(t, { canWrite: false })
+  const events = recordEvents(h)
+  h.receive(pendingSyncFrame({ seed_content: '# Template', content_format: 'markdown' }))
+  assert.deepEqual(events, ['synced'])
+  assert.equal(h.provider.seedContent, '# Template')
+  h.provider.seedContent = null
+  h.doc.getText('t').insert(0, 'Template')
+
+  h.disconnect()
+  h.receive(pendingSyncFrame({ seed_content: '# Template' }))
+  assert.equal(h.provider.seedContent, null, 'a reconnect must not offer the template again')
+  h.receive({ type: 'update', update: 'AAA=', cid: 'peer' })
+  assert.ok(!events.includes('stale'))
+
+  h.receive({ type: 'update', update: contentUpdate(), cid: 'peer' })
+  h.receive({ type: 'update', update: contentUpdate('typing'), cid: 'peer' })
+  assert.equal(events.filter((event) => event === 'stale').length, 1, 'a typing peer must not restart the reload')
+  assert.equal(events.at(-1), 'stale')
+  assert.equal(h.doc.getText('t').toString(), 'Template', 'real state must not merge into the local copy')
+  assert.equal(h.sentUpdates().length, 0)
+})
+
+test('a reader whose local seed was superseded while offline reloads on reconnect', (t) => {
+  const h = createHarness(t, { canWrite: false })
+  const events = recordEvents(h)
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: '# Template' })
+  h.doc.getText('t').insert(0, 'Template')
+  h.disconnect()
+  h.receive({ ...emptySyncFrame(1), update: contentUpdate() })
+  assert.deepEqual(events, ['synced', 'stale'])
+})
+
+test('a late answer to a seed-request leaves the live outbox and its sequence alone', async (t) => {
+  const h = createHarness(t, { ackTimeoutMs: 5000, seedRetryMs: 5 })
+  h.receive(pendingSyncFrame())
+  await pause(30)
+  assert.ok(h.sent.some((frame) => frame.type === 'seed-request'))
+  const peer = contentUpdate()
+  h.receive({ type: 'update', update: peer, cid: 'peer' })
+
+  h.doc.getText('t').insert(0, 'one ')
+  h.doc.getText('t').insert(0, 'two ')
+  h.receive({ ...emptySyncFrame(1), update: contentUpdate('late') })
+  assert.equal(h.sentUpdates().length, 1, 'the in-flight edit must not be resent under its own number')
+  assert.match(h.doc.getText('t').toString(), /late/)
+
+  h.receive({ type: 'ack', seq: 1 })
+  assert.deepEqual(h.sentUpdates().map((frame) => frame.seq), [1, 2])
+  const received = new Y.Doc()
+  Y.applyUpdate(received, fromBase64(peer))
+  for (const frame of h.sentUpdates()) Y.applyUpdate(received, fromBase64(frame.update))
+  assert.equal(received.getText('t').toString(), 'two one body')
+})
+
+test('a reader whose pending handshake already carries content shows that content, not the seed', (t) => {
+  const h = createHarness(t, { canWrite: false })
+  const events = recordEvents(h)
+  h.receive(pendingSyncFrame({ update: contentUpdate(), seed_content: '# Template' }))
+  assert.deepEqual(events, ['synced'])
+  assert.equal(h.provider.seedContent, null)
+})
+
+function claimantHarness(t, options) {
+  const h = createHarness(t, { ackTimeoutMs: 5000, ...options })
+  h.provider.seedClaim = 'claim-a'
+  h.doc.getText('t').insert(0, 'body')
+  return h
+}
+
+function syncFrameFrom(doc, extra = {}) {
+  return {
+    type: 'sync',
+    update: toBase64(Y.encodeStateAsUpdate(doc)),
+    sv: toBase64(Y.encodeStateVector(doc)),
+    generation: 1,
+    ...extra,
+  }
+}
+
+test('a channel grant hands its claim to the first seed write, and the ack ends it', (t) => {
+  const h = createHarness(t, { ackTimeoutMs: 5000 })
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: 'body', seed_claim: 'claim-a' })
+  h.doc.getText('t').insert(0, 'body')
+  assert.equal(h.sentUpdates()[0].seed_claim, 'claim-a')
+  h.receive({ type: 'ack', seq: 1 })
+  h.doc.getText('t').insert(0, 'x')
+  assert.ok(!('seed_claim' in h.sentUpdates()[1]))
+})
+
+test('a refused seed is dropped and never merged with the real state', (t) => {
+  const h = claimantHarness(t)
+  const events = recordEvents(h)
+  h.receive(pendingSyncFrame())
+  assert.equal(h.sentUpdates()[0].seed_claim, 'claim-a')
+
+  h.receive({ type: 'update', update: contentUpdate('theirs'), cid: 'peer' })
+  assert.equal(h.doc.getText('t').toString(), 'body', 'held until the claim is settled')
+  h.receive({ type: 'write-denied', locked: false, stale: true })
+  assert.deepEqual(events, ['synced', 'stale'])
+
+  h.receive({ type: 'update', update: contentUpdate('theirs'), cid: 'peer' })
+  h.doc.getText('t').insert(0, 'typed before the reload ')
+  h.provider.persistCurrentState({ content: '', spans: [], state_vector: '' })
+  assert.equal(h.doc.getText('t').toString(), 'typed before the reload body')
+  assert.equal(h.sentUpdates().length, 1, 'nothing from the dropped copy may go out')
+  assert.deepEqual(events, ['synced', 'stale'])
+})
+
+test('a slow claimant whose first handshake already has other content drops its seed', (t) => {
+  const h = claimantHarness(t)
+  const events = recordEvents(h)
+  const theirs = new Y.Doc()
+  theirs.getText('t').insert(0, 'theirs')
+  h.receive(syncFrameFrom(theirs))
+  assert.deepEqual(events, ['stale'])
+  assert.equal(h.doc.getText('t').toString(), 'body')
+  assert.equal(h.sentUpdates().length, 0)
+})
+
+test('a claimant whose own seed is already stored keeps it and applies held peer edits', (t) => {
+  const h = claimantHarness(t)
+  const events = recordEvents(h)
+  h.receive(emptySyncFrame(1))
+  const peer = new Y.Doc()
+  Y.applyUpdate(peer, fromBase64(h.sentUpdates()[0].update))
+  peer.getText('t').insert(4, ' plus')
+  h.receive({ type: 'update', update: toBase64(Y.encodeStateAsUpdate(peer)), cid: 'peer' })
+  assert.equal(h.doc.getText('t').toString(), 'body')
+  h.receive({ type: 'ack', seq: 1 })
+  assert.equal(h.doc.getText('t').toString(), 'body plus')
+
+  const again = claimantHarness(t)
+  again.receive(emptySyncFrame(1))
+  const stored = new Y.Doc()
+  Y.applyUpdate(stored, fromBase64(again.sentUpdates()[0].update))
+  again.disconnect()
+  again.receive(syncFrameFrom(stored))
+  assert.equal(again.doc.getText('t').toString(), 'body')
+  assert.ok(!('seed_claim' in again.sentUpdates()[1]), 'its own stored seed settles the claim')
+  assert.deepEqual(events, ['synced'])
+})
+
+test('a reconnecting claimant adopts a renewed claim without taking the template twice', (t) => {
+  const h = claimantHarness(t)
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: 'body', seed_claim: 'claim-b' })
+  assert.equal(h.provider.seedContent, null)
+  assert.equal(h.sentUpdates()[0].seed_claim, 'claim-b')
+})
+
+function refuseSeedPosts(t) {
+  const originalFetch = globalThis.fetch
+  const bodies = []
+  const answers = []
+  globalThis.fetch = (_url, init) => {
+    bodies.push(JSON.parse(init.body))
+    return new Promise((resolve) =>
+      answers.push(() => resolve({ ok: false, status: 409, json: async () => ({ seed_refused: true }) })),
+    )
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+  return { bodies, answer: async () => { answers.shift()(); await pause(10) } }
+}
+
+test('an HTTP seed write refused for the claim still held is dropped', async (t) => {
+  const post = refuseSeedPosts(t)
+  const h = claimantHarness(t)
+  const events = recordEvents(h)
+  h.provider.persistCurrentState()
+  assert.equal(post.bodies[0].seed_claim, 'claim-a')
+  h.receive(pendingSyncFrame())
+  await post.answer()
+  assert.deepEqual(events, ['synced', 'stale'])
+})
+
+test('a refusal for an older claim does not discard the renewed one, in either order', async (t) => {
+  const renewed = { ...emptySyncFrame(1), seed: true, seed_content: 'body', seed_claim: 'claim-b' }
+  const post = refuseSeedPosts(t)
+
+  const grantFirst = claimantHarness(t)
+  const grantFirstEvents = recordEvents(grantFirst)
+  grantFirst.provider.persistCurrentState()
+  grantFirst.receive(renewed)
+  await post.answer()
+  assert.deepEqual(grantFirstEvents, ['synced'])
+
+  const refusalFirst = claimantHarness(t)
+  const refusalFirstEvents = recordEvents(refusalFirst)
+  refusalFirst.provider.persistCurrentState()
+  await post.answer()
+  assert.deepEqual(refusalFirstEvents, [], 'the handshake decides')
+  refusalFirst.receive(renewed)
+  assert.deepEqual(refusalFirstEvents, ['synced'])
+  assert.equal(refusalFirst.sentUpdates()[0].seed_claim, 'claim-b')
+})
+
+test('an accepted HTTP seed write settles the claim', async (t) => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = () => Promise.resolve({ ok: true, status: 204 })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+  const h = claimantHarness(t)
+  h.provider.persistCurrentState()
+  await pause(10)
+  assert.equal(h.provider.seedClaim, null)
+})
+
+// A half-open socket: ActionCable reopens it without `disconnected`, so the
+// next handshake arrives while the provider still counts as synced.
+test('a second handshake without a disconnect makes a reader with a local seed reload, not merge', (t) => {
+  for (const extra of [{}, { seed_pending: true }]) {
+    const h = createHarness(t, { canWrite: false })
+    const events = recordEvents(h)
+    h.receive(pendingSyncFrame({ seed_content: 'hello' }))
+    h.doc.getText('t').insert(0, 'hello')
+    const real = new Y.Doc()
+    real.getText('t').insert(0, 'hello')
+    h.receive(syncFrameFrom(real, extra))
+    assert.equal(h.doc.getText('t').toString(), 'hello')
+    assert.equal(events.at(-1), 'stale')
+  }
+})
+
+test('a second handshake without a disconnect renews the claim of unsaved seed edits', (t) => {
+  const h = claimantHarness(t)
+  h.receive(pendingSyncFrame())
+  h.doc.getText('t').insert(4, ' edited')
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: 'body', seed_claim: 'claim-b' })
+  assert.equal(h.provider.seedClaim, 'claim-b')
+  assert.equal(h.provider.seedContent, null)
+  assert.ok(!h.sent.some((frame) => frame.type === 'seed-decline'))
+
+  const resent = h.sentUpdates()[1]
+  assert.equal(resent.seed_claim, 'claim-b')
+  const stored = new Y.Doc()
+  Y.applyUpdate(stored, fromBase64(resent.update))
+  assert.equal(stored.getText('t').toString(), 'body edited')
+})
+
+test('a second handshake without a disconnect resends unacked edits under a new number', (t) => {
+  const h = createHarness(t, { ackTimeoutMs: 5000 })
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'one ')
+  h.doc.getText('t').insert(4, 'two')
+  h.receive(emptySyncFrame(1))
+  assert.deepEqual(h.sentUpdates().map((frame) => frame.seq), [1, 2])
+
+  h.receive({ type: 'ack', seq: 1 })
+  h.disconnect()
+  h.receive(emptySyncFrame(1))
+  const last = new Y.Doc()
+  Y.applyUpdate(last, fromBase64(h.sentUpdates().at(-1).update))
+  assert.equal(last.getText('t').toString(), 'one two', 'an ack of the first send must not settle the second')
+})
+
+test('a late grant to a claimant with unsaved seed edits is adopted, and to a synced one is declined', async (t) => {
+  const grant = { ...emptySyncFrame(1), seed: true, seed_content: 'body', seed_claim: 'claim-b' }
+  const waiting = async () => {
+    const h = createHarness(t, { seedRetryMs: 5, ackTimeoutMs: 5000 })
+    h.receive(pendingSyncFrame())
+    await pause(30)
+    assert.ok(h.sent.some((frame) => frame.type === 'seed-request'))
+    h.receive({ type: 'update', update: contentUpdate(), cid: 'peer' })
+    return h
+  }
+  const declined = await waiting()
+  declined.receive(grant)
+  assert.equal(declined.provider.seedClaim, null)
+  assert.equal(declined.sent.at(-1).type, 'seed-decline')
+
+  const adopted = await waiting()
+  adopted.provider.seedClaim = 'claim-a'
+  adopted.receive(grant)
+  assert.equal(adopted.provider.seedClaim, 'claim-b')
+  assert.ok(!adopted.sent.some((frame) => frame.type === 'seed-decline'))
+})
+
+test('a grant that arrives with stored content is handed back, so peers show and edits are not refused', (t) => {
+  const stored = new Y.Doc()
+  stored.getText('t').insert(0, 'theirs')
+  const grant = { seed: true, seed_content: 'body', seed_claim: 'claim-b' }
+  const openings = {
+    'content in the handshake': (h) => h.receive(syncFrameFrom(stored, grant)),
+    'content broadcast just before an empty handshake': (h) => {
+      h.receive({ type: 'update', update: toBase64(Y.encodeStateAsUpdate(stored)), cid: 'peer' })
+      h.receive({ ...emptySyncFrame(1), ...grant })
+    },
+  }
+  for (const [name, open] of Object.entries(openings)) {
+    const h = createHarness(t, { ackTimeoutMs: 5000 })
+    open(h)
+    assert.equal(h.provider.seedClaim, null, name)
+    assert.equal(h.provider.seedContent, null, name)
+    assert.ok(h.sent.some((frame) => frame.type === 'seed-decline'), name)
+
+    const peer = new Y.Doc()
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(stored))
+    peer.getText('t').insert(6, ' and mine')
+    h.receive({ type: 'update', update: toBase64(Y.encodeStateAsUpdate(peer)), cid: 'peer' })
+    assert.equal(h.doc.getText('t').toString(), 'theirs and mine', name)
+
+    h.doc.getText('t').insert(0, 'my ')
+    assert.ok(!('seed_claim' in h.sentUpdates().at(-1)), name)
+  }
+})
+
+test('a re-grant that also shows the own seed is stored does not bring the claim back', (t) => {
+  const h = claimantHarness(t)
+  h.receive(emptySyncFrame(1))
+  const stored = new Y.Doc()
+  Y.applyUpdate(stored, fromBase64(h.sentUpdates()[0].update))
+  h.disconnect()
+  h.receive(syncFrameFrom(stored, { seed: true, seed_content: 'body', seed_claim: 'claim-b' }))
+  assert.equal(h.provider.seedClaim, null)
+  assert.ok(h.sent.some((frame) => frame.type === 'seed-decline'))
+  assert.equal(h.doc.getText('t').toString(), 'body')
+})
+
+test('a replaced document makes a claimant hand back a new grant and drop its edits', (t) => {
+  const h = claimantHarness(t)
+  const events = recordEvents(h)
+  h.receive(pendingSyncFrame())
+  h.disconnect()
+  h.receive({ ...emptySyncFrame(2), seed: true, seed_content: 'new', seed_claim: 'claim-b' })
+  assert.deepEqual(events, ['synced', 'stale'])
+  assert.equal(h.sent.at(-1).type, 'seed-decline')
+  assert.equal(h.sentUpdates().length, 1)
+})
+
+test('an ordinary 409 does not discard a claimant', async (t) => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => ({ ok: false, status: 409, json: async () => ({ error: 'stale' }) })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+  const h = claimantHarness(t)
+  const events = recordEvents(h)
+  h.receive(pendingSyncFrame())
+  h.provider.persistCurrentState()
+  await pause(10)
+  assert.deepEqual(events, ['synced'])
+  assert.equal(h.provider.seedClaim, 'claim-a')
+})
