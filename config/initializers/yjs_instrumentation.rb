@@ -44,9 +44,8 @@ Rails.application.config.after_initialize do
        sequence expected_sequence error].each do |key|
       fields[key] = payload[key] if payload.key?(key)
     end
-    # Class and message ("Document::StaleGenerationError: Client generation 3
-    # is behind..."); messages in this event family never carry doc content.
-    fields[:error] ||= payload[:exception].join(": ") if payload[:exception]
+    # The class only: a message can quote the payload it failed on.
+    fields[:error] ||= payload[:exception].first if payload[:exception]
     line = fields.map { |key, value| "#{key}=#{value}" }.join(" ")
 
     Rails.logger.public_send(level, line)

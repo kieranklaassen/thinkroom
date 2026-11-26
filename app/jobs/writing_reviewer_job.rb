@@ -38,14 +38,14 @@ class WritingReviewerJob < ApplicationJob
   rescue StandardError => e
     # Anything else must not leave the reviewer "running" forever (the panel
     # would show a spinner that never resolves).
-    Rails.logger.error("[compound] #{reviewer_key} crashed on pass #{pass_id}: #{e.class}: #{e.message}")
+    Rails.logger.error("[compound] #{reviewer_key} crashed on pass #{pass_id}: #{e.class}")
     fail_run(pass, reviewer_key, "#{e.class.name.demodulize}: #{e.message.to_s.byteslice(0, 200)}", count)
   end
 
   private
 
   def fail_run(pass, reviewer_key, message, count)
-    Rails.logger.warn("[compound] #{reviewer_key} failed on pass #{pass&.id}: #{message}")
+    Rails.logger.warn("[compound] #{reviewer_key} failed on pass #{pass&.id}")
     pass&.record_run!(reviewer_key, status: "failed", error: message, findings_count: count)
   rescue ActiveRecord::RecordNotFound
     nil

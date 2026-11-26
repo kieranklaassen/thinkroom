@@ -12,6 +12,7 @@ module RubyLlmSettings
     # room, and let RubyLLM retry 429/529 with backoff (TypeSafe asks for it).
     config.request_timeout = Integer(env.fetch("TYPESAFE_TIMEOUT_SECONDS", "60"))
     config.max_retries = 2
+    config.log_bodies = false # requests carry document text
     config
   end
 end
