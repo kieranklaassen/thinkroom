@@ -140,10 +140,7 @@ async function requestResult(
     ? AbortSignal.any([options.signal, timeout.signal])
     : timeout.signal
   init.signal = signal
-  const timer = setTimeout(
-    () => timeout.abort(new DOMException('timed out', 'TimeoutError')),
-    CALL_TIMEOUT_MS,
-  )
+  const timer = setTimeout(() => timeout.abort(), CALL_TIMEOUT_MS)
 
   let response: Response
   let text: string
@@ -202,7 +199,6 @@ function timedOut(method: WebmcpRequest['method']): Record<string, unknown> {
   const detail = `No complete response within ${seconds} seconds.`
   return {
     error: 'timed out',
-    // Aborting the fetch does not undo work the server already started.
     detail:
       method === 'POST'
         ? `${detail} The write may still have been applied; check before retrying.`
