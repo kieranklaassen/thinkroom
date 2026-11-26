@@ -11,7 +11,7 @@ namespace :compound_writing do
     user = flags_user!(args[:email])
     Flipper.enable_actor(CompoundWriting::FLAG, user)
     outcome = UserWritingPack.subscribe!(user, pack)
-    puts "#{outcome.change.to_s.capitalize} subscription for #{user.email} (#{outcome.subscription.enabled_lenses.size} lenses on)"
+    puts "#{outcome.change.to_s.capitalize} subscription for #{flags_label(user)} (#{outcome.subscription.enabled_lenses.size} lenses on)"
   end
 
   desc "List packs and their lenses"

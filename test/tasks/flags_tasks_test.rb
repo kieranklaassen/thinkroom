@@ -2,6 +2,8 @@ require "test_helper"
 require "rake"
 
 class FlagsTasksTest < ActiveSupport::TestCase
+  include CompoundWritingHelpers
+
   setup do
     Rake.application = Rake::Application.new
     Rails.application.load_tasks
@@ -47,11 +49,40 @@ class FlagsTasksTest < ActiveSupport::TestCase
     run_task("admin:grant", google_user.id.to_s)
     assert google_user.reload.admin?
     assert_match(/#{google_user.email} \(id #{google_user.id}\)/, run_task("admin:list"))
-    run_task("admin:revoke", google_user.email)
+    run_task("admin:revoke", google_user.email.upcase)
     assert_not google_user.reload.admin?
     run_task("admin:grant", @user.id.to_s)
     run_task("admin:revoke", @user.id.to_s)
     assert_not @user.reload.admin?
+  end
+
+  test "task output names the account by id" do
+    label = "#{@user.email} (id #{@user.id})"
+
+    assert_includes run_task("flags:enable", "compound_writing", @user.email), label
+    assert_includes run_task("flags:list", "compound_writing"), label
+    assert_includes run_task("flags:disable", "compound_writing", @user.email), label
+    assert_includes run_task("admin:grant", @user.email), label
+    assert_includes run_task("admin:list"), label
+    assert_includes run_task("admin:revoke", @user.email), label
+  end
+
+  test "compound_writing:install subscribes one account and needs an id for a shared email" do
+    google_user = User.for_google!(uid: "123", email: @user.email, name: "Kieran")
+    install = CompoundWriting::PackInstaller.method(:install!)
+    pack = compound_pack
+    CompoundWriting::PackInstaller.define_singleton_method(:install!) { |*, **| pack }
+
+    capture_io { assert_raises(SystemExit) { run_task("compound_writing:install", "acme/lenses", @user.email) } }
+    assert_empty UserWritingPack.where(user: [ @user, google_user ])
+
+    output = run_task("compound_writing:install", "acme/lenses", google_user.id.to_s)
+    assert_includes output, "#{google_user.email} (id #{google_user.id})"
+    assert_equal [ google_user.id ], UserWritingPack.where(user: [ @user, google_user ]).pluck(:user_id)
+    assert Flipper.enabled?(CompoundWriting::FLAG, google_user)
+    assert_not Flipper.enabled?(CompoundWriting::FLAG, @user)
+  ensure
+    CompoundWriting::PackInstaller.define_singleton_method(:install!, install)
   end
 
   test "admin:grant, admin:list, and admin:revoke" do

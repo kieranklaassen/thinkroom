@@ -90,6 +90,37 @@ class UserTest < ActiveSupport::TestCase
     assert_not_equal stored[0][-47..], stored[1][-47..]
   end
 
+  test "the stored email of a recreated separate Google account is a new one" do
+    User.create!(name: "Kieran", email: "kieran@example.com", password: PASSWORD)
+    stored = 2.times.map do
+      User.for_google!(uid: "123", email: "kieran@example.com", name: "Kieran").tap(&:destroy!).email
+    end
+
+    assert_not_equal(*stored)
+  end
+
+  test "a Google sign-in is resolved again when validation refuses the insert, at most twice" do
+    create = User.method(:create!)
+    calls = 0
+    failures = 2
+    User.define_singleton_method(:create!) do |**attributes|
+      calls += 1
+      raise ActiveRecord::RecordInvalid if calls <= failures
+
+      create.call(**attributes)
+    end
+
+    assert User.for_google!(uid: "123", email: "kieran@example.com", name: "Kieran").google_account?
+    assert_equal 3, calls
+
+    calls = 0
+    failures = 9
+    assert_raises(ActiveRecord::RecordInvalid) { User.for_google!(uid: "456", email: "other@example.com", name: "Other") }
+    assert_equal 3, calls
+  ensure
+    User.singleton_class.remove_method(:create!)
+  end
+
   test "a password account in the reserved form does not affect a Google sign-in for the plain email" do
     User.create!(name: "Kieran", email: "kieran@example.com", password: PASSWORD)
     User.new(name: "Other", email: "kieran@example.com.123.google.invalid", password: PASSWORD).save!(validate: false)

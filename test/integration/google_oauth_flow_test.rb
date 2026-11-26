@@ -180,6 +180,34 @@ class GoogleOauthFlowTest < ActionDispatch::IntegrationTest
     assert_equal 0, User.count
   end
 
+  test "a Google identity that cannot be saved ends at the sign-in message" do
+    sign_in_with_google(google_auth(email: "not an email"))
+
+    assert_redirected_to login_path
+    assert_nil session[:user_id]
+    assert_equal "We couldn’t sign you in with Google", inertia_error(:email)
+  end
+
+  test "a lock timeout ends at the sign-in message" do
+    User.define_singleton_method(:transaction) { |**| raise ActiveRecord::StatementTimeout }
+
+    sign_in_with_google
+
+    assert_redirected_to login_path
+    assert_nil session[:user_id]
+    assert_equal "We couldn’t sign you in with Google", inertia_error(:email)
+  ensure
+    User.singleton_class.remove_method(:transaction)
+  end
+
+  test "letter case in a Google email does not matter" do
+    password_account
+    sign_in_with_google(google_auth(email: " KIERAN@Example.com "))
+
+    assert_equal "kieran@example.com", User.find_by!(google_uid: "google-123").account_email
+    assert_equal 2, User.with_account_email("kieran@example.com").size
+  end
+
   test "OAuth request phase is post only" do
     get "/auth/google_oauth2"
     assert_response :not_found

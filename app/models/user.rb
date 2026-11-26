@@ -42,11 +42,14 @@ class User < ApplicationRecord
   def self.for_google!(uid:, email:, name:)
     attempts = 0
     begin
-      # SQLite's immediate transaction keeps the email lookup and insert together.
-      find_by(google_uid: uid) || transaction { create_for_google!(uid:, email:, name:) }
+      # SQLite's immediate transaction keeps the lookups and the insert together.
+      # A sign-in with the same subject can finish before it begins, and the
+      # query cache still holds the first lookup, so the second skips the cache.
+      find_by(google_uid: uid) || transaction do
+        uncached { find_by(google_uid: uid) || create_for_google!(uid:, email:, name:) }
+      end
     rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
-      # A registration and a sign-in with the same subject can each finish in
-      # between, so the lookup runs again up to twice.
+      # An insert refused all the same is resolved from the start, up to twice.
       attempts += 1
       raise if attempts > 2
 

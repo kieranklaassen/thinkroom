@@ -9,7 +9,7 @@ class OauthCallbacksController < InertiaController
     return google_failure unless user
 
     redirect_to complete_authentication(user), status: :see_other
-  rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
+  rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique, ActiveRecord::StatementTimeout
     google_failure
   end
 
