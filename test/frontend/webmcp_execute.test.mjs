@@ -28,9 +28,11 @@ function holdLimitTimer(t) {
   const { setTimeout: realSetTimeout, clearTimeout: realClearTimeout } = globalThis
   const held = new Map()
   let now = 0
+  let started = 0
   globalThis.setTimeout = (callback, delay, ...args) => {
     if (delay !== LIMIT_MS) return realSetTimeout(callback, delay, ...args)
     const timer = {}
+    started += 1
     held.set(timer, { callback, at: now + delay })
     return timer
   }
@@ -41,13 +43,17 @@ function holdLimitTimer(t) {
     globalThis.setTimeout = realSetTimeout
     globalThis.clearTimeout = realClearTimeout
   })
-  return (ms) => {
-    now += ms
-    for (const [timer, { callback, at }] of held) {
-      if (at > now) continue
-      held.delete(timer)
-      callback()
-    }
+  return {
+    started: () => started,
+    pending: () => held.size,
+    tick: (ms) => {
+      now += ms
+      for (const [timer, { callback, at }] of held) {
+        if (at > now) continue
+        held.delete(timer)
+        callback()
+      }
+    },
   }
 }
 
@@ -58,6 +64,7 @@ async function setup(t) {
   const waiting = []
   const server = createServer((request, response) => {
     if (request.url === '/api/fast') return response.end('{"ok":true}')
+    if (request.url === '/api/fail') return response.writeHead(500).end('{"error":"broken"}')
     if (request.url === '/api/stall') {
       response.writeHead(200, { 'Content-Type': 'application/json' })
       response.write('{"half":')
@@ -96,10 +103,9 @@ async function setup(t) {
     globalThis.fetch = originalFetch
   })
 
-  const tick = holdLimitTimer(t)
   return {
     headers,
-    tick,
+    ...holdLimitTimer(t),
     arrived: () =>
       arrivals.length ? Promise.resolve(arrivals.shift()) : new Promise((resolve) => waiting.push(resolve)),
     call: (route, { method = 'GET', signal } = {}) =>
@@ -214,3 +220,42 @@ test('a signal aborted before the call returns cancelled', bounded, async (t) =>
   const h = await setup(t)
   assert.deepEqual(errorOf(await h.call('fast', { signal: AbortSignal.abort() })), { error: 'cancelled' })
 })
+
+// Each ending of a call, driven to completion.
+const ENDINGS = {
+  success: (h, options) => h.call('fast', options),
+  'error status': (h, options) => h.call('fail', options),
+  'connection lost before the headers': async (h, options) => {
+    const result = h.call('hang', options)
+    ;(await h.arrived()).response.destroy()
+    return result
+  },
+  'connection lost in the body': async (h, options) => {
+    const result = h.call('stall', options)
+    await h.headers
+    ;(await h.arrived()).response.destroy()
+    return result
+  },
+  'caller abort before the headers': async (h, options) => {
+    const controller = new AbortController()
+    const result = h.call('hang', { ...options, signal: controller.signal })
+    await h.arrived()
+    controller.abort()
+    return result
+  },
+  'caller abort in the body': async (h, options) => {
+    const controller = new AbortController()
+    const result = h.call('stall', { ...options, signal: controller.signal })
+    await h.headers
+    controller.abort()
+    return result
+  },
+}
+
+for (const [ending, run] of Object.entries(ENDINGS)) {
+  test(`no limit timer is left after: ${ending}`, bounded, async (t) => {
+    const h = await setup(t)
+    await run(h)
+    assert.deepEqual([h.started(), h.pending()], [1, 0])
+  })
+}
