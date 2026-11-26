@@ -145,13 +145,20 @@ class GoogleOauthFlowTest < ActionDispatch::IntegrationTest
     create = User.method(:create!)
     meanwhile = [
       ->(email) { create.call(name: "Registered", email:, password: PASSWORD) },
-      ->(_email) { create.call(name: "Other tab", email: "kieran@example.com.google-123.google.invalid", google_uid: "google-123") }
+      ->(_email) { create.call(name: "Other tab", email: "kieran@example.com.#{SecureRandom.hex(16)}.google.invalid", google_uid: "google-123") }
     ]
-    # Skips validation so the unique index itself refuses the late insert.
+    # The other request's row is already there when the insert runs, so the
+    # unique index refuses it, and stays after this transaction rolls back.
     User.define_singleton_method(:create!) do |**attributes|
-      step = meanwhile.shift or next create.call(**attributes)
+      step = meanwhile.first or next create.call(**attributes)
       step.call(attributes[:email])
-      new(**attributes).tap { |user| user.save!(validate: false) }
+      new(**attributes).save!(validate: false)
+    end
+    User.define_singleton_method(:transaction) do |**options, &block|
+      super(**options, &block)
+    rescue ActiveRecord::RecordNotUnique
+      meanwhile.shift.call("kieran@example.com")
+      raise
     end
     sign_in_with_google
 
@@ -160,6 +167,7 @@ class GoogleOauthFlowTest < ActionDispatch::IntegrationTest
     assert User.find_by!(email: "kieran@example.com").password_account?
   ensure
     User.singleton_class.remove_method(:create!)
+    User.singleton_class.remove_method(:transaction)
   end
 
   test "Google rejects unverified or incomplete identity payloads" do

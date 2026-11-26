@@ -2,9 +2,11 @@ class User < ApplicationRecord
   MINIMUM_PASSWORD_LENGTH = 10
   MAXIMUM_PASSWORD_BYTES = 72
   # Email is unique, so a Google account whose address a password account
-  # already uses stores "<email>.<google uid>.google.invalid" instead.
+  # already uses stores "<email>.<random hex>.google.invalid" instead.
   # account_email gives the plain address back.
   RESERVED_EMAIL_SUFFIX = ".google.invalid"
+  RESERVED_EMAIL_ENDING = /\.\h{32}#{Regexp.escape(RESERVED_EMAIL_SUFFIX)}\z/
+  MAXIMUM_EMAIL_LENGTH = 320
 
   has_secure_password validations: false
 
@@ -21,7 +23,7 @@ class User < ApplicationRecord
   validates :name, presence: true, length: { maximum: 255 }
   validates :email,
             presence: true,
-            length: { maximum: 320 },
+            length: { maximum: ->(user) { MAXIMUM_EMAIL_LENGTH + user.email.length - user.account_email.length } },
             format: { with: URI::MailTo::EMAIL_REGEXP },
             uniqueness: true
   validates :google_uid, uniqueness: true, allow_nil: true
@@ -35,18 +37,13 @@ class User < ApplicationRecord
 
   # The account for a verified Google identity, created on first sign-in. It
   # is never an existing password account, whatever email that account uses.
-  # Nil when another Google account has the email.
+  # Nil when another Google account has the email, or the email is in the
+  # reserved form itself.
   def self.for_google!(uid:, email:, name:)
     attempts = 0
     begin
-      existing = find_by(google_uid: uid)
-      return existing if existing
-
-      holders = with_account_email(email)
-      return if holders.any?(&:google_account?)
-
-      stored = holders.any? ? "#{email}#{reserved_email_suffix(uid)}" : email
-      create!(name:, email: stored, google_uid: uid)
+      # SQLite's immediate transaction keeps the email lookup and insert together.
+      find_by(google_uid: uid) || transaction { create_for_google!(uid:, email:, name:) }
     rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
       # A registration and a sign-in with the same subject can each finish in
       # between, so the lookup runs again up to twice.
@@ -65,10 +62,19 @@ class User < ApplicationRecord
       .select { |user| user.account_email == email }
   end
 
-  def self.reserved_email_suffix(uid) = ".#{uid.downcase}#{RESERVED_EMAIL_SUFFIX}"
+  def self.create_for_google!(uid:, email:, name:)
+    return if email.end_with?(RESERVED_EMAIL_SUFFIX)
+
+    holders = with_account_email(email)
+    return if holders.any?(&:google_account?)
+
+    stored = holders.any? ? "#{email}.#{SecureRandom.hex(16)}#{RESERVED_EMAIL_SUFFIX}" : email
+    create!(name:, email: stored, google_uid: uid)
+  end
+  private_class_method :create_for_google!
 
   def account_email
-    google_account? ? email.delete_suffix(self.class.reserved_email_suffix(google_uid)) : email
+    google_account? ? email.sub(RESERVED_EMAIL_ENDING, "") : email
   end
 
   def public_identity = slice(:id, :name).merge(email: account_email)
