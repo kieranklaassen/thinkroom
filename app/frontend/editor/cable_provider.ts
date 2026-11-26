@@ -106,7 +106,13 @@ const fitsKeepalive = (bytes: number): boolean =>
 const isEmptyUpdate = (update: Uint8Array): boolean =>
   update.length === EMPTY_UPDATE.length && update.every((byte, i) => byte === EMPTY_UPDATE[i])
 
-export type ProviderEvent = 'synced' | 'seed' | 'rejected' | 'write-denied' | 'stale'
+export type ProviderEvent =
+  | 'synced'
+  | 'seed'
+  | 'rejected'
+  | 'write-denied'
+  | 'stale'
+  | 'access-changed'
 
 /** Origin tag for the page's server-rendered Yjs state applied at session
  *  creation (collab_session.ts). It is server state, never a local change. */
@@ -641,6 +647,9 @@ export class CableProvider {
           // Binding the editor now would replace the painted body with an
           // empty document.
           this.waitForSeed()
+          // Only viewers who cannot write are sent the seed with a pending
+          // handshake, so it tells the access this connection has now.
+          if (this.canWrite === Boolean(seedContent)) this.emit('access-changed')
           break
         }
         this.completeSync()

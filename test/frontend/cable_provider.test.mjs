@@ -368,7 +368,7 @@ function contentUpdate(text = 'body') {
 
 function recordEvents(h) {
   const events = []
-  for (const event of ['synced', 'stale']) h.provider.on(event, () => events.push(event))
+  for (const event of ['synced', 'stale', 'access-changed']) h.provider.on(event, () => events.push(event))
   return events
 }
 
@@ -412,6 +412,40 @@ test('a waiting writer retries the claim until it is granted, then stops', async
   const settled = requests()
   await pause(60)
   assert.equal(requests(), settled)
+})
+
+test('a waiting writer whose access narrowed while it was offline reports it on reconnect', (t) => {
+  const h = createHarness(t)
+  const events = recordEvents(h)
+  h.receive(pendingSyncFrame())
+  h.disconnect()
+  h.receive(pendingSyncFrame({ seed_content: '# Template' }))
+  assert.deepEqual(events, ['access-changed'])
+  assert.equal(h.provider.seedContent, null, 'the template is for a session that cannot send it')
+})
+
+test('a waiting reader whose access widened while it was offline reports it on reconnect', (t) => {
+  const h = createHarness(t, { canWrite: false })
+  const events = recordEvents(h)
+  h.disconnect()
+  h.receive(pendingSyncFrame())
+  assert.deepEqual(events, ['access-changed'])
+})
+
+test('a reconnect with unchanged access or with local content does not report an access change', (t) => {
+  const waiting = createHarness(t)
+  const holding = createHarness(t)
+  const events = [recordEvents(waiting), recordEvents(holding)]
+  waiting.receive(pendingSyncFrame())
+  waiting.disconnect()
+  waiting.receive(pendingSyncFrame())
+
+  holding.doc.getText('t').insert(0, 'typed')
+  holding.receive(pendingSyncFrame())
+  holding.disconnect()
+  holding.receive(pendingSyncFrame({ seed_content: '# Template' }))
+  assert.deepEqual(events, [[], ['synced', 'synced']])
+  assert.equal(holding.doc.getText('t').toString(), 'typed')
 })
 
 test('a waiting writer stops retrying when disconnected', async (t) => {

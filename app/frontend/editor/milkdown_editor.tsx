@@ -168,6 +168,8 @@ export interface EditorProps {
   onTitleChange?: (title: string) => void
   /** The local doc no longer matches the server's and must be reloaded. */
   onStale?: () => void
+  /** A page still waiting for content has other access than it was rendered with. */
+  onAccessChanged?: () => void
   /** The document no longer exists on the server. */
   onRejected?: () => void
   /** User-facing notices the editor cannot render itself: an edit refused
@@ -313,6 +315,7 @@ function CollabEditor({
   onSelection,
   onTitleChange,
   onStale,
+  onAccessChanged,
   onRejected,
   onNotice,
 }: EditorProps) {
@@ -320,8 +323,8 @@ function CollabEditor({
   const insertSketchRef = useRef<() => void>(() => undefined)
   const saveSketchRef = useRef<(data: SketchData) => void>(() => undefined)
   const deleteSketchRef = useRef<(id: string) => void>(() => undefined)
-  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onRejected, onNotice })
-  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onRejected, onNotice }
+  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice })
+  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice }
   // Ref so the editable() closure always reads the live value; the effect
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
@@ -461,8 +464,10 @@ function CollabEditor({
     // Bound before the editor is ready: a client still waiting for content has
     // no handle to report through.
     const stale = () => callbacksRef.current.onStale?.()
+    const accessChanged = () => callbacksRef.current.onAccessChanged?.()
     const rejected = () => callbacksRef.current.onRejected?.()
     provider.on('stale', stale)
+    provider.on('access-changed', accessChanged)
     provider.on('rejected', rejected)
     // Discarded while no editor was listening (a remount reusing the session).
     if (provider.discarded) stale()
@@ -611,6 +616,7 @@ function CollabEditor({
       cancelled = true
       provider.off('synced', start)
       provider.off('stale', stale)
+      provider.off('access-changed', accessChanged)
       provider.off('rejected', rejected)
       unbindMermaidHints?.()
       if (spansFrame) cancelAnimationFrame(spansFrame)
