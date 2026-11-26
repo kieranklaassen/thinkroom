@@ -22,14 +22,15 @@ const headTop = (view: EditorView): number | null => {
   }
 }
 
-/** Keep the selection head where it is now while the next frames render. */
-export const holdHead = (view: EditorView) => {
+/** Keep the selection head where it is now while the next frames render, unless
+ *  `isOver` says the scroll that put it there no longer stands. */
+export const holdHead = (view: EditorView, isOver = () => false) => {
   const head = view.state.selection.head
   const target = headTop(view)
   if (target === null) return
   let passes = 0
   const settle = () => {
-    if (view.isDestroyed || view.state.selection.head !== head) return
+    if (view.isDestroyed || view.state.selection.head !== head || isOver()) return
     const top = headTop(view)
     if (top === null) return
     const drift = top - target
