@@ -4,6 +4,10 @@ class DocumentAsset < ApplicationRecord
     \A/rails/active_storage/blobs/(?:redirect|proxy)/([^/]+)/
   }x
 
+  # An image path can only match ACTIVE_STORAGE_SRC when the source spells the
+  # prefix out or hides one of its characters behind a character reference.
+  MAY_REFERENCE_BLOB = %r{/rails/active_storage/blobs/|&(?:#|sol|lowbar|UnderBar)}
+
   belongs_to :document, optional: true
   has_one_attached :file
 
@@ -57,7 +61,10 @@ class DocumentAsset < ApplicationRecord
     private
 
     def blob_ids_from(source)
-      Nokogiri::HTML5.fragment(source.to_s).css("img[src]").filter_map do |image|
+      source = source.to_s
+      return [] unless source.match?(MAY_REFERENCE_BLOB)
+
+      Nokogiri::HTML5.fragment(source).css("img[src]").filter_map do |image|
         match = ACTIVE_STORAGE_SRC.match(image["src"].to_s)
         ActiveStorage::Blob.find_signed(match[1])&.id if match
       rescue ActiveSupport::MessageVerifier::InvalidSignature, ActiveRecord::RecordNotFound

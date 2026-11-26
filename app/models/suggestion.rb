@@ -53,6 +53,13 @@ class Suggestion < ApplicationRecord
     suggestion
   end
 
+  # The compare-and-set every resolve goes through; true for its one winner.
+  def self.resolve_pending(id, new_status, by:)
+    where(id:, status: "pending")
+      .update_all(status: new_status, resolved_by: by, updated_at: Time.current) == 1
+  end
+  private_class_method :resolve_pending
+
   def accept!(by: nil)
     transition!("accepted", by:)
   end
@@ -74,18 +81,13 @@ class Suggestion < ApplicationRecord
   # resolved concurrently by a single accept loses its pending status and is
   # excluded — the caller only merges winners, so no text applies twice.
   def self.accept_all!(document:, by: nil, ids: nil)
-    winners = []
     document.transaction do
       pending = document.suggestions.pending
       pending = pending.where(id: ids) unless ids.nil?
-      pending.order(:id).each do |suggestion|
-        suggestion.accept!(by:)
-        winners << suggestion
-      rescue ActiveRecord::RecordInvalid
-        # lost to a concurrent resolve between the scope read and this row
-      end
+      # A row lost to a concurrent resolve since this read changes nothing.
+      won = pending.order(:id).ids.select { |id| resolve_pending(id, "accepted", by:) }
+      document.suggestions.where(id: won).order(:id).to_a
     end
-    winners
   end
 
   def reject!(by: nil)
@@ -131,8 +133,9 @@ class Suggestion < ApplicationRecord
   # against, not an edge case to swallow.
   def self.auto_reject_stale!(document, new_content:)
     rejected = 0
-    new_plain_text = DocumentPlainText.call(format: document.content_format, content: new_content)
+    new_plain_text = nil
     document.suggestions.pending.where.not(replaces: [ nil, "" ]).find_each do |suggestion|
+      new_plain_text ||= document.plain_text(new_content)
       next if new_plain_text.include?(suggestion.replaces)
 
       suggestion.reject!
@@ -178,9 +181,8 @@ class Suggestion < ApplicationRecord
   # guarantee the whole accept flow's no-duplicate promise rests on. An
   # in-memory status check would pass in BOTH racing requests.
   def transition!(new_status, by:)
-    updated = self.class.where(id:, status: "pending")
-                  .update_all(status: new_status, resolved_by: by, updated_at: Time.current)
-    raise ActiveRecord::RecordInvalid.new(self), "already #{status}" if updated.zero?
+    won = self.class.send(:resolve_pending, id, new_status, by:)
+    raise ActiveRecord::RecordInvalid.new(self), "already #{status}" unless won
 
     reload
   end

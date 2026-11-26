@@ -1,6 +1,6 @@
 # Reports whether a markdown document's inline excalidraw fences were
 # recognized as sketches. Recognition mirrors DocumentPlainText exactly — same
-# Commonmarker render, same `pre[lang="excalidraw"] > code` selector, same
+# parsed fragment, same `pre[lang="excalidraw"] > code` selector, same
 # ThinkroomSketch.parse arguments — so a "kept as a code block" warning on the
 # create response fires precisely when plain_text would echo raw scene JSON.
 class MarkdownSketchAudit
@@ -26,9 +26,12 @@ class MarkdownSketchAudit
       source = content.to_s
       return Result.new(fence_count: 0, unrecognized_count: 0) if source.blank?
 
-      html = Commonmarker.to_html(source, plugins: DocumentPlainText::MARKDOWN_PLUGINS)
-      fragment = Nokogiri::HTML5.fragment(html)
+      self.in(DocumentPlainText.fragment(format: "markdown", content: source))
+    end
 
+    # The audit of an already parsed source. Read it before the text
+    # (DocumentPlainText.text), which replaces recognized sketches in place.
+    def in(fragment)
       fence_count = 0
       unrecognized_count = 0
       fragment.css('pre[lang="excalidraw"] > code').each do |node|
