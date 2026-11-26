@@ -8,8 +8,6 @@ import {
   editorViewOptionsCtx,
   rootCtx,
 } from '@milkdown/kit/core'
-import { commonmark } from '@milkdown/kit/preset/commonmark'
-import { gfm } from '@milkdown/kit/preset/gfm'
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
 import { clipboard } from '@milkdown/kit/plugin/clipboard'
 import { cursor } from '@milkdown/kit/plugin/cursor'
@@ -80,6 +78,7 @@ import { agentCursors } from './agent_cursors'
 import { scrollSettle } from './scroll_settle'
 import { longDocument } from './long_document'
 import { codeBlockView } from './code_block_view'
+import { markdownPresets } from './schema_attributes'
 import { configureCleanClipboard } from './clipboard'
 import { renderSoftBreaks } from './line_breaks'
 import { interactiveTaskListItems, taskPersistenceCtx } from './task_list_items'
@@ -407,9 +406,8 @@ function CollabEditor({
             },
           }))
         })
-        .use(commonmark)
+        .use(markdownPresets)
         .use(codeBlockView)
-        .use(gfm)
         .use(interactiveTaskListItems)
         .use(tableBlock)
         .use(listener)
