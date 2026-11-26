@@ -581,7 +581,7 @@ export default function DocumentShow({
       async: true,
     })
   }, [ownership.yours])
-  const recoverDeniedWrite = useCallback(() => {
+  const reloadChangedAccess = useCallback(() => {
     router.reload({ only: ['document', 'ownership', 'viewer'], async: true })
   }, [])
   const reloadAfterContentReset = useCallback(() => {
@@ -601,11 +601,11 @@ export default function DocumentShow({
   useEffect(() => {
     if (!handle) return
     const provider = handle.provider
-    provider.on('write-denied', recoverDeniedWrite)
+    provider.on('write-denied', reloadChangedAccess)
     return () => {
-      provider.off('write-denied', recoverDeniedWrite)
+      provider.off('write-denied', reloadChangedAccess)
     }
-  }, [handle, recoverDeniedWrite])
+  }, [handle, reloadChangedAccess])
 
   // Priority-ordered dispatch: text selection → mobile suggestion tap →
   // click-to-comment → AI review span. Exactly one target (or none) comes
@@ -1115,6 +1115,7 @@ export default function DocumentShow({
                 // real state. Same recovery action as content_reset, reached via
                 // the sync channel or a refused durable save of the seed.
                 onStale={reloadAfterContentReset}
+                onAccessChanged={reloadChangedAccess}
                 // The sync channel rejects its resubscription when the doc is
                 // gone; same exit path as the deleted broadcast.
                 onRejected={onDocumentGone}
