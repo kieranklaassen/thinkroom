@@ -15,7 +15,7 @@ export const waitForHome = (page) =>
 
 // The one viewer granted a document's seed may close or reload before applying
 // it (a cold Vite cache reloads the page that warms it). Until the grant lapses
-// after 30 seconds every other viewer keeps the server-painted preview, and it
+// after 30 seconds every other writer keeps the server-painted preview, and it
 // goes live only at its next retry, so outwait both before looking for content.
 export const openSeeded = async (page, url) => {
   const deadline = Date.now() + 45000
