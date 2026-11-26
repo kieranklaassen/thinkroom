@@ -1,7 +1,7 @@
 // Two-window live-collaboration smoke check using Playwright.
 // Usage: BASE_URL=http://localhost:4123 node script/browser_check.mjs
 import { chromium } from 'playwright'
-import { waitForHome, waitForLive } from './lib/check_helpers.mjs'
+import { openSeeded, waitForHome, waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 const SLUG = process.env.SLUG ?? 'demo'
@@ -573,8 +573,7 @@ try {
   // one state, without replacing the live editor or losing a saved choice.
   const appearance = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
   appearance.on('pageerror', (err) => errors.a.push(String(err)))
-  await appearance.goto(`${BASE}/d/${SLUG}`)
-  await waitForLive(appearance)
+  await openSeeded(appearance, `${BASE}/d/${SLUG}`)
   const themeTrigger = appearance.getByRole('button', { name: 'Change theme', exact: true })
   await themeTrigger.waitFor({ timeout: 5000 })
   await appearance.evaluate(() => { window.__themeEditor = document.querySelector('.doc-live-editor .ProseMirror') })
