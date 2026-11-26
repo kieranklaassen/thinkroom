@@ -178,6 +178,8 @@ export interface EditorProps {
 
 const REFUSED_EDIT_NOTICE =
   'That edit was not applied: it would push this document past its 2 MB limit.'
+const UNSAVEABLE_NOTICE =
+  'Your latest changes are not saved: one of them is too large to save. Copy what you need before you reload or leave this page.'
 const SNAPSHOT_TOO_LARGE_NOTICE =
   'This document is over the 2 MB source limit, so its saved copy is stale. Shorten it to keep agents and previews current.'
 
@@ -463,7 +465,9 @@ function CollabEditor({
     const stale = () => callbacksRef.current.onStale?.()
     const rejected = () => callbacksRef.current.onRejected?.()
     provider.on('stale', stale)
+    const unsaveable = () => callbacksRef.current.onNotice?.(UNSAVEABLE_NOTICE)
     provider.on('rejected', rejected)
+    provider.on('unsaveable', unsaveable)
     // Discarded while no editor was listening (a remount reusing the session).
     if (provider.discarded) stale()
 
@@ -612,6 +616,7 @@ function CollabEditor({
       provider.off('synced', start)
       provider.off('stale', stale)
       provider.off('rejected', rejected)
+      provider.off('unsaveable', unsaveable)
       unbindMermaidHints?.()
       if (spansFrame) cancelAnimationFrame(spansFrame)
       snapshots.dispose()

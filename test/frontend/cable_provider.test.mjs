@@ -48,6 +48,8 @@ const { CableProvider, SERVER_HYDRATE_ORIGIN } = await import(
   '../../app/frontend/editor/cable_provider.ts'
 )
 
+const { splitUpdate } = await import('../../app/frontend/editor/split_update.ts')
+
 const toBase64 = (u8) => Buffer.from(u8).toString('base64')
 const fromBase64 = (b64) => new Uint8Array(Buffer.from(b64, 'base64'))
 
@@ -1008,5 +1010,163 @@ test('an edit typed during a save that was refused goes out with everything stil
     await calls[0].respond(status)
     h.provider.persistCurrentState()
     assert.equal(savedText(calls[1]), h.doc.getText('t').toString())
+  }
+})
+
+const MAX_UPDATE = 2 * 1024 * 1024
+
+const LARGE = '漢'.repeat(1_600_000)
+
+function applySave(call, server) {
+  const updates = call.body.updates ?? [call.body.update]
+  for (const update of updates) {
+    assert.ok(fromBase64(update).length <= MAX_UPDATE)
+    Y.applyUpdate(server, fromBase64(update))
+  }
+}
+
+test('an edit larger than one frame is saved whole in one request, between what came before and after', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t)
+  const server = new Y.Doc()
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'before ')
+  h.doc.getText('t').insert(7, LARGE)
+  h.doc.getText('t').insert(0, 'after ')
+  Y.applyUpdate(server, fromBase64(h.sentUpdates()[0].update))
+  h.receive({ type: 'ack', seq: 1 })
+  assert.equal(h.sentUpdates().length, 1, 'no frame carries the large edit')
+  assert.equal(calls.length, 1)
+  assert.ok(calls[0].body.updates.length > 1)
+  assert.equal(calls[0].body.generation, 1)
+  applySave(calls[0], server)
+  await calls[0].respond()
+  Y.applyUpdate(server, fromBase64(h.sentUpdates()[1].update))
+  h.receive({ type: 'ack', seq: h.sentUpdates()[1].seq })
+  assert.equal(server.getText('t').toString(), h.doc.getText('t').toString())
+  assert.equal(h.provider.unackedParts().length, 0)
+})
+
+test('a large edit is retried after a failed request and settled by one request across a reconnect', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t, { retryBaseMs: 5 })
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, LARGE)
+  await calls[0].fail()
+  await pause(30)
+  assert.equal(calls.length, 2)
+  h.disconnect()
+  h.receive(emptySyncFrame(1))
+  assert.equal(calls.length, 2, 'the request under way is not repeated')
+  await calls[1].respond()
+  assert.equal(h.provider.unackedParts().length, 0)
+})
+
+test('a large edit the server refuses is reported and kept without another request', async (t) => {
+  for (const status of [413, 422, 423]) {
+    const { calls } = stubLimitedFetch(t)
+    const h = createHarness(t, { retryBaseMs: 5 })
+    const events = []
+    h.provider.on('unsaveable', () => events.push('unsaveable'))
+    h.receive(emptySyncFrame(1))
+    h.doc.getText('t').insert(0, LARGE)
+    await calls[0].respond(status)
+    h.doc.getText('t').insert(0, 'later ')
+    await pause(40)
+    assert.equal(calls.length, 1)
+    assert.ok(events.length > 0)
+    assert.ok(h.provider.unackedParts().length > 0)
+  }
+})
+
+test('a seed larger than one frame is saved whole with its claim', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t)
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_claim: 'claim-a', seed_content: '# Seed' })
+  h.doc.getText('t').insert(0, LARGE)
+  assert.equal(calls[0].body.seed_claim, 'claim-a')
+  await calls[0].respond()
+  assert.equal(h.provider.seedClaim, null)
+  assert.equal(h.provider.unackedParts().length, 0)
+})
+
+test('leaving the page asks first while a large edit is unsaved', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t)
+  h.receive(emptySyncFrame(1))
+  const leave = () => {
+    let asked = false
+    h.provider.handleUnload({ preventDefault: () => { asked = true } })
+    return asked
+  }
+  h.doc.getText('t').insert(0, 'small')
+  assert.equal(leave(), false)
+  h.receive({ type: 'ack', seq: 1 })
+  h.doc.getText('t').insert(0, LARGE)
+  assert.equal(leave(), true)
+  for (const call of calls) await call.respond()
+  assert.equal(leave(), false)
+})
+
+test('an edit that fits no frame is reported, kept, and not sent', async (t) => {
+  const h = createHarness(t, { ackTimeoutMs: 20, retryBaseMs: 5 })
+  const events = []
+  h.provider.on('unsaveable', () => events.push('unsaveable'))
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'small')
+  h.receive({ type: 'ack', seq: 1 })
+  h.doc.getMap('m').set('value', 'x'.repeat(MAX_UPDATE + 1))
+  h.doc.getText('t').insert(0, 'later ')
+  await pause(80)
+  assert.equal(h.sentUpdates().length, 1)
+  assert.ok(events.length > 0)
+  assert.ok(h.provider.unackedParts().length > 0)
+})
+
+test('an edit the server calls oversized is reported and kept without a resend', async (t) => {
+  const h = createHarness(t, { ackTimeoutMs: 20, retryBaseMs: 5 })
+  const events = []
+  h.provider.on('unsaveable', () => events.push('unsaveable'))
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'edit')
+  h.receive({ type: 'nack', seq: 1, reason: 'oversized' })
+  h.doc.getText('t').insert(0, 'later ')
+  await pause(80)
+  assert.equal(h.sentUpdates().length, 1)
+  assert.deepEqual([...new Set(events)], ['unsaveable'])
+  assert.ok(h.provider.unackedParts().length > 0)
+})
+
+test('a large edit left when its provider is destroyed is saved', (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = editedHarness(t, 10)
+  h.doc.getText('t').insert(0, LARGE)
+  h.provider.destroy()
+  const server = new Y.Doc()
+  applySave(calls[0], server)
+  assert.equal(server.getText('t').toString(), h.doc.getText('t').toString())
+})
+
+test('splitting keeps surrogate pairs, deletions and structure', () => {
+  const doc = new Y.Doc()
+  const updates = []
+  doc.getText('t').insert(0, 'old text to replace')
+  const base = Y.encodeStateAsUpdate(doc)
+  doc.on('update', (update) => updates.push(update))
+  doc.transact(() => {
+    doc.getText('t').delete(0, 8)
+    doc.getText('t').insert(0, 'a' + '😀'.repeat(2_000))
+    for (let i = 0; i < 200; i += 1) doc.getText('t').insert(5, `run ${i}`, { bold: { by: i } })
+  })
+  for (const limit of [300, 301, 302, 1_000]) {
+    const pieces = splitUpdate(updates[0], limit)
+    assert.ok(pieces.every((piece) => piece.length <= limit))
+    const copy = new Y.Doc()
+    Y.applyUpdate(copy, base)
+    pieces.reverse().forEach((piece, i) => {
+      assert.equal(copy.getText('t').toString(), 'old text to replace', `piece ${i} of ${pieces.length}`)
+      Y.applyUpdate(copy, piece)
+    })
+    assert.deepEqual(copy.getText('t').toDelta(), doc.getText('t').toDelta())
   }
 })

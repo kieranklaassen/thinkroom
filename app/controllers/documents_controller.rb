@@ -428,21 +428,26 @@ class DocumentsController < InertiaController
     document = Document.find_by!(slug: params[:slug])
     @write_document = document
     document.assert_write_access!(token: owner_token, user: current_user)
-    update = params[:update].to_s
-    return head :content_too_large if update.bytesize > MAX_SYNC_UPDATE_B64_BYTES
+    updates = params.key?(:updates) ? Array(params[:updates]).map(&:to_s) : [ params[:update].to_s ]
+    return head :content_too_large if updates.size > YjsPersistence::MAX_SPLIT_UPDATES
+    return head :content_too_large if updates.any? { |update| update.bytesize > MAX_SYNC_UPDATE_B64_BYTES }
 
-    decoded = Base64.strict_decode64(update)
-    return head :content_too_large if decoded.bytesize > MAX_SYNC_UPDATE_BYTES
+    decoded = updates.map { |update| Base64.strict_decode64(update) }
+    return head :content_too_large if decoded.any? { |update| update.bytesize > MAX_SYNC_UPDATE_BYTES }
 
     generation = YjsPersistence.parse_generation(params[:generation])
-    YjsPersistence.merge_bytes(
+    YjsPersistence.merge_updates(
       document, decoded, generation:, seed_claim: params[:seed_claim], token: owner_token, user: current_user
     )
-    SyncChannel.broadcast_to(document, {
-      type: "update",
-      update:,
-      cid: params[:cid].to_s.presence || "http-sync"
-    })
+    # Last first: an editor holds the pieces of a split edit until the first
+    # arrives, so it never shows half of one.
+    updates.reverse_each do |update|
+      SyncChannel.broadcast_to(document, {
+        type: "update",
+        update:,
+        cid: params[:cid].to_s.presence || "http-sync"
+      })
+    end
 
     if params.key?(:content)
       content = params[:content].to_s

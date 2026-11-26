@@ -457,6 +457,31 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal "keep", text_of(doc)
   end
 
+  test "a split edit is stored whole or not at all" do
+    doc = Document.create!(title: "Split edit")
+    client = Y::Doc.new
+    text = client.get_text("t")
+    text << "first "
+    first = client.encode_state_as_update
+    vector = client.encode_state_vector
+    text << "second"
+    second = client.encode_state_as_update(vector)
+
+    assert_raises(ArgumentError) do
+      YjsPersistence.merge_updates(doc, [ first, "garbage" ], generation: doc.content_generation)
+    end
+    assert_not doc.reload.yjs_document_updates.exists?
+
+    # No fold may run between the pieces, so one must not be due until both are in.
+    (YjsPersistence::FOLD_THRESHOLD - 1).times { |i| YjsPersistence.merge(doc, b64_update_for("row #{i} ")) }
+    fold = assert_notification("fold.yjs") do
+      YjsPersistence.merge_updates(doc.reload, [ first, second ], generation: doc.content_generation)
+    end
+    assert_equal YjsPersistence::FOLD_THRESHOLD + 1, fold.payload[:rows]
+    assert_equal 0, fold.payload[:retained]
+    assert_includes text_of(doc), "first second"
+  end
+
   test "a pending row is retained across folds and quarantined after the TTL" do
     doc = Document.create!(title: "Pending")
     # Build a causally dependent pair and append only the second half.

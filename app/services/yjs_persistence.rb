@@ -47,6 +47,9 @@ class YjsPersistence
   # oversized wire payloads are rejected before allocating/decoding.
   MAX_UPDATE_B64_BYTES = (MAX_UPDATE_BYTES * 4 / 3) + 4
 
+  # How many updates one split edit may hold (see merge_updates).
+  MAX_SPLIT_UPDATES = 8
+
   class << self
     # Parse a wire-supplied content_generation into a non-negative Integer, or
     # nil if absent/malformed. Shared by SyncChannel and DocumentsController so
@@ -77,10 +80,19 @@ class YjsPersistence
     #
     # `seed_claim` is present on a claimant's writes until its seed is known to
     # be stored. The first seed stored wins; see seed_claim_holds?.
-    def merge_bytes(document, update, generation:, seed_claim: nil, token: nil, user: nil)
-      update = update.b
+    def merge_bytes(document, update, **)
+      merge_updates(document, [ update ], **)
+    end
+
+    # Merge one edit its client split because no single update could hold it, in
+    # clock order. All or nothing, and under one lock: yrs may integrate a later
+    # piece without the earlier one, so a fold in between could lose it.
+    def merge_updates(document, updates, generation:, seed_claim: nil, token: nil, user: nil)
+      updates = updates.map(&:b)
+      raise ArgumentError, "no Yjs update for document #{document.id}" if updates.empty?
+
       ActiveSupport::Notifications.instrument(
-        "merge.yjs", document_id: document.id, update_bytes: update.bytesize
+        "merge.yjs", document_id: document.id, update_bytes: updates.sum(&:bytesize)
       ) do |payload|
         # Fast pre-lock checks: reject unauthorized callers, missing/malformed
         # generations, and undecodable updates before taking the per-document
@@ -94,7 +106,7 @@ class YjsPersistence
           raise Document::StaleGenerationError,
                 "Client generation #{generation.inspect} is missing or invalid."
         end
-        unless update == EMPTY_UPDATE || decodable_update?(update)
+        unless updates.all? { |update| update == EMPTY_UPDATE || decodable_update?(update) }
           payload[:outcome] = "rejected_undecodable"
           raise ArgumentError, "undecodable Yjs update for document #{document.id}"
         end
@@ -118,12 +130,13 @@ class YjsPersistence
             # nothing new) must not append — flipping seed_state to
             # "seeded" without content would permanently block the seed
             # claim, and every join would bloat the log otherwise.
-            if update == EMPTY_UPDATE
+            updates -= [ EMPTY_UPDATE ]
+            if updates.empty?
               payload[:outcome] = "noop"
               next
             end
 
-            unless seed_claim.nil? || seed_claim_holds?(document, update, seed_claim)
+            unless seed_claim.nil? || seed_claim_holds?(document, updates.first, seed_claim)
               payload[:outcome] = "rejected_seed_claim"
               raise Document::StaleSeedClaimError, "Another seed is already stored."
             end
@@ -131,10 +144,12 @@ class YjsPersistence
             # The durable act: an O(update) append. No Y::Doc is built on
             # this path — folds materialize the tail into the snapshot
             # columns on joins, thresholds, and disconnects.
-            document.yjs_document_updates.create!(
-              content_generation: document.content_generation,
-              payload: update
-            )
+            updates.each do |update|
+              document.yjs_document_updates.create!(
+                content_generation: document.content_generation,
+                payload: update
+              )
+            end
             unless document.seed_state == "seeded"
               document.update_columns(seed_state: "seeded", updated_at: Time.current)
             end

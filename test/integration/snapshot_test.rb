@@ -111,6 +111,49 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert_equal "pending", suggestion.reload.status
   end
 
+  test "sync_update stores a split edit whole and relays it last piece first" do
+    client = Y::Doc.new
+    text = client.get_text("t")
+    text << "first "
+    first = Base64.strict_encode64(client.encode_state_as_update)
+    vector = client.encode_state_vector
+    text << "second"
+    second = Base64.strict_encode64(client.encode_state_as_update(vector))
+
+    relayed = capture_broadcasts(SyncChannel.broadcasting_for(@document)) do
+      post document_sync_update_path(@document.slug),
+           params: { updates: [ first, second ], cid: "x", generation: @document.content_generation },
+           as: :json
+    end
+    assert_response :no_content
+    assert_equal [ second, first ], relayed.pluck("update")
+    state, = YjsPersistence.state_b64(@document.reload)
+    stored = Y::Doc.new
+    stored.apply_update(Base64.strict_decode64(state))
+    assert_equal "first second", stored.get_text("t").to_s
+  end
+
+  test "sync_update refuses a split edit with an oversized, malformed, missing or surplus piece" do
+    client = Y::Doc.new
+    client.get_text("t") << "fits"
+    fits = Base64.strict_encode64(client.encode_state_as_update)
+    oversized = Base64.strict_encode64("x" * (YjsPersistence::MAX_UPDATE_BYTES + 1))
+    {
+      [ fits, oversized ] => :content_too_large,
+      [ fits ] * (YjsPersistence::MAX_SPLIT_UPDATES + 1) => :content_too_large,
+      [ fits, "not-base64" ] => :unprocessable_entity,
+      [ fits, Base64.strict_encode64("garbage") ] => :unprocessable_entity,
+      [] => :unprocessable_entity
+    }.each do |updates, status|
+      assert_no_broadcasts(SyncChannel.broadcasting_for(@document)) do
+        post document_sync_update_path(@document.slug),
+             params: { updates:, generation: @document.content_generation }, as: :json
+      end
+      assert_response status
+    end
+    assert_not @document.reload.live_crdt?
+  end
+
   test "locked requests are denied before snapshot and sync payload validation" do
     @document.update!(
       owner_token: "someone-else",
