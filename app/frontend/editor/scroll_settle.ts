@@ -22,46 +22,51 @@ const headTop = (view: EditorView): number | null => {
   }
 }
 
-const settleAfterScroll = (view: EditorView) => {
-  requestAnimationFrame(() => {
-    const head = view.state.selection.head
-    const target = headTop(view)
-    if (target === null) return
-    let passes = 0
-    const settle = () => {
-      if (view.isDestroyed || view.state.selection.head !== head) return
-      const top = headTop(view)
-      if (top === null) return
-      const drift = top - target
-      if (Math.abs(drift) <= 1) return
-      window.scrollBy({ top: drift, behavior: 'instant' })
-      passes += 1
-      if (passes < MAX_SETTLE_PASSES) requestAnimationFrame(settle)
-    }
-    requestAnimationFrame(settle)
-  })
+/** Keep the selection head where it is now while the next frames render. */
+export const holdHead = (view: EditorView) => {
+  const head = view.state.selection.head
+  const target = headTop(view)
+  if (target === null) return
+  let passes = 0
+  const settle = () => {
+    if (view.isDestroyed || view.state.selection.head !== head) return
+    const top = headTop(view)
+    if (top === null) return
+    const drift = top - target
+    if (Math.abs(drift) <= 1) return
+    window.scrollBy({ top: drift, behavior: 'instant' })
+    passes += 1
+    if (passes < MAX_SETTLE_PASSES) requestAnimationFrame(settle)
+  }
+  requestAnimationFrame(settle)
 }
 
-// A block already on screen is rendered, so scrolling to it shifts nothing;
-// only jumps into unrendered territory need the settle passes. The block's
-// own box is laid out even while its contents are skipped, so this read does
-// not force the contents to render.
-const headBlockOnScreen = (view: EditorView): boolean => {
+// ProseMirror scrolls after handleScrollToSelection returns.
+const settleAfterScroll = (view: EditorView) => {
+  requestAnimationFrame(() => holdHead(view))
+}
+
+/** The top-level block holding the selection head. Its own box is laid out even
+ *  while its contents are skipped, so reading it does not force them to render. */
+export const headBlock = (view: EditorView): Element | null => {
   try {
     const { node } = view.domAtPos(view.state.selection.head)
     const element = node instanceof Element ? node : node.parentElement
-    const block = element?.closest('.ProseMirror > *')
-    if (!block) return true
-    // Only a block crossing the viewport is certainly rendered. A block
-    // outside it may still be a placeholder, and this box is the placeholder
-    // geometry, so anything beyond the edge counts as a jump.
-    const rect = block.getBoundingClientRect()
-    return rect.bottom > 0 && rect.top < window.innerHeight
+    return element?.closest('.ProseMirror > *') ?? null
   } catch {
-    // A position the DOM cannot resolve yet (mid-redraw) is not a jump; the
-    // transaction must go through untouched.
-    return true
+    // A position the DOM cannot resolve yet (mid-redraw).
+    return null
   }
+}
+
+// A block already on screen is rendered, so scrolling to it shifts nothing;
+// only jumps into unrendered territory need the settle passes.
+export const blockOnScreen = (block: Element): boolean => {
+  // Only a block crossing the viewport is certainly rendered. A block
+  // outside it may still be a placeholder, and this box is the placeholder
+  // geometry, so anything beyond the edge counts as a jump.
+  const rect = block.getBoundingClientRect()
+  return rect.bottom > 0 && rect.top < window.innerHeight
 }
 
 const scrollSettleProse = $prose(
@@ -70,7 +75,8 @@ const scrollSettleProse = $prose(
       key: scrollSettleKey,
       props: {
         handleScrollToSelection(view) {
-          if (!headBlockOnScreen(view)) settleAfterScroll(view)
+          const block = headBlock(view)
+          if (block && !blockOnScreen(block)) settleAfterScroll(view)
           return false
         },
       },
