@@ -16,11 +16,9 @@ import {
   schemaCtx,
   serializer,
 } from '@milkdown/kit/core'
-import { commonmark } from '@milkdown/kit/preset/commonmark'
-import { gfm } from '@milkdown/kit/preset/gfm'
 import { initProseMirrorDoc } from 'y-prosemirror'
 import * as Y from 'yjs'
-import { tolerateMarkdownAttributes } from '../../app/frontend/editor/schema_attributes.ts'
+import { markdownPresets } from '../../app/frontend/editor/schema_attributes.ts'
 
 // Milkdown's timers signal each other through window events.
 const events = new EventTarget()
@@ -35,7 +33,7 @@ async function buildParser() {
   const run = (plugin) => plugin(ctx)
   const core = [schema, parser, serializer, commands, keymap, pasteRule, editorState]
   const runners = [...core, init(editor), config(async () => {})].map(run)
-  runners.push(...[commonmark, gfm, tolerateMarkdownAttributes].flat().map(run))
+  runners.push(...markdownPresets.map(run))
   runners.forEach((runner) => void runner?.())
   await ctx.wait(ParserReady)
   return { parse: ctx.get(parserCtx), schema: ctx.get(schemaCtx) }

@@ -1,5 +1,7 @@
 import { nodesCtx } from '@milkdown/kit/core'
 import type { MilkdownPlugin } from '@milkdown/kit/ctx'
+import { commonmark } from '@milkdown/kit/preset/commonmark'
+import { gfm } from '@milkdown/kit/preset/gfm'
 
 const VALIDATORS: Record<string, Record<string, string>> = {
   bullet_list: { spread: 'boolean|string' },
@@ -14,10 +16,8 @@ const VALIDATORS: Record<string, Record<string, string>> = {
  * attributes whenever a node is created, so those nodes fail to parse, and
  * y-prosemirror deletes any stored node it cannot create. Accept the values
  * that parsing produces and that stored documents already contain.
- *
- * Register after the presets and before the schema is built.
  */
-export const tolerateMarkdownAttributes: MilkdownPlugin = (ctx) => async () => {
+const tolerateMarkdownAttributes: MilkdownPlugin = (ctx) => async () => {
   ctx.update(nodesCtx, (nodes) => nodes.map(([name, schema]) => {
     const validators = VALIDATORS[name]
     if (!validators) return [name, schema]
@@ -29,3 +29,6 @@ export const tolerateMarkdownAttributes: MilkdownPlugin = (ctx) => async () => {
     return [name, { ...schema, attrs }]
   }))
 }
+
+/** Each preset re-registers its nodes, so the relaxed attributes must come last. */
+export const markdownPresets = [commonmark, gfm, tolerateMarkdownAttributes].flat()
