@@ -31,19 +31,15 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     assert_inertia_props { |props| props[:document][:seed_claim].nil? }
   end
 
-  test "sync_update refuses a seed whose claim has moved on" do
+  test "sync_update accepts a superseded claim's seed until another seed is stored" do
     get document_page_path(@document.slug), headers: browser
     claim = @document.reload.seed_claim_token
     travel(Document::SEED_CLAIM_TIMEOUT + 1.second) { assert Document.find(@document.id).try_claim_seed }
-    ydoc = Y::Doc.new
-    ydoc.get_text("t") << "body"
 
-    assert_no_difference -> { YjsDocumentUpdate.count } do
-      post "/d/#{@document.slug}/sync_update", as: :json, params: {
-        update: Base64.strict_encode64(ydoc.encode_state_as_update), generation: 0, seed_claim: claim
-      }
-    end
+    post_seed claim
+    assert_response :no_content
 
+    assert_no_difference(-> { YjsDocumentUpdate.count }) { post_seed @document.reload.seed_claim_token }
     assert_response :conflict
     assert_equal true, response.parsed_body["seed_refused"]
   end
@@ -274,5 +270,13 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
 
   def browser
     { "User-Agent" => "Mozilla/5.0" }
+  end
+
+  def post_seed(claim)
+    ydoc = Y::Doc.new
+    ydoc.get_text("t") << "body"
+    post "/d/#{@document.slug}/sync_update", as: :json, params: {
+      update: Base64.strict_encode64(ydoc.encode_state_as_update), generation: 0, seed_claim: claim
+    }
   end
 end

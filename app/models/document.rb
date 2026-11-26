@@ -35,9 +35,9 @@ class Document < ApplicationRecord
   # raise-at-the-merge-boundary shape (see YjsPersistence.merge).
   class StaleGenerationError < StandardError; end
 
-  # Raised when a first seed write no longer holds the seed claim: another
-  # client took it over, or its content is already stored. Storing both would
-  # double the text, and the client recovers as from any stale session.
+  # Raised when a seed write finds someone else's content already stored.
+  # Storing both would double the text, and the client recovers as from any
+  # stale session.
   class StaleSeedClaimError < StaleGenerationError; end
 
   attr_readonly :slug, :content_format
@@ -382,8 +382,11 @@ class Document < ApplicationRecord
     won
   end
 
+  SEED_CLAIM_TOKEN = /\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z\z/
+
   # Identifies the current seed claim. The claimant returns it with its first
-  # seed write so a claim that has since moved on is refused.
+  # seed write, which marks that write as a seed: the first one stored wins,
+  # whether or not its claim has since been taken over.
   def seed_claim_token
     seed_claimed_at&.utc&.iso8601(6)
   end

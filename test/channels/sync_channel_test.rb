@@ -19,6 +19,29 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     [ first, second ].map { |update| Base64.strict_encode64(update) }
   end
 
+  def text_in(message)
+    client = Y::Doc.new
+    client.apply_update(Base64.strict_decode64(message["update"]))
+    client.get_text("t").to_s
+  end
+
+  # The first join recovers the row; later ones meet what recovery left behind.
+  def assert_served_editable(doc)
+    subscribe slug: doc.slug
+    unsubscribe
+    doc.reload
+    assert_not doc.live_crdt?
+    assert_equal "seeded", doc.seed_state
+
+    subscribe slug: doc.slug
+    perform :receive, { "type" => "seed-request", "cid" => "writer" }
+    transmissions.last(2).each do |message|
+      assert_equal "sync", message["type"]
+      assert_not message.key?("seed_pending")
+      assert_not message.key?("seed")
+    end
+  end
+
   test "subscribing transmits the sync handshake" do
     doc = Document.create!(title: "Live")
 
@@ -232,6 +255,55 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert_equal "write-denied", transmissions.last["type"]
     assert_equal true, transmissions.last["stale"]
     assert_equal 1, doc.reload.yjs_document_updates.count
+  end
+
+  test "a claimant superseded by a slower first write is refused and resyncs to the stored content" do
+    doc = Document.create!(title: "FirstStoredWins", seed_markdown: "# Template")
+    slow = Document.find(doc.id)
+    assert slow.try_claim_seed
+
+    travel Document::SEED_CLAIM_TIMEOUT + 1.second do
+      subscribe slug: doc.slug
+      claim = transmissions.last["seed_claim"]
+      assert claim.present?
+      YjsPersistence.merge(slow, build_update_b64("slow body"), seed_claim: slow.seed_claim_token)
+
+      perform :receive, {
+        "type" => "update", "update" => build_update_b64("body"), "cid" => "newer", "seq" => 1,
+        "generation" => doc.content_generation, "seed_claim" => claim
+      }
+      assert_equal "write-denied", transmissions.last["type"]
+      assert_equal true, transmissions.last["stale"]
+
+      perform :receive, { "type" => "seed-decline", "cid" => "newer" }
+      assert_equal "seeded", doc.reload.seed_state
+
+      unsubscribe
+      subscribe slug: doc.slug
+    end
+    message = transmissions.last
+    assert_not message.key?("seed")
+    assert_not message.key?("seed_pending")
+    assert_equal "slow body", text_in(message)
+  end
+
+  test "a seeded document emptied by corruption recovery is served editable, not seed_pending" do
+    doc = Document.create!(title: "HealedEmpty", seed_markdown: "# Template")
+    YjsPersistence.merge(doc, build_update_b64("content"))
+    YjsPersistence.fold!(doc)
+    doc.reload.update_columns(yjs_state: "corrupt".b)
+
+    assert_served_editable(doc)
+    assert_equal 1, doc.yjs_state_archives.where(kind: YjsStateArchive::QUARANTINE).count
+  end
+
+  test "a seeded document whose only rows were quarantined is served editable, not seed_pending" do
+    doc = Document.create!(title: "QuarantinedEmpty", seed_markdown: "# Template")
+    YjsPersistence.merge(doc, build_update_b64("content"))
+    doc.yjs_document_updates.sole.update_columns(payload: "corrupt".b)
+
+    assert_served_editable(doc)
+    assert_equal 1, doc.yjs_state_archives.where(kind: YjsStateArchive::QUARANTINE).count
   end
 
   test "a late seed-decline leaves a newer claim at the same generation alone" do

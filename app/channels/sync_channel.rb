@@ -6,7 +6,7 @@
 #   client -> server (sub)   : { slug, cid?, client_id?, checksum?, sv?, generation? }
 #   server -> joining client : { type: "sync", update, sv, checksum?, generation, seed?, seed_claim?, seed_pending?, content_format?, seed_content?, seed_author_kind?, seed_author_name? }
 #                              # seed_claim: identifies the claim `seed` granted; returned on the claimant's frames until its
-#                              # seed is stored, and refused (write-denied stale) once the claim has moved on.
+#                              # seed is stored, and refused (write-denied stale) once another claimant's seed is.
 #                              # seed_pending: nothing is stored yet and another subscriber holds the seed claim, so the
 #                              # empty state is not the document. Viewers who cannot write also get the seed_* fields to show.
 #                              { type: "awareness", update, cid }     # cached active peers, unicast on join
@@ -186,8 +186,10 @@ class SyncChannel < ApplicationCable::Channel
     message[:seed_author_name] = @document.seed_author_name if @document.seed_author_name
   end
 
+  # A seeded document can be emptied again by recovery (YjsRecovery). No claim
+  # can be won there, so waiting for one would never end.
   def seed_pending?
-    @document.seed_content.present? && !@document.live_crdt?
+    @document.seed_state != "seeded" && @document.seed_content.present? && !@document.live_crdt?
   end
 
   def writable?

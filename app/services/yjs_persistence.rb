@@ -76,7 +76,7 @@ class YjsPersistence
     # rejected with Document::StaleGenerationError rather than persisted.
     #
     # `seed_claim` is present on a claimant's writes until its seed is known to
-    # be stored, and must still be the document's current claim.
+    # be stored. The first seed stored wins; see seed_claim_holds?.
     def merge_bytes(document, update, generation:, seed_claim: nil, token: nil, user: nil)
       update = update.b
       ActiveSupport::Notifications.instrument(
@@ -125,7 +125,7 @@ class YjsPersistence
 
             unless seed_claim.nil? || seed_claim_holds?(document, update, seed_claim)
               payload[:outcome] = "rejected_seed_claim"
-              raise Document::StaleSeedClaimError, "The seed claim has moved on."
+              raise Document::StaleSeedClaimError, "Another seed is already stored."
             end
 
             # The durable act: an O(update) append. No Y::Doc is built on
@@ -423,11 +423,13 @@ class YjsPersistence
 
     private
 
-    # Callers hold both locks. Existing content is compatible only when it is
+    # Callers hold both locks. While nothing is stored any claimant may write,
+    # even one whose claim was taken over: there is nothing to double yet.
+    # Existing content is compatible only when it is
     # this claimant's own earlier write: one client's structs all carry its Yjs
     # client id, so a repeat (HTTP and cable both deliver the seed) shares it.
     def seed_claim_holds?(document, update, seed_claim)
-      return false unless seed_claim == document.seed_claim_token
+      return false unless seed_claim.is_a?(String) && seed_claim.match?(Document::SEED_CLAIM_TOKEN)
       return true unless document.live_crdt?
 
       writers = decode_state_vector(load_verified_blob(update).encode_state_vector).keys

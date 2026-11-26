@@ -60,18 +60,21 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal "body", text_of(doc)
   end
 
-  test "a slow claimant's seed is refused while the next claimant has yet to write" do
+  test "a superseded claimant's first write is accepted while nothing is stored, and the newer claimant's is refused" do
     doc = Document.create!(title: "Slow claimant", seed_markdown: "body")
     claim_a, claim_b = expired_then_reclaimed(doc)
+    author = Y::Doc.new
 
+    YjsPersistence.merge(doc, b64_update_for("body", from_doc: author), seed_claim: claim_a)
+    assert_equal "seeded", doc.reload.seed_state
     assert_raises(Document::StaleSeedClaimError) do
-      YjsPersistence.merge(doc, b64_update_for("body"), seed_claim: claim_a)
+      YjsPersistence.merge(doc, b64_update_for("body"), seed_claim: claim_b)
     end
-    assert_not doc.reload.live_crdt?
-    assert_equal "claimed", doc.seed_state
-
-    YjsPersistence.merge(doc, b64_update_for("body"), seed_claim: claim_b)
     assert_equal "body", text_of(doc)
+
+    YjsPersistence.merge(doc, b64_update_for(" edited", from_doc: author), seed_claim: claim_a)
+    assert_equal "body edited", text_of(doc)
+    assert_not Document.find(doc.id).try_claim_seed
   end
 
   test "a current claim is refused when someone else's content is already stored" do
