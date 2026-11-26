@@ -730,4 +730,16 @@ class DocumentTest < ActiveSupport::TestCase
 
     assert_equal "Stored Title", doc.display_title
   end
+
+  test "the seed claim token survives the database at sub-second precision" do
+    doc = Document.create!(title: "Token", seed_markdown: "# Template")
+    travel_to Time.utc(2026, 1, 1, 0, 0, Rational(123_456_789, 1_000_000_000)), with_usec: true do
+      assert doc.try_claim_seed
+    end
+
+    assert_equal "2026-01-01T00:00:00.123456Z", doc.seed_claim_token
+    assert_equal doc.seed_claim_token, Document.find(doc.id).seed_claim_token
+    assert_not doc.changed?
+    assert_nil Document.create!(title: "Unclaimed").seed_claim_token
+  end
 end

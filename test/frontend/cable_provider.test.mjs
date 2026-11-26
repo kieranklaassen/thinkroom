@@ -491,3 +491,122 @@ test('a reader whose pending handshake already carries content shows that conten
   assert.deepEqual(events, ['synced'])
   assert.equal(h.provider.seedContent, null)
 })
+
+function claimantHarness(t, options) {
+  const h = createHarness(t, { ackTimeoutMs: 5000, ...options })
+  h.provider.seedClaim = 'claim-a'
+  h.doc.getText('t').insert(0, 'body')
+  return h
+}
+
+function syncFrameFrom(doc, extra = {}) {
+  return {
+    type: 'sync',
+    update: toBase64(Y.encodeStateAsUpdate(doc)),
+    sv: toBase64(Y.encodeStateVector(doc)),
+    generation: 1,
+    ...extra,
+  }
+}
+
+test('a channel grant hands its claim to the first seed write, and the ack ends it', (t) => {
+  const h = createHarness(t, { ackTimeoutMs: 5000 })
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: 'body', seed_claim: 'claim-a' })
+  h.doc.getText('t').insert(0, 'body')
+  assert.equal(h.sentUpdates()[0].seed_claim, 'claim-a')
+  h.receive({ type: 'ack', seq: 1 })
+  h.doc.getText('t').insert(0, 'x')
+  assert.ok(!('seed_claim' in h.sentUpdates()[1]))
+})
+
+test('a refused seed is dropped and never merged with the real state', (t) => {
+  const h = claimantHarness(t)
+  const events = recordEvents(h)
+  h.receive(pendingSyncFrame())
+  assert.equal(h.sentUpdates()[0].seed_claim, 'claim-a')
+
+  h.receive({ type: 'update', update: contentUpdate('theirs'), cid: 'peer' })
+  assert.equal(h.doc.getText('t').toString(), 'body', 'held until the claim is settled')
+  h.receive({ type: 'write-denied', locked: false, stale: true })
+  assert.deepEqual(events, ['synced', 'stale'])
+
+  h.receive({ type: 'update', update: contentUpdate('theirs'), cid: 'peer' })
+  h.doc.getText('t').insert(0, 'typed before the reload ')
+  h.provider.persistCurrentState({ content: '', spans: [], state_vector: '' })
+  assert.equal(h.doc.getText('t').toString(), 'typed before the reload body')
+  assert.equal(h.sentUpdates().length, 1, 'nothing from the dropped copy may go out')
+  assert.deepEqual(events, ['synced', 'stale'])
+})
+
+test('a slow claimant whose first handshake already has other content drops its seed', (t) => {
+  const h = claimantHarness(t)
+  const events = recordEvents(h)
+  const theirs = new Y.Doc()
+  theirs.getText('t').insert(0, 'theirs')
+  h.receive(syncFrameFrom(theirs))
+  assert.deepEqual(events, ['stale'])
+  assert.equal(h.doc.getText('t').toString(), 'body')
+  assert.equal(h.sentUpdates().length, 0)
+})
+
+test('a claimant whose own seed is already stored keeps it and applies held peer edits', (t) => {
+  const h = claimantHarness(t)
+  const events = recordEvents(h)
+  h.receive(emptySyncFrame(1))
+  const peer = new Y.Doc()
+  Y.applyUpdate(peer, fromBase64(h.sentUpdates()[0].update))
+  peer.getText('t').insert(4, ' plus')
+  h.receive({ type: 'update', update: toBase64(Y.encodeStateAsUpdate(peer)), cid: 'peer' })
+  assert.equal(h.doc.getText('t').toString(), 'body')
+  h.receive({ type: 'ack', seq: 1 })
+  assert.equal(h.doc.getText('t').toString(), 'body plus')
+
+  const again = claimantHarness(t)
+  again.receive(emptySyncFrame(1))
+  const stored = new Y.Doc()
+  Y.applyUpdate(stored, fromBase64(again.sentUpdates()[0].update))
+  again.disconnect()
+  again.receive(syncFrameFrom(stored))
+  assert.equal(again.doc.getText('t').toString(), 'body')
+  assert.ok(!('seed_claim' in again.sentUpdates()[1]), 'its own stored seed settles the claim')
+  assert.deepEqual(events, ['synced'])
+})
+
+test('a reconnecting claimant adopts a renewed claim without taking the template twice', (t) => {
+  const h = claimantHarness(t)
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: 'body', seed_claim: 'claim-b' })
+  assert.equal(h.provider.seedContent, null)
+  assert.equal(h.sentUpdates()[0].seed_claim, 'claim-b')
+})
+
+test('an HTTP seed write the server refuses is dropped', async (t) => {
+  const originalFetch = globalThis.fetch
+  const bodies = []
+  globalThis.fetch = (_url, init) => {
+    bodies.push(JSON.parse(init.body))
+    return Promise.resolve({ ok: false, status: 409, json: async () => ({ seed_refused: true }) })
+  }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+  const h = claimantHarness(t)
+  const events = recordEvents(h)
+  h.provider.persistCurrentState()
+  await pause(10)
+  assert.equal(bodies[0].seed_claim, 'claim-a')
+  assert.deepEqual(events, ['stale'])
+  h.receive(pendingSyncFrame())
+  assert.equal(h.sentUpdates().length, 0)
+})
+
+test('an accepted HTTP seed write settles the claim', async (t) => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = () => Promise.resolve({ ok: true, status: 204 })
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+  const h = claimantHarness(t)
+  h.provider.persistCurrentState()
+  await pause(10)
+  assert.equal(h.provider.seedClaim, null)
+})

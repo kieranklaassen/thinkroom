@@ -130,6 +130,8 @@ export interface EditorProps {
   /** True when documents#show atomically claimed the seed for this page
    *  load — the props-first path that skips the WebSocket round-trip. */
   seedGranted?: boolean
+  /** Identifies that grant; returned with the first seed write. */
+  seedClaim?: string | null
   /** Who authored the seed source. Non-human seeds get their text
    *  explicitly AI-attributed after the collab connection renders them —
    *  otherwise seeded text is unmarked and counts as human in the
@@ -304,6 +306,7 @@ function CollabEditor({
   seedContent,
   seedVersion,
   seedGranted,
+  seedClaim,
   seedAuthorKind,
   seedAuthorName,
   canWrite = true,
@@ -593,6 +596,7 @@ function CollabEditor({
     } else if (seedGranted && seedContent && !seedAlreadyApplied(slug, seedVersion)) {
       markSeedApplied(slug, seedVersion)
       provider.seedContent = seedContent
+      provider.seedClaim = seedClaim ?? null
       provider.seedFormat = contentFormat
       provider.seedAuthorKind = seedAuthorKind ?? null
       provider.seedAuthorName = seedAuthorName ?? null

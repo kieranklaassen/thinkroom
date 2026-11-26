@@ -36,6 +36,79 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert doc.reload.yjs_state.present?, "the read path folds the tail into the snapshot"
   end
 
+  # Two independent claimants: A's claim expires before A writes, B takes over.
+  def expired_then_reclaimed(doc)
+    first = Document.find(doc.id)
+    assert first.try_claim_seed
+    second = nil
+    travel(Document::SEED_CLAIM_TIMEOUT + 1.second) do
+      second = Document.find(doc.id)
+      assert second.try_claim_seed
+    end
+    [ first.seed_claim_token, second.seed_claim_token ]
+  end
+
+  test "a slow claimant's seed is refused after the next claimant wrote, leaving one copy" do
+    doc = Document.create!(title: "Slow claimant", seed_markdown: "body")
+    claim_a, claim_b = expired_then_reclaimed(doc)
+
+    YjsPersistence.merge(doc, b64_update_for("body"), seed_claim: claim_b)
+    assert_raises(Document::StaleSeedClaimError) do
+      YjsPersistence.merge(doc, b64_update_for("body"), seed_claim: claim_a)
+    end
+
+    assert_equal "body", text_of(doc)
+  end
+
+  test "a slow claimant's seed is refused while the next claimant has yet to write" do
+    doc = Document.create!(title: "Slow claimant", seed_markdown: "body")
+    claim_a, claim_b = expired_then_reclaimed(doc)
+
+    assert_raises(Document::StaleSeedClaimError) do
+      YjsPersistence.merge(doc, b64_update_for("body"), seed_claim: claim_a)
+    end
+    assert_not doc.reload.live_crdt?
+    assert_equal "claimed", doc.seed_state
+
+    YjsPersistence.merge(doc, b64_update_for("body"), seed_claim: claim_b)
+    assert_equal "body", text_of(doc)
+  end
+
+  test "a current claim is refused when someone else's content is already stored" do
+    doc = Document.create!(title: "Occupied", seed_markdown: "body")
+    assert doc.try_claim_seed
+    claim = doc.seed_claim_token
+    YjsPersistence.merge(doc, b64_update_for("body"))
+
+    assert_raises(Document::StaleSeedClaimError) do
+      YjsPersistence.merge(doc, b64_update_for("body"), seed_claim: claim)
+    end
+    assert_equal "body", text_of(doc)
+  end
+
+  test "a claimant repeating its own seed, with later edits, is accepted" do
+    doc = Document.create!(title: "Repeated", seed_markdown: "body")
+    assert doc.try_claim_seed
+    claim = doc.seed_claim_token
+    author = Y::Doc.new
+
+    YjsPersistence.merge(doc, b64_update_for("body", from_doc: author), seed_claim: claim)
+    YjsPersistence.merge(doc, b64_update_for(" edited", from_doc: author), seed_claim: claim)
+
+    assert_equal "body edited", text_of(doc)
+  end
+
+  test "a malformed seed claim is refused rather than treated as absent" do
+    doc = Document.create!(title: "Malformed", seed_markdown: "body")
+    assert doc.try_claim_seed
+
+    [ "", "nope", 7, {} ].each do |claim|
+      assert_raises(Document::StaleSeedClaimError) do
+        YjsPersistence.merge(doc, b64_update_for("body"), seed_claim: claim)
+      end
+    end
+  end
+
   test "merge appends to the update log without loading the stored document" do
     doc = Document.create!(title: "Appended")
 

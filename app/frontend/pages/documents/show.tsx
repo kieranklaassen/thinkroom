@@ -116,6 +116,7 @@ export interface DocumentProps {
     seed_content: string | null
     seed_version: string
     seed_granted: boolean
+    seed_claim: string | null
     seed_author_kind: CollaboratorKind | null
     seed_author_name: string | null
     has_state: boolean
@@ -1208,6 +1209,7 @@ export default function DocumentShow({
                 seedContent={doc.seed_content}
                 seedVersion={doc.seed_version}
                 seedGranted={doc.seed_granted}
+                seedClaim={doc.seed_claim}
                 seedAuthorKind={doc.seed_author_kind}
                 seedAuthorName={doc.seed_author_name}
                 editable={ownership.can_write && (effectiveMode === 'edit' || effectiveMode === 'suggest')}

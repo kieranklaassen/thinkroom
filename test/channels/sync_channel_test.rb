@@ -210,6 +210,37 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert_nothing_raised { perform :receive, { "type" => "seed-request", "cid" => "waiting" } }
   end
 
+  test "a granted handshake carries the claim, and a slow claimant's seed is refused as stale" do
+    doc = Document.create!(title: "SlowChannelClaimant", seed_markdown: "# Template")
+    subscribe slug: doc.slug
+    claim = transmissions.last["seed_claim"]
+    assert_equal doc.reload.seed_claim_token, claim
+    assert claim.present?
+
+    travel Document::SEED_CLAIM_TIMEOUT + 1.second do
+      other = Document.find(doc.id)
+      assert other.try_claim_seed
+      YjsPersistence.merge(other, build_update_b64("body"), seed_claim: other.seed_claim_token)
+    end
+    assert_no_broadcasts(SyncChannel.broadcasting_for(doc)) do
+      perform :receive, {
+        "type" => "update", "update" => build_update_b64("body"), "cid" => "slow", "seq" => 1,
+        "generation" => doc.content_generation, "seed_claim" => claim
+      }
+    end
+
+    assert_equal "write-denied", transmissions.last["type"]
+    assert_equal true, transmissions.last["stale"]
+    assert_equal 1, doc.reload.yjs_document_updates.count
+  end
+
+  test "an ungranted handshake carries no claim" do
+    doc = Document.create!(title: "NoClaim", seed_markdown: "# Template")
+    assert doc.try_claim_seed
+    subscribe slug: doc.slug
+    assert_not transmissions.last.key?("seed_claim")
+  end
+
   test "seed-request retries an abandoned claim and answers with a fresh handshake" do
     doc = Document.create!(title: "Abandoned", seed_markdown: "# Template")
     assert doc.try_claim_seed

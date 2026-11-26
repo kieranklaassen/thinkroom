@@ -63,8 +63,8 @@ class YjsPersistence
     # Convenience wrapper over merge_bytes for callers holding a base64 frame;
     # transport boundaries (SyncChannel, DocumentsController) decode once and
     # call merge_bytes directly.
-    def merge(document, base64_update, generation: document.content_generation, token: nil, user: nil)
-      merge_bytes(document, decode(base64_update), generation:, token:, user:)
+    def merge(document, base64_update, generation: document.content_generation, seed_claim: nil, token: nil, user: nil)
+      merge_bytes(document, decode(base64_update), generation:, seed_claim:, token:, user:)
     end
 
     # Merge raw binary Yjs update bytes into the document's persisted state.
@@ -74,7 +74,10 @@ class YjsPersistence
     # is out of date with an owner CLI replacement (Document#replace_content!)
     # or untrusted: merging could resurrect wiped CRDT content, so the update is
     # rejected with Document::StaleGenerationError rather than persisted.
-    def merge_bytes(document, update, generation:, token: nil, user: nil)
+    #
+    # `seed_claim` is present on a claimant's writes until its seed is known to
+    # be stored, and must still be the document's current claim.
+    def merge_bytes(document, update, generation:, seed_claim: nil, token: nil, user: nil)
       update = update.b
       ActiveSupport::Notifications.instrument(
         "merge.yjs", document_id: document.id, update_bytes: update.bytesize
@@ -118,6 +121,11 @@ class YjsPersistence
             if update == EMPTY_UPDATE
               payload[:outcome] = "noop"
               next
+            end
+
+            unless seed_claim.nil? || seed_claim_holds?(document, update, seed_claim)
+              payload[:outcome] = "rejected_seed_claim"
+              raise Document::StaleSeedClaimError, "The seed claim has moved on."
             end
 
             # The durable act: an O(update) append. No Y::Doc is built on
@@ -414,6 +422,18 @@ class YjsPersistence
     end
 
     private
+
+    # Callers hold both locks. Existing content is compatible only when it is
+    # this claimant's own earlier write: one client's structs all carry its Yjs
+    # client id, so a repeat (HTTP and cable both deliver the seed) shares it.
+    def seed_claim_holds?(document, update, seed_claim)
+      return false unless seed_claim == document.seed_claim_token
+      return true unless document.live_crdt?
+
+      writers = decode_state_vector(load_verified_blob(update).encode_state_vector).keys
+      stored = decode_state_vector(perform_fold(document).encode_state_vector).keys
+      writers.intersect?(stored)
+    end
 
     def monotonic_ms
       Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)

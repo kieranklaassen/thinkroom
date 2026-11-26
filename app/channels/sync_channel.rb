@@ -4,7 +4,9 @@
 #
 # Protocol:
 #   client -> server (sub)   : { slug, cid?, client_id?, checksum?, sv?, generation? }
-#   server -> joining client : { type: "sync", update, sv, checksum?, generation, seed?, seed_pending?, content_format?, seed_content?, seed_author_kind?, seed_author_name? }
+#   server -> joining client : { type: "sync", update, sv, checksum?, generation, seed?, seed_claim?, seed_pending?, content_format?, seed_content?, seed_author_kind?, seed_author_name? }
+#                              # seed_claim: identifies the claim `seed` granted; returned on the claimant's frames until its
+#                              # seed is stored, and refused (write-denied stale) once the claim has moved on.
 #                              # seed_pending: nothing is stored yet and another subscriber holds the seed claim, so the
 #                              # empty state is not the document. Viewers who cannot write also get the seed_* fields to show.
 #                              { type: "awareness", update, cid }     # cached active peers, unicast on join
@@ -14,7 +16,7 @@
 #                              { type: "write-denied", locked: true }          # read-only link
 #                              { type: "write-denied", locked: false, stale: true } # document was replaced
 #   client -> server         : { type: "sync-reply", update, cid, seq?, generation } # unacked edits flushed on reconnect
-#                              { type: "update", update, cid, seq?, generation }     # incremental edit
+#                              { type: "update", update, cid, seq?, generation, seed_claim? } # incremental edit
 #                              { type: "awareness", update, cid, client_id? }        # presence/cursors, cached + relayed (4 KiB cap)
 #                              { type: "seed-decline", cid }                         # hand back a seed claim this handshake granted
 #                              { type: "seed-request", cid }                         # waiting writer retries the claim; answered with a "sync"
@@ -140,7 +142,7 @@ class SyncChannel < ApplicationCable::Channel
         return unless seq&.positive?
       end
 
-      persist_and_broadcast(message, decoded, generation:, seq:)
+      persist_and_broadcast(message, decoded, generation:, seed_claim: data["seed_claim"], seq:)
     when "awareness"
       handle_awareness(data)
     when "seed-decline"
@@ -154,6 +156,7 @@ class SyncChannel < ApplicationCable::Channel
 
   def transmit_handshake
     granted = claim_seed?
+    seed_claim = @document.seed_claim_token if granted
     # Decided before the state is read: content landing in between then travels
     # with the flag, where the other order would send an unmarked empty state.
     pending = !granted && seed_pending?
@@ -163,6 +166,7 @@ class SyncChannel < ApplicationCable::Channel
       # release exactly this claim (and only at this generation).
       @granted_seed_generation = @document.content_generation
       message[:seed] = true
+      message[:seed_claim] = seed_claim
       add_seed(message)
     elsif pending
       message[:seed_pending] = true
@@ -315,11 +319,12 @@ class SyncChannel < ApplicationCable::Channel
     })
   end
 
-  def persist_and_broadcast(message, decoded, generation:, seq: nil)
+  def persist_and_broadcast(message, decoded, generation:, seed_claim: nil, seq: nil)
     YjsPersistence.merge_bytes(
       @document,
       decoded,
       generation:,
+      seed_claim:,
       token: connection_owner_token,
       user: connection_current_user
     )

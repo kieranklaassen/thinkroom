@@ -23,6 +23,31 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     assert_equal "claimed", @document.reload.seed_state
   end
 
+  test "the page grant carries the claim, and only with the grant" do
+    get document_page_path(@document.slug), headers: browser
+    assert_inertia_props { |props| props[:document][:seed_claim] == @document.reload.seed_claim_token }
+
+    get document_page_path(@document.slug), headers: browser
+    assert_inertia_props { |props| props[:document][:seed_claim].nil? }
+  end
+
+  test "sync_update refuses a seed whose claim has moved on" do
+    get document_page_path(@document.slug), headers: browser
+    claim = @document.reload.seed_claim_token
+    travel(Document::SEED_CLAIM_TIMEOUT + 1.second) { assert Document.find(@document.id).try_claim_seed }
+    ydoc = Y::Doc.new
+    ydoc.get_text("t") << "body"
+
+    assert_no_difference -> { YjsDocumentUpdate.count } do
+      post "/d/#{@document.slug}/sync_update", as: :json, params: {
+        update: Base64.strict_encode64(ydoc.encode_state_as_update), generation: 0, seed_claim: claim
+      }
+    end
+
+    assert_response :conflict
+    assert_equal true, response.parsed_body["seed_refused"]
+  end
+
   test "HTML page load ships HTML source and format with the seed grant" do
     html = Document.create!(
       title: "HTML",
