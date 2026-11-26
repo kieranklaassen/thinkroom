@@ -44,6 +44,8 @@ async function buildParser() {
 test('markdown lists, tasks and untitled images parse into the document', async () => {
   const { parse } = await buildParser()
   const doc = parse('- plain\n\n1. numbered\n\n- [ ] task\n\n![alt](/image.png)\n')
+  // check() validates attributes on every ProseMirror version.
+  doc.check()
   const names = []
   doc.descendants((node) => void names.push(node.type.name))
   for (const name of ['bullet_list', 'ordered_list', 'list_item', 'image']) {
@@ -110,6 +112,7 @@ test('loading a stored document leaves the shared type unchanged', async () => {
   const { doc } = initProseMirrorDoc(fragment, built)
 
   assert.equal(fragment.toString(), before, 'loading changed the shared document')
+  doc.check()
   const count = {}
   const tasks = []
   doc.descendants((node) => {
