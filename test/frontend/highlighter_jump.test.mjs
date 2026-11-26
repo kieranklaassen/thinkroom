@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { Schema } from '@milkdown/kit/prose/model'
-import { EditorState } from '@milkdown/kit/prose/state'
+import { EditorState, TextSelection } from '@milkdown/kit/prose/state'
 
 // The jump needs neither the editor setup nor the highlighter's own commands.
 const stub = (source) => `data:text/javascript,${encodeURIComponent(source)}`
@@ -41,7 +41,8 @@ const IN_EDITOR = {}
 
 globalThis.Element = class {
   constructor(rect) { this.getBoundingClientRect = rect }
-  closest() { return this }
+  // Nothing here sits in code, which scrolls sideways.
+  closest(selector) { return selector === 'pre code' ? null : this }
 }
 
 // A page 800px tall whose selected text sits at `top`, under a 44px header;
@@ -90,8 +91,11 @@ function fakePage({ top, focusNode, skipped = null, grows = 0, dockTop = null })
     querySelector: (selector) => chrome[selector] && { getBoundingClientRect: () => chrome[selector] },
   }
   globalThis.requestAnimationFrame = (callback) => page.frames.push(callback)
+  const listeners = new EventTarget()
+  page.input = (type) => listeners.dispatchEvent(new Event(type))
   globalThis.window = {
     innerHeight: 800,
+    addEventListener: listeners.addEventListener.bind(listeners),
     scrollBy: ({ top }) => { page.pageScrolls.push(top); page.top -= top },
   }
   return page
@@ -170,12 +174,59 @@ test('a snippet already on screen is selected without scrolling the page', () =>
   assert.deepEqual(page.pageScrolls, [])
 })
 
-test('the editor does the scrolling once the selection is inside it', () => {
-  const page = fakePage({ top: 5000, focusNode: IN_EDITOR })
+test('a repeated jump lands like the first one, without the editor scrolling', () => {
+  for (const top of [5000, -5000, 20]) {
+    const page = fakePage({ top, focusNode: IN_EDITOR, skipped: 0 })
+    if (top === 20) page.frame()
+    jump(page, SNIPPET)
+    page.settle()
+    assert.equal(page.textTop(), 320)
+    assert.equal(page.editorScrolls, 0)
+  }
+})
+
+const INPUTS = ['wheel', 'touchmove', 'pointerdown', 'keydown']
+
+test('a person taking over stops the jump from any frame on', () => {
+  const pages = [
+    { top: 5000, focusNode: null, skipped: 600, grows: 700 },
+    { top: 20, focusNode: null, grows: 700 },
+  ]
+  for (const options of pages) {
+    for (const input of INPUTS) {
+      for (let frames = 0; frames < 6; frames += 1) {
+        const page = fakePage(options)
+        jump(page, SNIPPET)
+        for (let i = 0; i < frames; i += 1) page.frame()
+        page.input(input)
+        page.top -= 400
+        const scrolls = page.pageScrolls.length
+        page.settle()
+        assert.equal(page.pageScrolls.length, scrolls, `${input} after ${frames} frames`)
+      }
+    }
+  }
+})
+
+test('selecting something else stops the jump from any frame on', () => {
+  for (let frames = 0; frames < 6; frames += 1) {
+    const page = fakePage({ top: 5000, focusNode: null, skipped: 600, grows: 700 })
+    jump(page, SNIPPET)
+    for (let i = 0; i < frames; i += 1) page.frame()
+    const { state } = page.view
+    page.view.dispatch(state.tr.setSelection(TextSelection.create(state.doc, 2)))
+    const scrolls = page.pageScrolls.length
+    page.settle()
+    assert.equal(page.pageScrolls.length, scrolls)
+  }
+})
+
+test('input before a jump does not stop it', () => {
+  const page = fakePage({ top: 5000, focusNode: null })
+  page.input('pointerdown')
   jump(page, SNIPPET)
-  assert.equal(page.editorScrolls, 1)
   page.settle()
-  assert.deepEqual(page.pageScrolls, [])
+  assert.equal(page.textTop(), 320)
 })
 
 test('a snippet past the end of the document is ignored', () => {

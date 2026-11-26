@@ -1,18 +1,19 @@
 import type { Transaction } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import { blockOnScreen, headBlock, holdHead } from '../editor/scroll_settle'
+import { blockOnScreen, headBlock, headElement, holdHead } from '../editor/scroll_settle'
 
 // Where a jump puts its text, as a share of the window height.
 const JUMP_LINE = 0.4
 
-/** Dispatch a transaction and bring its selection into view. ProseMirror skips
- *  that scroll while the browser's selection is outside the editor (before the
- *  first click in it, or after a click on a card), so the page scrolls then. */
+let lastJump: AbortController | null = null
+
+/** Dispatch a transaction and bring its selection into view. The page scrolls
+ *  itself rather than asking ProseMirror, which skips the scroll while the
+ *  browser's selection is outside the editor and otherwise aims at blocks a
+ *  long document has not rendered, with no room for the sticky header. */
 export function dispatchIntoView(view: EditorView, tr: Transaction): void {
-  const focusNode = document.getSelection()?.focusNode ?? null
-  const editorScrolls = view.dom.contains(focusNode)
-  view.dispatch(tr.scrollIntoView())
-  if (editorScrolls) return
+  view.dispatch(tr)
+  const isOver = startJump(view)
 
   const block = headBlock(view)
   if (block && !blockOnScreen(block)) {
@@ -20,18 +21,42 @@ export function dispatchIntoView(view: EditorView, tr: Transaction): void {
     // coordinates (WebKit can report 0/0), so bring the block on screen first.
     // Browsers render it after the next frame's callbacks, hence two frames.
     scrollToJumpLine(block.getBoundingClientRect().top)
-    requestAnimationFrame(() => requestAnimationFrame(() => placeHead(view)))
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!isOver()) placeHead(view, isOver)
+    }))
     return
   }
   const { top, bottom } = view.coordsAtPos(view.state.selection.head)
-  if (top >= chromeTop() && bottom <= chromeBottom()) return
-  placeHead(view)
+  if (top >= chromeTop() && bottom <= chromeBottom()) scrollCodeSideways(view)
+  else placeHead(view, isOver)
 }
 
-function placeHead(view: EditorView): void {
-  if (view.isDestroyed) return
+/** A jump is over once the person scrolls, points, types or selects something
+ *  else, or another jump starts. Input events are what tell their scrolling
+ *  from the browser's own scroll anchoring. */
+function startJump(view: EditorView): () => boolean {
+  lastJump?.abort()
+  const jump = new AbortController()
+  lastJump = jump
+  for (const type of ['wheel', 'touchmove', 'pointerdown', 'keydown']) {
+    window.addEventListener(type, () => jump.abort(), { capture: true, passive: true, signal: jump.signal })
+  }
+  const { head } = view.state.selection
+  return () => jump.signal.aborted || view.isDestroyed || view.state.selection.head !== head
+}
+
+function placeHead(view: EditorView, isOver: () => boolean): void {
   scrollToJumpLine(view.coordsAtPos(view.state.selection.head).top)
-  holdHead(view)
+  scrollCodeSideways(view)
+  holdHead(view, isOver)
+}
+
+function scrollCodeSideways(view: EditorView): void {
+  const code = headElement(view)?.closest('pre code')
+  if (!code) return
+  const { left, right } = code.getBoundingClientRect()
+  const x = view.coordsAtPos(view.state.selection.head).left
+  if (x < left || x > right) code.scrollLeft += x - (left + right) / 2
 }
 
 function scrollToJumpLine(top: number): void {

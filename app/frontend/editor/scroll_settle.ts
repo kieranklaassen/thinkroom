@@ -22,14 +22,15 @@ const headTop = (view: EditorView): number | null => {
   }
 }
 
-/** Keep the selection head where it is now while the next frames render. */
-export const holdHead = (view: EditorView) => {
+/** Keep the selection head where it is now while the next frames render, unless
+ *  `isOver` says the scroll that put it there no longer stands. */
+export const holdHead = (view: EditorView, isOver = () => false) => {
   const head = view.state.selection.head
   const target = headTop(view)
   if (target === null) return
   let passes = 0
   const settle = () => {
-    if (view.isDestroyed || view.state.selection.head !== head) return
+    if (view.isDestroyed || view.state.selection.head !== head || isOver()) return
     const top = headTop(view)
     if (top === null) return
     const drift = top - target
@@ -46,18 +47,20 @@ const settleAfterScroll = (view: EditorView) => {
   requestAnimationFrame(() => holdHead(view))
 }
 
-/** The top-level block holding the selection head. Its own box is laid out even
- *  while its contents are skipped, so reading it does not force them to render. */
-export const headBlock = (view: EditorView): Element | null => {
+export const headElement = (view: EditorView): Element | null => {
   try {
     const { node } = view.domAtPos(view.state.selection.head)
-    const element = node instanceof Element ? node : node.parentElement
-    return element?.closest('.ProseMirror > *') ?? null
+    return node instanceof Element ? node : node.parentElement
   } catch {
     // A position the DOM cannot resolve yet (mid-redraw).
     return null
   }
 }
+
+/** The top-level block holding the selection head. Its own box is laid out even
+ *  while its contents are skipped, so reading it does not force them to render. */
+export const headBlock = (view: EditorView): Element | null =>
+  headElement(view)?.closest('.ProseMirror > *') ?? null
 
 // A block already on screen is rendered, so scrolling to it shifts nothing;
 // only jumps into unrendered territory need the settle passes.
