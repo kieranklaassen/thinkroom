@@ -106,7 +106,13 @@ const fitsKeepalive = (bytes: number): boolean =>
 const isEmptyUpdate = (update: Uint8Array): boolean =>
   update.length === EMPTY_UPDATE.length && update.every((byte, i) => byte === EMPTY_UPDATE[i])
 
-export type ProviderEvent = 'synced' | 'seed' | 'rejected' | 'write-denied' | 'stale'
+export type ProviderEvent =
+  | 'synced'
+  | 'seed'
+  | 'rejected'
+  | 'write-denied'
+  | 'stale'
+  | 'access-changed'
 
 /** Origin tag for the page's server-rendered Yjs state applied at session
  *  creation (collab_session.ts). It is server state, never a local change. */
@@ -617,6 +623,14 @@ export class CableProvider {
         if (typeof data.generation === 'number') this.generation = data.generation
         const seedContent = data.seed_content
         const localDocEmpty = this.doc.store.clients.size === 0
+        if (data.seed && !this.canWrite && localDocEmpty) {
+          // Only a writer is granted the claim. This session cannot use it, so
+          // it goes back for the one the page opens with its current access.
+          this.send({ type: 'seed-decline' })
+          this.waitForSeed()
+          this.emit('access-changed')
+          break
+        }
         if (data.seed && this.canWrite) {
           // A claim is for a seed still to be stored. With content here and
           // none of this client's own unsettled there is nothing to claim, and
@@ -641,6 +655,9 @@ export class CableProvider {
           // Binding the editor now would replace the painted body with an
           // empty document.
           this.waitForSeed()
+          // A pending handshake carries the seed only for those who cannot write.
+          const serverAllowsWrites = !seedContent
+          if (this.canWrite !== serverAllowsWrites) this.emit('access-changed')
           break
         }
         this.completeSync()

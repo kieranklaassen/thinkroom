@@ -368,7 +368,7 @@ function contentUpdate(text = 'body') {
 
 function recordEvents(h) {
   const events = []
-  for (const event of ['synced', 'stale']) h.provider.on(event, () => events.push(event))
+  for (const event of ['synced', 'stale', 'access-changed']) h.provider.on(event, () => events.push(event))
   return events
 }
 
@@ -414,6 +414,63 @@ test('a waiting writer retries the claim until it is granted, then stops', async
   assert.equal(requests(), settled)
 })
 
+test('a waiting writer whose access narrowed while it was offline reports it on reconnect', (t) => {
+  const h = createHarness(t)
+  const events = recordEvents(h)
+  h.receive(pendingSyncFrame())
+  h.disconnect()
+  h.receive(pendingSyncFrame({ seed_content: '# Template' }))
+  assert.deepEqual(events, ['access-changed'])
+  assert.equal(h.provider.seedContent, null, 'the template is for a session that cannot send it')
+})
+
+test('a waiting reader whose access widened while it was offline reports it on reconnect', (t) => {
+  const h = createHarness(t, { canWrite: false })
+  const events = recordEvents(h)
+  h.disconnect()
+  h.receive(pendingSyncFrame())
+  assert.deepEqual(events, ['access-changed'])
+})
+
+test('a waiting reader granted the seed hands the claim back once and reports its access', async (t) => {
+  const h = createHarness(t, { canWrite: false, seedRetryMs: 10 })
+  const events = recordEvents(h)
+  const types = () => h.sent.map((frame) => frame.type)
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: '# Template', seed_claim: 'claim-a' })
+  assert.deepEqual(events, ['access-changed'])
+  assert.deepEqual(types(), ['seed-decline'])
+  assert.equal(h.provider.seedContent, null)
+  assert.equal(h.provider.seedClaim, null)
+  await pause(60)
+  h.provider.destroy()
+  assert.deepEqual(types(), ['seed-decline'], 'no second decline could reach a claim taken since')
+})
+
+test('a reader that handed a claim back still goes live on content from another writer', (t) => {
+  const h = createHarness(t, { canWrite: false })
+  const events = recordEvents(h)
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: '# Template', seed_claim: 'claim-a' })
+  h.receive({ type: 'update', update: contentUpdate(), cid: 'peer' })
+  assert.deepEqual(events, ['access-changed', 'synced'])
+  assert.equal(h.doc.getText('t').toString(), 'body')
+})
+
+test('a reconnect with unchanged access or with local content does not report an access change', (t) => {
+  const waiting = createHarness(t)
+  const holding = createHarness(t)
+  const events = [recordEvents(waiting), recordEvents(holding)]
+  waiting.receive(pendingSyncFrame())
+  waiting.disconnect()
+  waiting.receive(pendingSyncFrame())
+
+  holding.doc.getText('t').insert(0, 'typed')
+  holding.receive(pendingSyncFrame())
+  holding.disconnect()
+  holding.receive(pendingSyncFrame({ seed_content: '# Template' }))
+  assert.deepEqual(events, [[], ['synced', 'synced']])
+  assert.equal(holding.doc.getText('t').toString(), 'typed')
+})
+
 test('a waiting writer stops retrying when disconnected', async (t) => {
   const h = createHarness(t, { seedRetryMs: 10 })
   h.receive(pendingSyncFrame())
@@ -457,7 +514,7 @@ test('a reader shows the seed locally and reloads instead of merging real state 
 test('a reader whose local seed was superseded while offline reloads on reconnect', (t) => {
   const h = createHarness(t, { canWrite: false })
   const events = recordEvents(h)
-  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: '# Template' })
+  h.receive(pendingSyncFrame({ seed_content: '# Template' }))
   h.doc.getText('t').insert(0, 'Template')
   h.disconnect()
   h.receive({ ...emptySyncFrame(1), update: contentUpdate() })
