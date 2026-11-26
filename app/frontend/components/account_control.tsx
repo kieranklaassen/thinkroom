@@ -1,4 +1,5 @@
 import { Link } from '@inertiajs/react'
+import { useNotReady } from '../lib/use_not_ready'
 import type { ViewerPayload } from '../types/viewer'
 
 interface Props {
@@ -6,6 +7,8 @@ interface Props {
 }
 
 export function AccountControl({ viewer }: Props) {
+  const notReady = useNotReady()
+
   if (!viewer.account) {
     return (
       <Link href="/login?return_to=%2F" className="account-control account-control--guest">
@@ -19,7 +22,7 @@ export function AccountControl({ viewer }: Props) {
       <span title={viewer.account.email}>{viewer.account.name}</span>
       {/* Stable id: the Ruby Native account menu's Sign out item clicks this
           button, so sign-out stays on the one DELETE submission path. */}
-      <Link id="account-signout" href="/logout" method="delete" as="button">
+      <Link id="account-signout" href="/logout" method="delete" as="button" {...notReady}>
         Sign out
       </Link>
     </div>
