@@ -109,7 +109,7 @@ const MERGE_BYTES_PER_PART = 16
 
 // A minute to answer, and time to send the body at 50 KB/s.
 const defaultUploadDeadlineMs = (bytes: number): number => 60_000 + bytes / 50
-// How long a large edit may keep failing before the page says it is not saved.
+// How long a large edit may be owed before the page says it is not saved.
 const DEFAULT_UPLOAD_WARN_MS = 30_000
 
 // Groups neighbours whose merge one frame holds. An update larger than that
@@ -217,8 +217,8 @@ export class CableProvider {
   private upload: { part: Uint8Array; abort: AbortController } | null = null
   /** Changes with the 'save-state' event. */
   saveState: SaveState = null
-  // Large edits to call unsaved until they are stored: refused, or failing for
-  // a while. Each has its own time to fail.
+  // Large edits to call unsaved until they are stored: refused, or owed for a
+  // while. Each has its own time.
   private unsaved = new WeakSet<Uint8Array>()
   private unsavedTimers = new Map<Uint8Array, ReturnType<typeof setTimeout>>()
   // The edit refused on this connection. Nothing more is sent while it is owed,
@@ -282,7 +282,8 @@ export class CableProvider {
           this.stopSeedWait()
           this.requeueInFlight()
           this.refusedPart = null
-          // Its connection may be gone too, and nothing else would end it.
+          // Restarts the upload: its connection may be gone too, and waiting for
+          // its deadline would take longer than sending it again.
           this.upload?.abort.abort()
           this.clearAwarenessThrottle()
           // Refresh the ActionCable subscription identifier while the socket is
@@ -416,6 +417,8 @@ export class CableProvider {
       this.unsavedTimers.delete(part)
     }
     const large = unacked.filter((part) => part.length > MAX_UPDATE_BYTES)
+    // From when it is owed, not from a failure: it may not even be sent.
+    for (const part of large) if (!this.unsaved.has(part)) this.warnIfStillUnsaved(part)
     const stuck = large.some((part) => this.unsaved.has(part) || this.pieces.get(part) === null)
     const state = stuck ? 'stuck' : large.length > 0 ? 'sending' : null
     if (state === this.saveState) return
@@ -592,8 +595,9 @@ export class CableProvider {
         this.flush('update')
         return
       }
-      if (status < 400 || status >= 500 || status === 408 || status === 429 || seedRefused) {
-        this.warnIfStillUnsaved(part)
+      // Aborted: whatever it answered, its connection is gone.
+      const refused = status >= 400 && status < 500 && status !== 408 && status !== 429
+      if (!refused || seedRefused || upload.abort.signal.aborted) {
         this.scheduleRetry()
       } else if (status === 409) {
         // As for a frame refused as stale: the document was replaced.
@@ -797,6 +801,7 @@ export class CableProvider {
         this.serverChecksum = data.checksum ?? null
         this.clearRetryTimer()
         this.requeueInFlight()
+        this.refusedPart = null
         this.retryAttempt = 0
         if (typeof data.generation === 'number') this.generation = data.generation
         const seedContent = data.seed_content

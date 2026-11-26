@@ -6,7 +6,7 @@ export function UnsavedEditNotice({ saveState }: { saveState: SaveState }) {
   return (
     <div className="doc-notice" role="alert">
       <span>
-        Your latest changes are not saved: one is too large, was refused, or could not be sent.
+        Your latest changes are not saved: one is too large, was refused, or is still not sent.
         Copy what you need before you reload or leave this page.
       </span>
     </div>

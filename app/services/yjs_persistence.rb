@@ -143,9 +143,10 @@ class YjsPersistence
               raise Document::StaleSeedClaimError, "Another seed is already stored."
             end
 
-            # The durable act: an O(update) append. No Y::Doc is built on
-            # this path — folds materialize the tail into the snapshot
-            # columns on joins, thresholds, and disconnects.
+            # The durable act: an O(update) append. A single update builds no
+            # Y::Doc on this path unless the tail is at its threshold; a split
+            # edit is folded below. Other folds materialize the tail into the
+            # snapshot columns on joins and disconnects.
             updates.each do |update|
               document.yjs_document_updates.create!(
                 content_generation: document.content_generation,

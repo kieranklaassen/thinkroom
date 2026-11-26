@@ -886,8 +886,8 @@ function stubLimitedFetch(t) {
         done()
         return pause(0)
       }
-      call.respond = (status = 204) =>
-        settle(() => resolve({ ok: status < 400, status, json: async () => null }))
+      call.respond = (status = 204, json = null) =>
+        settle(() => resolve({ ok: status < 400, status, json: async () => json }))
       call.fail = () => settle(() => reject(new TypeError('Failed to fetch')))
     })
   }
@@ -1188,20 +1188,89 @@ test('a refusal does not outlive its edit: a later large edit that only fails is
 
 test('each large edit has its own time before it is called unsaved', async (t) => {
   const { calls } = stubLimitedFetch(t)
-  const h = createHarness(t, { retryBaseMs: 5, retryMaxMs: 5, uploadWarnMs: 600 })
+  const h = createHarness(t, { uploadWarnMs: 1500 })
+  h.receive(emptySyncFrame(1))
+  const states = statesOf(h)
+  h.doc.getText('t').insert(0, LARGE)
+  await pause(700)
+  const owedAt = performance.now()
+  h.doc.getText('t').insert(0, LARGE)
+  await calls[0].respond()
+  for (let i = 0; i < 1_000 && h.provider.saveState !== 'stuck'; i += 1) await pause(5)
+  assert.equal(h.provider.saveState, 'stuck')
+  // Timers may fire a little early, never by what the first edit waited.
+  assert.ok(performance.now() - owedAt >= 1490, `${performance.now() - owedAt} ms`)
+  assert.deepEqual(states, ['sending', 'stuck'])
+})
+
+test('a large edit that cannot even be sent is called unsaved, and no longer once it is stored', async (t) => {
+  const situations = {
+    'before the first handshake': () => {},
+    offline: (h) => { h.receive(emptySyncFrame(1)); h.disconnect() },
+    'behind an unanswered frame': (h) => { h.receive(emptySyncFrame(1)); h.doc.getText('t').insert(0, 'small') },
+    'in a request without an answer': (h) => h.receive(emptySyncFrame(1)),
+  }
+  for (const [name, arrange] of Object.entries(situations)) {
+    const { calls } = stubLimitedFetch(t)
+    const h = createHarness(t, { uploadWarnMs: 20, ackTimeoutMs: 5_000 })
+    arrange(h)
+    h.doc.getText('t').insert(0, LARGE)
+    assert.equal(h.provider.saveState, 'sending', name)
+    await pause(60)
+    assert.equal(h.provider.saveState, 'stuck', name)
+    if (name.startsWith('behind')) h.receive({ type: 'ack', seq: 1 })
+    else if (calls.length === 0) h.receive(emptySyncFrame(1))
+    await calls[0].respond()
+    assert.equal(h.provider.saveState, null, name)
+  }
+})
+
+test('a connection that replaces a half-open one tries a refused edit again', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t)
   h.receive(emptySyncFrame(1))
   h.doc.getText('t').insert(0, LARGE)
-  h.doc.getText('t').insert(0, LARGE)
-  await calls[0].fail()
-  await pause(300)
+  await calls[0].respond(413)
+  h.receive(emptySyncFrame(1))
+  assert.equal(calls.length, 2)
   await calls[1].respond()
-  await calls[2].fail()
-  const failedAt = Date.now()
-  let warnedAt = null
-  h.provider.on('save-state', () => { warnedAt ??= h.provider.saveState === 'stuck' ? Date.now() : null })
-  await pause(900)
-  assert.ok(warnedAt, 'the first edit left no timer that swallows the warning')
-  assert.ok(warnedAt - failedAt >= 590, `${warnedAt - failedAt} ms`)
+  assert.equal(h.provider.saveState, null)
+})
+
+test('a refusal that was read only after the connection dropped does not count for the next one', async (t) => {
+  for (const reconnect of ['before', 'after']) {
+    const { calls } = stubLimitedFetch(t)
+    const h = createHarness(t, { retryBaseMs: 5 })
+    h.receive(emptySyncFrame(1))
+    h.doc.getText('t').insert(0, LARGE)
+    const answered = calls[0].respond(413)
+    h.disconnect()
+    if (reconnect === 'before') h.receive(emptySyncFrame(1))
+    await answered
+    if (reconnect === 'after') h.receive(emptySyncFrame(1))
+    await pause(20)
+    assert.equal(calls.length, 2, `handshake ${reconnect} the answer was read`)
+    await calls[1].respond(413)
+    await pause(30)
+    assert.equal(calls.length, 2, 'refused on this connection')
+    assert.equal(h.provider.saveState, 'stuck')
+  }
+})
+
+test('a large seed refused for a claim since renewed is sent again under the new one', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t, { retryBaseMs: 5 })
+  const events = recordEvents(h)
+  const grant = (claim) => ({ ...emptySyncFrame(1), seed: true, seed_claim: claim, seed_content: '# Seed' })
+  h.receive(grant('claim-a'))
+  h.doc.getText('t').insert(0, LARGE)
+  h.receive(grant('claim-b'))
+  await calls[0].respond(409, { seed_refused: true })
+  await pause(20)
+  assert.equal(events.includes('stale'), false)
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1].body.seed_claim, 'claim-b')
+  assert.ok(h.provider.unackedParts().length > 0)
 })
 
 test('a large edit refused as stale or locked recovers the way a frame does', async (t) => {
@@ -1219,34 +1288,38 @@ test('a large edit refused as stale or locked recovers the way a frame does', as
   }
 })
 
-test('a frame refused as locked keeps the large edit queued behind it', (t) => {
+test('a frame refused as locked keeps the large edit queued behind it, and one refused as stale does not', (t) => {
   stubLimitedFetch(t)
-  const h = createHarness(t)
-  h.receive(emptySyncFrame(1))
-  h.doc.getText('t').insert(0, 'small')
-  h.doc.getText('t').insert(0, LARGE)
-  h.receive({ type: 'write-denied', locked: true })
-  assert.equal(h.provider.saveState, 'stuck')
-  const kept = new Y.Doc()
-  Y.applyUpdate(kept, Y.mergeUpdates(h.provider.unackedParts()))
-  assert.equal(kept.getText('t').toString(), h.doc.getText('t').toString())
+  for (const stale of [false, true]) {
+    const h = createHarness(t)
+    const events = []
+    for (const name of ['stale', 'write-denied']) h.provider.on(name, () => events.push(name))
+    h.receive(emptySyncFrame(1))
+    h.doc.getText('t').insert(0, 'small')
+    h.doc.getText('t').insert(0, LARGE)
+    h.receive({ type: 'write-denied', locked: !stale, stale })
+    assert.deepEqual(events, [stale ? 'stale' : 'write-denied'])
+    assert.equal(h.provider.saveState, stale ? null : 'stuck')
+    const kept = new Y.Doc()
+    for (const part of h.provider.unackedParts()) Y.applyUpdate(kept, part)
+    assert.equal(kept.getText('t').toString(), stale ? '' : h.doc.getText('t').toString())
+  }
 })
 
-test('5xx, 408, 429 and lost answers are retried with backoff and said only after a while', async (t) => {
+test('5xx, 408, 429 and lost answers are retried with backoff, one request at a time', async (t) => {
   for (const status of [500, 503, 408, 429, 0]) {
     const { calls } = stubLimitedFetch(t)
-    const h = createHarness(t, { retryBaseMs: 10, retryMaxMs: 20, uploadWarnMs: 60 })
+    const h = createHarness(t, { retryBaseMs: 10, retryMaxMs: 20 })
     h.receive(emptySyncFrame(1))
     h.doc.getText('t').insert(0, LARGE)
     for (let i = 0; i < 8; i += 1) {
-      if (i < 2) assert.equal(h.provider.saveState, 'sending')
+      assert.equal(h.provider.saveState, 'sending', 'a failure that is retried is not a refusal')
       const answered = calls.length
       await (status ? calls[answered - 1].respond(status) : calls[answered - 1].fail())
       await pause(5)
       assert.ok(calls.length <= answered + 1, 'one request at a time')
       while (calls.length === answered) await pause(5)
     }
-    assert.equal(h.provider.saveState, 'stuck')
     await calls.at(-1).respond()
     assert.equal(h.provider.saveState, null)
     assert.equal(h.provider.unackedParts().length, 0)
