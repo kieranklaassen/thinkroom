@@ -41,6 +41,25 @@ class DocumentCreateTest < ActionDispatch::IntegrationTest
     assert_equal "markdown", Document.order(:created_at).last.content_format
   end
 
+  test "the home page's form creates a page without JavaScript" do
+    original = ActionController::Base.allow_forgery_protection
+    ActionController::Base.allow_forgery_protection = true
+    get root_path, headers: browser
+    token = inertia.props[:csrf_token]
+
+    assert_no_difference -> { Document.count } do
+      post documents_path, params: { name: "Quiet Falcon" }, headers: browser
+      assert_response :unprocessable_entity
+    end
+    post documents_path, params: { authenticity_token: token, name: "Quiet Falcon" }, headers: browser
+
+    document = Document.order(:created_at).last
+    assert_redirected_to document_mode_path(document.slug, "edit")
+    assert_equal "Quiet Falcon", document.owner_name
+  ensure
+    ActionController::Base.allow_forgery_protection = original
+  end
+
   private
 
   def browser

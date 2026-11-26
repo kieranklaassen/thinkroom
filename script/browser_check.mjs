@@ -783,6 +783,23 @@ try {
   ok('a refused clipboard write reveals the agent instruction inline')
   await refusedClipboard.close()
 
+  // New page is visible before the page's script runs; a click then must not
+  // be lost. Hold the script back until the click has navigated.
+  const earlyClick = await browser.newPage()
+  let releaseScript
+  const scriptReleased = new Promise((resolve) => { releaseScript = resolve })
+  await earlyClick.route(/\/entrypoints\/inertia\.tsx/, async (route) => {
+    await scriptReleased
+    await route.continue().catch(() => {}) // the navigation cancelled it
+  })
+  await earlyClick.goto(BASE, { waitUntil: 'commit' })
+  await earlyClick.getByRole('button', { name: 'New page' }).click({ noWaitAfter: true })
+  await earlyClick.waitForURL(/\/d\/[^/]+\/edit/, { waitUntil: 'commit' })
+  releaseScript()
+  await waitForLive(earlyClick)
+  ok('New page clicked before hydration still creates a page')
+  await earlyClick.close()
+
   await landing.getByRole('button', { name: 'New page' }).click()
   await landing.waitForURL(/\/d\//)
   const accessSlug = new URL(landing.url()).pathname.split('/')[2]

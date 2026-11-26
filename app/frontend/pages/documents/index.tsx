@@ -46,6 +46,7 @@ type Props = Pick<SharedProps, 'nativeApp'> & {
   day_part: DayPart
   ui: { background: IndexBackground }
   viewer: ViewerPayload
+  csrf_token: string
   // WebMCP tool manifest (AgentGuide.webmcp_index_tools) — lazy prop.
   webmcp: WebmcpManifest
 }
@@ -315,6 +316,7 @@ export default function DocumentsIndex({
   day_part,
   ui,
   viewer,
+  csrf_token,
   webmcp,
   nativeApp,
 }: Props) {
@@ -631,16 +633,28 @@ export default function DocumentsIndex({
               {greeting}
             </h1>
             <div className="notebook-actions">
-              <button
-                id="new-document-button"
-                className="btn btn-primary"
-                type="button"
-                disabled={processing}
-                onClick={() => post('/documents')}
-                {...nativeHaptic('impact')}
+              {/* A real form: the button is server rendered, so it can be
+                  clicked before hydration, when only the browser can act. */}
+              <form
+                action="/documents"
+                method="post"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  post('/documents')
+                }}
               >
-                {processing ? 'Creating…' : 'New page'}
-              </button>
+                <input type="hidden" name="authenticity_token" value={csrf_token} />
+                <input type="hidden" name="name" value={viewer.name ?? viewer.guest_name ?? ''} />
+                <button
+                  id="new-document-button"
+                  className="btn btn-primary"
+                  type="submit"
+                  disabled={processing}
+                  {...nativeHaptic('impact')}
+                >
+                  {processing ? 'Creating…' : 'New page'}
+                </button>
+              </form>
               <button
                 id="agent-start-trigger"
                 className="notebook-text-button"
