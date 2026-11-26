@@ -466,8 +466,22 @@ try {
   const afterRaw = await page.evaluate(() => window.__webmcpToolchange)
   assert(after !== null, `toolchange fired across the Inertia visit (before ${before}, after ${afterRaw})`)
   assert(sameSet((await getTools()).map((t) => t.name), DOCUMENT_TOOLS), 'after navigating index → document, the registered set is the document set')
-  await page.goto(`${BASE}/login`)
-  assert(await page.evaluate(() => window.__thinkroomWebmcp === undefined), 'development seam is removed when leaving a tool page')
+
+  // Leave the tool pages through in-app links only: a full navigation replaces
+  // `window`, which would make the seam disappear without any teardown. The
+  // marker proves the window survived.
+  phase = 'seam teardown'
+  await page.evaluate(() => { window.__webmcpSameWindow = true })
+  await page.locator('a.doc-home').click()
+  await page.getByRole('heading', { name: 'Contents' }).waitFor()
+  await page.waitForFunction(() => typeof window.__thinkroomWebmcp?.execute === 'function')
+  await page.locator('a.account-control--guest').click()
+  await page.locator('#auth-heading').waitFor()
+  assert(await page.evaluate(() => window.__webmcpSameWindow === true), 'leaving the tool pages kept the same window')
+  const seamRemoved = await page
+    .waitForFunction(() => window.__thinkroomWebmcp === undefined, null, { timeout: 5000 })
+    .then(() => true, () => false)
+  assert(seamRemoved, 'development seam is removed when leaving a tool page')
 
   // AE6: a browser without modelContext sees no change and no hydration errors.
   phase = 'AE6'
