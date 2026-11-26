@@ -10,6 +10,7 @@ import { $ctx, $prose, $view } from '@milkdown/kit/utils'
 import { Plugin, TextSelection } from '@milkdown/kit/prose/state'
 import { attrsFromSketchData, dataFromSketchNode, sketchSchema } from './schema'
 import { downloadSketchSvg } from './export'
+import { warmSketchTools } from './excalidraw_loader'
 import {
   fitSketchViewport,
   renderExactSketchPreview,
@@ -103,6 +104,10 @@ const buildSketchView = (
     dom.style.setProperty('--sketch-tape-offset', `${((hash >>> 8) % 21) - 10}px`)
     dom.style.setProperty('--sketch-tape-angle', `${(((hash >>> 16) % 29) - 14) / 10}deg`)
   }
+
+  // A sketch that arrived after load (a collaborator's, an undo) still needs
+  // its tools ready for the first stroke or click.
+  warmSketchTools()
 
   dom.className = 'thinkroom-sketch'
   dom.contentEditable = 'false'
@@ -345,6 +350,8 @@ const sketchInteractivity = $prose(
       view: (view) => {
         const sync = () => {
           const enabled = ctx.get(sketchControlsCtx.key).enabled()
+          // A sketch can be inserted from here on, possibly after going offline.
+          if (enabled) warmSketchTools()
           if (!enabled) {
             view.dom.querySelectorAll<HTMLElement>('.thinkroom-sketch[data-sketch-id]').forEach((node) => {
               if (node.dataset.sketchId) ctx.get(sketchControlsCtx.key).close(node.dataset.sketchId)
