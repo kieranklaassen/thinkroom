@@ -56,14 +56,19 @@ module AuthenticatesUser
     destination ? "#{path}?#{Rack::Utils.build_query(return_to: destination)}" : path
   end
 
+  # A path on this site, returned exactly as given, or nil. The path part is
+  # checked as text, decoded until nothing changes: a parsed URI's path leaves
+  # out the host.
   def safe_return_to(value)
-    return if value.blank?
+    return unless value.is_a?(String) && value.valid_encoding?
+    return if value.match?(/[[:cntrl:]\\]/)
 
-    uri = URI.parse(value.to_s)
-    return unless uri.relative? && uri.path.start_with?("/") && !uri.path.start_with?("//")
-    return if value.to_s.include?("\\")
+    URI.parse(value)
+    path = value[/\A[^?#]*/].b
+    return unless path.start_with?("/")
 
-    value.to_s
+    nil while path.gsub!(/%\h\h/) { |escape| escape[1..].hex.chr }
+    value unless path.match?(%r{//|[[:cntrl:]\\]})
   rescue URI::InvalidURIError
     nil
   end
