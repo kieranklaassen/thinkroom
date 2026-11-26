@@ -39,15 +39,32 @@ const schema = new Schema({
 
 const IN_EDITOR = {}
 
-// A page 800px tall whose selected text sits at `top`; `focusNode` is where the
-// browser's own selection is.
-function fakePage({ top, focusNode }) {
+globalThis.Element = class {
+  constructor(rect) { this.getBoundingClientRect = rect }
+  closest() { return this }
+}
+
+// A page 800px tall whose selected text sits at `top`, under a 44px header;
+// `focusNode` is where the browser's own selection is. `skipped` is how far the
+// text really sits below its block's top while the block is not rendered: its
+// coordinates read 0/0 until a frame has passed with the block on screen, and
+// `grows` is what the blocks above then add.
+function fakePage({ top, focusNode, skipped = null, grows = 0, dockTop = null }) {
   const doc = schema.node('doc', null, [schema.node('paragraph', null, [schema.text('A blue run here.')])])
-  const page = { pageScrolls: [], editorScrolls: 0, focused: false }
+  const page = { pageScrolls: [], editorScrolls: 0, focused: false, top, frames: [] }
+  let rendered = skipped === null
+  const onScreen = () => page.top > -40 && page.top < 800
+  const block = new Element(() => ({ top: page.top, bottom: page.top + 40 }))
+  page.textTop = () => page.top + (skipped ?? 0)
   page.view = {
     state: EditorState.create({ doc }),
+    isDestroyed: false,
     dom: { contains: (node) => node === IN_EDITOR },
-    coordsAtPos: () => ({ top, bottom: top + 20 }),
+    domAtPos: () => ({ node: block }),
+    coordsAtPos() {
+      if (page.view.isDestroyed) throw new Error('view destroyed')
+      return rendered ? { top: page.textTop(), bottom: page.textTop() + 20 } : { top: 0, bottom: 0 }
+    },
     dispatch(tr) {
       // ProseMirror ignores the request while the selection is elsewhere.
       if (tr.scrolledIntoView && focusNode === IN_EDITOR) page.editorScrolls += 1
@@ -55,8 +72,28 @@ function fakePage({ top, focusNode }) {
     },
     focus() { page.focused = true },
   }
-  globalThis.document = { getSelection: () => ({ focusNode }) }
-  globalThis.window = { innerHeight: 800, scrollBy: ({ top }) => page.pageScrolls.push(top) }
+  // Blocks render after a frame's callbacks; the ones above grow a frame later.
+  let renderedFor = 0
+  page.frame = () => {
+    const callbacks = page.frames.splice(0)
+    callbacks.forEach((callback) => callback())
+    if (onScreen()) rendered = true
+    if (rendered && ++renderedFor === 2) page.top += grows
+  }
+  page.settle = () => { for (let i = 0; i < 10; i += 1) page.frame() }
+  const chrome = {
+    '.doc-header': { top: 0, bottom: 44, height: 44 },
+    '.mobile-dock': dockTop === null ? null : { top: dockTop, bottom: 800, height: 800 - dockTop },
+  }
+  globalThis.document = {
+    getSelection: () => ({ focusNode }),
+    querySelector: (selector) => chrome[selector] && { getBoundingClientRect: () => chrome[selector] },
+  }
+  globalThis.requestAnimationFrame = (callback) => page.frames.push(callback)
+  globalThis.window = {
+    innerHeight: 800,
+    scrollBy: ({ top }) => { page.pageScrolls.push(top); page.top -= top },
+  }
   return page
 }
 
@@ -83,15 +120,53 @@ const selectedText = ({ state }) => state.doc.textBetween(state.selection.from, 
 test('a legend snippet jumps before anything was selected in the editor', () => {
   const page = fakePage({ top: 5000, focusNode: null })
   jump(page, SNIPPET)
+  page.settle()
   assert.equal(selectedText(page.view), 'blue run')
-  assert.deepEqual(page.pageScrolls, [5000 - 320])
+  assert.equal(page.textTop(), 320)
   assert.ok(page.focused)
+})
+
+test('a snippet in a block that is not rendered yet lands on screen', () => {
+  const page = fakePage({ top: 5000, focusNode: null, skipped: 600 })
+  jump(page, SNIPPET)
+  page.settle()
+  assert.equal(page.textTop(), 320)
+})
+
+test('a jump holds its text in place while the blocks around it render', () => {
+  const page = fakePage({ top: 5000, focusNode: null, skipped: 600, grows: 700 })
+  jump(page, SNIPPET)
+  page.settle()
+  assert.equal(page.textTop(), 320)
+})
+
+test('a jump stops when the editor goes away between its frames', () => {
+  for (let frames = 0; frames < 6; frames += 1) {
+    const page = fakePage({ top: 5000, focusNode: null, skipped: 600, grows: 700 })
+    jump(page, SNIPPET)
+    for (let i = 0; i < frames; i += 1) page.frame()
+    page.view.isDestroyed = true
+    const scrolls = page.pageScrolls.length
+    assert.doesNotThrow(() => page.settle())
+    assert.equal(page.pageScrolls.length, scrolls)
+  }
+})
+
+test('text behind the header or the dock is not on screen', () => {
+  const behindHeader = fakePage({ top: 20, focusNode: null })
+  jump(behindHeader, SNIPPET)
+  assert.equal(behindHeader.textTop(), 320)
+
+  const behindDock = fakePage({ top: 750, focusNode: null, dockTop: 740 })
+  jump(behindDock, SNIPPET)
+  assert.equal(behindDock.textTop(), 320)
 })
 
 test('a snippet already on screen is selected without scrolling the page', () => {
   const page = fakePage({ top: 300, focusNode: null })
   jump(page, SNIPPET)
   assert.equal(selectedText(page.view), 'blue run')
+  page.settle()
   assert.deepEqual(page.pageScrolls, [])
 })
 
@@ -99,6 +174,7 @@ test('the editor does the scrolling once the selection is inside it', () => {
   const page = fakePage({ top: 5000, focusNode: IN_EDITOR })
   jump(page, SNIPPET)
   assert.equal(page.editorScrolls, 1)
+  page.settle()
   assert.deepEqual(page.pageScrolls, [])
 })
 
@@ -107,6 +183,7 @@ test('a snippet past the end of the document is ignored', () => {
   const before = page.view.state
   jump(page, { ...SNIPPET, to: 999 })
   assert.equal(page.view.state, before)
+  page.settle()
   assert.deepEqual(page.pageScrolls, [])
 })
 
