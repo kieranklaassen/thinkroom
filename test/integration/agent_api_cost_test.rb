@@ -2,6 +2,8 @@ require "test_helper"
 
 # How much parsing and querying one agent write or batch accept may do.
 class AgentApiCostTest < ActionDispatch::IntegrationTest
+  include CompoundWritingHelpers
+
   VALID_SKETCH = <<~MD.freeze
     ```excalidraw
     {"id":"flow1","formatVersion":1,"description":"Flow","scene":{"type":"excalidraw","version":2,"elements":[]}}
@@ -13,7 +15,7 @@ class AgentApiCostTest < ActionDispatch::IntegrationTest
   BROWSER = { "User-Agent" => "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36" }.freeze
 
   setup do
-    @owner = User.create!(name: "Owner", email: "owner@example.com", password: "password-123")
+    @owner = User.create!(name: "Owner", email: "owner@example.com", password: PASSWORD)
     _record, token = CliAccessToken.issue!(user: @owner)
     @headers = { "Authorization" => "Bearer #{token}", "X-Agent-Name" => "Scout" }
   end
