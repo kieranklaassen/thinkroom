@@ -1,6 +1,6 @@
 import type { Transaction } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import { blockOnScreen, headBlock, holdHead } from '../editor/scroll_settle'
+import { blockOnScreen, headBlock, headElement, holdHead } from '../editor/scroll_settle'
 
 // Where a jump puts its text, as a share of the window height.
 const JUMP_LINE = 0.4
@@ -13,7 +13,7 @@ let lastJump: AbortController | null = null
  *  long document has not rendered, with no room for the sticky header. */
 export function dispatchIntoView(view: EditorView, tr: Transaction): void {
   view.dispatch(tr)
-  const isOver = personTakesOver(view)
+  const isOver = startJump(view)
 
   const block = headBlock(view)
   if (block && !blockOnScreen(block)) {
@@ -27,14 +27,14 @@ export function dispatchIntoView(view: EditorView, tr: Transaction): void {
     return
   }
   const { top, bottom } = view.coordsAtPos(view.state.selection.head)
-  if (top >= chromeTop() && bottom <= chromeBottom()) scrollAcross(view)
+  if (top >= chromeTop() && bottom <= chromeBottom()) scrollCodeSideways(view)
   else placeHead(view, isOver)
 }
 
 /** A jump is over once the person scrolls, points, types or selects something
  *  else, or another jump starts. Input events are what tell their scrolling
  *  from the browser's own scroll anchoring. */
-function personTakesOver(view: EditorView): () => boolean {
+function startJump(view: EditorView): () => boolean {
   lastJump?.abort()
   const jump = new AbortController()
   lastJump = jump
@@ -47,18 +47,15 @@ function personTakesOver(view: EditorView): () => boolean {
 
 function placeHead(view: EditorView, isOver: () => boolean): void {
   scrollToJumpLine(view.coordsAtPos(view.state.selection.head).top)
-  scrollAcross(view)
+  scrollCodeSideways(view)
   holdHead(view, isOver)
 }
 
-// Code scrolls its long lines sideways inside the page.
-function scrollAcross(view: EditorView): void {
-  const { head } = view.state.selection
-  const { node } = view.domAtPos(head)
-  const code = (node instanceof Element ? node : node.parentElement)?.closest('pre code')
+function scrollCodeSideways(view: EditorView): void {
+  const code = headElement(view)?.closest('pre code')
   if (!code) return
   const { left, right } = code.getBoundingClientRect()
-  const x = view.coordsAtPos(head).left
+  const x = view.coordsAtPos(view.state.selection.head).left
   if (x < left || x > right) code.scrollLeft += x - (left + right) / 2
 }
 

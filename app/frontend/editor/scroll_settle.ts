@@ -47,18 +47,20 @@ const settleAfterScroll = (view: EditorView) => {
   requestAnimationFrame(() => holdHead(view))
 }
 
-/** The top-level block holding the selection head. Its own box is laid out even
- *  while its contents are skipped, so reading it does not force them to render. */
-export const headBlock = (view: EditorView): Element | null => {
+export const headElement = (view: EditorView): Element | null => {
   try {
     const { node } = view.domAtPos(view.state.selection.head)
-    const element = node instanceof Element ? node : node.parentElement
-    return element?.closest('.ProseMirror > *') ?? null
+    return node instanceof Element ? node : node.parentElement
   } catch {
     // A position the DOM cannot resolve yet (mid-redraw).
     return null
   }
 }
+
+/** The top-level block holding the selection head. Its own box is laid out even
+ *  while its contents are skipped, so reading it does not force them to render. */
+export const headBlock = (view: EditorView): Element | null =>
+  headElement(view)?.closest('.ProseMirror > *') ?? null
 
 // A block already on screen is rendered, so scrolling to it shifts nothing;
 // only jumps into unrendered territory need the settle passes.
