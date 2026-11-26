@@ -383,6 +383,11 @@ export class CableProvider {
     this.emit('stale')
   }
 
+  private takeOrDeclineSeedClaim(claim: string | undefined, hasSeedToStore: boolean): void {
+    if (hasSeedToStore) this.seedClaim = claim ?? null
+    else this.send({ type: 'seed-decline' })
+  }
+
   private settleSeedClaim(): void {
     if (this.seedClaim === null) return
     this.seedClaim = null
@@ -574,8 +579,7 @@ export class CableProvider {
         // A late answer to a seed-request, not a new subscription: the
         // outbox and its sequence are live and must not be reset.
         if (this.synced && answersSeedRequest) {
-          if (data.seed && this.seedClaim !== null) this.seedClaim = data.seed_claim ?? null
-          else if (data.seed) this.send({ type: 'seed-decline' })
+          if (data.seed) this.takeOrDeclineSeedClaim(data.seed_claim, this.seedClaim !== null)
           if (data.update) Y.applyUpdate(this.doc, fromBase64(data.update), this)
           break
         }
@@ -600,8 +604,7 @@ export class CableProvider {
           // A claim is for a seed still to be stored. With content here and
           // none of this client's own unsettled there is nothing to claim, and
           // holding it would keep peer edits back and get the next edit refused.
-          if (localDocEmpty || this.seedClaim !== null) this.seedClaim = data.seed_claim ?? null
-          else this.send({ type: 'seed-decline' })
+          this.takeOrDeclineSeedClaim(data.seed_claim, localDocEmpty || this.seedClaim !== null)
         }
         // An unshared seed is safe to show only where it can never be sent.
         const showLocally = Boolean(data.seed_pending) && !this.canWrite

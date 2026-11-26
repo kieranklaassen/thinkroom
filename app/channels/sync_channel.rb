@@ -14,11 +14,12 @@
 #   server -> sender         : { type: "ack", seq }                            # durable merge receipt (when seq was sent)
 #                              { type: "nack", seq, reason: "retryable" | "invalid" }
 #                              { type: "write-denied", locked: true }          # read-only link
-#                              { type: "write-denied", locked: false, stale: true } # document was replaced
+#                              { type: "write-denied", locked: false, stale: true } # document was replaced, or another claimant's seed is stored
 #   client -> server         : { type: "sync-reply", update, cid, seq?, generation, seed_claim? } # unacked edits flushed on reconnect
 #                              { type: "update", update, cid, seq?, generation, seed_claim? } # incremental edit
 #                              { type: "awareness", update, cid, client_id? }        # presence/cursors, cached + relayed (4 KiB cap)
-#                              { type: "seed-decline", cid }                         # hand back a seed claim this handshake granted
+#                              { type: "seed-decline", cid }                         # hand back a seed claim this handshake granted;
+#                              # sent when the local doc predates a replacement, or holds content and no seed of its own to store
 #                              { type: "seed-request", cid }                         # waiting writer retries the claim; answered with a "sync"
 #   server -> peers          : { type: "awareness-leave", cid, client_id }           # emitted on subscriber disconnect
 # All client messages are broadcast to every subscriber (sender filters its own
@@ -344,7 +345,8 @@ class SyncChannel < ApplicationCable::Channel
     # last synced, or the frame omitted a valid generation. Drop the frame —
     # merging it would resurrect content the replacement just wiped — and tell
     # the client to discard its session rather than silently dropping it with
-    # no recovery signal.
+    # no recovery signal. Also raised, as StaleSeedClaimError, for a claimant
+    # whose seed lost to another one already stored.
     transmit({ type: "write-denied", locked: false, stale: true })
   rescue ArgumentError => e
     Rails.logger.warn("SyncChannel: undecodable update dropped: #{e.message}")
@@ -369,10 +371,11 @@ class SyncChannel < ApplicationCable::Channel
     @document.try_claim_seed
   end
 
-  # A subscriber granted the seed claim in its handshake hands it back when
-  # it cannot apply the template — a reconnecting tab whose local doc
-  # predates an owner replacement discards its session (page reload) instead
-  # of seeding. Releasing the claim lets that reload's page render re-claim
+  # A subscriber granted the seed claim in its handshake hands it back when it
+  # has no seed to store: a reconnecting tab whose local doc predates an owner
+  # replacement discards its session (page reload), and one that already holds
+  # content, with no unsettled seed of its own, keeps it. Releasing the claim
+  # lets that reload's page render, or another client's handshake, re-claim
   # immediately instead of leaving the document blank for everyone until
   # SEED_CLAIM_TIMEOUT expires. The conditional UPDATE only releases a
   # still-unconsumed claim at the granted generation: a merge that already

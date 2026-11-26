@@ -1221,9 +1221,11 @@ export default function DocumentShow({
                 onTitleChange={setDocumentTitle}
                 // This tab's local doc predates an owner CLI replacement (a frame
                 // it sent was rejected for staleness, or a reconnect handshake
-                // reported a different generation), or a viewer's local copy of
-                // the seed was superseded by real state. Same recovery action
-                // as content_reset, reached via the sync channel.
+                // reported a different generation), a claimant's seed was
+                // refused or superseded because other content is stored, or a
+                // viewer's local copy of the seed was superseded by real state.
+                // Same recovery action as content_reset, reached via the sync
+                // channel or a refused durable save.
                 onStale={reloadAfterContentReset}
                 // The sync channel rejects its resubscription when the doc is
                 // gone; same exit path as the deleted broadcast.
