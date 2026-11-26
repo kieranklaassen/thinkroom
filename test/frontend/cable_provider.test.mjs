@@ -800,3 +800,130 @@ test('a sync_update refused after access was revoked keeps the unsent edits', as
   assert.ok(h.provider.inFlight, 'the refused update must not count as stored')
   assert.ok(h.provider.queuedUpdate, 'the refused queued edit must not count as stored')
 })
+
+const KEEPALIVE_LIMIT = 64 * 1024
+
+// Browsers refuse a keepalive request that takes the total of those in flight
+// past 64 KiB. Ordinary requests have no such limit.
+function stubLimitedFetch(t) {
+  const calls = []
+  let inFlight = 0
+  const originalFetch = globalThis.fetch
+  const originalWarn = console.warn
+  const warnings = []
+  console.warn = (...args) => warnings.push(args)
+  globalThis.fetch = (_url, init) => {
+    const bytes = new TextEncoder().encode(init.body).byteLength
+    const call = { bytes, keepalive: init.keepalive === true, body: JSON.parse(init.body), refused: false }
+    calls.push(call)
+    if (call.keepalive && inFlight + bytes > KEEPALIVE_LIMIT) {
+      call.refused = true
+      return Promise.reject(new TypeError('Failed to fetch'))
+    }
+    if (call.keepalive) inFlight += bytes
+    return new Promise((resolve, reject) => {
+      const settle = (done) => {
+        if (call.keepalive) inFlight -= bytes
+        done()
+        return pause(0)
+      }
+      call.respond = (status = 204) =>
+        settle(() => resolve({ ok: status < 400, status, json: async () => null }))
+      call.fail = () => settle(() => reject(new TypeError('Failed to fetch')))
+    })
+  }
+  // Settle what a test left pending, so it holds no room in the next one.
+  t.after(async () => {
+    for (const call of calls) await call.respond?.()
+    globalThis.fetch = originalFetch
+    console.warn = originalWarn
+  })
+  return { calls, warnings }
+}
+
+function editedHarness(t, characters) {
+  const h = createHarness(t, { initialGeneration: 1 })
+  h.doc.getText('t').insert(0, 'x'.repeat(characters))
+  return h
+}
+
+function savedText(call) {
+  const doc = new Y.Doc()
+  Y.applyUpdate(doc, fromBase64(call.body.update))
+  return doc.getText('t').toString()
+}
+
+const snapshotOf = (characters) => ({ content: 'y'.repeat(characters), spans: [], state_vector: 'AA==' })
+
+test('a save too large for keepalive goes out as an ordinary request and settles the outbox', async (t) => {
+  const { calls, warnings } = stubLimitedFetch(t)
+  const h = editedHarness(t, 100_000)
+
+  h.provider.persistCurrentState(snapshotOf(100_000))
+  assert.equal(calls[0].refused, false)
+  assert.equal(calls[0].keepalive, false)
+  assert.equal(savedText(calls[0]).length, 100_000)
+
+  await calls[0].respond()
+  assert.deepEqual(warnings, [])
+  h.receive(emptySyncFrame(1))
+  assert.equal(h.sentUpdates().length, 0, 'the saved edit is not owed again')
+})
+
+test('a save that fits alone is an ordinary request while another keepalive save holds the room', async (t) => {
+  const { calls, warnings } = stubLimitedFetch(t)
+  const h = editedHarness(t, 30_000)
+
+  h.provider.persistCurrentState()
+  h.doc.getText('t').insert(0, 'later ')
+  h.provider.persistCurrentState()
+  assert.deepEqual(calls.map((call) => [call.keepalive, call.refused]), [[true, false], [false, false]])
+
+  await calls[0].respond()
+  await calls[1].respond()
+  h.provider.persistCurrentState(snapshotOf(10))
+  assert.equal(calls[2].keepalive, true, 'a settled save gives its room back')
+  assert.deepEqual(warnings, [])
+})
+
+test('a failed or refused keepalive save gives its room back and keeps the edit owed', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = editedHarness(t, 30_000)
+
+  h.provider.persistCurrentState()
+  await calls[0].fail()
+  h.provider.persistCurrentState()
+  assert.equal(calls[1].keepalive, true)
+  await calls[1].respond(423)
+  h.provider.persistCurrentState()
+  assert.equal(calls[2].keepalive, true)
+  assert.equal(savedText(calls[2]).length, 30_000)
+})
+
+test('a snapshot that no longer fits is left to its debounce so the edit keeps its keepalive', (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = editedHarness(t, 30)
+
+  h.provider.persistCurrentState(snapshotOf(40_000))
+  h.provider.persistCurrentState(snapshotOf(40_000))
+  assert.equal(calls[0].body.content.length, 40_000)
+  assert.deepEqual(calls.map((call) => [call.keepalive, call.refused]), [[true, false], [true, false]])
+  assert.equal(calls[1].body.content, undefined)
+  assert.equal(savedText(calls[1]).length, 30)
+})
+
+test('providers on one page share the keepalive room', (t) => {
+  const { calls } = stubLimitedFetch(t)
+  editedHarness(t, 30_000).provider.persistCurrentState()
+  editedHarness(t, 30_000).provider.persistCurrentState()
+  assert.deepEqual(calls.map((call) => [call.keepalive, call.refused]), [[true, false], [false, false]])
+})
+
+test('a large unsaved edit is still sent when its provider is destroyed', (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = editedHarness(t, 100_000)
+  h.provider.destroy()
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].refused, false)
+  assert.equal(savedText(calls[0]).length, 100_000)
+})
