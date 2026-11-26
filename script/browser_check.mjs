@@ -1,7 +1,7 @@
 // Two-window live-collaboration smoke check using Playwright.
 // Usage: BASE_URL=http://localhost:4123 node script/browser_check.mjs
 import { chromium } from 'playwright'
-import { openSeeded, waitForHome, waitForLive } from './lib/check_helpers.mjs'
+import { openSeeded, reloadSynced, waitForHome, waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
 const SLUG = process.env.SLUG ?? 'demo'
@@ -1266,6 +1266,16 @@ try {
   await taskB.goto(`${BASE}/d/${taskDoc.slug}/edit`)
   await waitForLive(taskA)
   await waitForLive(taskB)
+  // A reload can be served before the toggle's own request commits; the sync
+  // then brings it to the already-live editor.
+  const firstTaskBecomes = (checked) =>
+    taskA
+      .waitForFunction(
+        (want) => document.querySelector('.doc-live-editor .task-checkbox')?.checked === want,
+        checked,
+        { timeout: 10000 },
+      )
+      .then(() => true, () => false)
   const taskCheckboxes = taskA.locator(
     '.milkdown .ProseMirror li[data-item-type="task"] input[type="checkbox"]',
   )
@@ -1308,7 +1318,7 @@ try {
   }
   await taskA.reload()
   await waitForLive(taskA)
-  if (await taskA.locator('.task-checkbox').nth(0).isChecked()) {
+  if (await firstTaskBecomes(true)) {
     ok('checked task survives reload')
   } else {
     fail('checked task did not survive reload')
@@ -1321,7 +1331,7 @@ try {
   await taskA.locator('.task-checkbox').nth(0).uncheck()
   await taskA.reload()
   await waitForLive(taskA)
-  if (!(await taskA.locator('.task-checkbox').nth(0).isChecked())) {
+  if (await firstTaskBecomes(false)) {
     ok('task toggle survives an immediate reload')
   } else {
     fail('task toggle was lost during an immediate reload')
@@ -1340,7 +1350,7 @@ try {
   await taskA.locator('.task-checkbox').nth(0).check()
   await taskA.reload()
   await waitForLive(taskA)
-  if (await taskA.locator('.task-checkbox').nth(0).isChecked()) {
+  if (await firstTaskBecomes(true)) {
     ok('task toggle persists in Suggest mode')
   } else {
     fail('task toggle was dropped by Suggest mode')
@@ -1741,11 +1751,15 @@ try {
   await sketchB.locator('.excalidraw canvas').last().click({ position: { x: 20, y: 20 } })
   await sketchB.keyboard.press('Delete')
   await sketchA.locator('.thinkroom-sketch').waitFor({ state: 'detached', timeout: 10000 })
-  await sketchB.reload()
-  // The derived server preview can lag the already-persisted Yjs deletion.
-  // Check the hydrated editor, not a transient preview (or an empty shell).
-  await waitForLive(sketchB)
-  if ((await sketchB.locator('.thinkroom-sketch').count()) === 0) {
+  // The server preview and the page's starting state can both lag the already
+  // persisted deletion, so judge the editor once the sync has arrived.
+  await reloadSynced(sketchB)
+  if (
+    await sketchB
+      .locator('.thinkroom-sketch')
+      .waitFor({ state: 'detached', timeout: 5000 })
+      .then(() => true, () => false)
+  ) {
     ok('deleting a sketch syncs and survives reload')
   } else {
     fail('deleted sketch returned after reload')
