@@ -140,7 +140,7 @@ async function requestResult(
     ? AbortSignal.any([options.signal, timeout.signal])
     : timeout.signal
   init.signal = signal
-  const sent = !signal.aborted
+  if (signal.aborted) return errorResult({ error: 'cancelled' })
   const timer = setTimeout(() => timeout.abort(), CALL_TIMEOUT_MS)
 
   let response: Response
@@ -158,7 +158,7 @@ async function requestResult(
     // The combined signal keeps the reason of whichever abort came first. The
     // thrown value cannot tell them apart: callers pick their own reason.
     if (signal.reason === timeout.signal.reason) return errorResult(timedOut(request.method))
-    return errorResult(sent ? unanswered(request.method, 'cancelled') : { error: 'cancelled' })
+    return errorResult(unanswered(request.method, 'cancelled'))
   } finally {
     clearTimeout(timer)
   }
@@ -200,19 +200,17 @@ function timedOut(method: WebmcpRequest['method']): Record<string, unknown> {
   }
 }
 
-/** A request that was sent and got no complete answer. The server may have
- * finished a write all the same. */
+/** The server may have finished a write whose answer never arrived whole. */
 function unanswered(
   method: WebmcpRequest['method'],
   error: string,
-  reason = '',
+  reason?: string,
 ): Record<string, unknown> {
-  const sentence = /[^.!?]$/.test(reason) ? `${reason}.` : reason
-  const detail =
-    method === 'POST'
-      ? `${sentence} The write may still have been applied; check before retrying.`.trim()
-      : reason
-  return detail ? { error, detail } : { error }
+  if (method !== 'POST') return reason ? { error, detail: reason } : { error }
+  const warning = 'The write may still have been applied; check before retrying.'
+  if (!reason) return { error, detail: warning }
+  const sentence = /[.!?]$/.test(reason) ? reason : `${reason}.`
+  return { error, detail: `${sentence} ${warning}` }
 }
 
 type Outcome<T> = { value: T } | { error: string; [key: string]: unknown }

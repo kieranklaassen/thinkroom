@@ -50,7 +50,8 @@ class CoalescedLoad extends Promise<void> {
     onfulfilled?: ((value: void) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
   ): Promise<TResult1 | TResult2> {
-    if (this.claimed) return NEVER.then(onfulfilled, onrejected)
+    // A promise of its own: a shared one would keep every declined callback.
+    if (this.claimed) return new Promise(() => undefined)
     this.claimed = true
     const release = () => {
       this.claimed = false
@@ -59,8 +60,6 @@ class CoalescedLoad extends Promise<void> {
     return this.loaded.then(onfulfilled, onrejected)
   }
 }
-
-const NEVER = new Promise<never>(() => undefined)
 
 let loading: Promise<void> | null = null
 

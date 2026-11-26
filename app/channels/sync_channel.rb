@@ -14,7 +14,7 @@
 #   server -> sender         : { type: "ack", seq }                            # durable merge receipt (when seq was sent)
 #                              { type: "nack", seq, reason: "retryable" | "invalid" }
 #                              { type: "write-denied", locked: true }          # read-only link
-#                              { type: "write-denied", locked: false, stale: true } # document was replaced, or another claimant's seed is stored
+#                              { type: "write-denied", locked: false, stale: true } # document was replaced, generation missing, or a seed frame not matching the stored content or its claim
 #   client -> server         : { type: "sync-reply", update, cid, seq?, generation, seed_claim? } # unacked edits flushed on reconnect
 #                              { type: "update", update, cid, seq?, generation, seed_claim? } # incremental edit
 #                              { type: "awareness", update, cid, client_id? }        # presence/cursors, cached + relayed (4 KiB cap)
@@ -346,7 +346,7 @@ class SyncChannel < ApplicationCable::Channel
     # merging it would resurrect content the replacement just wiped — and tell
     # the client to discard its session rather than silently dropping it with
     # no recovery signal. Also raised, as StaleSeedClaimError, for a claimant
-    # whose seed lost to another one already stored.
+    # whose claim is malformed, or whose seed came after other stored content.
     transmit({ type: "write-denied", locked: false, stale: true })
   rescue ArgumentError => e
     Rails.logger.warn("SyncChannel: undecodable update dropped: #{e.message}")
@@ -374,8 +374,8 @@ class SyncChannel < ApplicationCable::Channel
   # A subscriber granted the seed claim in its handshake hands it back when it
   # has no seed to store: a reconnecting tab whose local doc predates an owner
   # replacement discards its session (page reload), and one that already holds
-  # content, with no unsettled seed of its own, keeps it. Releasing the claim
-  # lets that reload's page render, or another client's handshake, re-claim
+  # content, with no unsettled seed of its own, has none to apply. Releasing the
+  # claim lets that reload's page render, or another client's handshake, re-claim
   # immediately instead of leaving the document blank for everyone until
   # SEED_CLAIM_TIMEOUT expires. The conditional UPDATE only releases a
   # still-unconsumed claim at the granted generation: a merge that already

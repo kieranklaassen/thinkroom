@@ -373,8 +373,6 @@ function CollabEditor({
           }))
           ctx.update(highlightPluginConfig.key, (prev) => ({
             ...prev,
-            // Highlights at once when shiki is ready and upgrades painted code
-            // in place otherwise, so content paint never waits on it.
             parser: lazyShikiParser(),
             languageExtractor: (node) => (node.attrs.language as string) ?? '',
           }))
