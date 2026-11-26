@@ -307,7 +307,7 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
       %w[read comment suggest edit].map { |mode| "/d/#{@document.slug}/#{mode}" }
     paths.product(requests).each do |path, headers|
       get path, headers: browser.merge(headers)
-      assert_not_equal 409, response.status, "#{path} #{headers}"
+      assert_includes [ 200, 301, 303 ], response.status, "#{path} #{headers}"
       assert_equal "pending", @document.reload.seed_state, "#{path} #{headers}"
     end
   end

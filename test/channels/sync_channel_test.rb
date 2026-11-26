@@ -440,8 +440,9 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert_equal true, transmissions.last["seed_pending"]
     doc.update!(link_access: "comment", seed_state: "pending", seed_claimed_at: nil)
 
-    perform :receive, { "type" => "seed-request", "cid" => "reader" }
-
+    assert_no_difference -> { transmissions.length } do
+      perform :receive, { "type" => "seed-request", "cid" => "reader" }
+    end
     assert_equal "pending", doc.reload.seed_state
   end
 
