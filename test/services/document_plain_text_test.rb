@@ -99,4 +99,18 @@ class DocumentPlainTextTest < ActiveSupport::TestCase
       refute_includes result, "Sketch:" # not recognized as a sketch
     end
   end
+
+  test "a bounded read is a prefix of the full text at least as long as asked" do
+    content = "# Title\n\n" + (1..40).map { |i| "Word#{i}   **bold** , then [link](https://example.com)." }.join("\n\n")
+    full = DocumentPlainText.call(format: "markdown", content:)
+
+    [ 1, 50, 400, full.length, full.length + 1_000 ].each do |at_least|
+      fragment = DocumentPlainText.fragment(format: "markdown", content:)
+      text = DocumentPlainText.text(fragment, format: "markdown", at_least:)
+      assert full.start_with?(text)
+      assert_operator text.length, :>=, [ at_least, full.length ].min
+    end
+    fragment = DocumentPlainText.fragment(format: "markdown", content:)
+    assert_operator DocumentPlainText.text(fragment, format: "markdown", at_least: 50).length, :<, full.length
+  end
 end
