@@ -4,6 +4,7 @@ import { TextSelection } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import type { EditorHandle } from '../editor/milkdown_editor'
 import { clearHighlight, domRange, setHighlight, supportsHighlights } from '../lib/highlights'
+import { dispatchIntoView } from '../lib/scroll_to_selection'
 import { useMarginStack } from '../lib/use_margin_stack'
 import {
   SuggestionCardBody,
@@ -135,8 +136,7 @@ export function MarginAnnotations({ items, comments, anchorRanges, handle, focus
           const tr = view.state.tr.setSelection(
             TextSelection.create(view.state.doc, Math.min(from, max), Math.min(to, max)),
           )
-          tr.scrollIntoView()
-          view.dispatch(tr)
+          dispatchIntoView(view, tr)
         })
       } catch {
         // editor torn down mid-navigation
