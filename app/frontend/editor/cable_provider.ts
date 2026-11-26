@@ -160,7 +160,7 @@ export class CableProvider {
   private localSeed = false
   // The local doc was superseded and the page is reloading: nothing more is
   // sent from it or merged into it.
-  private discarded = false
+  discarded = false
   // Peer updates that arrived while `seedClaim` was unsettled. Merging them
   // into a seed the server then refuses would double the text.
   private heldUpdates: Uint8Array[] = []
@@ -459,6 +459,7 @@ export class CableProvider {
     const snapInFlight = this.inFlight
     const snapQueued = this.queuedUpdate
     const pending = this.mergedUnackedUpdate()
+    const sentClaim = this.seedClaim
     if (!pending && !snapshot) return
 
     const updatePayload = {
@@ -497,7 +498,10 @@ export class CableProvider {
       .then(async (response) => {
         if (response.status === 409) {
           const refusal = (await response.json().catch(() => null)) as { seed_refused?: boolean } | null
-          if (refusal?.seed_refused && !this.destroyed) this.discardLocalSeed()
+          // Before the handshake this client may still be granted the claim
+          // anew, so the handshake decides.
+          const current = this.synced && this.seedClaim === sentClaim
+          if (refusal?.seed_refused && current && !this.destroyed) this.discardLocalSeed()
         }
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         if (this.destroyed || this.discarded) return

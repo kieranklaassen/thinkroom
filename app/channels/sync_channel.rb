@@ -156,6 +156,7 @@ class SyncChannel < ApplicationCable::Channel
 
   def transmit_handshake
     granted = claim_seed?
+    claimed_at = @document.seed_claimed_at if granted
     seed_claim = @document.seed_claim_token if granted
     # Decided before the state is read: content landing in between then travels
     # with the flag, where the other order would send an unmarked empty state.
@@ -165,6 +166,7 @@ class SyncChannel < ApplicationCable::Channel
       # Remember the grant so a "seed-decline" from this subscriber can
       # release exactly this claim (and only at this generation).
       @granted_seed_generation = @document.content_generation
+      @granted_seed_claimed_at = claimed_at
       message[:seed] = true
       message[:seed_claim] = seed_claim
       add_seed(message)
@@ -373,14 +375,15 @@ class SyncChannel < ApplicationCable::Channel
   # SEED_CLAIM_TIMEOUT expires. The conditional UPDATE only releases a
   # still-unconsumed claim at the granted generation: a merge that already
   # flipped seed_state to "seeded", or a replacement that advanced the
-  # generation, leaves the row untouched.
+  # generation, or another client's newer claim, leaves the row untouched.
   def decline_seed_claim
     generation = @granted_seed_generation
     return unless generation
 
     @granted_seed_generation = nil
     Document
-      .where(id: @document.id, seed_state: "claimed", content_generation: generation)
+      .where(id: @document.id, seed_state: "claimed", content_generation: generation,
+             seed_claimed_at: @granted_seed_claimed_at)
       .update_all(seed_state: "pending", seed_claimed_at: nil)
   end
 end

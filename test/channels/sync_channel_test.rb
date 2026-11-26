@@ -234,6 +234,19 @@ class SyncChannelTest < ActionCable::Channel::TestCase
     assert_equal 1, doc.reload.yjs_document_updates.count
   end
 
+  test "a late seed-decline leaves a newer claim at the same generation alone" do
+    doc = Document.create!(title: "LateDecline", seed_markdown: "# Template")
+    subscribe slug: doc.slug
+
+    travel Document::SEED_CLAIM_TIMEOUT + 1.second do
+      other = Document.find(doc.id)
+      assert other.try_claim_seed
+      perform :receive, { "type" => "seed-decline", "cid" => "late" }
+      assert_equal "claimed", doc.reload.seed_state
+      assert_equal other.seed_claim_token, doc.seed_claim_token
+    end
+  end
+
   test "an ungranted handshake carries no claim" do
     doc = Document.create!(title: "NoClaim", seed_markdown: "# Template")
     assert doc.try_claim_seed

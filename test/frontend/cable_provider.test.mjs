@@ -579,24 +579,52 @@ test('a reconnecting claimant adopts a renewed claim without taking the template
   assert.equal(h.sentUpdates()[0].seed_claim, 'claim-b')
 })
 
-test('an HTTP seed write the server refuses is dropped', async (t) => {
+function refuseSeedPosts(t) {
   const originalFetch = globalThis.fetch
   const bodies = []
+  const answers = []
   globalThis.fetch = (_url, init) => {
     bodies.push(JSON.parse(init.body))
-    return Promise.resolve({ ok: false, status: 409, json: async () => ({ seed_refused: true }) })
+    return new Promise((resolve) =>
+      answers.push(() => resolve({ ok: false, status: 409, json: async () => ({ seed_refused: true }) })),
+    )
   }
   t.after(() => {
     globalThis.fetch = originalFetch
   })
+  return { bodies, answer: async () => { answers.shift()(); await pause(10) } }
+}
+
+test('an HTTP seed write refused for the claim still held is dropped', async (t) => {
+  const post = refuseSeedPosts(t)
   const h = claimantHarness(t)
   const events = recordEvents(h)
   h.provider.persistCurrentState()
-  await pause(10)
-  assert.equal(bodies[0].seed_claim, 'claim-a')
-  assert.deepEqual(events, ['stale'])
+  assert.equal(post.bodies[0].seed_claim, 'claim-a')
   h.receive(pendingSyncFrame())
-  assert.equal(h.sentUpdates().length, 0)
+  await post.answer()
+  assert.deepEqual(events, ['synced', 'stale'])
+})
+
+test('a refusal for an older claim does not discard the renewed one, in either order', async (t) => {
+  const renewed = { ...emptySyncFrame(1), seed: true, seed_content: 'body', seed_claim: 'claim-b' }
+  const post = refuseSeedPosts(t)
+
+  const grantFirst = claimantHarness(t)
+  const grantFirstEvents = recordEvents(grantFirst)
+  grantFirst.provider.persistCurrentState()
+  grantFirst.receive(renewed)
+  await post.answer()
+  assert.deepEqual(grantFirstEvents, ['synced'])
+
+  const refusalFirst = claimantHarness(t)
+  const refusalFirstEvents = recordEvents(refusalFirst)
+  refusalFirst.provider.persistCurrentState()
+  await post.answer()
+  assert.deepEqual(refusalFirstEvents, [], 'the handshake decides')
+  refusalFirst.receive(renewed)
+  assert.deepEqual(refusalFirstEvents, ['synced'])
+  assert.equal(refusalFirst.sentUpdates()[0].seed_claim, 'claim-b')
 })
 
 test('an accepted HTTP seed write settles the claim', async (t) => {

@@ -473,6 +473,8 @@ function CollabEditor({
     const rejected = () => callbacksRef.current.onRejected?.()
     provider.on('stale', stale)
     provider.on('rejected', rejected)
+    // Discarded while no editor was listening (a remount reusing the session).
+    if (provider.discarded) stale()
 
     let cancelled = false
     let unbindMermaidHints: (() => void) | null = null
@@ -585,6 +587,9 @@ function CollabEditor({
       callbacksRef.current.onStatus?.('live')
     }
 
+    // Per grant, not per source: a refused claimant that reloads and wins the
+    // same source again must be able to apply it.
+    const seedGrant = `${seedVersion}:${seedClaim}`
     // A hydrated doc binds immediately — no visible empty-editor frame. A
     // fresh doc whose seed claim arrived with the page response also binds
     // immediately, applying the template from props (the one-shot consume in
@@ -593,8 +598,8 @@ function CollabEditor({
     // someone else holds the claim — waits for content or the channel's grant.
     if (provider.synced || ydoc.store.clients.size > 0) {
       start()
-    } else if (seedGranted && seedContent && !seedAlreadyApplied(slug, seedVersion)) {
-      markSeedApplied(slug, seedVersion)
+    } else if (seedGranted && seedContent && !seedAlreadyApplied(slug, seedGrant)) {
+      markSeedApplied(slug, seedGrant)
       provider.seedContent = seedContent
       provider.seedClaim = seedClaim ?? null
       provider.seedFormat = contentFormat
