@@ -179,7 +179,7 @@ export interface EditorProps {
 const REFUSED_EDIT_NOTICE =
   'That edit was not applied: it would push this document past its 2 MB limit.'
 const UNSAVEABLE_NOTICE =
-  'Your latest changes are not saved: one of them is too large to save. Copy what you need before you reload or leave this page.'
+  'Your latest changes are not saved: one of them is too large or was refused. Copy what you need before you reload or leave this page.'
 const SNAPSHOT_TOO_LARGE_NOTICE =
   'This document is over the 2 MB source limit, so its saved copy is stale. Shorten it to keep agents and previews current.'
 

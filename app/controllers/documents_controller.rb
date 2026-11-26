@@ -439,15 +439,12 @@ class DocumentsController < InertiaController
     YjsPersistence.merge_updates(
       document, decoded, generation:, seed_claim: params[:seed_claim], token: owner_token, user: current_user
     )
-    # Last first: an editor holds the pieces of a split edit until the first
-    # arrives, so it never shows half of one.
-    updates.reverse_each do |update|
-      SyncChannel.broadcast_to(document, {
-        type: "update",
-        update:,
-        cid: params[:cid].to_s.presence || "http-sync"
-      })
-    end
+    # One message, so no editor shows half of a split edit.
+    SyncChannel.broadcast_to(document, {
+      type: "update",
+      **(updates.one? ? { update: updates.first } : { updates: }),
+      cid: params[:cid].to_s.presence || "http-sync"
+    })
 
     if params.key?(:content)
       content = params[:content].to_s

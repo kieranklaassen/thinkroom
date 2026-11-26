@@ -22,6 +22,7 @@
 #                              { type: "seed-decline", cid }                         # hand back a seed claim this handshake granted;
 #                              # sent when the local doc predates a replacement, or holds content and no seed of its own to store
 #                              { type: "seed-request", cid }                         # waiting writer retries the claim; answered with a "sync"
+#   server -> peers          : { type: "update", updates, cid }                     # one edit split to fit, saved over HTTP; applied whole
 #   server -> peers          : { type: "awareness-leave", cid, client_id }           # emitted on subscriber disconnect
 # All client messages are broadcast to every subscriber (sender filters its own
 # via cid); update/sync-reply are persisted before broadcast and acknowledged

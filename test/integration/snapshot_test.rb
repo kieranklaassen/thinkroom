@@ -111,7 +111,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert_equal "pending", suggestion.reload.status
   end
 
-  test "sync_update stores a split edit whole and relays it last piece first" do
+  test "sync_update stores a split edit whole and relays it in one message" do
     client = Y::Doc.new
     text = client.get_text("t")
     text << "first "
@@ -126,7 +126,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
            as: :json
     end
     assert_response :no_content
-    assert_equal [ second, first ], relayed.pluck("update")
+    assert_equal [ [ first, second ] ], relayed.pluck("updates")
     state, = YjsPersistence.state_b64(@document.reload)
     stored = Y::Doc.new
     stored.apply_update(Base64.strict_decode64(state))

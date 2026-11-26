@@ -40,9 +40,8 @@ const NO_DELETES = Uint8Array.from([0])
 
 /**
  * Splits one client's v1 update into updates of at most `limit` bytes, in clock
- * order. They are one edit: a Yjs document given them last first shows nothing
- * until it has the first, which carries the deletions, and then all of it.
- * y-prosemirror deletes a half-built node that its schema does not allow.
+ * order. They are one edit and must be applied as one: y-prosemirror deletes a
+ * half-built node that its schema does not allow.
  *
  * Null when it cannot be done: a single value over the limit, or structs of
  * several clients.
@@ -86,9 +85,17 @@ export function splitUpdate(update: Uint8Array, limit: number): Uint8Array[] | n
       }
       if (!(struct instanceof Y.Item) || !(struct.content instanceof Y.ContentString)) return null
       const text = struct.content.str
-      // At most 3 bytes per UTF-16 unit, and the rest of the item unchanged.
-      const around = bytes.length - new TextEncoder().encode(text.slice(offset)).length
-      let end = offset + Math.floor((room() - around) / 3)
+      const utf8 = (from: string) => new TextEncoder().encode(from).length
+      // The item without its text.
+      const budget = room() - (bytes.length - utf8(text.slice(offset)))
+      if (budget <= 0) return null
+      let take = budget
+      for (;;) {
+        const length = utf8(text.slice(offset, offset + take))
+        if (length <= budget) break
+        take = Math.min(take - 1, Math.floor((take * budget) / length))
+      }
+      let end = offset + take
       if (end > offset && /[\uD800-\uDBFF]/.test(text[end - 1])) end -= 1
       if (end <= offset) return null
       struct.content.str = text.slice(0, end)

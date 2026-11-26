@@ -53,6 +53,8 @@ type SyncMessage = {
    *  document was replaced since this client last synced) rather than a
    *  locked-link permission denial. */
   stale?: boolean
+  /** One edit in pieces, to be applied together. */
+  updates?: string[]
 }
 
 const AWARENESS_THROTTLE_MS = 100
@@ -113,6 +115,9 @@ const fitsKeepalive = (bytes: number): boolean =>
 const isEmptyUpdate = (update: Uint8Array): boolean =>
   update.length === EMPTY_UPDATE.length && update.every((byte, i) => byte === EMPTY_UPDATE[i])
 
+/** What an HTTP save came back with. */
+type SaveAnswer = { status: number; seedRefused: boolean }
+
 export type ProviderEvent = 'synced' | 'seed' | 'rejected' | 'write-denied' | 'stale' | 'unsaveable'
 
 /** Origin tag for the page's server-rendered Yjs state applied at session
@@ -172,10 +177,10 @@ export class CableProvider {
   // What the server takes in place of an update too large for it, or null when
   // it cannot be split.
   private pieces = new WeakMap<Uint8Array, Uint8Array[] | null>()
-  private uploading = new WeakSet<Uint8Array>()
-  // The server refused an edit for good. Sending it again cannot help, and
-  // every later edit builds on it.
-  private refused = false
+  private upload: { part: Uint8Array; abort: AbortController } | null = null
+  // An edit the server refused. Not sent again on this connection, and every
+  // later edit builds on it.
+  private refusedPart: Uint8Array | null = null
   private ackTimer: ReturnType<typeof setTimeout> | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryAttempt = 0
@@ -229,6 +234,9 @@ export class CableProvider {
           this.clearRetryTimer()
           this.stopSeedWait()
           this.requeueInFlight()
+          this.refusedPart = null
+          // Its connection may be gone too, and nothing else would end it.
+          this.upload?.abort.abort()
           this.clearAwarenessThrottle()
           // Refresh the ActionCable subscription identifier while the socket is
           // closed so the next automatic reload() carries our latest checksum,
@@ -326,7 +334,7 @@ export class CableProvider {
   private enqueue(update: Uint8Array): void {
     const last = this.queued[this.queued.length - 1]
     const fits = last && last.length + update.length + MERGE_BYTES_PER_PART <= MAX_UPDATE_BYTES
-    if (last && fits && !this.carriedBySave.has(last)) {
+    if (last && fits && last !== this.refusedPart && !this.carriedBySave.has(last)) {
       this.queued[this.queued.length - 1] = Y.mergeUpdates([last, update])
     } else {
       this.queued.push(update)
@@ -397,7 +405,7 @@ export class CableProvider {
     this.inFlight = null
     this.queued = []
     this.retryAttempt = 0
-    this.refused = false
+    this.refusedPart = null
   }
 
   private stopSeedWait(): void {
@@ -479,8 +487,8 @@ export class CableProvider {
     const batch = this.nextBatch()
     const oversized = batch.length === 0
     const parts = oversized ? this.queued.slice(0, 1) : batch
-    if (this.uploading.has(parts[0])) return
-    if (this.refused || !this.piecesOf(parts[0])) {
+    if (this.upload?.part === parts[0]) return
+    if (this.refused() || !this.piecesOf(parts[0])) {
       this.emit('unsaveable')
       return
     }
@@ -489,7 +497,7 @@ export class CableProvider {
     const seq = this.updateSequence
     this.inFlight = { seq, parts }
     if (oversized) {
-      this.upload(parts[0])
+      this.startUpload(parts[0])
       return
     }
     this.send({
@@ -502,24 +510,33 @@ export class CableProvider {
     this.ackTimer = setTimeout(() => this.handleAckTimeout(seq), this.ackTimeoutMs)
   }
 
+  private refused(): boolean {
+    return this.refusedPart !== null && this.unackedParts().includes(this.refusedPart)
+  }
+
   // No frame holds this part, so it goes over HTTP, whose answer is its receipt.
-  private upload(part: Uint8Array): void {
-    this.uploading.add(part)
-    void this.save([part]).then((status) => {
-      this.uploading.delete(part)
-      if (this.destroyed || this.discarded || (status !== null && status < 300)) {
+  private startUpload(part: Uint8Array): void {
+    const upload = { part, abort: new AbortController() }
+    this.upload = upload
+    void this.save([part], undefined, upload.abort.signal).then(({ status, seedRefused }) => {
+      if (this.upload === upload) this.upload = null
+      if (this.destroyed || this.discarded) return
+      if (this.inFlight?.parts.includes(part)) this.requeueInFlight()
+      // Saved, or given up with the rest of the outbox.
+      if (!this.queued.includes(part)) {
         this.flush('update')
         return
       }
-      if (this.inFlight?.parts.includes(part)) this.requeueInFlight()
-      // Gone from the outbox: settled by another save, or given up with it.
-      if (!this.queued.includes(part)) return
-      const permanent = status !== null && status >= 400 && status < 500 && ![408, 429].includes(status)
-      if (permanent) {
-        this.refused = true
-        this.emit('unsaveable')
-      } else {
+      if (status < 400 || status >= 500 || status === 408 || status === 429 || seedRefused) {
         this.scheduleRetry()
+      } else if (status === 409) {
+        // As for a frame refused as stale: the document was replaced.
+        this.clearOutbox()
+        this.emit('stale')
+      } else {
+        this.refusedPart = part
+        this.emit('unsaveable')
+        if (status === 423) this.emit('write-denied')
       }
     })
   }
@@ -555,15 +572,19 @@ export class CableProvider {
   persistCurrentState = (snapshot?: DurableSnapshotPayload): void => {
     if (!this.canWrite || this.discarded) return
     const unacked = this.unackedParts()
-    const stuck = this.refused ? 0 : unacked.findIndex((part) => !this.piecesOf(part))
+    const stuck = this.refused() ? 0 : unacked.findIndex((part) => !this.piecesOf(part))
     const parts = stuck === -1 ? unacked : unacked.slice(0, stuck)
     const withheld = parts.length < unacked.length
     if (withheld) this.emit('unsaveable')
     if (parts.length > 0 || (snapshot && !withheld)) void this.save(parts, withheld ? undefined : snapshot)
   }
 
-  // The HTTP status, or null when no answer came.
-  private save(parts: Uint8Array[], snapshot?: DurableSnapshotPayload): Promise<number | null> {
+  // Status 0 when no answer came.
+  private save(
+    parts: Uint8Array[],
+    snapshot?: DurableSnapshotPayload,
+    signal?: AbortSignal,
+  ): Promise<SaveAnswer> {
     const pending = parts.length > 0 ? Y.mergeUpdates(parts) : EMPTY_UPDATE
     const sentClaim = this.seedClaim
     parts.forEach((part) => this.carriedBySave.add(part))
@@ -604,28 +625,31 @@ export class CableProvider {
       headers: jsonHeaders(),
       body,
       keepalive,
+      signal,
     })
       .then(async (response) => {
+        let seedRefused = false
         if (response.status === 409) {
           const refusal = (await response.json().catch(() => null)) as { seed_refused?: boolean } | null
           // Before the handshake this client may still be granted the claim
           // anew, so the handshake decides.
           const current = this.synced && this.seedClaim === sentClaim
-          if (refusal?.seed_refused && current && !this.destroyed) this.discardLocalSeed()
+          seedRefused = refusal?.seed_refused === true
+          if (seedRefused && current && !this.destroyed) this.discardLocalSeed()
         }
         if (!response.ok) {
           console.warn('CableProvider: durable sync failed', new Error(`HTTP ${response.status}`))
-          return response.status
+          return { status: response.status, seedRefused }
         }
-        if (this.destroyed || this.discarded) return response.status
+        if (this.destroyed || this.discarded) return { status: response.status, seedRefused }
         if (parts.length > 0) this.settleSeedClaim()
         this.settleParts(parts)
         this.flush('update')
-        return response.status
+        return { status: response.status, seedRefused }
       })
       .catch((error) => {
         console.warn('CableProvider: durable sync failed', error)
-        return null
+        return { status: 0, seedRefused: false }
       })
       .finally(() => {
         if (keepalive) keepaliveBytesInFlight -= bodyBytes
@@ -744,7 +768,7 @@ export class CableProvider {
           this.scheduleRetry()
         } else if (data.reason === 'oversized') {
           this.requeueInFlight()
-          this.refused = true
+          this.refusedPart = this.queued[0]
           this.emit('unsaveable')
         } else {
           console.warn('CableProvider: server rejected update', data.reason)
@@ -758,7 +782,9 @@ export class CableProvider {
       case 'sync-reply':
         this.serverChecksum = null
         try {
-          const update = fromBase64(data.update!)
+          const update = data.updates
+            ? Y.mergeUpdates(data.updates.map(fromBase64))
+            : fromBase64(data.update!)
           if (this.localSeed) {
             if (!isEmptyUpdate(update)) this.discardLocalSeed()
             break
@@ -878,10 +904,11 @@ export class CableProvider {
 
   private handleUnload = (event?: BeforeUnloadEvent): void => {
     // Too large to outlive the page, so ask before it goes.
-    if (this.refused || this.unackedParts().some((part) => part.length > MAX_UPDATE_BYTES)) {
-      event?.preventDefault()
-    }
-    removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload')
+    const unacked = this.unackedParts().reduce((bytes, part) => bytes + part.length, 0)
+    const ask = event !== undefined && (this.refused() || unacked > MAX_UPDATE_BYTES)
+    if (ask) event.preventDefault()
+    // Whoever stays is still here.
+    else removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload')
     if (this.inFlight || this.queued.length > 0) {
       this.persistCurrentState()
     }
