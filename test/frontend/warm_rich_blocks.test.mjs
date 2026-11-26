@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { registerHooks } from 'node:module'
 import path from 'node:path'
 import test from 'node:test'
@@ -330,4 +330,42 @@ test('an idle load that fails is ignored', async () => {
   runIdle()
   await settle() // an unhandled rejection would fail this test
   assert.equal(loads.shiki, 1)
+})
+
+// Follows the imports a module runs at load, from its transpiled source, where
+// type-only imports are gone. Dynamic imports are what may load the libraries.
+const FRONTEND = fileURLToPath(new URL('../../app/frontend/', import.meta.url))
+const staticImports = (file) => {
+  const fileName = path.join(FRONTEND, file)
+  const { outputText } = ts.transpileModule(readFileSync(fileName, 'utf8'), {
+    fileName,
+    compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+  })
+  return ts.createSourceFile(fileName, outputText, ts.ScriptTarget.ES2022).statements
+    .flatMap((statement) => statement.moduleSpecifier?.text ?? [])
+}
+const resolveModule = (specifier, importer) => {
+  const base = /^[@~]\//.test(specifier)
+    ? specifier.slice(2)
+    : path.posix.join(path.posix.dirname(importer), specifier)
+  const file = ['', '.ts', '.tsx', '/index.ts', '/index.tsx']
+    .map((suffix) => base + suffix)
+    .find((candidate) => statSync(path.join(FRONTEND, candidate), { throwIfNoEntry: false })?.isFile())
+  assert.ok(file, `${importer} imports ${specifier}, which was not found`)
+  return file
+}
+
+test('the document page imports no drawing tools, and shiki only in the highlighter', () => {
+  const files = new Set(['pages/documents/show.tsx'])
+  const heavy = []
+  for (const file of files) {
+    if (!/\.tsx?$/.test(file)) continue
+    for (const specifier of staticImports(file)) {
+      if (/^(\.|[@~]\/)/.test(specifier)) files.add(resolveModule(specifier, file))
+      else if (/^(@excalidraw|@shikijs|shiki)(\/|$)/.test(specifier)) heavy.push(`${file}: ${specifier}`)
+    }
+  }
+  assert.ok(files.has('editor/milkdown_editor.tsx'), 'the walk missed the editor')
+  // The entry itself; it loads grammars and themes on demand.
+  assert.deepEqual(heavy, ['editor/highlighter.ts: shiki'])
 })
