@@ -1,6 +1,6 @@
 import type { Transaction } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import { blockOnScreen, headBlock, headElement, holdHead } from '../editor/scroll_settle'
+import { blockOnScreen, headBlock, headElement, holdHead, selectionMoves } from '../editor/scroll_settle'
 
 // Where a jump puts its text, as a share of the window height.
 const JUMP_LINE = 0.4
@@ -33,7 +33,8 @@ export function dispatchIntoView(view: EditorView, tr: Transaction): void {
 
 /** A jump is over once the person scrolls, points, types or selects something
  *  else, or another jump starts. Input events are what tell their scrolling
- *  from the browser's own scroll anchoring. */
+ *  from the browser's own scroll anchoring. A change to the document elsewhere
+ *  moves the target, and the jump follows it. */
 function startJump(view: EditorView): () => boolean {
   lastJump?.abort()
   const jump = new AbortController()
@@ -41,8 +42,8 @@ function startJump(view: EditorView): () => boolean {
   for (const type of ['wheel', 'touchmove', 'pointerdown', 'keydown']) {
     window.addEventListener(type, () => jump.abort(), { capture: true, passive: true, signal: jump.signal })
   }
-  const { head } = view.state.selection
-  return () => jump.signal.aborted || view.isDestroyed || view.state.selection.head !== head
+  const selectionMoved = selectionMoves(view)
+  return () => jump.signal.aborted || view.isDestroyed || selectionMoved()
 }
 
 function placeHead(view: EditorView, isOver: () => boolean): void {
