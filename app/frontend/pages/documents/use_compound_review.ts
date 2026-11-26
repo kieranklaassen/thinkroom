@@ -2,30 +2,9 @@ import { useCallback, useMemo } from 'react'
 import { router } from '@inertiajs/react'
 import type { CompoundPanelProps } from '../../components/compound_panel'
 import type { FindingCardsSource } from '../../components/finding_margin_cards'
-import type { EditorHandle } from '../../editor/milkdown_editor'
-import type {
-  WritingFindingPayload,
-  WritingPackPayload,
-  WritingPassPayload,
-  WritingReviewerPayload,
-} from '../../types/payloads'
+import type { WritingFindingPayload, WritingReviewerPayload } from '../../types/payloads'
 import { useFindingAnchors } from './use_finding_anchors'
-import { useWritingPass } from './use_writing_pass'
-
-interface Options {
-  slug: string
-  /** undefined: not loaded (optional prop outside Comment mode); null: no pass yet. */
-  pass: WritingPassPayload | null | undefined
-  reviewers: WritingReviewerPayload[]
-  packs: WritingPackPayload[]
-  /** True while the page is in Comment mode for a featured account. */
-  active: boolean
-  enabled: boolean
-  canWrite: boolean
-  handle: EditorHandle | null
-  identityName: string
-  docTick: number
-}
+import { useWritingPass, type WritingPassOptions } from './use_writing_pass'
 
 export interface CompoundReview {
   /** Reload the pass prop (cable event). */
@@ -44,30 +23,9 @@ export interface CompoundReview {
  * anchor back into the live doc and paint through the Custom Highlight API
  * while Comment mode is active for a featured account.
  */
-export function useCompoundReview({
-  slug,
-  pass,
-  reviewers,
-  packs,
-  active,
-  enabled,
-  canWrite,
-  handle,
-  identityName,
-  docTick,
-}: Options): CompoundReview {
-  const writing = useWritingPass({
-    slug,
-    pass,
-    reviewers,
-    packs,
-    active,
-    enabled,
-    canWrite,
-    handle,
-    identityName,
-    docTick,
-  })
+export function useCompoundReview(options: WritingPassOptions): CompoundReview {
+  const { pass, reviewers, packs, active, enabled, canWrite, handle, docTick } = options
+  const writing = useWritingPass(options)
   const visibleKeys = useMemo(
     () => new Set(reviewers.filter((reviewer) => !writing.off.has(reviewer.key)).map((reviewer) => reviewer.key)),
     [reviewers, writing.off],
