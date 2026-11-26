@@ -191,6 +191,14 @@ module LogContent
     end
   end
 
+  # Redirects in the routes are logged without config.filter_redirect.
+  module RouteRedirects
+    def redirect(event)
+      hidden = event.payload[:location].to_s.match?(Regexp.union(Rails.application.config.filter_redirect))
+      super(hidden ? event.dup.tap { |copy| copy.payload = event.payload.merge(location: FILTERED) } : event)
+    end
+  end
+
   module RescuedExceptions
     def rescue_from_callback(event)
       super(event.dup.tap { |copy| copy.payload = event.payload.merge(exception: LogContent.without_message(event.payload[:exception])) })
@@ -295,6 +303,7 @@ module LogContent
 
   override ActionDispatch::Request, Request
   override ActionDispatch::DebugExceptions, Exceptions
+  override ActionDispatch::LogSubscriber, RouteRedirects
   override ActionController::LogSubscriber, RescuedExceptions
   override ActionCable::Connection::Subscriptions, CableSubscriptions
   override ActiveStorage::LogSubscriber, StorageUrls

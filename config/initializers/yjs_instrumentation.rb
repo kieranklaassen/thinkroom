@@ -44,8 +44,8 @@ Rails.application.config.after_initialize do
        sequence expected_sequence error].each do |key|
       fields[key] = payload[key] if payload.key?(key)
     end
-    # The class only: a message can quote the payload it failed on.
-    fields[:error] ||= payload[:exception].first if payload[:exception]
+    # The class, with a message where LogContent keeps one.
+    fields[:error] ||= LogContent.title(payload[:exception_object]) if payload[:exception_object]
     line = fields.map { |key, value| "#{key}=#{value}" }.join(" ")
 
     Rails.logger.public_send(level, line)

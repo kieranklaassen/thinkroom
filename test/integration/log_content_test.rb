@@ -198,6 +198,7 @@ class LogContentTest < ActionDispatch::IntegrationTest
               /merge failed: ActiveRecord::StatementInvalid \| caused by SQLite3::FullException \| .*#{frame}/,
               /merge failed: NoMethodError \(undefined method 'missing_method'/,
               /SyncChannel: unsubscribe cleanup failed: RuntimeError \| .*#{frame}/ ]
+    keeps << /event=merge\.yjs .*error=RuntimeError$/ << /event=merge\.yjs .*error=NoMethodError \(undefined method 'missing_method'/
     assert_no_content_logged(keeps:) do
       connection, = connect_cable
       send_frame(connection, command: "subscribe", identifier:)
@@ -216,6 +217,9 @@ class LogContentTest < ActionDispatch::IntegrationTest
       end
       assert_raises(RuntimeError) do
         ActiveSupport::Notifications.instrument("merge.yjs", document_id: 1) { raise MARK }
+      end
+      assert_raises(NoMethodError) do
+        ActiveSupport::Notifications.instrument("merge.yjs", document_id: 1) { nil.missing_method }
       end
     end
   end
@@ -379,11 +383,13 @@ class LogContentTest < ActionDispatch::IntegrationTest
         end
       end
       assert_raises(RuntimeError) { SteppingJob.perform_now(MARK.reverse) }
+      assert_raises(RuntimeError) { ActiveSupport::Notifications.instrument("merge.yjs", document_id: 1) { raise MARK } }
     ensure
       Rails.env = previous
     end
     assert_match(/RuntimeError \(#{MARK}\):/, log)
     assert_match(/Error performing .*RuntimeError \(#{MARK}\)/, log)
+    assert_match(/event=merge\.yjs .*error=RuntimeError \(#{MARK}\)/, log)
   end
 
   test "upload objects under any part name" do
@@ -553,13 +559,17 @@ class LogContentTest < ActionDispatch::IntegrationTest
     image.write(Vips::Image.black(8, 8).write_to_buffer(".png"))
     image.rewind
 
-    assert_no_content_logged(keeps: [ %r{GET "/rails/active_storage/blobs/redirect/\[FILTERED\]"}, %r{GET "/rails/active_storage/disk/\[FILTERED\]"} ]) do
+    assert_no_content_logged(keeps: [ %r{GET "/rails/active_storage/blobs/redirect/\[FILTERED\]"}, %r{GET "/rails/active_storage/disk/\[FILTERED\]"}, /Redirected to \[FILTERED\]\nCompleted 301/ ]) do
       post api_uploads_path, headers: AGENT, params: { file: Rack::Test::UploadedFile.new(image.path, "image/png", true, original_filename: "#{MARK}.png") }
       assert_response :created
       get response.parsed_body.fetch("src")
       assert_response :redirect
       get response.location
       assert_response :success
+      host! "127.0.0.1"
+      get "/rails/active_storage/blobs/redirect/x/#{MARK}.png"
+      assert_redirected_to %r{\Ahttp://localhost.*#{MARK}}
+      host! "www.example.com"
       without_error_details do
         with_env_config("action_dispatch.show_exceptions" => :all) do
           %w[blobs/x representations/x/y blobs/proxy/x representations/redirect/x/y disk/x unknown].each do |route|
