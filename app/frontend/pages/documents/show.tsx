@@ -693,8 +693,14 @@ export default function DocumentShow({
           if (editorClickRaf) cancelAnimationFrame(editorClickRaf)
           editorClickRaf = requestAnimationFrame(() => {
             editorClickRaf = 0
-            const view = viewRef.current
-            if (view) handleSelection(view)
+            // Not viewRef: a first click where the cursor already starts
+            // reports no selection, so viewRef can still be null here.
+            try {
+              const view = handleRef.current?.editor.action((ctx) => ctx.get(editorViewCtx))
+              if (view) handleSelection(view)
+            } catch {
+              // editor torn down mid-navigation
+            }
           })
         }
         return

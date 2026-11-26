@@ -13,6 +13,7 @@ import {
   type HighlightGroup,
   type HighlightSnippet,
 } from '../../editor/text_highlighter'
+import { dispatchIntoView } from '../../lib/scroll_to_selection'
 import type { TextTarget } from './use_floating_chrome'
 
 interface Options {
@@ -81,8 +82,15 @@ export function useHighlighter({ handle, viewRef, docTick, textTarget, names, ca
   }, [canHighlight, viewRef, names, activeHighlightColor])
 
   const jumpToHighlight = useCallback((snippet: HighlightSnippet) => {
-    const view = viewRef.current
-    if (!view) return
+    if (!handle) return
+    // Not viewRef: it stays null until a selection reaches the page, and Read
+    // mode never reports one.
+    let view: EditorView
+    try {
+      view = handle.editor.action((ctx) => ctx.get(editorViewCtx))
+    } catch {
+      return // editor torn down mid-navigation
+    }
     // Positions come from the last scan; a remote edit landing between scan
     // and click could shift them. TextSelection.between snaps to the nearest
     // valid inline positions instead of throwing on a stale range.
@@ -91,10 +99,9 @@ export function useHighlighter({ handle, viewRef, docTick, textTarget, names, ca
     const tr = view.state.tr.setSelection(
       TextSelection.between(view.state.doc.resolve(snippet.from), view.state.doc.resolve(snippet.to)),
     )
-    tr.scrollIntoView()
-    view.dispatch(tr)
+    dispatchIntoView(view, tr)
     view.focus()
-  }, [viewRef])
+  }, [handle])
 
   return { highlightGroups, highlightSwatches, jumpToHighlight }
 }
