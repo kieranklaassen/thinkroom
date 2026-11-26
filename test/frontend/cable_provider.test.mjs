@@ -777,3 +777,26 @@ test('an ordinary 409 does not discard a claimant', async (t) => {
   assert.deepEqual(events, ['synced'])
   assert.equal(h.provider.seedClaim, 'claim-a')
 })
+
+test('a sync_update refused after access was revoked keeps the unsent edits', async (t) => {
+  const originalFetch = globalThis.fetch
+  // The server's answer to a refused write: 423 to a client asking for JSON,
+  // otherwise a redirect that fetch follows to an ordinary page.
+  globalThis.fetch = async (_url, init) =>
+    new Headers(init.headers).get('Accept') === 'application/json'
+      ? { ok: false, status: 423, redirected: false }
+      : { ok: true, status: 200, redirected: true }
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  const h = createHarness(t, { ackTimeoutMs: 5000 })
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'in flight')
+  h.doc.getText('t').insert(0, 'queued ')
+  h.provider.persistCurrentState()
+  await pause(10)
+
+  assert.ok(h.provider.inFlight, 'the refused update must not count as stored')
+  assert.ok(h.provider.queuedUpdate, 'the refused queued edit must not count as stored')
+})
