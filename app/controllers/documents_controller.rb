@@ -5,6 +5,12 @@ class DocumentsController < InertiaController
   SIGNED_IN_AUTO_CLAIM_WINDOW = 10.minutes
   MIN_RICH_CONTENT_WIDTH = 640
   MAX_RICH_CONTENT_WIDTH = 1_200
+  # What a home-page row and its ownership state read. The rest of a document
+  # row (both sources, the editor state, provenance) is megabytes a list never
+  # shows.
+  INDEX_COLUMNS = %i[
+    id title slug tags created_at owner_name owner_token user_id link_access
+  ].freeze
   INDEX_BACKGROUNDS = %w[morning terracotta paper night].freeze
 
   # SSR is scoped to the read-only document surfaces — #show (shell, header,
@@ -29,30 +35,32 @@ class DocumentsController < InertiaController
     row = ->(document) { index_document_props(document, week_start:, current_year: now.year, zone:) }
     # Signed-in ownership follows the account across browsers. Guests retain
     # the original permanent-cookie ownership model.
-    owned_all = current_user ? current_user.documents : Document.where(owner_token: owner_token)
+    owned_all = current_user ? Document.where(user_id: current_user.id) : Document.where(owner_token: owner_token)
     # Archived pages leave Contents and Pinned; they stay readable by link and
     # are listed on demand under Archived.
     owned = owned_all.where(archived_at: nil)
+    # One scan answers both counts: every page, then those with archived_at set.
+    counts = -> { @index_counts ||= owned_all.pick(Arel.sql("COUNT(*)"), Arel.sql("COUNT(archived_at)")) }
     # AR relations memoize their own load, so props sharing one relation run
     # its query once. List props are procs: a scoped partial reload (a pin,
     # a tag edit, a claim) runs only the queries its `only:` asks for.
-    yours = owned.order(created_at: :desc).limit(50)
+    yours = owned.select(*INDEX_COLUMNS).order(created_at: :desc).limit(50)
 
     # Recents are session-scoped: you see the documents you opened, not a
     # global listing of everyone's. The mechanism is unchanged — the display
     # just skips docs already shown under Your docs. Continue reading is the
     # newest recent that still exists, owned or not.
     slugs = Array(session[:recent_slugs])
-    recent_docs = Document.where(slug: slugs)
+    recent_docs = Document.where(slug: slugs).select(*INDEX_COLUMNS)
     recent_by_slug = -> { @recent_by_slug ||= recent_docs.index_by(&:slug) }
     with_ownership = ->(document) { row.(document).merge(document.ownership_props(owner_token, viewer_user: current_user)) }
 
     render inertia: "documents/index", props: {
       yours: -> { yours.map(&row) },
-      yours_count: -> { owned.count },
-      archived_count: -> { owned_all.where.not(archived_at: nil).count },
+      yours_count: -> { counts.call.then { |all, archived| all - archived } },
+      archived_count: -> { counts.call.last },
       archived: InertiaRails.optional {
-        owned_all.where.not(archived_at: nil).order(archived_at: :desc).limit(50).map(&row)
+        owned_all.where.not(archived_at: nil).select(*INDEX_COLUMNS).order(archived_at: :desc).limit(50).map(&row)
       },
       # Recent rows ("Shared with you") are documents opened here that the
       # viewer does not own — filtered by ownership, not the 50-row window,
@@ -69,12 +77,14 @@ class DocumentsController < InertiaController
       # still shows. The cap keeps this list complete, so the page derives
       # every star's state from it.
       pinned: -> {
-        DocumentPin.for_owner(user: current_user, token: owner_token)
-                   .joins(:document).where(documents: { archived_at: nil })
-                   .includes(:document)
-                   .order(created_at: :desc, id: :desc)
-                   .limit(DocumentPin::MAX_PER_OWNER)
-                   .map { |pin| with_ownership.(pin.document).merge(pinned_at: pin.created_at.iso8601) }
+        pins = DocumentPin.for_owner(user: current_user, token: owner_token)
+                          .order(created_at: :desc, id: :desc)
+                          .limit(DocumentPin::MAX_PER_OWNER)
+        pinned_at = DocumentPin.type_for_attribute(:created_at)
+        Document.where(archived_at: nil)
+                .joins(:document_pins).merge(pins)
+                .select(*INDEX_COLUMNS, "document_pins.created_at AS pinned_at")
+                .map { |document| with_ownership.(document).merge(pinned_at: pinned_at.deserialize(document[:pinned_at]).iso8601) }
       },
       continue_reading: -> {
         document = slugs.lazy.filter_map { |slug| recent_by_slug.()[slug] }.first
