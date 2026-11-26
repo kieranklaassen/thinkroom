@@ -335,18 +335,46 @@ class LogContentTest < ActionDispatch::IntegrationTest
         SolidCable::Message.broadcast("sync", { update: LARGE, title: MARK }.to_json)
       end
     end
+
+    ActiveRecord::Base.connection.execute("DROP TABLE solid_cable_messages") # keeps the cached schema
+    error = assert_raises(ActiveRecord::StatementInvalid) { SolidCable::Message.broadcast("sync", MARK) }
+    assert_match(/no such table/, error.message)
+    FORMS.each { |form| assert_not_includes error.full_message, form }
+    assert_nil error.cause
   ensure
     ActiveRecord::Base.connection.drop_table(:solid_cable_messages, if_exists: true)
+  end
+
+  test "uploaded file names in storage paths and redirects" do
+    image = Tempfile.new([ "pixel", ".png" ], binmode: true)
+    image.write(Vips::Image.black(8, 8).write_to_buffer(".png"))
+    image.rewind
+
+    assert_no_content_logged(keeps: [ %r{GET "/rails/active_storage/blobs/redirect/\[FILTERED\]"}, %r{GET "/rails/active_storage/disk/\[FILTERED\]"} ]) do
+      post api_uploads_path, headers: AGENT, params: { file: Rack::Test::UploadedFile.new(image.path, "image/png", true, original_filename: "#{MARK}.png") }
+      assert_response :created
+      get response.parsed_body.fetch("src")
+      assert_response :redirect
+      get response.location
+      assert_response :success
+    end
+  ensure
+    image&.close!
   end
 
   test "server rendering failures" do
     config = InertiaRails::Configuration.default
     config.ssr_raise_on_error = false
     config.on_ssr_error = InertiaRails.configuration.on_ssr_error
-    renderer = InertiaRails::SSRRenderer.new(config, page: { component: "documents/show", props: {} })
+    config.ssr_bundle = nil
+    failures = [ InertiaRails::SSRError.new(%("#{MARK}" is not valid JSON), type: "render"), Net::ReadTimeout.new(MARK) ]
 
-    assert_no_content_logged(keeps: /documents\/show render failed: InertiaRails::SSRError/) do
-      renderer.send(:handle_error, InertiaRails::SSRError.new(%("#{MARK}" is not valid JSON)))
+    assert_no_content_logged(keeps: [ /render failed: render$/, /documents\/show render failed: .*Net::ReadTimeout/ ]) do
+      failures.each do |failure|
+        renderer = InertiaRails::SSRRenderer.new(config, page: { component: "documents/show", props: {} })
+        renderer.define_singleton_method(:request) { raise failure }
+        assert_nil renderer.render
+      end
     end
   end
 

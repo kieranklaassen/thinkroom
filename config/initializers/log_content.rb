@@ -28,6 +28,11 @@ module LogContent
       super
     end
 
+    # Storage paths end in the file's name, and disk keys encode it.
+    def filtered_path
+      super.sub(%r{\A(/rails/active_storage/(?:blobs/|representations/)?(?:redirect|proxy|disk))/.*}m, "\\1/#{FILTERED}")
+    end
+
     private
 
     def log_parse_error_once
@@ -87,6 +92,9 @@ module LogContent
   module CableMessages
     def broadcast(channel, payload)
       ActiveRecord::Base.logger ? ActiveRecord::Base.logger.silence { super } : super
+    rescue ActiveRecord::StatementInvalid => e
+      # A database error can continue with the statement on further lines.
+      raise e.class, e.message.lines.first.to_s.chomp, e.backtrace, cause: nil
     end
   end
 
@@ -96,7 +104,15 @@ module LogContent
     def handle_error(error)
       return super if @configuration.ssr_raise_on_error
 
-      super(error.class.new("message withheld"))
+      # The renderer wraps other errors, such as timeouts, before this.
+      raised = $! unless $!.is_a?(InertiaRails::SSRError)
+      super(error.class.new((raised&.class || error.type || "render error").to_s, type: error.type))
+    end
+  end
+
+  module StorageUrls
+    def service_url(event)
+      debug event, "Generated URL for file at key: #{key_in(event)}"
     end
   end
 end
@@ -104,5 +120,6 @@ end
 ActionDispatch::Request.prepend LogContent::Request
 ActionDispatch::DebugExceptions.prepend LogContent::BadRequests
 ActionCable::Connection::Subscriptions.prepend LogContent::CableSubscriptions
+ActiveStorage::LogSubscriber.prepend LogContent::StorageUrls
 InertiaRails::SSRRenderer.prepend LogContent::ServerRendering
 Rails.application.config.to_prepare { SolidCable::Message.singleton_class.prepend LogContent::CableMessages }

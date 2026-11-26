@@ -27,6 +27,9 @@ Rails.application.config.filter_parameters << lambda do |_name, value|
   value.replace("[FILTERED]") if value.is_a?(String) && value.bytesize > 255
 end
 
+# Storage URLs end in the file's name, and disk keys encode it.
+Rails.application.config.filter_redirect << "/rails/active_storage/"
+
 # Rails copies the list to Active Record when that loads, which a gem does
 # before this file runs.
 ActiveSupport.on_load(:active_record) do
