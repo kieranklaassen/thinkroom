@@ -147,7 +147,13 @@ try {
   // afterwards it folds past three rows in an order the lenses' timing decides.
   // Read every row of the finished cards.
   const foldToggles = (label) => page.locator('.compound-card-more').filter({ hasText: label })
-  while (await foldToggles(/^Show \d+ more$/).count()) await foldToggles(/^Show \d+ more$/).first().click()
+  const clickAllFolds = async (label) => {
+    for (let clicks = 0; await foldToggles(label).count(); clicks += 1) {
+      if (clicks === 50) throw new Error(`the "${label}" toggle does not work`)
+      await foldToggles(label).first().click()
+    }
+  }
+  await clickAllFolds(/^Show \d+ more$/)
   const cards = await page.locator('.compound-card').evaluateAll((elements) => elements.map((card) =>
     [...card.querySelectorAll('.compound-card-row')].map((row) => [
       row.querySelector('.compound-card-reviewer')?.textContent,
@@ -155,7 +161,7 @@ try {
     ])))
   const quotes = (rows, quote) => rows.some(([reviewer, text]) => reviewer === 'AI check' && text === quote)
   check(cards.some((rows) => quotes(rows, 'utilize') && quotes(rows, 'leverage')), 'the paragraph\'s margin card groups the AI check findings on "utilize" and "leverage"')
-  while (await foldToggles('Show fewer').count()) await foldToggles('Show fewer').first().click()
+  await clickAllFolds('Show fewer')
   const aiCount = Number(await lensRow(page, 'AI check').locator('.compound-count').innerText())
   check(aiCount >= 4, `AI check reports its findings (${aiCount})`)
   check((await lensRow(page, 'Nemesis').locator('.compound-count').count()) === 0, 'a lens that is off has no count')

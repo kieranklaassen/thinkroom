@@ -28,6 +28,7 @@ export const openSeeded = async (page, url) => {
       .then(() => true, () => false)
     if (seeded) return
     if (Date.now() > deadline) throw new Error(`${url} is still blank after its seed grant lapsed`)
+    console.log(`! ${url} opened blank; waiting for its seed grant to lapse`)
   }
 }
 

@@ -913,12 +913,12 @@ try {
   await landing.goBack()
   await landing.waitForURL((url) => new URL(url).pathname === '/', { timeout: 15000 })
   await landing.waitForSelector('.notebook')
-  await waitForHome(landing)
   if ((await landing.locator('.notebook').getAttribute('data-background')) === 'night') {
     ok('the background choice survives Back navigation')
   } else {
     fail('Back navigation restored a stale background')
   }
+  await waitForHome(landing)
   await landing.getByRole('button', { name: 'Background' }).click()
   await landing.getByRole('radio', { name: /Morning/ }).click()
 
@@ -1249,8 +1249,16 @@ try {
   const taskA = await browser.newPage()
   const taskB = await browser.newPage()
   let blockTaskWebSocketUpdates = false
+  let taskConnectionsSynced = 0
   await taskA.routeWebSocket(/\/cable(?:\?|$)/, (socket) => {
     const server = socket.connectToServer()
+    let synced = false
+    server.onMessage((message) => {
+      socket.send(message)
+      if (synced || !String(message).includes('"type":"sync"')) return
+      synced = true
+      taskConnectionsSynced += 1
+    })
     socket.onMessage((message) => {
       try {
         const command = JSON.parse(String(message))
@@ -1266,8 +1274,21 @@ try {
   await taskB.goto(`${BASE}/d/${taskDoc.slug}/edit`)
   await waitForLive(taskA)
   await waitForLive(taskB)
-  // A reload can be served before the toggle's own request commits; the sync
-  // then brings it to the already-live editor.
+  // The page starts from the last compacted state, which can match by chance,
+  // so judge a reload only after its own connection has received the sync.
+  const reloadTaskSynced = async () => {
+    const before = taskConnectionsSynced
+    await taskA.reload()
+    await waitForLive(taskA)
+    const deadline = Date.now() + 30000
+    while (taskConnectionsSynced === before) {
+      if (Date.now() > deadline) throw new Error('no sync arrived after the task reload')
+      await taskA.waitForTimeout(50)
+    }
+    await taskA.waitForTimeout(250) // the frame has been sent; let the editor apply it
+  }
+  // The toggle's own request can commit after the reload was served; it then
+  // reaches the live editor as an update.
   const firstTaskBecomes = (checked) =>
     taskA
       .waitForFunction(
@@ -1316,8 +1337,7 @@ try {
   } else {
     fail(`checked task did not persist: ${JSON.stringify(taskMarkdown)}`)
   }
-  await taskA.reload()
-  await waitForLive(taskA)
+  await reloadTaskSynced()
   if (await firstTaskBecomes(true)) {
     ok('checked task survives reload')
   } else {
@@ -1329,8 +1349,7 @@ try {
   // WebSocket and debounced source snapshot time to settle first.
   blockTaskWebSocketUpdates = true
   await taskA.locator('.task-checkbox').nth(0).uncheck()
-  await taskA.reload()
-  await waitForLive(taskA)
+  await reloadTaskSynced()
   if (await firstTaskBecomes(false)) {
     ok('task toggle survives an immediate reload')
   } else {
@@ -1348,8 +1367,7 @@ try {
     { timeout: 5000 },
   )
   await taskA.locator('.task-checkbox').nth(0).check()
-  await taskA.reload()
-  await waitForLive(taskA)
+  await reloadTaskSynced()
   if (await firstTaskBecomes(true)) {
     ok('task toggle persists in Suggest mode')
   } else {
