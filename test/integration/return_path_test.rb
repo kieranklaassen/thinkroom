@@ -13,12 +13,13 @@ class ReturnPathTest < ActionDispatch::IntegrationTest
     "/%09/example.com", "/%0A/example.com", "/%0d%0aexample.com", "/%00", "/%7F", "/%2509/example.com", "/%25%32%66example.com", "/d/page?q=\n1", "/d/page?q=\u0001", "/d/page#\t", "//@/page",
     "https://example.com/page", "HTTPS://example.com", "https:/page", "https:page", "http://user@example.com/page",
     "http://www.example.com/d/page", "javascript:void(0)", "data:text/html,page",
-    "user@example.com/page", "@example.com", "example.com/page", "d/page", "?q=1", "#top", "/d/%zz"
+    "user@example.com/page", "@example.com", "example.com/page", "d/page", "?q=1", "#top", "/d/%zz",
+    "/d/%#{"25" * 600}41"
   ].freeze
 
   ACCEPTED = [
     "/", "/d/page", "/d/page/edit", "/d/page?view=1&next=%2Fd%2Fother", "/d/page?q=%5C%0A#part-2",
-    "/d/page#part%2Ftwo", "/d/page?url=https://example.com//page", "/d/page%20one", "/d/page/", "/?q=1", "/d/100%25", "/d/%FF",
+    "/d/page#part%2Ftwo", "/d/page?url=https://example.com//page", "/d/page%20one", "/d/page/", "/?q=1", "/d/100%25", "/d/%FF", "/d/#{"a" * 1021}",
     "/cli/authorize?code=ABCD-EFGH", "/cli/authorize?code=ABCD-EFGH#confirm"
   ].freeze
 
