@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useNotReady } from '../lib/use_not_ready'
 import { PopoverShell } from './popover_shell'
 
 export const INDEX_BACKGROUNDS = [
@@ -21,6 +22,8 @@ interface Props {
  * the pruf_background cookie, which the server reads for first paint.
  */
 export function BackgroundPicker({ value, onChange }: Props) {
+  const notReady = useNotReady()
+
   return (
     <PopoverShell
       rootClassName="share-root background-picker-root"
@@ -32,6 +35,7 @@ export function BackgroundPicker({ value, onChange }: Props) {
           className="notebook-bar-button"
           aria-haspopup="dialog"
           aria-expanded={open}
+          {...notReady}
           onClick={toggle}
         >
           <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
