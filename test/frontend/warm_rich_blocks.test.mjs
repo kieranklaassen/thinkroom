@@ -8,12 +8,15 @@ import ts from 'typescript'
 
 // The heavy packages are replaced by stubs that record being loaded; a `?n`
 // query on an app module gives each test its own fresh module state.
-const loads = (globalThis.richBlockLoads = { shiki: 0, excalidraw: 0, canvas: 0, shikiFails: false })
+const loads = (globalThis.richBlockLoads = { shiki: 0, excalidraw: 0, canvas: 0, shikiFails: false, sketchFails: false })
 const stub = (source) => `data:text/javascript,${encodeURIComponent(source)}`
 const STUBS = {
   shiki: stub(`export const createHighlighter = async () => {
-    globalThis.richBlockLoads.shiki += 1
-    if (globalThis.richBlockLoads.shikiFails) throw new Error('offline')
+    const loads = globalThis.richBlockLoads
+    loads.shiki += 1
+    // As in a browser: an import that failed once fails for good.
+    if (!navigator.onLine) loads.shikiFails = true
+    if (loads.shikiFails) throw new Error('remembered failure')
     return {}
   }`),
   '@milkdown/plugin-highlight/shiki': stub(`export const createParser = () => () => ['colored']`),
@@ -24,9 +27,13 @@ const COUNTED = { '@excalidraw/excalidraw': 'excalidraw', './excalidraw_canvas':
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
-    if (COUNTED[specifier]) loads[COUNTED[specifier]] += 1
+    if (COUNTED[specifier]) {
+      loads[COUNTED[specifier]] += 1
+      if (!navigator.onLine) loads.sketchFails = true
+      if (loads.sketchFails) throw new Error('remembered failure')
+    }
     if (STUBS[specifier]) return { url: STUBS[specifier], shortCircuit: true }
-    if (specifier.startsWith('./') && context.parentURL?.startsWith('file:')) {
+    if (/^\.\.?\//.test(specifier) && context.parentURL?.startsWith('file:')) {
       const parent = new URL(context.parentURL)
       const file = `${path.resolve(path.dirname(fileURLToPath(parent)), specifier)}.ts`
       if (existsSync(file)) {
@@ -57,8 +64,16 @@ const idleApi = {
 globalThis.window = {
   addEventListener: (event, handler) =>
     ({ online, load: onLoad })[event]?.add(handler),
-  removeEventListener: (event, handler) => event === 'load' && onLoad.delete(handler),
+  removeEventListener: (event, handler) => ({ online, load: onLoad })[event]?.delete(handler),
   ...idleApi,
+}
+const connection = { onLine: true }
+Object.defineProperty(globalThis, 'navigator', { value: connection, configurable: true })
+const reconnect = () => {
+  connection.onLine = true
+  const handlers = [...online]
+  online.clear() // every listener is { once: true }
+  handlers.forEach((handler) => handler())
 }
 globalThis.document = { readyState: 'complete' }
 const runIdle = () => idle.forEach(({ callback }) => callback())
@@ -66,7 +81,8 @@ const runIdle = () => idle.forEach(({ callback }) => callback())
 let instance = 0
 const fresh = async () => {
   instance += 1
-  Object.assign(loads, { shiki: 0, excalidraw: 0, canvas: 0, shikiFails: false })
+  Object.assign(loads, { shiki: 0, excalidraw: 0, canvas: 0, shikiFails: false, sketchFails: false })
+  connection.onLine = true
   online.clear()
   onLoad.clear()
   idle.clear()
@@ -76,6 +92,7 @@ const fresh = async () => {
   return {
     ...(await import(`${base}/warm_rich_blocks.ts?${instance}`)),
     ...(await import(`${base}/highlighter.ts?${instance}`)),
+    ...(await import(`${base}/sketch/excalidraw_loader.ts?${instance}`)),
   }
 }
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20))
@@ -122,19 +139,126 @@ test('the first code block loads the highlighter once and colors when it is read
   assert.deepEqual(parse(code), ['colored'])
 })
 
-test('a load that failed offline is retried after the connection returns', async () => {
+test('a code block seen offline waits, then colors itself on reconnecting', async () => {
   const { lazyShikiParser } = await fresh()
+  const parse = lazyShikiParser()
+  connection.onLine = false
+  const pending = parse(code)
+  assert.equal(parse(code), pending)
+  await settle()
+  assert.deepEqual([loads.shiki, online.size], [0, 1])
+  reconnect()
+  await pending
+  assert.equal(loads.shiki, 1)
+  assert.deepEqual(parse(code), ['colored'])
+})
+
+test('a highlighter load that fails while connected is not tried again', async () => {
+  const { lazyShikiParser, warmHighlighter } = await fresh()
   const parse = lazyShikiParser()
   loads.shikiFails = true
   await assert.rejects(parse(code))
+  reconnect()
+  warmHighlighter()
+  await assert.rejects(parse(code))
+  assert.deepEqual([loads.shiki, online.size], [1, 0])
+})
+
+test('warming offline starts nothing, and works once connected', async () => {
+  const { warmForContent } = await fresh()
+  const html = '<pre><code>x</code></pre><figure class="thinkroom-sketch"></figure>'
+  connection.onLine = false
+  warmForContent(html)
   await settle()
-  parse(code).catch(() => undefined)
-  assert.equal(loads.shiki, 1)
-  loads.shikiFails = false
-  online.forEach((handler) => handler())
-  await parse(code)
-  assert.equal(loads.shiki, 2)
-  assert.deepEqual(parse(code), ['colored'])
+  assert.deepEqual([loads.shiki, loads.excalidraw, loads.canvas, online.size], [0, 0, 0, 0])
+  reconnect()
+  warmForContent(html)
+  await settle()
+  assert.deepEqual([loads.shiki, loads.excalidraw, loads.canvas], [1, 1, 1])
+})
+
+test('a sketch opened offline waits and loads on reconnecting', async () => {
+  const { loadExcalidraw, loadExcalidrawCanvas } = await fresh()
+  connection.onLine = false
+  const waiting = [loadExcalidraw(), loadExcalidraw(), loadExcalidrawCanvas()]
+  await settle()
+  assert.deepEqual([loads.excalidraw, loads.canvas, online.size], [0, 0, 1])
+  reconnect()
+  await Promise.all(waiting)
+  assert.deepEqual([loads.excalidraw, loads.canvas], [1, 1])
+})
+
+test('a wait survives a connection that drops again before it can load', async () => {
+  const { loadExcalidraw } = await fresh()
+  connection.onLine = false
+  const waiting = loadExcalidraw()
+  await settle()
+  reconnect()
+  connection.onLine = false
+  await settle()
+  assert.deepEqual([loads.excalidraw, online.size], [0, 1])
+  reconnect()
+  await waiting
+  assert.equal(loads.excalidraw, 1)
+})
+
+test('exporting offline fails at once without spoiling a later export', async () => {
+  const { loadExcalidrawNow } = await fresh()
+  connection.onLine = false
+  await assert.rejects(loadExcalidrawNow())
+  assert.equal(loads.excalidraw, 0)
+  connection.onLine = true
+  await loadExcalidrawNow()
+  connection.onLine = false
+  await loadExcalidrawNow()
+  assert.equal(loads.excalidraw, 1)
+})
+
+test('drawing tools loaded while connected open offline', async () => {
+  const { warmSketchTools, loadExcalidraw, loadExcalidrawCanvas } = await fresh()
+  warmSketchTools()
+  await settle()
+  connection.onLine = false
+  await Promise.all([loadExcalidraw(), loadExcalidrawCanvas()])
+  assert.deepEqual([loads.excalidraw, loads.canvas, online.size], [1, 1, 0])
+})
+
+test('a failed warm-up is not repeated on every edit and does not pin the failure', async () => {
+  const { warmSketchTools, loadExcalidraw } = await fresh()
+  loads.sketchFails = true
+  warmSketchTools()
+  await settle()
+  warmSketchTools()
+  await settle()
+  assert.equal(loads.excalidraw, 1)
+  await assert.rejects(loadExcalidraw())
+  loads.sketchFails = false // a failure the browser does not remember, such as a stylesheet
+  await loadExcalidraw()
+  assert.equal(loads.excalidraw, 3)
+})
+
+test('an idle load that comes due offline waits for the connection', async () => {
+  const { warmForEditorsWhenIdle } = await fresh()
+  warmForEditorsWhenIdle(true)
+  connection.onLine = false
+  runIdle()
+  await settle()
+  assert.deepEqual([loads.shiki, loads.excalidraw, loads.canvas, online.size], [0, 0, 0, 1])
+  reconnect()
+  await settle()
+  assert.deepEqual([loads.shiki, loads.excalidraw, loads.canvas], [1, 1, 1])
+})
+
+test('leaving while an idle load waits for the connection cancels it', async () => {
+  const { warmForEditorsWhenIdle } = await fresh()
+  const cancel = warmForEditorsWhenIdle(true)
+  connection.onLine = false
+  runIdle()
+  cancel()
+  assert.equal(online.size, 0)
+  reconnect()
+  await settle()
+  assert.deepEqual([loads.shiki, loads.excalidraw, loads.canvas], [0, 0, 0])
 })
 
 test('a viewer who may edit loads both libraries once the page is idle, not before', async () => {

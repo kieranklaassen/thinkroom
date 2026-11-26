@@ -1,3 +1,4 @@
+import { isOffline } from './connection'
 import { warmHighlighter } from './highlighter'
 import { warmSketchTools } from './sketch/excalidraw_loader'
 
@@ -14,13 +15,18 @@ const IDLE_TIMEOUT_MS = 5000
 
 /** Anyone who may edit can switch to Edit, or start a code block, after the
  * connection is gone. Once the page has loaded and is idle, fetch what that
- * needs; a viewer who cannot edit never does. Returns the cancel. */
+ * needs, or wait for the connection to return if it is already gone; a viewer
+ * who cannot edit never does. Returns the cancel. */
 export const warmForEditorsWhenIdle = (canWrite: boolean): (() => void) => {
   if (!canWrite) return () => undefined
 
   let idle: number | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   const warm = () => {
+    if (isOffline()) {
+      window.addEventListener('online', warm, { once: true })
+      return
+    }
     warmHighlighter()
     warmSketchTools()
   }
@@ -37,6 +43,7 @@ export const warmForEditorsWhenIdle = (canWrite: boolean): (() => void) => {
 
   return () => {
     window.removeEventListener('load', schedule)
+    window.removeEventListener('online', warm)
     if (idle !== null) window.cancelIdleCallback(idle)
     if (timer !== null) clearTimeout(timer)
   }

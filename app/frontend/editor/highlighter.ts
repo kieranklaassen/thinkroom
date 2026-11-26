@@ -1,33 +1,28 @@
 import { createHighlighter } from 'shiki'
 import { createParser, type Parser } from '@milkdown/plugin-highlight/shiki'
+import { connectedImport, isOffline } from './connection'
 
 const LANGS = [
   'javascript', 'typescript', 'tsx', 'jsx', 'ruby', 'python', 'json',
   'bash', 'html', 'css', 'markdown', 'sql', 'yaml', 'go', 'rust',
 ]
 
-let parserPromise: Promise<Parser> | null = null
 let readyParser: Parser | null = null
 
 /** Singleton shiki-backed parser for code block highlighting. */
-function loadShikiParser(): Promise<Parser> {
-  parserPromise ??= createHighlighter({ themes: ['github-light'], langs: LANGS }).then(
-    (highlighter) => {
-      const base = createParser(highlighter, { theme: 'github-light' })
-      // Unknown languages must degrade to plain text, not crash the editor.
-      const safe: Parser = (options) => {
-        try {
-          return base(options)
-        } catch {
-          return []
-        }
-      }
-      readyParser = safe
-      return safe
-    },
-  )
-  return parserPromise
-}
+const shikiParser = connectedImport<Parser>(async () => {
+  const highlighter = await createHighlighter({ themes: ['github-light'], langs: LANGS })
+  const base = createParser(highlighter, { theme: 'github-light' })
+  // Unknown languages must degrade to plain text, not crash the editor.
+  readyParser = (options) => {
+    try {
+      return base(options)
+    } catch {
+      return []
+    }
+  }
+  return readyParser
+})
 
 /**
  * The pending-parser promise handed to prosemirror-highlight while shiki
@@ -69,25 +64,21 @@ const NEVER = new Promise<never>(() => undefined)
 
 let pendingParser: CoalescedLoad | null = null
 
-// One load per page. A failed load (offline) is forgotten when the connection
-// returns, so the next edit to a code block tries again.
+// One load per page, started only while connected. Browsers remember a failed
+// import, so a load that fails leaves code plain until the page is reloaded.
 const startLoading = (): CoalescedLoad => {
   if (!pendingParser) {
-    const loaded = loadShikiParser().then(() => undefined)
-    loaded.catch(() => {
-      window.addEventListener('online', () => {
-        parserPromise = null
-        pendingParser = null
-      }, { once: true })
-    })
+    const loaded = shikiParser.whenOnline().then(() => undefined)
+    loaded.catch(() => undefined)
     pendingParser = new CoalescedLoad(loaded)
   }
   return pendingParser
 }
 
-/** Start loading shiki before the first code block asks for it. */
+/** Start loading shiki before the first code block asks for it. Skipped
+ * offline: a code block asks again and waits for the connection itself. */
 export const warmHighlighter = (): void => {
-  startLoading()
+  if (!isOffline()) startLoading()
 }
 
 /**
