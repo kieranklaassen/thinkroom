@@ -599,7 +599,13 @@ export class CableProvider {
         if (typeof data.generation === 'number') this.generation = data.generation
         const seedContent = data.seed_content
         const localDocEmpty = this.doc.store.clients.size === 0
-        if (data.seed && this.canWrite) this.seedClaim = data.seed_claim ?? null
+        if (data.seed && this.canWrite) {
+          // A claim is for a seed still to be stored. With content here and
+          // none of this client's own unsettled there is nothing to claim, and
+          // holding it would keep peer edits back and get the next edit refused.
+          if (localDocEmpty || this.seedClaim !== null) this.seedClaim = data.seed_claim ?? null
+          else this.send({ type: 'seed-decline' })
+        }
         // An unshared seed is safe to show only where it can never be sent.
         const showLocally = Boolean(data.seed_pending) && !this.canWrite
         if ((data.seed || showLocally) && seedContent && localDocEmpty) {

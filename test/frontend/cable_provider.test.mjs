@@ -711,6 +711,47 @@ test('a late grant to a claimant with unsaved seed edits is adopted, and to a sy
   assert.ok(!adopted.sent.some((frame) => frame.type === 'seed-decline'))
 })
 
+test('a grant that arrives with stored content is handed back, so peers show and edits are not refused', (t) => {
+  const stored = new Y.Doc()
+  stored.getText('t').insert(0, 'theirs')
+  const grant = { seed: true, seed_content: 'body', seed_claim: 'claim-b' }
+  const openings = {
+    'content in the handshake': (h) => h.receive(syncFrameFrom(stored, grant)),
+    'content broadcast just before an empty handshake': (h) => {
+      h.receive({ type: 'update', update: toBase64(Y.encodeStateAsUpdate(stored)), cid: 'peer' })
+      h.receive({ ...emptySyncFrame(1), ...grant })
+    },
+  }
+  for (const [name, open] of Object.entries(openings)) {
+    const h = createHarness(t, { ackTimeoutMs: 5000 })
+    open(h)
+    assert.equal(h.provider.seedClaim, null, name)
+    assert.equal(h.provider.seedContent, null, name)
+    assert.ok(h.sent.some((frame) => frame.type === 'seed-decline'), name)
+
+    const peer = new Y.Doc()
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(stored))
+    peer.getText('t').insert(6, ' and mine')
+    h.receive({ type: 'update', update: toBase64(Y.encodeStateAsUpdate(peer)), cid: 'peer' })
+    assert.equal(h.doc.getText('t').toString(), 'theirs and mine', name)
+
+    h.doc.getText('t').insert(0, 'my ')
+    assert.ok(!('seed_claim' in h.sentUpdates().at(-1)), name)
+  }
+})
+
+test('a re-grant that also shows the own seed is stored does not bring the claim back', (t) => {
+  const h = claimantHarness(t)
+  h.receive(emptySyncFrame(1))
+  const stored = new Y.Doc()
+  Y.applyUpdate(stored, fromBase64(h.sentUpdates()[0].update))
+  h.disconnect()
+  h.receive(syncFrameFrom(stored, { seed: true, seed_content: 'body', seed_claim: 'claim-b' }))
+  assert.equal(h.provider.seedClaim, null)
+  assert.ok(h.sent.some((frame) => frame.type === 'seed-decline'))
+  assert.equal(h.doc.getText('t').toString(), 'body')
+})
+
 test('a replaced document makes a claimant hand back a new grant and drop its edits', (t) => {
   const h = claimantHarness(t)
   const events = recordEvents(h)

@@ -15,7 +15,7 @@
 #                              { type: "nack", seq, reason: "retryable" | "invalid" }
 #                              { type: "write-denied", locked: true }          # read-only link
 #                              { type: "write-denied", locked: false, stale: true } # document was replaced
-#   client -> server         : { type: "sync-reply", update, cid, seq?, generation } # unacked edits flushed on reconnect
+#   client -> server         : { type: "sync-reply", update, cid, seq?, generation, seed_claim? } # unacked edits flushed on reconnect
 #                              { type: "update", update, cid, seq?, generation, seed_claim? } # incremental edit
 #                              { type: "awareness", update, cid, client_id? }        # presence/cursors, cached + relayed (4 KiB cap)
 #                              { type: "seed-decline", cid }                         # hand back a seed claim this handshake granted
