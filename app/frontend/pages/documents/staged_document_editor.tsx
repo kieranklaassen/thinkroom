@@ -5,6 +5,8 @@ import {
   type EditorProps,
 } from '../../editor/milkdown_editor'
 import { LONG_DOCUMENT_BLOCKS, LONG_DOCUMENT_CLASS } from '../../editor/long_document'
+import { warmHighlighter } from '../../editor/highlighter'
+import { warmForContent } from '../../editor/warm_rich_blocks'
 
 // Resolves once every image in the live editor has finished loading (or
 // errored — a broken image settles at its broken-glyph size either way), or
@@ -72,6 +74,12 @@ export function StagedDocumentEditor({ contentHtml, contentBlocks, isClient, onH
   const [handle, setHandle] = useState<EditorHandle | null>(null)
   const [swapped, setSwapped] = useState(false)
 
+  // In render, not an effect: the fetch must be under way before the editor
+  // below mounts and paints.
+  useState(() => {
+    if (typeof window !== 'undefined') warmForContent(contentHtml)
+  })
+
   const onHandleRef = useRef(onHandle)
   onHandleRef.current = onHandle
   useEffect(() => {
@@ -98,7 +106,7 @@ export function StagedDocumentEditor({ contentHtml, contentBlocks, isClient, onH
           client's first hydration render) and the static preview above
           carries first paint until the editor mounts post-hydration and the
           swap takes over. */}
-      <div className="doc-live-editor">
+      <div className="doc-live-editor" onFocus={editorProps.editable ? warmHighlighter : undefined}>
         {isClient && (
           <DocumentEditor
             {...editorProps}

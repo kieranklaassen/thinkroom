@@ -10,7 +10,7 @@ let parserPromise: Promise<Parser> | null = null
 let readyParser: Parser | null = null
 
 /** Singleton shiki-backed parser for code block highlighting. */
-export function loadShikiParser(): Promise<Parser> {
+function loadShikiParser(): Promise<Parser> {
   parserPromise ??= createHighlighter({ themes: ['github-light'], langs: LANGS }).then(
     (highlighter) => {
       const base = createParser(highlighter, { theme: 'github-light' })
@@ -67,17 +67,37 @@ class CoalescedLoad extends Promise<void> {
 
 const NEVER = new Promise<never>(() => undefined)
 
-/**
- * Non-blocking parser so the editor never waits on shiki to paint.
- * While the highlighter loads, it returns the in-flight promise —
- * prosemirror-highlight's documented lazy protocol — and the plugin
- * re-renders decorations when it resolves. Once ready, it highlights
- * synchronously. If shiki fails to load, code blocks stay plain text.
- */
-let loadedPromise: Promise<void> | null = null
+let pendingParser: CoalescedLoad | null = null
 
+// One load per page. A failed load (offline) is forgotten when the connection
+// returns, so the next edit to a code block tries again.
+const startLoading = (): CoalescedLoad => {
+  if (!pendingParser) {
+    const loaded = loadShikiParser().then(() => undefined)
+    loaded.catch(() => {
+      window.addEventListener('online', () => {
+        parserPromise = null
+        pendingParser = null
+      }, { once: true })
+    })
+    pendingParser = new CoalescedLoad(loaded)
+  }
+  return pendingParser
+}
+
+/** Start loading shiki before the first code block asks for it. */
+export const warmHighlighter = (): void => {
+  startLoading()
+}
+
+/**
+ * Non-blocking parser so the editor never waits on shiki to paint, and a
+ * document without code never loads it. While the highlighter loads, it
+ * returns the in-flight promise — prosemirror-highlight's documented lazy
+ * protocol — and the plugin re-renders decorations when it resolves. Once
+ * ready, it highlights synchronously. If shiki fails to load, code blocks stay
+ * plain text.
+ */
 export function lazyShikiParser(): Parser {
-  loadedPromise ??= loadShikiParser().then(() => undefined)
-  const pending = new CoalescedLoad(loadedPromise)
-  return (options) => (readyParser ? readyParser(options) : pending)
+  return (options) => (readyParser ? readyParser(options) : startLoading())
 }

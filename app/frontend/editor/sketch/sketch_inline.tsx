@@ -9,6 +9,7 @@ import {
   type ErrorInfo,
   type ReactNode,
 } from 'react'
+import { loadExcalidrawCanvas } from './excalidraw_loader'
 import {
   MAX_SKETCH_HEIGHT,
   MIN_SKETCH_HEIGHT,
@@ -18,13 +19,8 @@ import {
   type SketchScene,
 } from './scene'
 
-const loadExcalidrawCanvas = () => import('./excalidraw_canvas')
 const ExcalidrawCanvas = lazy(loadExcalidrawCanvas)
 const SAVE_DELAY_MS = 350
-
-// The Inertia document chunk loads while the collaborative editor connects;
-// use that time to fetch the drawing tools instead of waiting for first click.
-if (typeof window !== 'undefined') void loadExcalidrawCanvas()
 
 class SketchCanvasBoundary extends Component<
   { children: ReactNode; onDone: () => void },
