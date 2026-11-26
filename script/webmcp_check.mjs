@@ -455,6 +455,8 @@ try {
   phase = 'AE5'
   await page.goto(`${BASE}/`)
   await page.getByRole('heading', { name: 'Contents' }).waitFor()
+  // The link also works before hydration, as a full page load.
+  await page.waitForFunction(() => (window.__webmcpToolchange ?? 0) >= 2)
   const before = await page.evaluate(() => window.__webmcpToolchange ?? 0)
   await page.locator(`a.document-row-title[href="/d/${slug}"]`).first().click()
   await page.waitForURL(new RegExp(`/d/${slug}`))

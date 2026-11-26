@@ -7,6 +7,12 @@
 export const waitForLive = (page, timeout = 15000) =>
   page.waitForSelector('.doc-editor-stack[data-phase="live"]', { timeout })
 
+// The home page is server rendered, so its rows and buttons are visible before
+// they have handlers, and `load` can fire before hydration too. The feedback
+// button renders only on the client, so it marks the page as interactive.
+export const waitForHome = (page) =>
+  page.locator('.feedback-button').waitFor({ state: 'attached' })
+
 // Dev-environment console noise, verified not to reproduce on clean loads or
 // in production builds (docs/dogfood-reports/2026-07-01-main-two-week-release-dogfood.md):
 // - React's recoverable hydration de-opt fires when automation interacts
