@@ -35,6 +35,11 @@ class Document < ApplicationRecord
   # raise-at-the-merge-boundary shape (see YjsPersistence.merge).
   class StaleGenerationError < StandardError; end
 
+  # Raised when a seed write finds someone else's content already stored.
+  # Storing both would double the text, and the client recovers as from any
+  # stale session.
+  class StaleSeedClaimError < StaleGenerationError; end
+
   attr_readonly :slug, :content_format
 
   has_many :suggestions, dependent: :destroy
@@ -361,13 +366,29 @@ class Document < ApplicationRecord
     # below remains the single source of truth under concurrency.
     return false if seed_state == "claimed" && seed_claimed_at&.after?(SEED_CLAIM_TIMEOUT.ago)
 
-    self.class
+    claimed_at = Time.current
+    won = self.class
       .where(id: id)
       .where(
         "seed_state = 'pending' OR (seed_state = 'claimed' AND seed_claimed_at < ?)",
         SEED_CLAIM_TIMEOUT.ago
       )
-      .update_all(seed_state: "claimed", seed_claimed_at: Time.current) == 1
+      .update_all(seed_state: "claimed", seed_claimed_at: claimed_at) == 1
+    # In memory too: this value is the claim's token (see seed_claim_token).
+    if won
+      assign_attributes(seed_state: "claimed", seed_claimed_at: claimed_at)
+      clear_attribute_changes(%w[seed_state seed_claimed_at])
+    end
+    won
+  end
+
+  SEED_CLAIM_TOKEN = /\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z\z/
+
+  # Identifies the current seed claim. The claimant returns it with its first
+  # seed write, which marks that write as a seed: the first one stored wins,
+  # whether or not its claim has since been taken over.
+  def seed_claim_token
+    seed_claimed_at&.utc&.iso8601(6)
   end
 
   def ownership_props(viewer_token, viewer_user: nil)
