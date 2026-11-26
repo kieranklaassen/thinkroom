@@ -33,6 +33,24 @@ class FlagsTasksTest < ActiveSupport::TestCase
     assert_raises(SystemExit) { run_task("flags:enable", "compound_writing", "nobody@example.com") }
   end
 
+  test "an email two accounts answer to needs an account id" do
+    google_user = User.for_google!(uid: "123", email: @user.email, name: "Kieran")
+
+    _output, message = capture_io do
+      assert_raises(SystemExit) { run_task("admin:grant", @user.email) }
+    end
+    assert_match(/#{@user.id} .*#{@user.email}/, message)
+    assert_match(/#{google_user.id} .*#{google_user.email}/, message)
+    assert_not @user.reload.admin?
+    assert_not google_user.reload.admin?
+
+    run_task("admin:grant", google_user.id.to_s)
+    assert google_user.reload.admin?
+    run_task("admin:grant", @user.id.to_s)
+    run_task("admin:revoke", @user.id.to_s)
+    assert_not @user.reload.admin?
+  end
+
   test "admin:grant, admin:list, and admin:revoke" do
     assert_match(/is an admin/, run_task("admin:grant", @user.email))
     assert @user.reload.admin?

@@ -1,6 +1,8 @@
 require "test_helper"
 
 class UserTest < ActiveSupport::TestCase
+  include CompoundWritingHelpers
+
   test "password account normalizes email and authenticates" do
     user = User.create!(
       name: "Kieran",
@@ -60,6 +62,35 @@ class UserTest < ActiveSupport::TestCase
     duplicate_google = User.new(name: "Second", email: "second@example.com", google_uid: "google-123")
     assert_not duplicate_google.valid?
     assert_includes duplicate_google.errors[:google_uid], "has already been taken"
+  end
+
+  test "account_email is the plain address of every account" do
+    password_user = User.create!(name: "Kieran", email: "kieran@example.com", password: PASSWORD)
+    google_user = User.for_google!(uid: "123", email: "kieran@example.com", name: "Kieran")
+    other = User.for_google!(uid: "456", email: "other@example.com", name: "Other")
+
+    assert_equal "kieran@example.com", password_user.account_email
+    assert_equal "kieran@example.com", google_user.account_email
+    assert_equal "other@example.com", other.email
+    assert_equal "other@example.com", other.account_email
+    assert_equal [ password_user, google_user ], User.with_account_email("KIERAN@example.com").sort_by(&:id)
+    assert google_user.update(name: "Renamed")
+  end
+
+  test "feedback automation goes by the plain address" do
+    User.create!(name: "Password", email: "maintainer@example.com", password: PASSWORD)
+    google_user = User.for_google!(uid: "123", email: "maintainer@example.com", name: "Google")
+
+    assert FeedbackAutomation.allowed?(google_user)
+  end
+
+  test "an existing password account is not revalidated against the reserved form" do
+    user = User.new(name: "Kieran", email: "kieran@example.com.123.google.invalid", password: PASSWORD)
+    assert_not user.valid?
+    user.save!(validate: false)
+
+    assert user.reload.update(name: "Renamed")
+    assert_equal "kieran@example.com.123.google.invalid", user.account_email
   end
 
   test "password has bounded length" do

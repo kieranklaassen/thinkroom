@@ -20,7 +20,7 @@ module Api
         render json: {
           access_token: raw_token,
           token_type: "Bearer",
-          account: token_record.user.slice(:id, :name, :email)
+          account: token_record.user.public_identity
         }
       rescue CliDeviceAuthorization::InvalidDeviceCode
         render_device_error("invalid_device_code", "That device authorization does not exist.", :not_found)

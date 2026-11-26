@@ -48,7 +48,7 @@ class CliAuthorizationsController < InertiaController
     {
       status:,
       user_code: authorization&.user_code || normalized_code,
-      account: current_user.slice(:name, :email)
+      account: current_user.public_identity.slice(:name, :email)
     }
   end
 end

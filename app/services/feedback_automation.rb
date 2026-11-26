@@ -2,7 +2,7 @@ module FeedbackAutomation
   module_function
 
   def allowed?(user)
-    user.present? && allowed_emails.include?(user.email.to_s.downcase)
+    user.present? && allowed_emails.include?(user.account_email.downcase)
   end
 
   def allowed_emails

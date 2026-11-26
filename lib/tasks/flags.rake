@@ -45,8 +45,16 @@ namespace :flags do
     flag.to_sym
   end
 
-  def flags_user!(email)
-    User.find_by(email: email.to_s.strip.downcase) or abort "No account with email #{email.inspect}"
+  # One account by email or id. A password account and a Google account can
+  # share an email, and then only an id says which.
+  def flags_user!(reference)
+    reference = reference.to_s.strip
+    users = reference.match?(/\A\d+\z/) ? User.where(id: reference).to_a : User.with_account_email(reference)
+    return users.first if users.one?
+
+    abort "No account with email or id #{reference.inspect}" if users.empty?
+    abort [ "Several accounts use #{reference}; give an id:",
+            *users.map { |user| "  #{user.id} #{user.google_account? ? "Google" : "password"} #{user.email}" } ].join("\n")
   end
 end
 
