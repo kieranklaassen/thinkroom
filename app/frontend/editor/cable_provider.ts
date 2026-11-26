@@ -92,6 +92,16 @@ const DEFAULT_RETRY_BASE_MS = 250
 const DEFAULT_RETRY_MAX_MS = 8_000
 const DEFAULT_SEED_RETRY_MS = 3_000
 
+// Browsers refuse a keepalive request that takes the total of the page's
+// keepalive bodies in flight past 64 KiB.
+const KEEPALIVE_LIMIT_BYTES = 64 * 1024
+const MAX_SAVE_WITH_SNAPSHOT_BYTES = 60 * 1024
+let keepaliveBytesInFlight = 0
+
+const byteLength = (text: string): number => new TextEncoder().encode(text).byteLength
+const fitsKeepalive = (bytes: number): boolean =>
+  keepaliveBytesInFlight + bytes <= KEEPALIVE_LIMIT_BYTES
+
 // The exact v1 update carrying no structs and no deletes.
 const isEmptyUpdate = (update: Uint8Array): boolean =>
   update.length === EMPTY_UPDATE.length && update.every((byte, i) => byte === EMPTY_UPDATE[i])
@@ -459,8 +469,9 @@ export class CableProvider {
 
   /**
    * Persist strictly the merged unacked outbox bytes (`inFlight` +
-   * `queuedUpdate`) over a `keepalive` HTTP request so discrete edits or an
-   * immediate navigation/unload survive ActionCable teardown.
+   * `queuedUpdate`) over an HTTP request so discrete edits or an immediate
+   * navigation/unload survive ActionCable teardown: `keepalive` when the body
+   * fits what browsers allow, ordinary otherwise.
    */
   persistCurrentState = (snapshot?: DurableSnapshotPayload): void => {
     if (!this.canWrite || this.discarded) return
@@ -480,25 +491,29 @@ export class CableProvider {
       generation: this.generation,
       ...this.seedClaimParam(),
     }
-    let body: string
+    let body = JSON.stringify(updatePayload)
     if (snapshot) {
+      // Large docs still get durable CRDT state (and therefore correct reload
+      // behavior); their derived source snapshot continues through the normal
+      // debounce.
       const completeBody = JSON.stringify({ ...updatePayload, ...snapshot })
-      // Browsers cap keepalive request bodies at roughly 64 KiB. Large docs
-      // still get durable CRDT state (and therefore correct reload behavior);
-      // their derived source snapshot continues through the normal debounce.
-      body =
-        new TextEncoder().encode(completeBody).byteLength <= 60 * 1024
-          ? completeBody
-          : JSON.stringify(updatePayload)
-    } else {
-      body = JSON.stringify(updatePayload)
+      const completeBytes = byteLength(completeBody)
+      if (completeBytes <= MAX_SAVE_WITH_SNAPSHOT_BYTES && fitsKeepalive(completeBytes)) {
+        body = completeBody
+      }
     }
+
+    // A save with no room for keepalive would never leave the browser, so it
+    // goes as an ordinary request, which only lasts as long as the page.
+    const bodyBytes = byteLength(body)
+    const keepalive = fitsKeepalive(bodyBytes)
+    if (keepalive) keepaliveBytesInFlight += bodyBytes
 
     void fetch(`/d/${this.slug}/sync_update`, {
       method: 'POST',
       headers: jsonHeaders(),
       body,
-      keepalive: true,
+      keepalive,
     })
       .then(async (response) => {
         if (response.status === 409) {
@@ -530,6 +545,9 @@ export class CableProvider {
         this.flush('update')
       })
       .catch((error) => console.warn('CableProvider: durable sync failed', error))
+      .finally(() => {
+        if (keepalive) keepaliveBytesInFlight -= bodyBytes
+      })
   }
 
   private handleReceived(data: SyncMessage): void {
