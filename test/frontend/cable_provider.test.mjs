@@ -355,3 +355,109 @@ test('write-denied and stale responses clear the outbox and emit the matching ev
   assert.deepEqual(events, ['write-denied', 'stale'])
   assert.equal(h.sentUpdates().length, 2) // only the one edit before disconnect; nothing on stale reconnect
 })
+
+function pendingSyncFrame(extra = {}) {
+  return { ...emptySyncFrame(1), seed_pending: true, ...extra }
+}
+
+function contentUpdate(text = 'body') {
+  const doc = new Y.Doc()
+  doc.getText('t').insert(0, text)
+  return toBase64(Y.encodeStateAsUpdate(doc))
+}
+
+function recordEvents(h) {
+  const events = []
+  for (const event of ['synced', 'stale']) h.provider.on(event, () => events.push(event))
+  return events
+}
+
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+test('an ungranted empty handshake does not sync the editor and finishes on the first real content', (t) => {
+  const h = createHarness(t)
+  const events = recordEvents(h)
+
+  h.receive(pendingSyncFrame())
+  assert.equal(h.provider.synced, false)
+  assert.deepEqual(events, [], 'binding here would replace the painted body with an empty editor')
+
+  h.receive({ type: 'update', update: 'AAA=', cid: 'peer' })
+  assert.deepEqual(events, [], 'an empty update is not content')
+
+  h.receive({ type: 'update', update: contentUpdate(), cid: 'peer' })
+  assert.deepEqual(events, ['synced'])
+  assert.equal(h.doc.getText('t').toString(), 'body')
+
+  h.receive({ type: 'update', update: contentUpdate('more'), cid: 'peer' })
+  assert.deepEqual(events, ['synced'])
+})
+
+test('a waiting writer retries the claim until it is granted, then stops', async (t) => {
+  const h = createHarness(t, { seedRetryMs: 10 })
+  const events = recordEvents(h)
+  const requests = () => h.sent.filter((frame) => frame.type === 'seed-request').length
+
+  h.receive(pendingSyncFrame())
+  await pause(60)
+  assert.ok(requests() >= 1)
+  h.receive(pendingSyncFrame())
+  const before = requests()
+  await pause(60)
+  assert.ok(requests() > before, 'a still-pending answer re-arms the retry')
+
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: '# Template' })
+  assert.deepEqual(events, ['synced'])
+  assert.equal(h.provider.seedContent, '# Template')
+  const settled = requests()
+  await pause(60)
+  assert.equal(requests(), settled)
+})
+
+test('a waiting writer stops retrying when disconnected', async (t) => {
+  const h = createHarness(t, { seedRetryMs: 10 })
+  h.receive(pendingSyncFrame())
+  h.disconnect()
+  await pause(60)
+  assert.equal(h.sent.filter((frame) => frame.type === 'seed-request').length, 0)
+})
+
+test('a writer that already holds content syncs normally on a pending handshake', (t) => {
+  const h = createHarness(t)
+  const events = recordEvents(h)
+  h.doc.getText('t').insert(0, 'template applied from the page grant')
+  h.receive(pendingSyncFrame())
+  assert.deepEqual(events, ['synced'])
+  assert.equal(h.sentUpdates().length, 1)
+})
+
+test('a reader shows the seed locally and reloads instead of merging real state over it', (t) => {
+  const h = createHarness(t, { canWrite: false })
+  const events = recordEvents(h)
+  h.receive(pendingSyncFrame({ seed_content: '# Template', content_format: 'markdown' }))
+  assert.deepEqual(events, ['synced'])
+  assert.equal(h.provider.seedContent, '# Template')
+  h.provider.seedContent = null
+  h.doc.getText('t').insert(0, 'Template')
+
+  h.disconnect()
+  h.receive(pendingSyncFrame({ seed_content: '# Template' }))
+  assert.equal(h.provider.seedContent, null, 'a reconnect must not offer the template again')
+  h.receive({ type: 'update', update: 'AAA=', cid: 'peer' })
+  assert.ok(!events.includes('stale'))
+
+  h.receive({ type: 'update', update: contentUpdate(), cid: 'peer' })
+  assert.equal(events.at(-1), 'stale')
+  assert.equal(h.doc.getText('t').toString(), 'Template', 'real state must not merge into the local copy')
+  assert.equal(h.sentUpdates().length, 0)
+})
+
+test('a reader whose local seed was superseded while offline reloads on reconnect', (t) => {
+  const h = createHarness(t, { canWrite: false })
+  const events = recordEvents(h)
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: '# Template' })
+  h.doc.getText('t').insert(0, 'Template')
+  h.disconnect()
+  h.receive({ ...emptySyncFrame(1), update: contentUpdate() })
+  assert.deepEqual(events, ['synced', 'stale'])
+})

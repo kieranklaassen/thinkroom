@@ -153,6 +153,8 @@ class YjsPersistence
           if document.yjs_document_updates.exists?
             fold_and_encode_handshake(document, payload)
           else
+            # An empty tail may have been folded since this row was loaded.
+            document.reload
             encode_handshake(document, payload)
           end
         rescue CorruptStateError
@@ -182,6 +184,7 @@ class YjsPersistence
           if document.yjs_document_updates.exists?
             fold_and_encode_diff(document, client_sv, payload)
           else
+            document.reload # see state_b64
             encode_diff(document, client_sv, payload)
           end
         rescue CorruptStateError

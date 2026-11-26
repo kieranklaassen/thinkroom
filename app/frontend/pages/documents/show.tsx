@@ -640,19 +640,11 @@ export default function DocumentShow({
     const provider = handle.provider
     provider.on('rejected', onDocumentGone)
     provider.on('write-denied', recoverDeniedWrite)
-    // This tab's local doc predates an owner CLI replacement: either a frame
-    // it sent was rejected for staleness (its content_generation is behind),
-    // or a reconnect handshake reported a generation different from the one
-    // it last synced. Both fire when the content_reset broadcast was missed
-    // or raced — same recovery action as content_reset, reached via the
-    // sync channel instead.
-    provider.on('stale', reloadAfterContentReset)
     return () => {
       provider.off('rejected', onDocumentGone)
       provider.off('write-denied', recoverDeniedWrite)
-      provider.off('stale', reloadAfterContentReset)
     }
-  }, [handle, onDocumentGone, recoverDeniedWrite, reloadAfterContentReset])
+  }, [handle, onDocumentGone, recoverDeniedWrite])
 
   // Priority-ordered dispatch: text selection → mobile suggestion tap →
   // click-to-comment → AI review span. Exactly one target (or none) comes
@@ -1229,7 +1221,13 @@ export default function DocumentShow({
                 onSpans={setSpans}
                 onSelection={isReading ? undefined : handleSelection}
                 onTitleChange={setDocumentTitle}
-                onNotice={setEditorNotice}
+                // This tab's local doc predates an owner CLI replacement (a frame
+              // it sent was rejected for staleness, or a reconnect handshake
+              // reported a different generation), or a viewer's local copy of
+              // the seed was superseded by real state. Same recovery action
+              // as content_reset, reached via the sync channel.
+              onStale={reloadAfterContentReset}
+              onNotice={setEditorNotice}
               />
             </article>
             <DocumentWidthHandle

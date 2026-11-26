@@ -975,6 +975,32 @@ class YjsPersistenceTest < ActiveSupport::TestCase
 
   # --- Handshake serving ----------------------------------------------------
 
+  test "a handshake serves state another connection folded after this row was loaded" do
+    doc = Document.create!(title: "Folded underneath")
+    joining = Document.find(doc.id)
+    YjsPersistence.merge(doc, b64_update_for("stored content"))
+    YjsPersistence.fold!(doc)
+
+    full_b64, = YjsPersistence.state_b64(joining)
+    client = Y::Doc.new
+    client.apply_update(Base64.strict_decode64(full_b64))
+    assert_equal "stored content", client.get_text("t").to_s
+  end
+
+  test "a differential handshake serves state another connection folded after this row was loaded" do
+    doc = Document.create!(title: "Folded underneath")
+    joining = Document.find(doc.id)
+    YjsPersistence.merge(doc, b64_update_for("stored content"))
+    YjsPersistence.fold!(doc)
+
+    other = Y::Doc.new
+    other.get_text("other") << "x"
+    diff_b64, = YjsPersistence.diff_b64(joining, Base64.strict_encode64(other.encode_state_vector))
+    client = Y::Doc.new
+    client.apply_update(Base64.strict_decode64(diff_b64))
+    assert_equal "stored content", client.get_text("t").to_s
+  end
+
   test "state_b64 serves the handshake from columns without building a doc" do
     doc = Document.create!(title: "Fast join")
     YjsPersistence.merge(doc, b64_update_for("column served"))

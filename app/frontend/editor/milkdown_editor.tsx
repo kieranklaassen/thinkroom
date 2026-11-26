@@ -165,6 +165,8 @@ export interface EditorProps {
   onSpans?: (spans: ProvenanceSpan[]) => void
   onSelection?: SelectionCallback
   onTitleChange?: (title: string) => void
+  /** The local doc no longer matches the server's and must be reloaded. */
+  onStale?: () => void
   /** User-facing notices the editor cannot render itself: an edit refused
    *  for pushing the document past its size limit, a durable snapshot the
    *  server refused as too large. */
@@ -313,14 +315,15 @@ function CollabEditor({
   onSpans,
   onSelection,
   onTitleChange,
+  onStale,
   onNotice,
 }: EditorProps) {
   const [sketchDraft, setSketchDraft] = useState<ActiveSketch | undefined>(undefined)
   const insertSketchRef = useRef<() => void>(() => undefined)
   const saveSketchRef = useRef<(data: SketchData) => void>(() => undefined)
   const deleteSketchRef = useRef<(id: string) => void>(() => undefined)
-  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onNotice })
-  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onNotice }
+  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onNotice })
+  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onNotice }
   // Ref so the editable() closure always reads the live value; the effect
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
@@ -458,6 +461,10 @@ function CollabEditor({
       contentGeneration,
     )
     callbacksRef.current.onStatus?.('connecting')
+    // Bound before the editor is ready: a client still waiting for content has
+    // no handle to report through.
+    const stale = () => callbacksRef.current.onStale?.()
+    provider.on('stale', stale)
 
     let cancelled = false
     let unbindMermaidHints: (() => void) | null = null
@@ -575,7 +582,7 @@ function CollabEditor({
     // immediately, applying the template from props (the one-shot consume in
     // start() plus applyTemplate's remote-empty guard keep this race-safe
     // against a channel-granted seeder). Only a fresh doc with no grant —
-    // someone else holds the claim — waits for the sync handshake.
+    // someone else holds the claim — waits for content or the channel's grant.
     if (provider.synced || ydoc.store.clients.size > 0) {
       start()
     } else if (seedGranted && seedContent && !seedAlreadyApplied(slug, seedVersion)) {
@@ -592,6 +599,7 @@ function CollabEditor({
     return () => {
       cancelled = true
       provider.off('synced', start)
+      provider.off('stale', stale)
       unbindMermaidHints?.()
       snapshots.dispose()
       try {
