@@ -45,15 +45,33 @@ registerHooks({
 })
 
 const online = new Set()
-globalThis.window = {
-  addEventListener: (event, handler) => event === 'online' && online.add(handler),
+const onLoad = new Set()
+const idle = new Map()
+const idleApi = {
+  requestIdleCallback: (callback, options) => {
+    idle.set(idle.size + 1, { callback, options })
+    return idle.size
+  },
+  cancelIdleCallback: (id) => idle.delete(id),
 }
+globalThis.window = {
+  addEventListener: (event, handler) =>
+    ({ online, load: onLoad })[event]?.add(handler),
+  removeEventListener: (event, handler) => event === 'load' && onLoad.delete(handler),
+  ...idleApi,
+}
+globalThis.document = { readyState: 'complete' }
+const runIdle = () => idle.forEach(({ callback }) => callback())
 
 let instance = 0
 const fresh = async () => {
   instance += 1
   Object.assign(loads, { shiki: 0, excalidraw: 0, canvas: 0, shikiFails: false })
   online.clear()
+  onLoad.clear()
+  idle.clear()
+  document.readyState = 'complete'
+  Object.assign(window, idleApi)
   const base = '../../app/frontend/editor'
   return {
     ...(await import(`${base}/warm_rich_blocks.ts?${instance}`)),
@@ -117,4 +135,61 @@ test('a load that failed offline is retried after the connection returns', async
   await parse(code)
   assert.equal(loads.shiki, 2)
   assert.deepEqual(parse(code), ['colored'])
+})
+
+test('a viewer who may edit loads both libraries once the page is idle, not before', async () => {
+  const { warmForEditorsWhenIdle } = await fresh()
+  warmForEditorsWhenIdle(true)
+  await settle()
+  assert.deepEqual([loads.shiki, loads.excalidraw, loads.canvas], [0, 0, 0])
+  assert.ok(idle.get(1).options.timeout > 0)
+  runIdle()
+  await settle()
+  assert.deepEqual([loads.shiki, loads.excalidraw, loads.canvas], [1, 1, 1])
+})
+
+test('a viewer who cannot edit schedules nothing', async () => {
+  const { warmForEditorsWhenIdle } = await fresh()
+  document.readyState = 'interactive'
+  warmForEditorsWhenIdle(false)()
+  assert.deepEqual([idle.size, onLoad.size], [0, 0])
+})
+
+test('idle loading waits for the page to load', async () => {
+  const { warmForEditorsWhenIdle } = await fresh()
+  document.readyState = 'interactive'
+  warmForEditorsWhenIdle(true)
+  assert.equal(idle.size, 0)
+  onLoad.forEach((handler) => handler())
+  assert.equal(idle.size, 1)
+})
+
+test('leaving before the page loads or goes idle cancels the load', async () => {
+  const { warmForEditorsWhenIdle } = await fresh()
+  warmForEditorsWhenIdle(true)()
+  assert.equal(idle.size, 0)
+  document.readyState = 'interactive'
+  warmForEditorsWhenIdle(true)()
+  assert.equal(onLoad.size, 0)
+})
+
+test('a browser without idle callbacks loads after a delay, and leaving cancels it', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const { warmForEditorsWhenIdle } = await fresh()
+  window.requestIdleCallback = undefined
+  warmForEditorsWhenIdle(true)()
+  t.mock.timers.tick(60_000)
+  assert.equal(loads.canvas, 0)
+  warmForEditorsWhenIdle(true)
+  t.mock.timers.tick(60_000)
+  assert.equal(loads.canvas, 1)
+})
+
+test('an idle load that fails is ignored', async () => {
+  const { warmForEditorsWhenIdle } = await fresh()
+  loads.shikiFails = true
+  warmForEditorsWhenIdle(true)
+  runIdle()
+  await settle() // an unhandled rejection would fail this test
+  assert.equal(loads.shiki, 1)
 })
