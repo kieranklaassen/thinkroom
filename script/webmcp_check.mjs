@@ -144,6 +144,17 @@ trackRequests(page)
 const getTools = () => page.evaluate(() => document.modelContext.getTools())
 const invoke = (name, args) => page.evaluate(([n, a]) => window.__webmcpInvoke(n, a), [name, args])
 const seam = (tool, args) => page.evaluate(([t, a]) => window.__thinkroomWebmcp.execute(t, a), [tool, args])
+// waitForFunction calls an async predicate once and settles for its `false`,
+// so ask from here until the page reports the value.
+const ownershipBecomes = async (target, field, value) => {
+  const deadline = Date.now() + 15000
+  for (;;) {
+    const result = await target.evaluate(() => window.__webmcpInvoke('thinkroom_read_document', {}))
+    if (JSON.parse(result.content[0].text).viewer_context?.ownership?.[field] === value) return
+    if (Date.now() > deadline) throw new Error(`ownership.${field} never became ${value}`)
+    await target.waitForTimeout(100)
+  }
+}
 const requestTool = (name, url, overrides = {}) => ({
   name,
   description: 'hand-built test tool',
@@ -347,10 +358,7 @@ try {
   // AE7: the guest claims the draft and becomes the owner.
   phase = 'AE7'
   await page.getByRole('button', { name: 'Claim this doc' }).click()
-  await page.waitForFunction(async () => {
-    const result = await window.__webmcpInvoke('thinkroom_read_document', {})
-    return JSON.parse(result.content[0].text).viewer_context?.ownership?.yours === true
-  }, null, { timeout: 15000 })
+  await ownershipBecomes(page, 'yours', true)
   assert(true, 'after claiming, read_document reports viewer_context.ownership.yours = true')
 
   // A second, non-owner tab on the still-Edit link registers the update tool.
@@ -384,10 +392,7 @@ try {
   // Live revocation: the already-registered tool in the non-owner tab refuses
   // once the link is View, and a reload no longer registers it at all.
   phase = 'revocation'
-  await other.waitForFunction(async () => {
-    const result = await window.__webmcpInvoke('thinkroom_read_document', {})
-    return JSON.parse(result.content[0].text).viewer_context?.ownership?.can_write === false
-  }, null, { timeout: 15000 })
+  await ownershipBecomes(other, 'can_write', false)
   const revoked = parseResult(
     await other.evaluate(([n, a]) => window.__webmcpInvoke(n, a), ['thinkroom_update_document', { agent_name: AGENT, content: '# Hijack\n\nNope.' }]),
   )
