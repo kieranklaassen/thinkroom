@@ -120,6 +120,6 @@ CI's browser job always starts from three clean conditions: a freshly seeded dat
 - Issue #205 (flaky browser checks) is a different failure class: checks that acted before the condition they assert. Load only widened the windows. Its causes, for the next one that looks like a timeout:
   - `load` is not hydration. Server-rendered controls are visible and clickable before they have handlers (`waitForHome`).
   - A document editor goes live from the last compacted state; newer edits arrive with the sync after it (`reloadSynced`).
-  - A page that holds a document's seed grant and dies leaves every viewer a live but blank editor for 30 seconds. A cold Vite cache reloads the page that warms it, so a first run can hit this (`openSeeded`). An unexpected empty editor looks like a layout or selection failure.
+  - A page that holds a document's seed grant and dies keeps every other viewer on the server-painted preview, not live, until the grant lapses after 30 seconds and the page's next retry wins it. A cold Vite cache reloads the page that warms it, so a first run can hit this (`openSeeded`). A plain `waitForLive` times out first and looks like a page that never loads.
   - Finding cards stream in, and a finished card folds past three rows in timing order.
   - A wheel gesture larger than the page keeps animating at the edge and overrides a later programmatic scroll. The step can still pass while acting on the wrong text, so assert what a drag selected.
