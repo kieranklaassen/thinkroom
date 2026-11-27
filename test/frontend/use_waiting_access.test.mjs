@@ -6,12 +6,13 @@ import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import * as Y from 'yjs'
 
-const runtime = { reloads: [], provider: null }
+// One ref per page, so calling the hook again is the page's next render.
+const runtime = { reloads: [], provider: null, ref: null }
 globalThis.waitingAccessRuntime = runtime
 
 const stub = (source) => `data:text/javascript,${encodeURIComponent(source)}`
 const STUBS = {
-  react: stub('export const useCallback = (callback) => callback, useRef = (current) => ({ current })'),
+  react: stub('export const useCallback = (callback) => callback, useRef = (current) => (globalThis.waitingAccessRuntime.ref ??= { current })'),
   '@inertiajs/react': stub('export const router = { reload: (options) => globalThis.waitingAccessRuntime.reloads.push(options) }'),
   '../../editor/collab_session': stub(
     'export const getSession = (slug) => slug === "doc" ? { provider: globalThis.waitingAccessRuntime.provider } : undefined',
@@ -64,7 +65,7 @@ function waitingPage(t, shown = GUEST, storage = new Map()) {
     } } },
   })
   t.after(() => provider.destroy())
-  Object.assign(runtime, { reloads: [], provider })
+  Object.assign(runtime, { reloads: [], provider, ref: null })
   provider.on('access-changed', useWaitingAccess('doc', shown))
   let synced = 0
   provider.on('synced', () => { synced += 1 })
@@ -72,9 +73,9 @@ function waitingPage(t, shown = GUEST, storage = new Map()) {
   t.mock.timers.tick(5)
   t.mock.timers.tick(10)
   assert.equal(runtime.reloads.length, 1)
-  const answer = (props) => {
+  const answer = (props, reload = 0) => {
     const page = { props: { ...shown, comments: [], ...props } }
-    runtime.reloads[0].onBeforeUpdate(page)
+    runtime.reloads[reload].onBeforeUpdate(page)
     return page.props
   }
   return { doc, provider, sent, loads, answer, receive: callbacks.received, disconnect: callbacks.disconnected, synced: () => synced, storage }
@@ -102,6 +103,51 @@ test('a waiting page loads again for another identity, and nothing binds or is s
   assert.equal(page.synced(), 0)
   assert.equal(page.provider.seedContent, null)
   assert.equal(page.sent.length, sent)
+})
+
+for (const [name, second] of [
+  ['the same identity', SIGNED_IN],
+  ['changed access alone', { ...GUEST, ownership: { can_write: false } }],
+]) {
+  test(`a second answer with ${name} is not applied after the page load began`, (t) => {
+    const page = waitingPage(t)
+    page.receive(PENDING)
+    t.mock.timers.tick(5)
+    t.mock.timers.tick(10)
+    assert.equal(runtime.reloads.length, 2, 'two reloads are outstanding')
+
+    const first = page.answer(SIGNED_IN, 0)
+    const later = page.answer(second, 1)
+    assert.deepEqual(page.loads, ['load'])
+    assert.deepEqual(first, { ...GUEST, comments: [] })
+    assert.deepEqual(later, { ...GUEST, comments: [] })
+  })
+}
+
+test('a sign-in to another account loads a waiting page again', (t) => {
+  const page = waitingPage(t, SIGNED_IN)
+  page.answer({ ...SIGNED_IN, viewer: { account: { id: 8 } } })
+  assert.deepEqual(page.loads, ['load'])
+})
+
+test('the identity of the last render decides, not of the first', (t) => {
+  const page = waitingPage(t)
+  useWaitingAccess('doc', SIGNED_IN)
+  page.answer(SIGNED_IN)
+  assert.deepEqual(page.loads, [])
+})
+
+test('a waiting page that holds text is not loaded again', (t) => {
+  const page = waitingPage(t)
+  const original = { document: globalThis.document, fetch: globalThis.fetch }
+  globalThis.document = { querySelector: () => null }
+  globalThis.fetch = async () => ({ ok: true, status: 204 })
+  t.after(() => Object.assign(globalThis, original))
+  page.doc.getText('t').insert(0, 'local')
+  const props = page.answer(SIGNED_IN)
+  assert.deepEqual(page.loads, [])
+  assert.equal(page.provider.discarded, false)
+  assert.deepEqual(props, { ...SIGNED_IN, comments: [] })
 })
 
 test('a sign-out loads a waiting page again too', (t) => {

@@ -28,7 +28,7 @@ function firstLoadFor(slug: string, identity: string): boolean {
  * Re-reads the access of a page whose document may still wait for its first
  * content. When the answer is for another identity and the page still waits,
  * the whole page loads again, so its requests, socket and editor all belong to
- * that identity; there is no text to lose. Otherwise the answer is applied.
+ * that identity; there is no document text to lose. Otherwise the answer is applied.
  */
 export function useWaitingAccess(slug: string, shown: AccessProps): () => void {
   const shownRef = useRef(shown)
@@ -41,6 +41,11 @@ export function useWaitingAccess(slug: string, shown: AccessProps): () => void {
       onHttpException: () => false,
       onBeforeUpdate: (page) => {
         const provider = getSession(slug)?.provider
+        // The page load has begun; a second answer must not be applied either.
+        if (provider?.discarded) {
+          Object.assign(page.props, shownRef.current)
+          return
+        }
         const from = viewerIdentity(shownRef.current.viewer)
         const to = viewerIdentity((page.props as unknown as AccessProps).viewer)
         if (from === to || !provider?.awaitingContent || !firstLoadFor(slug, to)) return
