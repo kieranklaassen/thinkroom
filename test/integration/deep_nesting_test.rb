@@ -1,4 +1,5 @@
 require "test_helper"
+require "open3"
 
 # Very deep nesting is handled: a document that cannot be formatted is read as
 # its source, and a write that cannot be checked gets a reason and stores nothing.
@@ -163,9 +164,32 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
   end
 
   test "the preview image answers" do
+    drawn = []
+    original = DocumentOgImage.method(:call)
+    DocumentOgImage.define_singleton_method(:call) do |document|
+      drawn << send(:svg, document)
+      "\x89PNG\r\n\x1A\nstub".b
+    end
     get document_og_image_path(deep_document(MARKDOWN).slug)
     assert_response :success
     assert_equal "image/png", response.media_type
+    assert_includes drawn.sole, ">Deep</tspan>"
+  ensure
+    DocumentOgImage.define_singleton_method(:call, original)
+  end
+
+  # In its own process, as the preview image's own test renders it.
+  test "the preview image renders" do
+    script = <<~RUBY
+      document = Document.new(title: "Deep", content_format: "markdown", seed_content: STDIN.read)
+      image = Vips::Image.new_from_buffer(DocumentOgImage.call(document), "")
+      puts JSON.generate([ image.get("vips-loader"), image.width, image.height ])
+    RUBY
+    stdout, stderr, status = Open3.capture3(
+      { "RAILS_ENV" => "test" }, Rails.root.join("bin/rails").to_s, "runner", script, stdin_data: MARKDOWN
+    )
+    assert status.success?, stderr
+    assert_equal [ "pngload_buffer", DocumentOgImage::WIDTH, DocumentOgImage::HEIGHT ], JSON.parse(stdout)
   end
 
   test "browser create stores the source as sent" do
