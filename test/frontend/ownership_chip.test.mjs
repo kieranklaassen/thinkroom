@@ -121,8 +121,18 @@ test('a claim clears the message, wherever it was made', () => {
 test('a delete that got no answer says so and can be tried again', () => {
   const { options } = startDelete()
   // Anything but false leaves the failed visit as an uncaught error.
-  assert.equal(options.onNetworkError(new Error('Network error')), false)
+  assert.equal(options.onNetworkError(Object.assign(new Error('Network error'), { code: 'ERR_NETWORK' })), false)
   options.onFinish()
   assert.ok(button('Yours — delete…'))
   assert.equal(alert(render()), 'Connection lost. This document may already be deleted.')
+})
+
+test('a delete whose answer could not be shown is not a lost connection', () => {
+  for (const error of [new Error('Home failed to load'), Object.assign(new Error('Other'), { code: 'ERR_OTHER' })]) {
+    const { options } = startDelete()
+    assert.notEqual(options.onNetworkError(error), false)
+    options.onFinish()
+    assert.ok(button('Yours — delete…'))
+    assert.equal(alert(render()), '')
+  }
 })

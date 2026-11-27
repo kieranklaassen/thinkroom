@@ -77,7 +77,10 @@ export function OwnershipChip({ slug, ownership, claimerName }: Props) {
                 onError: (errors) => {
                   setDeleteError(String(errors.document ?? 'Delete failed — please try again'))
                 },
-                onNetworkError: () => {
+                onNetworkError: (error) => {
+                  // Also called when showing the answer failed; that error is
+                  // not a lost connection and stays uncaught.
+                  if (!('code' in error) || error.code !== 'ERR_NETWORK') return
                   setDeleteError('Connection lost. This document may already be deleted.')
                   // Handled here; otherwise the visit rejects with no one to catch it.
                   return false
