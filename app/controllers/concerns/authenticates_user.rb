@@ -1,6 +1,9 @@
 module AuthenticatesUser
   extend ActiveSupport::Concern
 
+  # Limits the value as the session stores it, where "&" takes six bytes.
+  RETURN_TO_MAX_BYTES = 1024
+
   private
 
   def complete_authentication(user, remember: false)
@@ -56,15 +59,17 @@ module AuthenticatesUser
     destination ? "#{path}?#{Rack::Utils.build_query(return_to: destination)}" : path
   end
 
+  # The value as given when it is a local path, otherwise nil.
   def safe_return_to(value)
-    return if value.blank?
+    return unless value.is_a?(String) && value.valid_encoding? && value.start_with?("/")
+    return if value.to_json.delete_prefix('"').delete_suffix('"').bytesize > RETURN_TO_MAX_BYTES
+    return if value.match?(/[[:cntrl:]\\]/)
 
-    uri = URI.parse(value.to_s)
-    return unless uri.relative? && uri.path.start_with?("/") && !uri.path.start_with?("//")
-    return if value.to_s.include?("\\")
-
-    value.to_s
-  rescue URI::InvalidURIError
+    URI.parse(value)
+    path = value[/\A[^?#]*/].b
+    nil while path.gsub!(/%\h\h/) { |escape| escape[1..].hex.chr }
+    value unless path.match?(%r{//|[[:cntrl:]\\]})
+  rescue URI::Error
     nil
   end
 end
