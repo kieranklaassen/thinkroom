@@ -228,6 +228,7 @@ export class CableProvider {
   // The edit refused on this connection. Nothing more is sent while it is owed,
   // since every later edit builds on it.
   private refusedPart: Uint8Array | null = null
+  private refusedByLock = false
   private ackTimer: ReturnType<typeof setTimeout> | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryAttempt = 0
@@ -286,6 +287,7 @@ export class CableProvider {
           this.stopSeedWait()
           this.requeueInFlight()
           this.refusedPart = null
+          this.refusedByLock = false
           // Restarts the upload: its connection may be gone too, and waiting for
           // its deadline would take longer than sending it again.
           this.upload?.abort.abort()
@@ -414,7 +416,6 @@ export class CableProvider {
           ? pieces
           : null
       this.pieces.set(part, usable)
-      this.refreshSaveState()
     }
     return this.pieces.get(part) ?? null
   }
@@ -429,12 +430,7 @@ export class CableProvider {
     const large = unacked.filter((part) => part.length > MAX_UPDATE_BYTES)
     // From when it is owed, not from a failure: it may not even be sent.
     for (const part of large) if (!this.unsaved.has(part)) this.warnIfStillUnsaved(part)
-    const stuck = large.some(
-      (part) =>
-        this.unsaved.has(part) ||
-        part.length > MAX_SPLIT_UPDATE_BYTES ||
-        this.pieces.get(part) === null,
-    )
+    const stuck = large.some((part) => this.unsaved.has(part) || this.piecesOf(part) === null)
     const state = stuck ? 'stuck' : large.length > 0 ? 'sending' : null
     if (state === this.saveState) return
     this.saveState = state
@@ -484,6 +480,7 @@ export class CableProvider {
     this.queued = []
     this.retryAttempt = 0
     this.refusedPart = null
+    this.refusedByLock = false
     this.refreshSaveState()
   }
 
@@ -589,16 +586,18 @@ export class CableProvider {
     return this.refusedPart !== null && this.unackedParts().includes(this.refusedPart)
   }
 
-  private refuse(part: Uint8Array): void {
+  private refuse(part: Uint8Array, byLock = false): void {
     this.refusedPart = part
+    this.refusedByLock = byLock
     this.unsaved.add(part)
     this.refreshSaveState()
   }
 
-  /** Retry an edit refused on this connection once write access returns. */
+  /** Retry an edit refused because the document was locked once write access returns. */
   retryRefused(): void {
-    if (!this.refused()) return
+    if (!this.refused() || !this.refusedByLock) return
     this.refusedPart = null
+    this.refusedByLock = false
     this.flush('update')
   }
 
@@ -626,7 +625,7 @@ export class CableProvider {
         this.clearOutbox()
         this.emit('stale')
       } else {
-        this.refuse(part)
+        this.refuse(part, status === 423)
         if (status === 423) this.emit('write-denied')
       }
     })
@@ -852,6 +851,7 @@ export class CableProvider {
         this.clearRetryTimer()
         this.requeueInFlight()
         this.refusedPart = null
+        this.refusedByLock = false
         this.retryAttempt = 0
         if (typeof data.generation === 'number') this.generation = data.generation
         const seedContent = data.seed_content
@@ -964,7 +964,7 @@ export class CableProvider {
           // Holding a large edit: kept readable, as when its upload is refused.
           this.requeueInFlight()
           const large = this.queued.find((part) => part.length > MAX_UPDATE_BYTES)
-          if (large) this.refuse(large)
+          if (large) this.refuse(large, true)
           this.emit('write-denied')
           break
         }

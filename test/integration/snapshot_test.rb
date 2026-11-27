@@ -176,6 +176,21 @@ class SnapshotTest < ActionDispatch::IntegrationTest
       end
       assert_response :unprocessable_entity
       assert_not decoded_piece, "updates totaling at most one update must be refused before decoding"
+
+      # Padding a <= 2 MiB piece with EMPTY_UPDATE ('AAA=') must also be refused before decoding.
+      full_b64_len = ((YjsPersistence::MAX_UPDATE_BYTES + 2) / 3) * 4
+      full_pad = (3 - (YjsPersistence::MAX_UPDATE_BYTES % 3)) % 3
+      undecodable_full = ("!" * (full_b64_len - full_pad)) + ("=" * full_pad)
+      assert_no_broadcasts(SyncChannel.broadcasting_for(@document)) do
+        post document_sync_update_path(@document.slug),
+             params: {
+               updates: [ undecodable_full, DocumentsController::EMPTY_UPDATE_B64 ],
+               generation: @document.content_generation
+             },
+             as: :json
+      end
+      assert_response :unprocessable_entity
+      assert_not decoded_piece
     ensure
       Base64.define_singleton_method(:strict_decode64, original_decode)
     end

@@ -1600,9 +1600,9 @@ test('an edit beyond the total or piece limit is called stuck immediately, never
   assert.equal(asked, true)
   assert.equal(calls.length, 0)
 
-  // Over piece limit (> 5 pieces while total bytes <= 7 MiB: 6 paragraphs of ~1.05 MiB each)
+  // Over piece limit (> 5 pieces while total bytes <= 7 MiB: 6 paragraphs of ~1.05 MiB each),
+  // even while offline before the first handshake.
   const overPieces = createHarness(t)
-  overPieces.receive(emptySyncFrame(1))
   overPieces.doc.transact(() => {
     const els = []
     for (let i = 0; i < 6; i += 1) {
@@ -1615,6 +1615,7 @@ test('an edit beyond the total or piece limit is called stuck immediately, never
     overPieces.doc.getXmlFragment('prosemirror').insert(0, els)
   })
   assert.equal(overPieces.provider.saveState, 'stuck')
+  overPieces.receive(emptySyncFrame(1))
   assert.equal(calls.length, 0)
   assert.equal(overPieces.sentUpdates().length, 0)
 })
@@ -1659,6 +1660,14 @@ test('regained write access resumes sending a refused large edit and later typin
   assert.equal(h.sentUpdates().length, 1, 'later typing follows once the large edit is stored')
   Y.applyUpdate(server, fromBase64(h.sentUpdates()[0].update))
   assert.equal(server.getText('t').toString(), h.doc.getText('t').toString())
+  h.receive({ type: 'ack', seq: h.sentUpdates()[0].seq })
+
+  // A non-lock refusal (413) is not retried by retryRefused().
+  h.doc.getText('t').insert(0, LARGE)
+  await calls[2].respond(413)
+  assert.equal(h.provider.saveState, 'stuck')
+  h.provider.retryRefused()
+  assert.equal(calls.length, 3)
 })
 
 test('persistCurrentState does not re-upload a large edit already uploading, while unload and destroy still save', async (t) => {

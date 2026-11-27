@@ -143,13 +143,12 @@ class YjsPersistence
             # nothing new) must not append — flipping seed_state to
             # "seeded" without content would permanently block the seed
             # claim, and every join would bloat the log otherwise.
-            updates -= [ EMPTY_UPDATE ]
-            if updates.empty?
+            if non_empty.empty?
               payload[:outcome] = "noop"
               next
             end
 
-            unless seed_claim.nil? || seed_claim_holds?(document, updates.first, seed_claim)
+            unless seed_claim.nil? || seed_claim_holds?(document, non_empty.first, seed_claim)
               payload[:outcome] = "rejected_seed_claim"
               raise Document::StaleSeedClaimError, "Another seed is already stored."
             end
@@ -164,7 +163,7 @@ class YjsPersistence
             # Y::Doc on this path unless the tail is at its threshold; a split
             # edit is folded below. Other folds materialize the tail into the
             # snapshot columns on joins and disconnects.
-            updates.each do |update|
+            non_empty.each do |update|
               document.yjs_document_updates.create!(
                 content_generation: document.content_generation,
                 payload: update
@@ -175,7 +174,7 @@ class YjsPersistence
             end
             payload[:outcome] = "appended"
             payload[:tail_rows] = document.yjs_document_updates.unexamined.count
-            perform_fold(document) if updates.many? || payload[:tail_rows] >= FOLD_THRESHOLD
+            perform_fold(document) if non_empty.many? || payload[:tail_rows] >= FOLD_THRESHOLD
             true
           end
         end
@@ -491,13 +490,13 @@ class YjsPersistence
     def validate_split_updates(document, updates, generation:, payload:)
       ydoc, marker = load_integrated_doc_for_split(document, generation:, payload:)
 
-      if updates.all? { |update| ydoc.update_ready?(update) && !ydoc.update_advances?(update) }
+      if updates.all? { |update| !ydoc.update_advances?(update) && ydoc.update_ready?(update) }
         return [ :already_stored, marker ]
       end
 
       updates.each do |update|
         sv = decode_state_vector(ydoc.encode_state_vector)
-        unless contiguous_with_state?(update, sv)
+        unless contiguous_with_state?(update, sv, ydoc)
           payload[:outcome] = "rejected_incomplete"
           raise ArgumentError, "incomplete split Yjs update for document #{document.id}"
         end
@@ -544,18 +543,23 @@ class YjsPersistence
       end
 
       [ ydoc, marker ]
-    rescue CorruptStateError => e
+    rescue CorruptStateError
       raise if healed
 
       with_document_lock(document) do
-        YjsRecovery.heal_corrupt_state!(document, e)
+        begin
+          load_ydoc(document)
+        rescue CorruptStateError => locked_error
+          YjsRecovery.heal_corrupt_state!(document, locked_error)
+        end
       end
       load_integrated_doc_for_split(document, generation:, payload:, healed: true)
     end
 
-    def contiguous_with_state?(update, state_vector)
+    def contiguous_with_state?(update, state_vector, ydoc)
       client_count, index = decode_var_uint(update, 0)
-      return true if client_count.zero? || client_count > 1
+      return true if client_count.zero?
+      return ydoc.update_ready?(update) if client_count > 1
 
       struct_count, index = decode_var_uint(update, index)
       return true if struct_count.zero?

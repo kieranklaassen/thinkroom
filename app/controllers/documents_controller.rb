@@ -389,6 +389,7 @@ class DocumentsController < InertiaController
   MAX_SYNC_UPDATE_BYTES = YjsPersistence::MAX_UPDATE_BYTES
   MAX_SYNC_UPDATE_B64_BYTES = YjsPersistence::MAX_UPDATE_B64_BYTES
   MAX_SPLIT_UPDATE_BYTES = YjsPersistence::MAX_SPLIT_UPDATE_BYTES
+  EMPTY_UPDATE_B64 = Base64.strict_encode64(YjsPersistence::EMPTY_UPDATE).freeze
   MAX_SNAPSHOT_SPANS = 2_000
   MAX_SNAPSHOT_SPAN_TEXT = 280
   PROVENANCE_KINDS = %w[human ai].freeze
@@ -435,7 +436,15 @@ class DocumentsController < InertiaController
     @write_document = document
     document.assert_write_access!(token: owner_token, user: current_user)
     split = params.key?(:updates)
-    updates = split ? Array(params[:updates]).map(&:to_s) : [ params[:update].to_s ]
+    if split
+      raw_updates = params[:updates]
+      unless raw_updates.is_a?(Array) && raw_updates.all?(String)
+        return render json: { error: "Invalid Yjs update." }, status: :unprocessable_entity
+      end
+      updates = raw_updates
+    else
+      updates = [ params[:update].to_s ]
+    end
     return head :content_too_large if updates.size > YjsPersistence::MAX_SPLIT_UPDATES
     return head :content_too_large if updates.any? { |update| update.bytesize > MAX_SYNC_UPDATE_B64_BYTES }
 
@@ -443,7 +452,8 @@ class DocumentsController < InertiaController
       decoded_sizes = updates.map { |update| decoded_base64_bytesize(update) }
       return head :content_too_large if decoded_sizes.any? { |size| size && size > MAX_SYNC_UPDATE_BYTES }
       return head :content_too_large if decoded_sizes.compact.sum > MAX_SPLIT_UPDATE_BYTES
-      if decoded_sizes.any?(&:nil?) || decoded_sizes.sum <= MAX_SYNC_UPDATE_BYTES
+      non_empty_sum = updates.zip(decoded_sizes).sum { |update, size| update == EMPTY_UPDATE_B64 ? 0 : (size || 0) }
+      if decoded_sizes.any?(&:nil?) || non_empty_sum <= MAX_SYNC_UPDATE_BYTES
         return render json: { error: "Invalid Yjs update." }, status: :unprocessable_entity
       end
     end

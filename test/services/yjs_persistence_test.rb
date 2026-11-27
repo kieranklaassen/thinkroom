@@ -550,6 +550,15 @@ class YjsPersistenceTest < ActiveSupport::TestCase
       assert_not doc.reload.yjs_document_updates.exists?
     end
     assert_equal "first second", text_of(doc)
+
+    # Repeating the same pieces alongside a new deletion must still persist and fold the delete.
+    sv_after = client.encode_state_vector
+    text.delete(0, 6)
+    deletion = client.encode_state_as_update(sv_after)
+    assert_notification("fold.yjs") do
+      YjsPersistence.merge_updates(doc.reload, [ first, second, deletion ], generation: doc.content_generation)
+    end
+    assert_equal "second", text_of(doc.reload)
   end
 
   test "an incomplete split edit is refused before locking and stores nothing" do
@@ -592,6 +601,12 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     origin_b.get_text("t").insert(2, "mid")
     missing_origin = origin_b.encode_state_as_update(sv_origin)
 
+    # Multi-client piece containing a clock gap alongside another client's ready edit
+    multi_doc = Y::Doc.new
+    multi_doc.apply_update(root_c)
+    multi_doc.apply_update(origin_a.encode_state_as_update)
+    multi_gapped = multi_doc.encode_state_as_update
+
     # Hold the document mutex to prove the completeness check runs outside the write lock.
     YjsPersistence.send(:lock_for, doc.id).synchronize do
       {
@@ -600,7 +615,8 @@ class YjsPersistenceTest < ActiveSupport::TestCase
         "reordered pieces" => [ piece_b, piece_a ],
         "missing base" => [ piece_b, piece_c ],
         "delete of absent content" => [ piece_a, absent_delete ],
-        "missing cross-client origin" => [ piece_a, missing_origin ]
+        "missing cross-client origin" => [ piece_a, missing_origin ],
+        "multi-client gapped piece" => [ root_a, multi_gapped ]
       }.each do |label, bad_pieces|
         assert_raises(ArgumentError, label) do
           YjsPersistence.merge_updates(doc, bad_pieces, generation: doc.content_generation)
