@@ -39,7 +39,18 @@ module LogContent
   # Errors whose message names code rather than a value.
   DESCRIPTIVE = [ NameError, NoMethodError, ActionController::ParameterMissing ].freeze
 
+  # A feedback bundle's path, as written: its last part, up to a file format.
+  bundle = "feedback_runs/bundle/".each_char.map do |char|
+    "(?:#{char}|%#{char.unpack1("H*")})#{"++" if char == "/"}"
+  end
+  BUNDLE = %r{(?<prefix>(?:\A|/|%2f)#{bundle.join})[^?]+?(?<format>\.(?:zip|json|html|txt))?(?=\?|\z)}i
+
   class << self
+    # The path or URL, also inside a message, without a bundle's token.
+    def hide_bundle(text)
+      text.b.gsub(BUNDLE) { "#{$~[:prefix]}#{FILTERED}#{$~[:format]}" }.force_encoding(text.encoding)
+    end
+
     def redact(params)
       params.each_with_object(params.class.new) do |(name, value), shown|
         readable?(name, value) ? shown[name] = value : shown[FILTERED] = FILTERED
@@ -55,7 +66,7 @@ module LogContent
     end
 
     def title(error, name = error.class.name)
-      descriptive?(error) ? "#{name} (#{error.message})" : name
+      descriptive?(error) ? "#{name} (#{hide_bundle(error.message.to_s)})" : name
     end
 
     def describe_command(data)
@@ -152,7 +163,7 @@ module LogContent
     def filtered_path
       @filtered_path ||= begin
         storage = STORAGE.match(CGI.unescapeURIComponent(path.b).b)
-        shown = storage ? [ "/rails/active_storage", storage[:kind], storage[:how], FILTERED ].compact.join("/") : path
+        shown = storage ? [ "/rails/active_storage", storage[:kind], storage[:how], FILTERED ].compact.join("/") : LogContent.hide_bundle(path)
         query_string.empty? ? shown : "#{shown}?#{filtered_query_string}"
       end
     end
@@ -170,6 +181,10 @@ module LogContent
         true
       end
     end
+  end
+
+  module RedirectLocation
+    def filtered_location = LogContent.hide_bundle(super)
   end
 
   # Unhandled errors are logged by class, causes, and backtrace.
@@ -194,8 +209,10 @@ module LogContent
   # Redirects in the routes are logged without config.filter_redirect.
   module RouteRedirects
     def redirect(event)
-      hidden = event.payload[:location].to_s.match?(Regexp.union(Rails.application.config.filter_redirect))
-      super(hidden ? event.dup.tap { |copy| copy.payload = event.payload.merge(location: FILTERED) } : event)
+      location = event.payload[:location].to_s
+      hidden = location.match?(Regexp.union(Rails.application.config.filter_redirect))
+      shown = hidden ? FILTERED : LogContent.hide_bundle(location)
+      super(event.dup.tap { |copy| copy.payload = event.payload.merge(location: shown) })
     end
   end
 
@@ -302,6 +319,7 @@ module LogContent
   end
 
   override ActionDispatch::Request, Request
+  override ActionDispatch::Response, RedirectLocation
   override ActionDispatch::DebugExceptions, Exceptions
   override ActionDispatch::LogSubscriber, RouteRedirects
   override ActionController::LogSubscriber, RescuedExceptions
