@@ -183,6 +183,7 @@ export class CableProvider {
   // The local doc was superseded and the page is reloading: nothing more is
   // sent from it or merged into it.
   discarded = false
+  private binding = false
   // Peer updates that arrived while `seedClaim` was unsettled. Merging them
   // into a seed the server then refuses would double the text.
   private heldUpdates: Uint8Array[] = []
@@ -438,10 +439,26 @@ export class CableProvider {
     return [...this.doc.store.clients.keys()].some((client) => stateVector.has(client))
   }
 
+  /** Runs the editor's first bind; what it writes is sent only once it finished. */
+  bind(build: () => void): void {
+    this.binding = true
+    try {
+      build()
+    } catch (error) {
+      // Partial: nothing from this session is sent.
+      this.discarded = true
+      throw error
+    } finally {
+      this.binding = false
+    }
+    this.flush('update')
+  }
+
   private flush(type: 'sync-reply' | 'update' = 'update'): void {
     if (
       this.destroyed ||
       this.discarded ||
+      this.binding ||
       !this.canWrite ||
       !this.synced ||
       this.inFlight ||

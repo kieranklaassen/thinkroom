@@ -97,6 +97,9 @@ import {
 } from '../../editor/rich_block_width'
 import './show.css'
 
+const NO_EDITOR_NOTICE =
+  'The formatting here is too complex to edit in the browser. The document is stored unchanged.'
+
 export interface DocumentProps {
   document: {
     id: number
@@ -241,6 +244,10 @@ export default function DocumentShow({
   const [editorNotice, setEditorNotice] = useState<string | null>(null)
   // No editor opens for this document; exports serve the stored source.
   const [editorUnavailable, setEditorUnavailable] = useState(doc.source_only)
+  const onEditorAvailability = useCallback((available: boolean) => {
+    setEditorUnavailable(!available)
+    setEditorNotice((notice) => available ? (notice === NO_EDITOR_NOTICE ? null : notice) : NO_EDITOR_NOTICE)
+  }, [])
   // Hydration-safe init from server-rendered prefs: cookies supply panel/focus/
   // width while the URL supplies mode, so SSR and the first client render agree.
   const [panelOpen, setPanelOpen] = useState(ui.panel_open)
@@ -949,7 +956,7 @@ export default function DocumentShow({
             />
             <span
               className={`doc-status doc-status--${status}`}
-              title={status === 'live' ? 'Connected — edits sync live' : 'Connecting…'}
+              title={editorUnavailable ? 'Showing the stored document' : status === 'live' ? 'Connected — edits sync live' : 'Connecting…'}
             />
             {newVersionAvailable && (
               <button
@@ -1076,7 +1083,7 @@ export default function DocumentShow({
                 contentHtml={doc.content_html}
                 contentBlocks={doc.content_blocks}
                 sourceOnly={doc.source_only}
-                onUnavailable={() => setEditorUnavailable(true)}
+                onAvailability={onEditorAvailability}
                 isClient={isClient}
                 onHandle={setHandle}
                 slug={doc.slug}

@@ -498,22 +498,21 @@ function CollabEditor({
       try {
         open()
       } catch (error) {
-        // Formatting too deep to build runs out of stack. What was built so
-        // far is partial, so this session sends none of it.
         console.warn('pruf: the editor could not open this document', error)
-        provider.discarded = true
-        callbacksRef.current.onUnavailable?.()
+        if (!bound) {
+          callbacksRef.current.onUnavailable?.()
+          return
+        }
+        // Bound, the document is complete and stays: only a step after it failed.
       }
+      ready()
     }
+    // False when the formatting was too deep to build: it runs out of stack.
+    let bound = false
     const open = () => {
       editor.action((ctx) => {
         const service = ctx.get(collabServiceCtx)
         ctx.set(readPointerAwarenessCtx.key, provider.awareness)
-        // The service's awareness feeds ONLY y-prosemirror's cursor plugin,
-        // whose per-tick dispatches stomp native selections in non-editable
-        // modes — hand it the gated façade so it re-renders only when the
-        // remote cursor slice actually changed. Sync (bindDoc) is unaffected.
-        service.bindDoc(ydoc).setAwareness(gatedCursorAwareness(provider.awareness))
         ctx.set(taskPersistenceCtx.key, {
           persist: () =>
             provider.persistCurrentState(buildSnapshotPayload(ctx, ydoc, contentFormat)),
@@ -529,14 +528,22 @@ function CollabEditor({
         provider.seedContent = null
         provider.seedAuthorKind = null
         provider.seedAuthorName = null
-        if (seed) {
-          // Server granted this client the seed claim; the default condition
-          // (remote doc empty) double-guards against racing another seeder.
-          service.applyTemplate(
-            seedFormat === 'html' ? htmlDefaultValue(seed, 'external') : seed,
-          )
-        }
-        service.connect()
+        provider.bind(() => {
+          // The service's awareness feeds ONLY y-prosemirror's cursor plugin,
+          // whose per-tick dispatches stomp native selections in non-editable
+          // modes — hand it the gated façade so it re-renders only when the
+          // remote cursor slice actually changed. Sync (bindDoc) is unaffected.
+          service.bindDoc(ydoc).setAwareness(gatedCursorAwareness(provider.awareness))
+          if (seed) {
+            // Server granted this client the seed claim; the default condition
+            // (remote doc empty) double-guards against racing another seeder.
+            service.applyTemplate(
+              seedFormat === 'html' ? htmlDefaultValue(seed, 'external') : seed,
+            )
+          }
+          service.connect()
+        })
+        bound = true
         if (seed) {
           if (seedKind && seedKind !== 'human') {
             // Must run after connect(): only then has ySyncPlugin rendered
@@ -596,7 +603,8 @@ function CollabEditor({
           )
         }
       })
-
+    }
+    const ready = () => {
       const handle = { editor, ydoc, provider }
       startedRef.current = true
       // Seed/initial sync ran with suggesting off; apply a pre-stored

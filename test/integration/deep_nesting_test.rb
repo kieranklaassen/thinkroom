@@ -56,6 +56,10 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
     assert_equal 3, DocumentPreviewHtml.block_count(source)
   end
 
+  test "a deep source with a null character has a text" do
+    assert_includes DocumentPlainText.call(format: "markdown", content: "#{">" * 400} a\0b"), "a\uFFFDb"
+  end
+
   test "an element with too many attributes shows as its source" do
     content = "<p #{(1..500).map { |i| "a#{i}=1" }.join(" ")}>words</p>"
     assert_includes DocumentPreviewHtml.call(format: "html", content:), DocumentPreviewHtml::TOO_COMPLEX_NOTICE
@@ -136,6 +140,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
     post document_snapshot_path(document.slug), params: { content: deep, state_vector: "AA==" }, as: :json
     assert_response :unprocessable_entity
     assert_equal DocumentHtml::TooComplex::MESSAGE, response.parsed_body["error"]
+    assert_equal true, response.parsed_body["too_complex"]
 
     assert_equal "<p>kept</p>", document.reload.current_content
     assert_empty document.suggestions

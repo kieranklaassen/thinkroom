@@ -24,7 +24,7 @@ class DocumentPlainText
       DocumentHtml.parse(html)
     rescue DocumentHtml::TooComplex
       # Shown as its source: one text node, so it has no title and no sketches.
-      DocumentHtml.parse("").tap { |fragment| fragment << Nokogiri::XML::Text.new(source, fragment.document) }
+      DocumentHtml.parse("").tap { |fragment| fragment << Nokogiri::XML::Text.new(source.tr("\0", "\uFFFD"), fragment.document) }
     end
 
     # With `at_least`, reading may stop once the result has that many

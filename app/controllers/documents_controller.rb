@@ -498,7 +498,7 @@ class DocumentsController < InertiaController
     broadcast_title(document) if title != previous_title
     { normalized: normalization&.changed? || false }
   rescue DocumentHtml::TooComplex => e
-    render json: { error: e.message }, status: :unprocessable_entity
+    render json: { error: e.message, too_complex: true }, status: :unprocessable_entity
     nil
   end
 

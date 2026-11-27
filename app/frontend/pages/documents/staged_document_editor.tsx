@@ -35,10 +35,7 @@ const waitForEditorImages = (capMs: number): Promise<void> => {
   })
 }
 
-const NO_EDITOR_NOTICE =
-  'The formatting here is too complex to edit in the browser. The document is stored unchanged.'
-
-interface Props extends Omit<EditorProps, 'onReady'> {
+interface Props extends Omit<EditorProps, 'onReady' | 'onUnavailable'> {
   /** Server-rendered prose that carries first paint and holds layout height
    *  until the live editor swaps in. */
   contentHtml: string
@@ -56,6 +53,8 @@ interface Props extends Omit<EditorProps, 'onReady'> {
    *  a delayed callback from the old editor can then never hide the preview
    *  for a new remount. */
   onHandle: (handle: EditorHandle | null) => void
+  /** Whether this stage can have an editor; reported per mount. */
+  onAvailability: (available: boolean) => void
 }
 
 /**
@@ -76,7 +75,7 @@ interface Props extends Omit<EditorProps, 'onReady'> {
  * preview), then ProseMirror gets two frames to paint before the preview
  * is dropped.
  */
-export function StagedDocumentEditor({ contentHtml, contentBlocks, sourceOnly, isClient, onHandle, ...editorProps }: Props) {
+export function StagedDocumentEditor({ contentHtml, contentBlocks, sourceOnly, isClient, onHandle, onAvailability, ...editorProps }: Props) {
   const [handle, setHandle] = useState<EditorHandle | null>(null)
   const [swapped, setSwapped] = useState(false)
   // Per mount: a running editor is never taken away by later props.
@@ -95,11 +94,9 @@ export function StagedDocumentEditor({ contentHtml, contentBlocks, sourceOnly, i
   }, [handle])
   useEffect(() => () => onHandleRef.current(null), [])
 
-  const onNoticeRef = useRef(editorProps.onNotice)
-  onNoticeRef.current = editorProps.onNotice
   useEffect(() => {
-    if (unavailable) onNoticeRef.current?.(NO_EDITOR_NOTICE)
-  }, [unavailable])
+    onAvailability(!unavailable)
+  }, [unavailable, onAvailability])
 
   // After the swap, so the fetch never competes with the editor's own boot.
   const mayEdit = editorProps.canWrite ?? true
@@ -130,10 +127,7 @@ export function StagedDocumentEditor({ contentHtml, contentBlocks, sourceOnly, i
         {isClient && !unavailable && (
           <DocumentEditor
             {...editorProps}
-            onUnavailable={() => {
-              setUnavailable(true)
-              editorProps.onUnavailable?.()
-            }}
+            onUnavailable={() => setUnavailable(true)}
             onReady={(h) => {
               void waitForEditorImages(1500).then(() => {
                 setHandle(h)

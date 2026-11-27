@@ -46,7 +46,7 @@ export interface SnapshotTarget {
 }
 
 export type SnapshotPushOutcome =
-  /** The server answered; `ok` mirrors `Response.ok`; `body` is its JSON when ok. */
+  /** The server answered; `ok` mirrors `Response.ok`; `body` is its JSON. */
   | { ok: boolean; status: number; body?: Record<string, unknown> | null; error?: undefined }
   /** The request never got a response (network failure, aborted mid-flight). */
   | { ok: false; status: null; error: unknown }
@@ -103,9 +103,8 @@ export async function pushSnapshot(
     if (signal?.aborted) return { ok: false, status: response.status }
     return pushSnapshot(target, attempt + 1)
   }
-  if (!response.ok) return { ok: false, status: response.status }
   const body = (await response.json().catch(() => null)) as Record<string, unknown> | null
-  return { ok: true, status: response.status, body }
+  return { ok: response.ok, status: response.status, body }
 }
 
 export interface SnapshotScheduler {
@@ -132,7 +131,7 @@ export function createSnapshotScheduler(options: {
    *  console — the CRDT keeps every edit while agents and previews serve
    *  the last accepted copy. Fired once per scheduler lifetime. */
   onTooLarge?: () => void
-  /** The server could not check the snapshot's HTML (422), so the saved
+  /** The server could not check the snapshot's HTML (too deep), so the saved
    *  source is stale in the same way. Fired once per scheduler lifetime. */
   onTooComplex?: () => void
 }): SnapshotScheduler {
@@ -153,7 +152,7 @@ export function createSnapshotScheduler(options: {
           reportedTooLarge = true
           onTooLarge?.()
         }
-        if (outcome.status === 422 && !reportedTooComplex) {
+        if (outcome.status !== null && outcome.body?.too_complex && !reportedTooComplex) {
           reportedTooComplex = true
           onTooComplex?.()
         }
