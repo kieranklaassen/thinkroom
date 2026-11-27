@@ -217,7 +217,116 @@ class GoogleOauthFlowTest < ActionDispatch::IntegrationTest
     assert_response :redirect
   end
 
+  LONG_RETURN_PATHS = {
+    "plain" => "/d/demo?note=#{"a" * 1000}",
+    "percent-encoded" => "/d/demo?note=#{"%E2%9C%93" * 111}",
+    "ampersands" => "/d/demo?#{"a&" * 140}"
+  }.freeze
+
+  LONG_STARTS = {
+    "a long Referer" => { headers: { "HTTP_REFERER" => "http://www.example.com/login?x=#{"a" * 4000}" } },
+    "an origin in the query" => { query: { origin: "/#{"a" * 4000}" } },
+    "an origin in the body" => { params: { origin: "/#{"a" * 4000}" } },
+    "another parameter in the query" => { query: { note: "a" * 4000 } },
+    "another parameter in the body" => { params: { note: { deep: [ "a" * 4000 ] } } },
+    "a state in the query" => { query: { state: "a" * 4000 } },
+    "a state in the body" => { params: { state: "a" * 4000 } }
+  }.freeze
+
+  { "Google" => false, "the test strategy" => true }.each do |strategy, test_mode|
+    LONG_RETURN_PATHS.each do |shape, path|
+      test "start Google sign-in from a long return path: #{shape}, #{strategy}" do
+        OmniAuth.config.test_mode = test_mode
+        login = login_path(return_to: path)
+        get login
+        assert_equal path, session[:return_to]
+        before = session.to_h
+
+        post "/auth/google_oauth2", headers: { "HTTP_REFERER" => "http://www.example.com#{login}" }
+
+        assert_google_started(before)
+      end
+    end
+
+    LONG_STARTS.each do |shape, input|
+      test "start Google sign-in from a long return path: #{shape}, #{strategy}" do
+        OmniAuth.config.test_mode = test_mode
+        get login_path(return_to: LONG_RETURN_PATHS["plain"])
+        before = session.to_h
+
+        post "/auth/google_oauth2#{"?#{input[:query].to_query}" if input[:query]}", **input.slice(:params, :headers)
+
+        assert_google_started(before)
+      end
+    end
+  end
+
+  test "a Google sign-in from a long return path ends at that path" do
+    OmniAuth.config.test_mode = false
+    path = LONG_RETURN_PATHS["percent-encoded"]
+    get login_path(return_to: path)
+    post "/auth/google_oauth2", headers: { "HTTP_REFERER" => "http://www.example.com#{login_path(return_to: path)}" }
+    query = Rack::Utils.parse_query(URI.parse(response.location).query)
+
+    with_google_responses do
+      get "/auth/google_oauth2/callback", params: { code: "code", state: query.fetch("state") }
+    end
+
+    assert_redirected_to path
+    assert_equal User.find_by!(google_uid: "google-123").id, session[:user_id]
+    assert_empty session.to_h.keys.grep(/omniauth/)
+  end
+
+  test "a Google sign-in that fails goes back to login with its long return path" do
+    OmniAuth.config.test_mode = false
+    path = LONG_RETURN_PATHS["plain"]
+    get login_path(return_to: path)
+    post "/auth/google_oauth2", headers: { "HTTP_REFERER" => "http://www.example.com#{login_path(return_to: path)}" }
+
+    get "/auth/google_oauth2/callback", params: { error: "access_denied", state: session["omniauth.state"] }
+    assert_redirected_to "/auth/failure?message=access_denied&strategy=google_oauth2"
+    follow_redirect!
+
+    assert_redirected_to login_path(return_to: path)
+    assert_nil session[:user_id]
+    assert_equal "We couldn’t sign you in with Google", inertia_error(:email)
+    follow_redirect!
+    assert_response :success
+    assert_equal path, session[:return_to]
+  end
+
   private
+
+  # Only Google's own state, of a fixed size, joins what the session held.
+  def assert_google_started(before)
+    assert_response :redirect
+    if OmniAuth.config.test_mode
+      assert_equal "/auth/google_oauth2/callback", URI.parse(response.location).path
+      assert_equal before, session.to_h
+    else
+      assert_equal "accounts.google.com", URI.parse(response.location).host
+      assert_equal before, session.to_h.except("omniauth.state")
+      assert_match(/\A\h{48}\z/, session["omniauth.state"])
+      assert_equal session["omniauth.state"],
+                   Rack::Utils.parse_query(URI.parse(response.location).query)["state"]
+    end
+  end
+
+  # Answers in place of Google's token and profile endpoints.
+  def with_google_responses
+    strategy = OmniAuth::Strategies::GoogleOauth2
+    answers = {
+      client_get_token: ->(*) { OAuth2::AccessToken.new(client, "token") },
+      token_info: ->(*) { { "scope" => "email profile" } },
+      raw_info: -> { { "sub" => "google-123", "name" => "Kieran", "email" => "kieran@example.com", "email_verified" => true } }
+    }
+    originals = answers.keys.index_with { |name| strategy.instance_method(name) }
+    silence_warnings { answers.each { |name, answer| strategy.define_method(name, &answer) } }
+    yield
+  ensure
+    silence_warnings { originals&.each { |name, original| strategy.define_method(name, original) } }
+    strategy.send(:private, :client_get_token, :token_info)
+  end
 
   def sign_in_with_google(auth = google_auth)
     OmniAuth.config.mock_auth[:google_oauth2] = auth
