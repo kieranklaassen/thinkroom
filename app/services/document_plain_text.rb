@@ -7,7 +7,7 @@ class DocumentPlainText
 
   class << self
     def call(format:, content:)
-      text(fragment(format:, content:), format:)
+      text(readable(format:, content:), format:)
     end
 
     # The parsed source. A caller that needs both the title and the text parses
@@ -22,7 +22,16 @@ class DocumentPlainText
         DocumentMarkdown.to_html(source, options: { extension: { header_ids: nil } }, plugins: MARKDOWN_PLUGINS)
       end
 
-      Nokogiri::HTML5.fragment(html)
+      DocumentHtml.parse(html)
+    end
+
+    # For readers: a source too complex to parse is one text, itself, with no
+    # title and no sketches.
+    def readable(format:, content:)
+      fragment(format:, content:)
+    rescue DocumentHtml::TooComplex
+      source = content.to_s.scrub.tr("\0", "\uFFFD")
+      DocumentHtml.parse("").tap { |fragment| fragment << Nokogiri::XML::Text.new(source, fragment.document) }
     end
 
     # With `at_least`, reading may stop once the result has that many

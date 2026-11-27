@@ -15,6 +15,10 @@ module Api
       render json: { error: e.record.errors.full_messages.to_sentence }, status: :unprocessable_entity
     end
 
+    rescue_from DocumentHtml::TooComplex do |e|
+      render json: { error: e.message }, status: :unprocessable_entity
+    end
+
     rescue_from Document::EditingLockedError do
       render json: {
         error: "This link does not allow editing.",

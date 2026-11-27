@@ -46,18 +46,18 @@ class HtmlDocumentSanitizer
 
   class << self
     def external(source)
-      sanitize(source, trusted_metadata: false)
+      DocumentHtml.within_limits { sanitize(source, trusted_metadata: false) }
     end
 
     def snapshot(source)
-      sanitize(source, trusted_metadata: true)
+      DocumentHtml.within_limits { sanitize(source, trusted_metadata: true) }
     end
 
     private
 
     def sanitize(source, trusted_metadata:)
       original = source.to_s
-      source_fragment = Nokogiri::HTML5.fragment(original)
+      source_fragment = DocumentHtml.parse(original)
       source_fragment.xpath(DROPPED).remove
       sanitized = Rails::HTML5::SafeListSanitizer.new.sanitize(
         source_fragment.to_html,
@@ -65,7 +65,7 @@ class HtmlDocumentSanitizer
         attributes: ATTRIBUTES
       ).to_s
 
-      fragment = Nokogiri::HTML5.fragment(sanitized)
+      fragment = DocumentHtml.parse(sanitized)
       fragment.traverse do |node|
         next unless node.element?
 
