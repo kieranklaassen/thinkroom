@@ -14,12 +14,14 @@ export const NOT_WRITABLE_ERROR =
   'This link no longer allows editing. Ask the owner for an edit link or propose a suggestion instead.'
 export const EDITOR_LOADING_ERROR = 'editor is still loading; retry in a moment'
 export const NO_EDITOR_ERROR =
-  'this document is shown without an editor and cannot be changed in the browser; do not retry. The document was not changed. Its owner can change it through the agent API or CLI.'
+  'this document is shown without an editor and cannot be changed in the browser; do not retry. The document was not changed. It can be changed through the agent API or CLI where those allow it.'
 export const EMPTY_CONTENT_ERROR = 'refused: new content is empty; the document was not changed'
 export const NO_PROVENANCE_ERROR =
   'this editor cannot attribute agent text; the document was not changed'
 export const TOO_LARGE_ERROR =
   'refused: new content would push this document past its 2 MB limit; the document was not changed'
+const TOO_COMPLEX_NOTE =
+  'the saved copy was not updated and stays as it was until the content is nested less deeply'
 const REPLACE_REFUSALS = {
   empty: EMPTY_CONTENT_ERROR,
   no_provenance: NO_PROVENANCE_ERROR,
@@ -119,7 +121,9 @@ export async function executeEditorTool(
       const accessLost = snap.status === 403 || snap.status === 423
       result.persistence_note = accessLost
         ? `${PERSISTENCE_LAG_NOTE}. ${NOT_WRITABLE_ERROR}`
-        : PERSISTENCE_LAG_NOTE
+        : snap.status !== null && snap.body?.too_complex
+          ? TOO_COMPLEX_NOTE
+          : PERSISTENCE_LAG_NOTE
       if (snap.status !== null) result.snapshot_status = snap.status
     }
     return textResult(withContext(result))

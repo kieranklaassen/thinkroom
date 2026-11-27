@@ -108,7 +108,7 @@ export function StagedDocumentEditor({ contentHtml, contentBlocks, sourceOnly, i
       className="doc-editor-stack"
       data-phase={unavailable ? 'static' : swapped ? 'live' : handle ? 'revealing' : 'booting'}
     >
-      {!swapped && contentHtml && (
+      {(unavailable || !swapped) && contentHtml && (
         <div className="doc-static-preview milkdown" aria-hidden={unavailable ? undefined : true}>
           <div
             className={contentBlocks >= LONG_DOCUMENT_BLOCKS ? `ProseMirror ${LONG_DOCUMENT_CLASS}` : 'ProseMirror'}
@@ -126,9 +126,13 @@ export function StagedDocumentEditor({ contentHtml, contentBlocks, sourceOnly, i
         {isClient && !unavailable && (
           <DocumentEditor
             {...editorProps}
-            onUnavailable={() => setUnavailable(true)}
+            onUnavailable={() => {
+              setUnavailable(true)
+              setHandle(null)
+            }}
             onReady={(h) => {
               void waitForEditorImages(1500).then(() => {
+                if (h.provider.detached) return
                 setHandle(h)
                 requestAnimationFrame(() => requestAnimationFrame(() => setSwapped(true)))
               })

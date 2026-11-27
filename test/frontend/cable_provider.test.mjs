@@ -1129,7 +1129,7 @@ test('edits queued before a bind that throws are still sent, without the bind', 
   assert.throws(() => h.provider.bind(() => {
     h.doc.getText('t').insert(0, 'partial')
     throw new Error('no editor')
-  }))
+  }), /no editor/)
   h.receive(emptySyncFrame(1))
 
   assert.equal(h.sentUpdates().length, 1)
@@ -1148,7 +1148,7 @@ test('edits queued before a bind that throws are saved when the page goes away',
   assert.throws(() => h.provider.bind(() => {
     h.doc.getText('t').insert(0, 'partial')
     throw new Error('no editor')
-  }))
+  }), /no editor/)
   h.provider.destroy()
 
   assert.equal(saves.length, 1)
@@ -1177,7 +1177,7 @@ test('a bind that must be complete counts a deletion as unfinished', (t) => {
       generation: 1,
     })
     const bind = () => h.provider.bind(() => h.doc.getText('t').delete(0, 6), { complete })
-    if (complete) assert.throws(bind)
+    if (complete) assert.throws(bind, /whole document/)
     else bind()
     assert.equal(h.sentUpdates().length, complete ? 0 : 1)
   }
@@ -1187,8 +1187,34 @@ test('a seed claim granted after a bind threw is declined', (t) => {
   const h = createHarness(t)
   assert.throws(() => h.provider.bind(() => {
     throw new Error('no editor')
-  }))
+  }), /no editor/)
   h.receive({ ...emptySyncFrame(1), seed: true, seed_content: '# Hi', seed_claim: 'claim' })
 
   assert.equal(h.sent.filter((frame) => frame.type === 'seed-decline').length, 1)
+})
+
+test('a seed claim is declined when the bind its own handshake starts throws', (t) => {
+  const h = createHarness(t)
+  h.provider.on('synced', () => {
+    assert.throws(() => h.provider.bind(() => {
+      throw new Error('no editor')
+    }), /no editor/)
+  })
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: '# Hi', seed_claim: 'claim' })
+
+  assert.equal(h.sent.filter((frame) => frame.type === 'seed-decline').length, 1)
+})
+
+test('nothing remote enters the doc after a bind that throws', (t) => {
+  const h = createHarness(t)
+  assert.throws(() => h.provider.bind(() => {
+    throw new Error('no editor')
+  }), /no editor/)
+  const server = new Y.Doc()
+  server.getText('t').insert(0, 'stored')
+  const update = toBase64(Y.encodeStateAsUpdate(server))
+  h.receive({ type: 'sync', update, sv: toBase64(Y.encodeStateVector(server)), generation: 1 })
+  h.receive({ type: 'update', update, cid: 'peer' })
+
+  assert.equal(h.doc.getText('t').toString(), '')
 })

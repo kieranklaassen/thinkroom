@@ -31,7 +31,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
       test "#{format} #{name} have a preview, a text and a title" do
         LEVELS.product([ "", "words" ]).each do |levels, text|
           content = shape.call(levels, text)
-          html, plain = within_a_request { [ DocumentPreviewHtml.call(format:, content:), DocumentPlainText.call(format:, content:) ] }
+          html, plain = answered { [ DocumentPreviewHtml.call(format:, content:), DocumentPlainText.call(format:, content:) ] }
           DocumentPreviewHtml.block_count(html)
           DocumentTitle.call(format:, content:)
           assert_includes html + plain, text unless name == "images" # alt text only
@@ -144,8 +144,9 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
     assert_empty document.suggestions
   end
 
-  test "a large raw HTML block reads depth first and shows as its source" do
-    content = "<div>" * (Document::MAX_CONTENT_BYTES / "<div>".bytesize)
+  test "a raw HTML block reads depth first and shows as its source" do
+    content = "<div>" * 25_000
+    assert_operator content.count("<") * content.bytesize, :>, DocumentPreviewHtml.singleton_class::RAW_HTML_FIRST
     filters = []
     renderer = DocumentPreviewHtml.method(:markdown_html)
     DocumentPreviewHtml.define_singleton_method(:markdown_html) do |source, tagfilter: true|
@@ -161,7 +162,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
 
   test "much raw HTML reads depth first, then renders with the same tags filtered" do
     content = "#{"<div>a</div><script>b</script>\n\n" * 5_000}<div>end</div>"
-    assert_operator content.count("<") * content.bytesize, :>, DocumentPreviewHtml.singleton_class::DEPTH_FIRST_SIZE
+    assert_operator content.count("<") * content.bytesize, :>, DocumentPreviewHtml.singleton_class::RAW_HTML_FIRST
     html = DocumentPreviewHtml.call(format: "markdown", content:)
     assert_includes html, "&lt;script&gt;b"
     assert_not_includes html, DocumentPreviewHtml::TOO_COMPLEX_NOTICE
@@ -176,7 +177,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
     padding = "<div></div>\n" * 13_000
     [ "<textarea\f>\n#{"<div>" * 600}", "<svg>#{"<style>" * 600}" ].each do |block|
       content = "<div>\n#{block}\n#{padding}"
-      assert_operator content.count("<") * content.bytesize, :>, DocumentPreviewHtml.singleton_class::DEPTH_FIRST_SIZE
+      assert_operator content.count("<") * content.bytesize, :>, DocumentPreviewHtml.singleton_class::RAW_HTML_FIRST
       assert_nothing_raised { HtmlDocumentSanitizer.snapshot(DocumentPreviewHtml.send(:markdown_html, content)) }
       assert_not DocumentPreviewHtml.source?(DocumentPreviewHtml.call(format: "markdown", content:), content)
     end
@@ -222,8 +223,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
     BROWSER.merge("X-Inertia" => "true", "X-Inertia-Version" => InertiaController.safe_vite_digest.to_s)
   end
 
-  # What one page load does, it does within the time a request may take.
-  def within_a_request(&)
+  def answered(&)
     Timeout.timeout(20, &)
   end
 end

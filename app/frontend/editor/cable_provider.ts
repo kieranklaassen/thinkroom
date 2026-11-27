@@ -110,6 +110,8 @@ export type ProviderEvent =
   | 'synced'
   | 'seed'
   | 'rejected'
+  /** The bound editor cannot show the document any more. */
+  | 'unavailable'
   | 'write-denied'
   | 'stale'
   | 'access-changed'
@@ -184,9 +186,11 @@ export class CableProvider {
   // sent from it or merged into it.
   discarded = false
   private binding = false
-  // The first bind did not finish, so the local doc no longer speaks for the
-  // document: only edits queued before it are still owed.
+  // The editor does not hold the document, so the local doc no longer speaks
+  // for it: only edits queued before it are still owed.
   detached = false
+  // The bound editor was opened only because it holds the whole document.
+  private holdsWhole = false
   // Peer updates that arrived while `seedClaim` was unsettled. Merging them
   // into a seed the server then refuses would double the text.
   private heldUpdates: Uint8Array[] = []
@@ -429,7 +433,7 @@ export class CableProvider {
     this.heldUpdates = []
     for (const update of held) {
       try {
-        Y.applyUpdate(this.doc, update, this)
+        this.applyRemote(update)
       } catch (error) {
         console.warn('CableProvider: dropped malformed update', error)
       }
@@ -446,22 +450,30 @@ export class CableProvider {
    * Runs the editor's first bind; what it writes is sent only once it finished.
    * Unfinished, its writes are dropped and nothing more is taken from this
    * doc, while edits queued before it still go out. `complete` also counts a
-   * bind that deletes anything as unfinished: showing a document removes none
-   * of it.
+   * bind that deletes anything as unfinished, and holds each later remote
+   * update to the same rule: showing a document removes none of it.
    */
   bind(build: () => void, { complete = false } = {}): void {
-    const earlier = this.queued
+    try {
+      this.hold(build, complete)
+    } catch (error) {
+      this.releaseSeedClaim()
+      throw error
+    }
+    this.holdsWhole = complete
+  }
+
+  private hold(run: () => void, complete: boolean): void {
+    const earlier = [...this.queued]
     let deleted = false
     const watch = (transaction: Y.Transaction) => {
-      if (transaction.deleteSet.clients.size > 0) deleted = true
+      if (transaction.local && transaction.deleteSet.clients.size > 0) deleted = true
     }
-    this.queued = []
     this.binding = true
     if (complete) this.doc.on('afterTransaction', watch)
     try {
-      build()
+      run()
       if (deleted) throw new Error('the editor does not hold the whole document')
-      this.queued = [...earlier, ...this.queued]
     } catch (error) {
       this.detached = true
       this.queued = earlier
@@ -471,6 +483,29 @@ export class CableProvider {
       if (complete) this.doc.off('afterTransaction', watch)
       this.flush('update')
     }
+  }
+
+  // Server state and peer edits, into a doc an editor may be showing.
+  private applyRemote(update: Uint8Array): void {
+    if (this.detached) return
+    if (!this.holdsWhole) {
+      Y.applyUpdate(this.doc, update, this)
+      return
+    }
+    try {
+      this.hold(() => Y.applyUpdate(this.doc, update, this), true)
+    } catch (error) {
+      console.warn('CableProvider: the editor cannot show the document any more', error)
+      this.emit('unavailable')
+    }
+  }
+
+  // A claim granted over the channel goes back when its seed will not be stored.
+  private releaseSeedClaim(): void {
+    if (!this.synced || this.seedClaim === null || this.unackedParts().length > 0) return
+    this.seedClaim = null
+    this.heldUpdates = []
+    this.send({ type: 'seed-decline' })
   }
 
   private flush(type: 'sync-reply' | 'update' = 'update'): void {
@@ -640,7 +675,7 @@ export class CableProvider {
         // outbox and its sequence are live and must not be reset.
         if (this.synced && answersSeedRequest) {
           if (data.seed) this.takeOrDeclineSeedClaim(data.seed_claim, this.seedClaim !== null)
-          if (data.update) Y.applyUpdate(this.doc, fromBase64(data.update), this)
+          if (data.update) this.applyRemote(fromBase64(data.update))
           break
         }
         // Still synced means a half-open socket was replaced without
@@ -650,9 +685,7 @@ export class CableProvider {
         else this.updateSequence = 0
         // Apply server's delta or full state (empty string on checksum match);
         // any unacked local edits stay in the outbox and flush immediately once synced.
-        if (data.update && !this.detached) {
-          Y.applyUpdate(this.doc, fromBase64(data.update), this)
-        }
+        if (data.update) this.applyRemote(fromBase64(data.update))
         this.serverChecksum = data.checksum ?? null
         this.clearRetryTimer()
         this.requeueInFlight()
@@ -735,7 +768,7 @@ export class CableProvider {
             this.heldUpdates.push(update)
             break
           }
-          Y.applyUpdate(this.doc, update, this)
+          this.applyRemote(update)
         } catch (error) {
           // A malformed frame from a peer must not break this client's
           // sync handler; the doc itself is untouched by a failed apply.

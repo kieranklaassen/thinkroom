@@ -154,7 +154,8 @@ class Document < ApplicationRecord
 
   # True when the preview shows the source and the source is all there is. The
   # page then starts no editor and claims no seed. A live document can hold
-  # edits its last snapshot does not have yet, so its editor always opens.
+  # edits its last snapshot does not have yet, so its editor is tried
+  # and opens only if it holds the whole document.
   def source_only?(**preview_options)
     DocumentPreviewHtml.source?(preview_html(**preview_options), current_content) && !live_crdt?
   end

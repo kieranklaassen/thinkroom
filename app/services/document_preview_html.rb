@@ -154,15 +154,15 @@ class DocumentPreviewHtml
       )
     end
 
-    # Read depth first, then render: for a source with much raw HTML, whether it
-    # can be formatted is read from a render without the tag filter. That render
-    # is the filtered one only when the source names none of the filter's tags;
-    # any other source goes straight to the full render, which decides.
-    DEPTH_FIRST_SIZE = 2_000_000_000
+    # Read depth first, then render: whether a source with much raw HTML can be
+    # formatted is read from a render without the tag filter. That render is the
+    # filtered one when the source names none of the filter's tags; for any other
+    # source the full render decides.
+    RAW_HTML_FIRST = 2_000_000_000
     FILTERED_NAME = %r{</?(?:title|textarea|style|xmp|iframe|noembed|noframes|script|plaintext)}i
 
     def refuse_deep_raw_html(source)
-      return if source.count("<") * source.bytesize < DEPTH_FIRST_SIZE
+      return if source.count("<") * source.bytesize < RAW_HTML_FIRST
       return if source.match?(FILTERED_NAME)
 
       DocumentHtml.parse(markdown_html(source, tagfilter: false))

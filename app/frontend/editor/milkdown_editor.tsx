@@ -34,6 +34,7 @@ import {
   releaseSession,
   seedAlreadyApplied,
 } from './collab_session'
+import { startDocument } from './start_document'
 import { buildSnapshotPayload, createSnapshotScheduler } from './snapshots'
 import { firstHeadingTitle } from './document_title'
 import { gatedCursorAwareness } from './cursor_awareness'
@@ -164,7 +165,8 @@ export interface EditorProps {
   /** The saved source is shown as text; the editor opens only if it holds all of the live document. */
   sourcePreview?: boolean
   onReady?: (handle: EditorHandle) => void
-  /** The page keeps its preview for this document; nothing local was kept or sent. */
+  /** No editor shows this document: the page keeps or returns to its preview.
+   *  Edits queued before are still sent. */
   onUnavailable?: () => void
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
@@ -482,7 +484,6 @@ function CollabEditor({
     // Discarded while no editor was listening (a remount reusing the session).
     if (provider.discarded) stale()
 
-    let cancelled = false
     let unbindMermaidHints: (() => void) | null = null
     let spansFrame = 0
     const snapshots = createSnapshotScheduler({
@@ -490,27 +491,13 @@ function CollabEditor({
       ydoc,
       slug,
       contentFormat,
-      canWrite: () => canWriteRef.current,
+      canWrite: () => canWriteRef.current && !provider.detached,
       onTooLarge: () => callbacksRef.current.onNotice?.(SNAPSHOT_TOO_LARGE_NOTICE),
       onTooComplex: () => callbacksRef.current.onNotice?.(SNAPSHOT_TOO_COMPLEX_NOTICE),
     })
     const scheduleSnapshot = snapshots.schedule
 
-    let started = false
-    const start = () => {
-      if (started || cancelled) return
-      started = true
-      try {
-        open()
-      } catch (error) {
-        console.warn('pruf: the editor could not open this document', error)
-        // Never half of an editor: the page keeps its preview instead.
-        callbacksRef.current.onUnavailable?.()
-        return
-      }
-      ready()
-    }
-    const open = () => {
+    const open = (bind: (build: () => void) => void) => {
       editor.action((ctx) => {
         const service = ctx.get(collabServiceCtx)
         ctx.set(readPointerAwarenessCtx.key, provider.awareness)
@@ -529,7 +516,7 @@ function CollabEditor({
         provider.seedContent = null
         provider.seedAuthorKind = null
         provider.seedAuthorName = null
-        provider.bind(() => {
+        bind(() => {
           // The service's awareness feeds ONLY y-prosemirror's cursor plugin,
           // whose per-tick dispatches stomp native selections in non-editable
           // modes — hand it the gated façade so it re-renders only when the
@@ -543,7 +530,8 @@ function CollabEditor({
             )
           }
           service.connect()
-        }, { complete: sourcePreview })
+        })
+
         ctx.set(selectionCallbackCtx.key, {
           fn: (view, cause) => {
             // Once per frame, with the page's other per-edit updates: a
@@ -625,26 +613,35 @@ function CollabEditor({
     // A hydrated doc binds immediately — no visible empty-editor frame. A
     // fresh doc whose seed claim arrived with the page response also binds
     // immediately, applying the template from props (the one-shot consume in
-    // start() plus applyTemplate's remote-empty guard keep this race-safe
+    // open() plus applyTemplate's remote-empty guard keep this race-safe
     // against a channel-granted seeder). Only a fresh doc with no grant —
-    // someone else holds the claim — waits for content or the channel's grant.
-    if (provider.synced || ydoc.store.clients.size > 0) {
-      start()
-    } else if (seedGranted && seedContent && !seedAlreadyApplied(slug, seedGrant)) {
+    // someone else holds the claim — waits for content or the channel's grant,
+    // as does a document behind a source preview.
+    const takeSeed = () => {
+      if (!seedGranted || !seedContent || seedAlreadyApplied(slug, seedGrant)) return false
       markSeedApplied(slug, seedGrant)
       provider.seedContent = seedContent
       provider.seedClaim = seedClaim ?? null
       provider.seedFormat = contentFormat
       provider.seedAuthorKind = seedAuthorKind ?? null
       provider.seedAuthorName = seedAuthorName ?? null
-      start()
-    } else {
-      provider.on('synced', start)
+      return true
     }
+    const stop = startDocument({
+      provider,
+      hasLocalContent: ydoc.store.clients.size > 0,
+      sourcePreview,
+      takeSeed,
+      open,
+      ready,
+      unavailable: () => {
+        snapshots.dispose()
+        callbacksRef.current.onUnavailable?.()
+      },
+    })
 
     return () => {
-      cancelled = true
-      provider.off('synced', start)
+      stop()
       provider.off('stale', stale)
       provider.off('access-changed', accessChanged)
       provider.off('rejected', rejected)
