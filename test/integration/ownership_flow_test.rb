@@ -199,6 +199,44 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
     assert_not_nil Document.find_by(slug: @document.slug)
   end
 
+  # A document whose preview cannot be formatted opens as a plain source page,
+  # but one that is already open keeps its editor.
+  { "an ordinary document" => "words", "a source-page document" => "#{"<div>" * 1_000}words" }.each do |name, content|
+    test "a refused delete answers the open page of #{name}" do
+      establish_identity
+      @document.update!(owner_token: "someone-else", owner_name: "Owner", claimed_at: Time.current,
+                        content_snapshot: content)
+
+      delete_from_open_page
+
+      follow_redirect!(headers: open_page)
+      assert_open_page_refusal
+    end
+  end
+
+  test "a refused delete answers the open page when its mode is no longer available" do
+    establish_identity
+    @document.update!(owner_token: "someone-else", owner_name: "Owner", claimed_at: Time.current, link_access: "view")
+
+    delete_from_open_page
+
+    2.times { follow_redirect!(headers: open_page) }
+    assert_open_page_refusal
+  end
+
+  test "an owner's delete from the open page goes home with everything home shows" do
+    establish_identity
+    post claim_document_path(@document.slug), params: { name: "Owner" }
+
+    delete_from_open_page
+    assert_redirected_to root_path
+
+    follow_redirect!(headers: open_page)
+    assert_equal "documents/index", response.parsed_body["component"]
+    assert_empty %w[yours recent pinned ui viewer] - response.parsed_body["props"].keys
+    assert_nil Document.find_by(slug: @document.slug)
+  end
+
   test "delete of an already-deleted slug redirects home idempotently" do
     establish_identity
 
@@ -548,6 +586,32 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
     post login_path, params: { email: user.email, password: "thoughtful-passphrase" }
     assert_response :see_other
     user
+  end
+
+  # What an open document page sends with the delete and with the redirects that answer it.
+  def open_page
+    browser.merge(
+      "X-Inertia" => "true",
+      "X-Inertia-Version" => InertiaController.safe_vite_digest.to_s,
+      "X-Inertia-Partial-Component" => "documents/show",
+      "X-Inertia-Partial-Data" => "ownership,activities",
+      "Referer" => document_mode_url(@document.slug, "edit")
+    )
+  end
+
+  def delete_from_open_page
+    delete destroy_document_path(@document.slug), headers: open_page
+    assert_response :see_other
+  end
+
+  def assert_open_page_refusal
+    assert_response :success
+    page = response.parsed_body
+    assert_equal "documents/show", page["component"]
+    assert_equal "Only the owner can delete this document", page.dig("props", "errors", "document")
+    assert_not page.dig("props", "ownership", "yours")
+    assert_equal %w[activities errors ownership], page["props"].keys.sort
+    assert_not_nil Document.find_by(slug: @document.slug)
   end
 
   def browser
