@@ -26,6 +26,13 @@ export function OwnershipChip({ slug, ownership, claimerName }: Props) {
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  // Once the document is yours, whether claimed here, in the banner or in another
+  // tab, a message from before no longer holds.
+  const [wasYours, setWasYours] = useState(ownership.yours)
+  if (ownership.yours !== wasYours) {
+    setWasYours(ownership.yours)
+    if (ownership.yours) setDeleteError(null)
+  }
   // Ref guards double-fires synchronously — state updates only take effect
   // after the next render commit, leaving a same-frame window for a second
   // click (Enter bounce, mobile double-tap) to dispatch a duplicate request.
@@ -69,6 +76,11 @@ export function OwnershipChip({ slug, ownership, claimerName }: Props) {
                 preserveScroll: 'errors',
                 onError: (errors) => {
                   setDeleteError(String(errors.document ?? 'Delete failed — please try again'))
+                },
+                onNetworkError: () => {
+                  setDeleteError('Connection lost. This document may already be deleted.')
+                  // Handled here; otherwise the visit rejects with no one to catch it.
+                  return false
                 },
                 onFinish: () => {
                   deleteInFlight.current = false

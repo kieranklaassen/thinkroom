@@ -6,8 +6,9 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 
 // A one-component hook runtime: state lives in slots, so calling the chip again
-// after a click is its next render.
-const runtime = { slots: [], cursor: 0, visits: [] }
+// after a click is its next render. As in React, a change made while rendering
+// renders again before anyone sees the result.
+const runtime = { slots: [], cursor: 0, visits: [], changed: false }
 globalThis.ownershipChipRuntime = runtime
 
 const stub = (source) => `data:text/javascript,${encodeURIComponent(source)}`
@@ -17,7 +18,7 @@ const STUBS = {
     export const useState = (initial) => {
       const slot = runtime.cursor++
       if (!(slot in runtime.slots)) runtime.slots[slot] = initial
-      return [runtime.slots[slot], (value) => { runtime.slots[slot] = value }]
+      return [runtime.slots[slot], (value) => { runtime.slots[slot] = value; runtime.changed = true }]
     }
     export const useRef = (initial) => useState({ current: initial })[0]
   `),
@@ -44,10 +45,15 @@ registerHooks({
 const { OwnershipChip } = await import('../../app/frontend/components/ownership_chip.tsx')
 
 const YOURS = { claimed: true, claimable: false, yours: true, owner_name: 'Ada' }
+const UNCLAIMED = { ...YOURS, yours: false, claimed: false, claimable: true }
 
 function render(ownership = YOURS) {
-  runtime.cursor = 0
-  return OwnershipChip({ slug: 'doc', ownership, claimerName: 'Ada' })
+  for (let pass = 0; pass < 5; pass++) {
+    Object.assign(runtime, { cursor: 0, changed: false })
+    const tree = OwnershipChip({ slug: 'doc', ownership, claimerName: 'Ada' })
+    if (!runtime.changed) return tree
+  }
+  throw new Error('the chip keeps changing its state while rendering')
 }
 
 const nodes = (node) => {
@@ -84,7 +90,7 @@ test('a refused delete says why, whoever owns the document now', () => {
   options.onError({ document: 'Only the owner can delete this document' })
   options.onFinish()
   assert.ok(button('Yours — delete…'))
-  for (const ownership of [YOURS, { ...YOURS, yours: false }, { ...YOURS, yours: false, claimed: false, claimable: true }]) {
+  for (const ownership of [YOURS, { ...YOURS, yours: false }, UNCLAIMED]) {
     assert.equal(alert(render(ownership)), 'Only the owner can delete this document')
   }
 })
@@ -95,12 +101,28 @@ test('trying again clears the message', () => {
   options.onFinish()
   button('Yours — delete…').props.onClick()
   button('Delete?').props.onClick()
-  assert.equal(alert(render()), '')
   assert.equal(runtime.visits.length, 2)
+  runtime.visits[1].options.onFinish()
+  assert.ok(button('Yours — delete…'))
+  assert.equal(alert(render()), '')
 })
 
-test('a delete that got no answer can be tried again', () => {
+test('a claim clears the message, wherever it was made', () => {
   const { options } = startDelete()
+  render(UNCLAIMED)
+  options.onError({ document: 'Only the owner can delete this document' })
+  options.onFinish()
+  assert.equal(alert(render(UNCLAIMED)), 'Only the owner can delete this document')
+  // The claim shows as ownership before its answer arrives; a lost one is undone.
+  assert.equal(alert(render(YOURS)), '')
+  assert.equal(alert(render({ ...YOURS, yours: false })), '')
+})
+
+test('a delete that got no answer says so and can be tried again', () => {
+  const { options } = startDelete()
+  // Anything but false leaves the failed visit as an uncaught error.
+  assert.equal(options.onNetworkError(new Error('Network error')), false)
   options.onFinish()
   assert.ok(button('Yours — delete…'))
+  assert.equal(alert(render()), 'Connection lost. This document may already be deleted.')
 })
