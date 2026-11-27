@@ -64,12 +64,14 @@ class DocumentAsset < ApplicationRecord
       source = source.to_s
       return [] unless source.match?(MAY_REFERENCE_BLOB)
 
-      Nokogiri::HTML5.fragment(source).css("img[src]").filter_map do |image|
+      DocumentHtml.parse(source).css("img[src]").filter_map do |image|
         match = ACTIVE_STORAGE_SRC.match(image["src"].to_s)
         ActiveStorage::Blob.find_signed(match[1])&.id if match
       rescue ActiveSupport::MessageVerifier::InvalidSignature, ActiveRecord::RecordNotFound
         nil
       end.uniq
+    rescue DocumentHtml::TooComplex
+      []
     end
 
     def ensure_capacity!(incoming_bytes)

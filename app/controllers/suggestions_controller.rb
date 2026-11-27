@@ -32,6 +32,9 @@ class SuggestionsController < InertiaController
     # follow-up request can render them.
     redirect_back fallback_location: document_page_path(params[:slug]),
                   inertia: { errors: { suggestion: e.record.errors.full_messages.to_sentence } }
+  rescue DocumentHtml::TooComplex => e
+    redirect_back fallback_location: document_page_path(params[:slug]),
+                  inertia: { errors: { suggestion: e.message } }
   rescue ActiveRecord::RecordNotFound
     # The doc was deleted while the composer was open — go home cleanly.
     redirect_to root_path, status: :see_other

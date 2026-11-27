@@ -48,7 +48,7 @@ class DocumentPreviewHtml
       return 0 if html.blank?
 
       CACHE.fetch([ "document-preview-blocks", CACHE_VERSION, Digest::SHA256.hexdigest(html) ]) do
-        children = Nokogiri::HTML5.fragment(html).element_children
+        children = DocumentHtml.parse(html).element_children
         count = children.count { |node| !mermaid_widget_figure?(node) }
         count += 1 if trailing_paragraph?(children.last)
         count
@@ -108,7 +108,7 @@ class DocumentPreviewHtml
         # suggestion ins/del) into marks, so a preview that drops those tags
         # loses their tint until the swap — a visible color flash.
         # HtmlDocumentSanitizer remains the security boundary either way.
-        rendered = Commonmarker.to_html(
+        rendered = DocumentMarkdown.to_html(
           source,
           options: { render: { unsafe: true }, extension: { header_ids: nil } },
           plugins: { table: true, strikethrough: true, tasklist: true }
@@ -119,7 +119,7 @@ class DocumentPreviewHtml
       # Security boundary: document content is authored by humans and agents, so
       # it is sanitized before it can reach dangerouslySetInnerHTML on the client.
       sanitized = HtmlDocumentSanitizer.snapshot(html).content
-      fragment = Nokogiri::HTML5.fragment(sanitized)
+      fragment = DocumentHtml.parse(sanitized)
       collapse_block_whitespace(fragment)
       collapse_break_newlines(fragment)
       add_trailing_breaks(fragment)
@@ -148,7 +148,7 @@ class DocumentPreviewHtml
       # zero-mermaid document; without the substring the loop can't match.
       return html unless html.match?(/lang="mermaid"/i)
 
-      fragment = Nokogiri::HTML5.fragment(html)
+      fragment = DocumentHtml.parse(html)
       fragment.css("pre[lang]").each do |pre|
         next unless pre["lang"].to_s.casecmp?("mermaid")
 
@@ -183,7 +183,7 @@ class DocumentPreviewHtml
     # every line break made the preview one full line taller than the editor
     # (which emits a bare <br>). Strip exactly one newline after each <br>.
     def collapse_break_newlines(fragment)
-      fragment.css("br").each do |br|
+      fragment.xpath("descendant::br").each do |br|
         sibling = br.next_sibling
         next unless sibling&.text?
 
@@ -201,7 +201,7 @@ class DocumentPreviewHtml
     # and inside empty paragraphs — each adds one line box the plain HTML
     # doesn't have. Replicate the exact DOM so both layers wrap identically.
     def add_trailing_breaks(fragment)
-      fragment.css("p").each do |paragraph|
+      fragment.xpath("descendant::p").each do |paragraph|
         last = paragraph.children.reject { |node| node.text? && node.content.empty? }.last
 
         if last.nil?
@@ -231,7 +231,7 @@ class DocumentPreviewHtml
     SIGNED_BLOB_SRC = %r{\A/rails/active_storage/blobs/(?:redirect|proxy)/([^/]+)/}
 
     def annotate_image_dimensions(fragment)
-      targets = fragment.css("img[src]").filter_map do |img|
+      targets = fragment.xpath("descendant::img[@src]").filter_map do |img|
         next if img["width"].present? || img["class"].to_s.include?("ProseMirror-separator")
 
         signed_id = SIGNED_BLOB_SRC.match(img["src"].to_s)&.[](1)
@@ -263,7 +263,7 @@ class DocumentPreviewHtml
     # than a bare prose table. Give the preview the same wrapper so the boxes
     # match; the chrome's interactive handles only appear in the live editor.
     def wrap_tables(fragment)
-      fragment.css("table").each do |table|
+      fragment.xpath("descendant::table").each do |table|
         next if table.ancestors("table").any?
 
         block = Nokogiri::XML::Node.new("div", table.document)
@@ -334,7 +334,7 @@ class DocumentPreviewHtml
       else
         # The excalidraw fence sanitizes down to <pre><code>{scene json}</code></pre>
         # (the lang hint is dropped), so the JSON payload itself is the signal.
-        fragment.css("pre > code").filter_map do |code|
+        fragment.xpath("descendant::pre/code").filter_map do |code|
           parsed = ThinkroomSketch.parse_markdown_fence(code.text)
           [ code.parent, parsed ] if parsed
         end
