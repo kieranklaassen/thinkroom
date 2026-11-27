@@ -18,7 +18,8 @@ class DocumentPlainText
       html = if format == "html"
         source
       else
-        Commonmarker.to_html(source, plugins: MARKDOWN_PLUGINS)
+        # Nothing here reads heading ids.
+        DocumentMarkdown.to_html(source, options: { extension: { header_ids: nil } }, plugins: MARKDOWN_PLUGINS)
       end
 
       Nokogiri::HTML5.fragment(html)
