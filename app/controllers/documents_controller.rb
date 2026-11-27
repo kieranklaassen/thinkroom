@@ -100,7 +100,7 @@ class DocumentsController < InertiaController
     writable = document.writable_by?(owner_token, user: current_user)
     preview_editable = writable && %w[edit suggest].include?(mode)
     preview_sketch_interactive = writable && mode == "edit"
-    if document_prop_requested? &&
+    if !open_page_reload? &&
        !document.formattable?(editable: preview_editable, sketch_interactive: preview_sketch_interactive)
       return render_source(document, social_preview)
     end
@@ -129,7 +129,8 @@ class DocumentsController < InertiaController
       # the expensive parts entirely — preview HTML rendering and the Base64
       # Yjs state encode only run when the document prop is actually sent.
       document: -> {
-        content_html = document.preview_html(
+        content_html = preview_or_source(
+          document,
           editable: preview_editable,
           sketch_interactive: preview_sketch_interactive
         )
@@ -685,11 +686,19 @@ class DocumentsController < InertiaController
     request.headers["X-Inertia-Partial-Component"].blank?
   end
 
-  # A partial reload that leaves the document prop alone never shows the content.
-  def document_prop_requested?
-    requested = request.headers["X-Inertia-Partial-Data"].to_s.split(",")
-    initial_render? || requested.empty? || requested.include?("document")
+  # A page that is open reloads its props; it already has its editor.
+  def open_page_reload?
+    request.headers["X-Inertia-Partial-Component"] == "documents/show"
   end
+
+  # An open page keeps its editor, so there the source only fills the preview.
+  def preview_or_source(document, **preview_options)
+    return document.preview_html(**preview_options) if document.formattable?(**preview_options)
+
+    helpers.tag.pre(helpers.tag.code(document_source(document)))
+  end
+
+  def document_source(document) = document.current_content.to_s.scrub.tr("\0", "\uFFFD")
 
   # The document as text, on a page that starts no editor. An Inertia request
   # is sent to load that page whole.
@@ -697,7 +706,7 @@ class DocumentsController < InertiaController
     return inertia_location(request.original_url) if request.inertia?
 
     @without_scripts = true
-    @source = document.current_content.to_s.scrub.tr("\0", "\uFFFD")
+    @source = document_source(document)
     @source_title = social_preview.display_title
     @source_text_path = document_page_path(document.slug, format: :txt)
     render "documents/source", formats: :html

@@ -10,6 +10,9 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
   MARKDOWN = "#{">" * 500} words <b>&amp; \"more\"</b>".freeze
   HTML = "#{"<blockquote>" * 1_000}words".freeze
 
+  # Its text can be read; only the preview, which keeps raw HTML, cannot be formatted.
+  PREVIEW_ONLY = "#{"<div>" * 1_000}words & more".freeze
+
   SHAPES = {
     "quotes" => MARKDOWN,
     "lists" => (0...600).map { |level| "#{"  " * level}- words" }.join("\n"),
@@ -68,16 +71,68 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
     assert_source_page("\n\n#{MARKDOWN}")
   end
 
-  test "an Inertia request that loads the document goes to the source page" do
+  test "an Inertia visit goes to the source page" do
     document = deep_document(MARKDOWN)
-    [ {}, partial("document"), partial("ownership,document") ].each do |headers|
+    [ {}, partial("document", component: "documents/index") ].each do |headers|
       get document_mode_path(document.slug, "edit"), headers: inertia(headers)
       assert_response :conflict
       assert_equal document_mode_url(document.slug, "edit"), response.headers["X-Inertia-Location"]
     end
-    get document_mode_path(document.slug, "edit"), headers: inertia(partial("suggestions,comments"))
-    assert_response :success
     assert_equal "pending", document.reload.seed_state
+  end
+
+  # What an open editor asks for when access changes, when an update is denied,
+  # and for anything else it reloads.
+  [ "document,ownership", "document,ownership,viewer", "document", "document.title", "suggestions,comments" ].each do |props|
+    test "a partial reload of #{props} answers the open page" do
+      document = live_document
+      post document_snapshot_path(document.slug), params: { content: PREVIEW_ONLY }, as: :json
+      assert_response :success
+      assert_not document.reload.formattable?
+
+      get document_mode_path(document.slug, "edit"), headers: inertia(partial(props))
+      assert_response :success
+      loaded = response.parsed_body.dig("props", "document")
+      next assert_nil(loaded) unless props.include?("document")
+      assert_equal document.title, loaded["title"]
+      next if props == "document.title"
+
+      assert_equal "<pre><code>#{ERB::Util.html_escape(PREVIEW_ONLY)}</code></pre>", loaded["content_html"]
+      assert_kind_of Integer, loaded["content_blocks"]
+      assert_equal [ nil, false ], loaded.values_at("seed_content", "seed_granted")
+      assert loaded["yjs_state_b64"].present?
+      assert_equal document.title, loaded["display_title"]
+    end
+  end
+
+  test "a partial reload that leaves the document out answers the open page" do
+    get document_page_path(deep_document(MARKDOWN).slug),
+        headers: inertia(partial(nil).merge("X-Inertia-Partial-Except" => "document"))
+    assert_response :success
+    assert_nil response.parsed_body.dig("props", "document")
+  end
+
+  test "an access change is in the partial reload it causes" do
+    document = live_document(link_access: "edit", owner_token: "someone")
+    document.update!(content_snapshot: PREVIEW_ONLY)
+    document.update!(link_access: "view")
+    get document_page_path(document.slug), headers: inertia(partial("document,ownership"))
+    assert_response :success
+    assert_not response.parsed_body.dig("props", "ownership", "can_write")
+    assert_includes response.parsed_body.dig("props", "document", "content_html"), "&lt;div&gt;"
+  end
+
+  test "a source stored through the API that only its preview cannot format has the source page" do
+    post api_docs_path, params: { content: PREVIEW_ONLY }, as: :json, headers: AGENT
+    assert_response :created
+    get document_page_path(response.parsed_body["slug"]), headers: BROWSER
+    assert_source_page(PREVIEW_ONLY)
+  end
+
+  test "images are claimed from html over the limits as none" do
+    document = Document.create!(title: "Page", content_format: "html", seed_content: "<p>kept</p>")
+    source = %(#{HTML}<img src="/rails/active_storage/blobs/redirect/x/a.png">)
+    assert_nothing_raised { DocumentAsset.claim_from_html!(document:, source:) }
   end
 
   test "the source page keeps the checks of the document page" do
@@ -140,11 +195,8 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
     end
 
     test "a #{format} snapshot gives a reason and a live document keeps its last one" do
-      ydoc = Y::Doc.new
-      ydoc.get_text("t") << "live"
-      document = Document.create!(title: "Live", content_format: format, seed_content: "seed", content_snapshot: "good")
-      YjsPersistence.merge(document, encode(ydoc.encode_state_as_update))
-      YjsPersistence.fold!(document.reload)
+      ydoc = live_ydoc
+      document = live_document(content_format: format, content_snapshot: "good")
 
       post document_snapshot_path(document.slug), params: { content:, state_vector: encode(ydoc.encode_state_vector) }, as: :json
       assert_refused
@@ -217,8 +269,19 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
     BROWSER.merge("X-Inertia" => "true", "X-Inertia-Version" => InertiaController.safe_vite_digest.to_s, **headers)
   end
 
-  def partial(props)
-    { "X-Inertia-Partial-Component" => "documents/show", "X-Inertia-Partial-Data" => props }
+  def partial(props, component: "documents/show")
+    { "X-Inertia-Partial-Component" => component, "X-Inertia-Partial-Data" => props }.compact
+  end
+
+  def live_ydoc
+    @live_ydoc ||= Y::Doc.new.tap { |ydoc| ydoc.get_text("t") << "live" }
+  end
+
+  def live_document(**attributes)
+    Document.create!(title: "Live", seed_content: "seed", **attributes).tap do |document|
+      YjsPersistence.merge(document, encode(live_ydoc.encode_state_as_update))
+      YjsPersistence.fold!(document.reload)
+    end
   end
 
   def assert_refused
