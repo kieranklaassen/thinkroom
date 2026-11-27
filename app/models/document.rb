@@ -2,6 +2,21 @@ class Document < ApplicationRecord
   class EditingLockedError < StandardError; end
   class CommentingLockedError < StandardError; end
   class NotOwnerError < StandardError; end
+
+  # Creating or suggesting HTML needs an account: a signed-in user, or the user
+  # of a Thinkroom access token. `html` counts the pieces that were refused.
+  class HtmlAccountRequiredError < StandardError
+    CODE = "html_account_required".freeze
+    MESSAGE = "Adding HTML needs an account. Sign in to add it.".freeze
+
+    attr_reader :html
+
+    def initialize(html = {})
+      @html = html
+      super(MESSAGE)
+    end
+  end
+
   DEFAULT_SEED = "# Untitled\n\nStart writing — everything you type is attributed to you.\n"
   DEFAULT_HTML_SEED = "<h1>Untitled</h1><p>Start writing — everything you type is attributed to you.</p>"
   CONTENT_FORMATS = %w[markdown html].freeze
@@ -189,6 +204,27 @@ class Document < ApplicationRecord
 
   def writable_by?(token, user: nil)
     link_access == "edit" || owned_by?(token, user:)
+  end
+
+  # Writing content: an HTML document's content is all HTML.
+  def editable_by?(token, user: nil)
+    writable_by?(token, user:) && (user.present? || !html?)
+  end
+
+  def assert_html_account!(user)
+    raise HtmlAccountRequiredError if html? && user.nil?
+  end
+
+  # A new source may keep the HTML this document's source has.
+  def assert_source_allowed!(source, user:)
+    return if user
+
+    assert_html_account!(user)
+    self.class.assert_no_html!(RawHtml.more(RawHtml.in_markdown(source), RawHtml.in_markdown(current_content)))
+  end
+
+  def self.assert_no_html!(html)
+    raise HtmlAccountRequiredError if html.any?
   end
 
   def commentable_by?(token, user: nil)
@@ -424,7 +460,8 @@ class Document < ApplicationRecord
       yours: owned_by?(viewer_token, user: viewer_user),
       link_access:,
       editing_locked: editing_locked?,
-      can_write: writable_by?(viewer_token, user: viewer_user),
+      can_write: editable_by?(viewer_token, user: viewer_user),
+      html_needs_account: writable_by?(viewer_token, user: viewer_user) && !editable_by?(viewer_token, user: viewer_user),
       can_comment: commentable_by?(viewer_token, user: viewer_user)
     }
   end

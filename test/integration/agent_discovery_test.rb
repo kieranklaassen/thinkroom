@@ -165,7 +165,7 @@ class AgentDiscoveryTest < ActionDispatch::IntegrationTest
     assert_equal(
       { "claimed" => true, "claimable" => false, "owner_name" => "Quiet Falcon",
         "link_access" => "edit", "editing_locked" => false,
-        "can_write" => true, "can_comment" => true },
+        "can_write" => true, "html_needs_account" => false, "can_comment" => true },
       body["ownership"]
     )
     assert body["notes"].any? { |n| n.include?("cannot claim") }

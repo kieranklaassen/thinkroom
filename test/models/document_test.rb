@@ -53,7 +53,7 @@ class DocumentTest < ActiveSupport::TestCase
     assert_not document.owned_by?("stale-token")
     assert_equal(
       { claimed: true, claimable: false, owner_name: "Kieran", yours: true,
-        link_access: "edit", editing_locked: false, can_write: true, can_comment: true },
+        link_access: "edit", editing_locked: false, can_write: true, html_needs_account: false, can_comment: true },
       document.ownership_props("stale-token", viewer_user: user)
     )
   end
@@ -690,19 +690,19 @@ class DocumentTest < ActiveSupport::TestCase
     props = doc.ownership_props(nil)
     assert_equal(
       { claimed: false, claimable: true, owner_name: nil, yours: false,
-        link_access: "edit", editing_locked: false, can_write: true, can_comment: true },
+        link_access: "edit", editing_locked: false, can_write: true, html_needs_account: false, can_comment: true },
       props
     )
 
     doc.claim!(token: "tok-a", name: "Owner")
     assert_equal(
       { claimed: true, claimable: false, owner_name: "Owner", yours: true,
-        link_access: "edit", editing_locked: false, can_write: true, can_comment: true },
+        link_access: "edit", editing_locked: false, can_write: true, html_needs_account: false, can_comment: true },
       doc.ownership_props("tok-a")
     )
     assert_equal(
       { claimed: true, claimable: false, owner_name: "Owner", yours: false,
-        link_access: "edit", editing_locked: false, can_write: true, can_comment: true },
+        link_access: "edit", editing_locked: false, can_write: true, html_needs_account: false, can_comment: true },
       doc.ownership_props("tok-b")
     )
     doc.set_editing_locked!(locked: true, token: "tok-a")

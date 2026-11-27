@@ -97,7 +97,7 @@ class DocumentsController < InertiaController
     # Editor capabilities for THIS view, mirrored into the static preview so
     # mode-dependent chrome (Mermaid source visibility, sketch caption
     # affordance) is identical on both sides of the preview → editor swap.
-    writable = document.writable_by?(owner_token, user: current_user)
+    writable = document.editable_by?(owner_token, user: current_user)
     preview_editable = writable && %w[edit suggest].include?(mode)
     preview_sketch_interactive = writable && mode == "edit"
     if !open_page_reload? &&
@@ -204,6 +204,7 @@ class DocumentsController < InertiaController
                          inertia: { errors: { content: "Document content is too long" } }
     end
     source = raw_content || Document::DEFAULT_SEED
+    Document.assert_no_html!(RawHtml.in_markdown(raw_content)) unless current_user
 
     creator_name = current_user&.name ||
       Document.normalize_owner_name(preferred_name(params[:name], fallback: nil))
@@ -462,6 +463,8 @@ class DocumentsController < InertiaController
     end
 
     head :no_content
+  rescue YjsPersistence::UpdateNotReadyError
+    render json: { error: "This update depends on one that has not arrived; retry." }, status: :conflict
   rescue Document::StaleSeedClaimError
     render json: { error: "This seed was superseded; reload the document.", seed_refused: true }, status: :conflict
   rescue ArgumentError
@@ -587,7 +590,7 @@ class DocumentsController < InertiaController
     if mode == "comment"
       document.commentable_by?(owner_token, user: current_user)
     else
-      document.writable_by?(owner_token, user: current_user)
+      document.editable_by?(owner_token, user: current_user)
     end
   end
 

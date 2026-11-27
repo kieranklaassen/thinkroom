@@ -28,12 +28,16 @@ class Suggestion < ApplicationRecord
   # The single entry point for proposing a suggestion — the UI's AI path and
   # the agent API both flow through here (create + activity + live broadcast),
   # so there is no side channel around the review machinery.
-  def self.propose!(document:, author_name:, author_kind:, body:, intent: nil, anchor_text: nil, replaces: nil)
+  def self.propose!(document:, author_name:, author_kind:, body:, user: nil, intent: nil, anchor_text: nil, replaces: nil)
     body = body.to_s
     if body.bytesize > MAX_BODY_BYTES
       invalid = document.suggestions.build(author_name:, author_kind:, body:, intent:, anchor_text:, replaces:)
       invalid.errors.add(:body, "is too long")
       raise ActiveRecord::RecordInvalid.new(invalid)
+    end
+
+    unless user
+      Document.assert_no_html!(document.html? ? RawHtml.in_html(body) : RawHtml.in_markdown(body))
     end
 
     normalization = document.html? ? HtmlDocumentSanitizer.external(body) : nil
@@ -60,6 +64,9 @@ class Suggestion < ApplicationRecord
   end
   private_class_method :resolve_pending
 
+  # Merging it would write HTML into the document.
+  def brings_html? = document.html? || RawHtml.in_markdown(body).any?
+
   def accept!(by: nil)
     transition!("accepted", by:)
   end
@@ -80,12 +87,18 @@ class Suggestion < ApplicationRecord
   # or every pending row when ids are omitted, in one transaction. A row
   # resolved concurrently by a single accept loses its pending status and is
   # excluded — the caller only merges winners, so no text applies twice.
-  def self.accept_all!(document:, by: nil, ids: nil)
+  # With `html: false`, rows that bring HTML stay pending, and are yielded.
+  def self.accept_all!(document:, by: nil, ids: nil, html: true)
     document.transaction do
       pending = document.suggestions.pending
       pending = pending.where(id: ids) unless ids.nil?
       # A row lost to a concurrent resolve since this read changes nothing.
-      won = pending.order(:id).ids.select { |id| resolve_pending(id, "accepted", by:) }
+      pending = pending.order(:id)
+      unless html
+        left, pending = pending.to_a.partition { |row| document.html? || RawHtml.in_markdown(row.body).any? }
+        yield left if left.any?
+      end
+      won = (html ? pending.ids : pending.map(&:id)).select { |id| resolve_pending(id, "accepted", by:) }
       document.suggestions.where(id: won).order(:id).to_a
     end
   end

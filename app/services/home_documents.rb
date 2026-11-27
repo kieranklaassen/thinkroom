@@ -5,7 +5,7 @@ class HomeDocuments
   # What a row and its ownership state read. The rest of a document row (both
   # sources, the editor state, provenance) is megabytes a list never shows.
   COLUMNS = %i[
-    id title slug tags created_at owner_name owner_token user_id link_access
+    id title slug content_format tags created_at owner_name owner_token user_id link_access
   ].freeze
   LIST_LIMIT = 50
 

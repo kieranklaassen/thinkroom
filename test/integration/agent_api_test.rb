@@ -2,6 +2,7 @@ require "test_helper"
 
 class AgentApiTest < ActionDispatch::IntegrationTest
   include ActionCable::TestHelper
+  include CompoundWritingHelpers
 
   AGENT = { "X-Agent-Name" => "Scout" }.freeze
 
@@ -106,13 +107,14 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   end
 
   test "agent creates sanitized HTML and receives generic source fields" do
+    agent = account_agent
     post "/api/docs",
          params: {
            title: "HTML Doc",
            format: "html",
            content: '<h1 onclick="bad()">Hello</h1><p><strong>world</strong></p>'
          },
-         headers: AGENT,
+         headers: agent,
          as: :json
 
     assert_response :created
@@ -183,6 +185,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   end
 
   test "HTML suggestion is sanitized and reports normalization" do
+    agent = account_agent
     document = Document.create!(
       title: "HTML",
       content_format: "html",
@@ -191,7 +194,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
 
     post "/api/docs/#{document.slug}/suggestions",
          params: { body: '<p onclick="bad()">Better</p>' },
-         headers: AGENT,
+         headers: agent,
          as: :json
 
     assert_response :created
@@ -271,7 +274,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal(
       { "claimed" => false, "claimable" => true, "owner_name" => nil,
         "link_access" => "edit", "editing_locked" => false,
-        "can_write" => true, "can_comment" => true },
+        "can_write" => true, "html_needs_account" => false, "can_comment" => true },
       body["ownership"]
     )
 
@@ -282,7 +285,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     assert_equal(
       { "claimed" => true, "claimable" => false, "owner_name" => "Quiet Falcon",
         "link_access" => "edit", "editing_locked" => false,
-        "can_write" => true, "can_comment" => true },
+        "can_write" => true, "html_needs_account" => false, "can_comment" => true },
       body["ownership"]
     )
     refute_includes response.body, "tok-owner"
@@ -1290,11 +1293,12 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   end
 
   test "targeted replacement on an html document re-sanitizes the result and reports normalization" do
+    agent = account_agent
     doc = Document.create!(title: "Html", content_format: "html", seed_content: "<h1>Hello</h1><p>Fine text</p>")
 
     patch "/api/docs/#{doc.slug}",
           params: { replaces: "<p>Fine text</p>", with: "<p>Fine <script>alert(1)</script>text</p>" },
-          headers: AGENT, as: :json
+          headers: agent, as: :json
 
     assert_response :ok
     body = response.parsed_body
@@ -1356,10 +1360,11 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   end
 
   test "clean HTML update reports no normalization" do
-    post "/api/docs", params: { format: "html", content: "<h1>Clean</h1>" }, headers: AGENT, as: :json
+    agent = account_agent
+    post "/api/docs", params: { format: "html", content: "<h1>Clean</h1>" }, headers: agent, as: :json
     slug = response.parsed_body["slug"]
 
-    patch "/api/docs/#{slug}", params: { content: "<h1>Still clean</h1><p>Body.</p>" }, headers: AGENT, as: :json
+    patch "/api/docs/#{slug}", params: { content: "<h1>Still clean</h1><p>Body.</p>" }, headers: agent, as: :json
 
     assert_response :ok
     body = response.parsed_body
@@ -1388,14 +1393,15 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   end
 
   test "update reports HTML normalization the same way create does" do
+    agent = account_agent
     post "/api/docs",
          params: { format: "html", content: "<h1>Clean</h1>" },
-         headers: AGENT, as: :json
+         headers: agent, as: :json
     slug = response.parsed_body["slug"]
 
     patch "/api/docs/#{slug}",
           params: { content: '<h1 onclick="bad()">Hi</h1><script>evil()</script>' },
-          headers: AGENT, as: :json
+          headers: agent, as: :json
 
     assert_response :ok
     body = response.parsed_body
@@ -1503,6 +1509,11 @@ class AgentApiTest < ActionDispatch::IntegrationTest
   end
 
   private
+
+  def account_agent(headers = AGENT)
+    user = User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD)
+    headers.merge("Authorization" => "Bearer #{CliAccessToken.issue!(user:).last}")
+  end
 
   def cli_user(email:, name: "Owner")
     User.create!(

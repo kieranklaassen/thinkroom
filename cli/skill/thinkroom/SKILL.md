@@ -27,7 +27,7 @@ thinkroom new draft.md --title "Decision memo" --agent "Codex"
 
 Always pass `--agent` (or set `THINKROOM_AGENT`) on writes — it is required. Without it the CLI stops with an error instead of misattributing the write to a generic identity, because per-agent provenance is the point.
 
-Use `--format html` only when semantic HTML is genuinely needed. Return the printed share URL to the user.
+Use `--format html` only when semantic HTML is genuinely needed; HTML, raw HTML in Markdown included, needs a signed-in account (`thinkroom login`). Return the printed share URL to the user.
 
 If the CLI asks for authentication, run `thinkroom login` and let the person approve the browser prompt. Never ask them to paste a token into chat.
 

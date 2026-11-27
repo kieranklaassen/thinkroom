@@ -1,6 +1,8 @@
 require "test_helper"
 
 class AgentUploadTest < ActionDispatch::IntegrationTest
+  include CompoundWritingHelpers
+
   PNG = Base64.decode64(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
   ).freeze
@@ -39,6 +41,8 @@ class AgentUploadTest < ActionDispatch::IntegrationTest
   end
 
   test "uploaded src survives HTML creation and becomes document-owned" do
+    user = User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD)
+    @agent["Authorization"] = "Bearer #{CliAccessToken.issue!(user:).last}"
     post "/api/uploads",
          params: { file: uploaded_file("field-map.png", "image/png", PNG) },
          headers: @agent
@@ -75,6 +79,8 @@ class AgentUploadTest < ActionDispatch::IntegrationTest
   end
 
   test "HTML suggestion claims an uploaded image for the target document" do
+    user = User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD)
+    @agent["Authorization"] = "Bearer #{CliAccessToken.issue!(user:).last}"
     document = Document.create!(
       title: "Suggestions",
       content_format: "html",

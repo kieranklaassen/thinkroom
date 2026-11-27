@@ -11,15 +11,21 @@ class DocumentMarkdown
 
   class << self
     def to_html(source, options: {}, plugins:)
+      Commonmarker.to_html(source, options: limited(source, options), plugins:)
+    end
+
+    # The tree that to_html renders.
+    def parse(source, **options) = Commonmarker.parse(source, options: limited(source, options))
+
+    private
+
+    def limited(source, options)
       bytes = source.b
       off = {}
       off[:autolink] = false if crowded?(bytes)
       off[:table] = false if large_tables?(bytes)
-      options = options.merge(extension: { **options[:extension], **off }) if off.any?
-      Commonmarker.to_html(source, options:, plugins:)
+      off.any? ? options.merge(extension: { **options[:extension], **off }) : options
     end
-
-    private
 
     def crowded?(source) = many_addresses?(source) || much_link_text?(source)
 

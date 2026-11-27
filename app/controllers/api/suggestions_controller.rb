@@ -13,6 +13,7 @@ module Api
           document:,
           author_name: current_agent,
           author_kind: "agent",
+          user: current_api_user,
           body: params.require(:body),
           intent: params[:intent].presence,
           anchor_text: params[:anchor_text].presence,

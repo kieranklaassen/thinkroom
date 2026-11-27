@@ -47,6 +47,7 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
   end
 
   test "HTML page load ships HTML source and format with the seed grant" do
+    sign_in_as(User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD))
     html = Document.create!(
       title: "HTML",
       content_format: "html",
