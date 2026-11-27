@@ -32,7 +32,7 @@ class InertiaController < ApplicationController
   # color at first paint — no Anonymous→name flash post-hydration. Signed-in
   # users ignore it (their account name wins).
   inertia_share viewer: -> {
-    account = current_user&.slice(:id, :name, :email)
+    account = current_user&.public_identity
     name = current_user&.name || session[:display_name]
     guest = guest_identity_cookie
     {

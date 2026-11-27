@@ -1,6 +1,12 @@
 class User < ApplicationRecord
   MINIMUM_PASSWORD_LENGTH = 10
   MAXIMUM_PASSWORD_BYTES = 72
+  # Email is unique, so a Google account whose address a password account
+  # already uses stores "<email>.<random hex>.google.invalid" instead.
+  # account_email gives the plain address back.
+  RESERVED_EMAIL_SUFFIX = ".google.invalid"
+  RESERVED_EMAIL_ENDING = /\.\h{32}#{Regexp.escape(RESERVED_EMAIL_SUFFIX)}\z/
+  MAXIMUM_EMAIL_LENGTH = 320
 
   has_secure_password validations: false
 
@@ -17,7 +23,7 @@ class User < ApplicationRecord
   validates :name, presence: true, length: { maximum: 255 }
   validates :email,
             presence: true,
-            length: { maximum: 320 },
+            length: { maximum: ->(user) { MAXIMUM_EMAIL_LENGTH + user.email.length - user.account_email.length } },
             format: { with: URI::MailTo::EMAIL_REGEXP },
             uniqueness: true
   validates :google_uid, uniqueness: true, allow_nil: true
@@ -27,6 +33,54 @@ class User < ApplicationRecord
             allow_nil: true
   validate :password_within_bcrypt_limit
   validate :exactly_one_authentication_method
+  validate :email_not_reserved, on: :create, if: :password_account?
+
+  # The account for a verified Google identity, created on first sign-in. It
+  # is never an existing password account, whatever email that account uses.
+  # Nil when another Google account has the email, or the email is in the
+  # reserved form itself.
+  def self.for_google!(uid:, email:, name:)
+    attempts = 0
+    begin
+      # SQLite's immediate transaction keeps the lookups and the insert together.
+      # A sign-in with the same subject can finish before it begins, and the
+      # query cache still holds the first lookup, so the second skips the cache.
+      find_by(google_uid: uid) || transaction do
+        uncached { find_by(google_uid: uid) || create_for_google!(uid:, email:, name:) }
+      end
+    rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
+      # An insert refused all the same is resolved from the start, up to twice.
+      attempts += 1
+      raise if attempts > 2
+
+      retry
+    end
+  end
+
+  # A password account and a Google account can answer to the same email.
+  def self.with_account_email(email)
+    email = email.to_s.strip.downcase
+    where(email:)
+      .or(where("email LIKE ? ESCAPE '\\'", "#{sanitize_sql_like(email)}.%#{RESERVED_EMAIL_SUFFIX}"))
+      .select { |user| user.account_email == email }
+  end
+
+  def self.create_for_google!(uid:, email:, name:)
+    return if email.end_with?(RESERVED_EMAIL_SUFFIX)
+
+    holders = with_account_email(email)
+    return if holders.any?(&:google_account?)
+
+    stored = holders.any? ? "#{email}.#{SecureRandom.hex(16)}#{RESERVED_EMAIL_SUFFIX}" : email
+    create!(name:, email: stored, google_uid: uid)
+  end
+  private_class_method :create_for_google!
+
+  def account_email
+    google_account? ? email.sub(RESERVED_EMAIL_ENDING, "") : email
+  end
+
+  def public_identity = slice(:id, :name).merge(email: account_email)
 
   def password_account? = password_digest.present?
   def google_account? = google_uid.present?
@@ -67,6 +121,10 @@ class User < ApplicationRecord
   def normalize_identity
     self.name = Document.normalize_display_name(name)
     self.email = email.to_s.strip.downcase
+  end
+
+  def email_not_reserved
+    errors.add(:email, "is invalid") if email.end_with?(RESERVED_EMAIL_SUFFIX)
   end
 
   def password_within_bcrypt_limit

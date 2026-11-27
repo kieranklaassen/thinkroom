@@ -99,7 +99,7 @@ class SyncChannel < ApplicationCable::Channel
       evict_awareness
     end
   rescue StandardError => e
-    Rails.logger.warn("SyncChannel: unsubscribe cleanup failed: #{e.class}: #{e.message}")
+    Rails.logger.warn("SyncChannel: unsubscribe cleanup failed: #{LogContent.describe(e)}")
   end
 
   def receive(data)
@@ -350,10 +350,10 @@ class SyncChannel < ApplicationCable::Channel
     # whose claim is malformed, or whose seed came after other stored content.
     transmit({ type: "write-denied", locked: false, stale: true })
   rescue ArgumentError => e
-    Rails.logger.warn("SyncChannel: undecodable update dropped: #{e.message}")
+    Rails.logger.warn("SyncChannel: undecodable update dropped: #{LogContent.describe(e)}")
     transmit({ type: "nack", seq:, reason: "invalid" }) if seq
   rescue StandardError => e
-    Rails.logger.warn("SyncChannel: merge failed: #{e.class}: #{e.message}")
+    Rails.logger.warn("SyncChannel: merge failed: #{LogContent.describe(e)}")
     transmit({ type: "nack", seq:, reason: "retryable" }) if seq
   end
 
