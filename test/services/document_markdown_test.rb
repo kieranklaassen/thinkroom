@@ -35,6 +35,19 @@ class DocumentMarkdownTest < ActiveSupport::TestCase
     assert_equal 200, DocumentPlainText.fragment(format: "markdown", content:).css("a").size
   end
 
+  test "a line with very many links shows them as text" do
+    links = "https://example.com/a " * 2_500
+
+    assert_no_match(/<a /, DocumentMarkdown.to_html(links, **OPTIONS))
+    assert_no_match(/<a /, DocumentMarkdown.to_html("https://example.com/#{")" * 12_000}", **OPTIONS))
+  end
+
+  test "many links in many lines, and a long line without links, stay as they are" do
+    [ "https://example.com/a\n" * 2_500, "#{"word " * 40_000}\n#{"https://example.com (a)\n" * 200}", "&amp; " * 40_000 ].each do |source|
+      assert_equal Commonmarker.to_html(source, **OPTIONS), DocumentMarkdown.to_html(source, **OPTIONS)
+    end
+  end
+
   test "written links stay links among very many addresses" do
     html = DocumentMarkdown.to_html("[Ada](mailto:ada@example.com) <ada@example.com> " * 101, **OPTIONS)
 
