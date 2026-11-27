@@ -118,7 +118,7 @@ export interface DocumentProps {
     yjs_state_checksum: string | null
     content_html: string
     content_blocks: number
-    /** content_html is the source as text: no editor can start for it. */
+    /** content_html is the source as text, shown without an editor. */
     source_only: boolean
     display_title: string
     // Persisted render geometry (Mermaid figure heights by source hash):
@@ -242,7 +242,7 @@ export default function DocumentShow({
   // Editor-originated notices (refused oversized edit, snapshot refused as
   // too large); share the doc-notice slot with suggestion notices.
   const [editorNotice, setEditorNotice] = useState<string | null>(null)
-  // No editor opens for this document; exports serve the stored source.
+  // The document is shown without an editor; exports serve the stored source.
   const [editorUnavailable, setEditorUnavailable] = useState(doc.source_only)
   const onEditorAvailability = useCallback((available: boolean) => {
     setEditorUnavailable(!available)

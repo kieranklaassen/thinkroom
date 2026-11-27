@@ -1,7 +1,7 @@
 require "test_helper"
 
-# Very deep nesting is handled: what cannot be formatted shows as its source,
-# and what is stored stays exactly as it was sent.
+# Very deep nesting is handled: a document shows formatted or as its source, and
+# what is stored stays exactly as it was sent.
 class DeepNestingTest < ActionDispatch::IntegrationTest
   BROWSER = { "User-Agent" => "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36" }.freeze
   LEVELS = [ 100, 399, 400, 500, 1_000, 5_000, 50_000 ].freeze
@@ -29,7 +29,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
 
   { "markdown" => MARKDOWN, "html" => HTML }.each do |format, shapes|
     shapes.each do |name, shape|
-      test "#{format} #{name} at every depth have a preview, a text and a title" do
+      test "#{format} #{name} have a preview, a text and a title" do
         started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         LEVELS.product([ "", "words" ]).each do |levels, text|
           content = shape.call(levels, text)
@@ -45,7 +45,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "the deepest formatted level and the first one past it" do
+  test "a document shows formatted or as its source" do
     formatted = DocumentPreviewHtml.call(format: "markdown", content: "#{">" * 396} words")
     assert_includes formatted, "<blockquote>"
     assert_not_includes formatted, DocumentPreviewHtml::TOO_COMPLEX_NOTICE
@@ -56,24 +56,24 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
     assert_equal 3, DocumentPreviewHtml.block_count(source)
   end
 
-  test "a deep source with a null character has a text" do
+  test "a source with a null character has a text" do
     assert_includes DocumentPlainText.call(format: "markdown", content: "#{">" * 400} a\0b"), "a\uFFFDb"
   end
 
-  test "an element with too many attributes shows as its source" do
+  test "an element with many attributes shows as its source" do
     content = "<p #{(1..500).map { |i| "a#{i}=1" }.join(" ")}>words</p>"
     assert_includes DocumentPreviewHtml.call(format: "html", content:), DocumentPreviewHtml::TOO_COMPLEX_NOTICE
     assert_includes DocumentPlainText.call(format: "html", content:), "words"
   end
 
-  test "a preview that gains wrappers at the limit still has a block count" do
+  test "a preview with table wrappers has a block count" do
     (380..400).each do |levels|
       html = DocumentPreviewHtml.call(format: "markdown", content: "#{">" * levels} | a |\n#{">" * levels} |---|")
       assert_kind_of Integer, DocumentPreviewHtml.block_count(html)
     end
   end
 
-  test "another argument error is not taken for a limit" do
+  test "another argument error is passed on" do
     assert_raises(ArgumentError) { DocumentHtml.within_limits { raise ArgumentError, "something else" } }
   end
 
@@ -120,7 +120,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
     end
   end
 
-  test "html that cannot be checked is refused with a reason and changes nothing" do
+  test "html over the limits gets a reason and the document stays as it is" do
     deep = "#{"<blockquote>" * 1_000}words"
     assert_no_difference -> { Document.count } do
       post api_docs_path, params: { content: deep, format: "html" }, as: :json
@@ -146,14 +146,14 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
     assert_empty document.suggestions
   end
 
-  test "a raw HTML block at the size limit is bounded too" do
+  test "a large raw HTML block reads depth first and shows as its source" do
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     html = DocumentPreviewHtml.call(format: "markdown", content: "<div>" * (Document::MAX_CONTENT_BYTES / 5))
     assert_includes html, DocumentPreviewHtml::TOO_COMPLEX_NOTICE
     assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - started, :<, 5
   end
 
-  test "much raw HTML that is not deep still renders, with the same tags filtered" do
+  test "much raw HTML reads depth first, then renders with the same tags filtered" do
     content = "#{"<div>a</div><script>b</script>\n\n" * 5_000}<div>end</div>"
     assert_operator content.count("<") * content.bytesize, :>, 2_000_000_000
     html = DocumentPreviewHtml.call(format: "markdown", content:)

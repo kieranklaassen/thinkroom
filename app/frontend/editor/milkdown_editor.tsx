@@ -162,7 +162,7 @@ export interface EditorProps {
    *  same hints size the server preview's skeletons. */
   renderHints?: RenderHints
   onReady?: (handle: EditorHandle) => void
-  /** The editor could not show this document; nothing local was kept or sent. */
+  /** The page keeps its preview for this document; nothing local was kept or sent. */
   onUnavailable?: () => void
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
@@ -503,11 +503,11 @@ function CollabEditor({
           callbacksRef.current.onUnavailable?.()
           return
         }
-        // Bound, the document is complete and stays: only a step after it failed.
+        // Bound: the editor holds the whole document, so it stays.
       }
       ready()
     }
-    // False when the formatting was too deep to build: it runs out of stack.
+    // Whether the first bind finished; only then does this editor hold the document.
     let bound = false
     const open = () => {
       editor.action((ctx) => {

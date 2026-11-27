@@ -64,8 +64,8 @@ class DocumentPreviewHtml
         count += 1 if trailing_paragraph?(children.last)
         count
       rescue DocumentHtml::TooComplex
-        # The wrappers a preview adds (tables, sketches) can take it past the
-        # limit it was rendered under; it then counts as a short document.
+        # Without a parsed tree there are no blocks to count, so the page uses
+        # the short-document rendering.
         0
       end
     end
@@ -154,14 +154,14 @@ class DocumentPreviewHtml
       )
     end
 
-    # The renderer's tag filter takes time that grows with the square of a raw
-    # HTML block, so a source where that is noticeable (about a tenth of a
-    # second) is first parsed without it. Only its depth is read.
-    RAW_HTML_COST = 2_000_000_000
+    # Read depth first, then render: for a source with much raw HTML, whether it
+    # can be formatted is decided before the full render. Only the depth is read
+    # here, so the filtered tags count as the text they are shown as.
+    DEPTH_FIRST_SIZE = 2_000_000_000
     FILTERED_TAG = %r{<(?=/?(?:title|textarea|style|xmp|iframe|noembed|noframes|script|plaintext)(?:[\s>]|/>))}i
 
     def refuse_deep_raw_html(source)
-      return if source.count("<") * source.bytesize < RAW_HTML_COST
+      return if source.count("<") * source.bytesize < DEPTH_FIRST_SIZE
 
       DocumentHtml.parse(markdown_html(source, tagfilter: false).gsub(FILTERED_TAG, "&lt;"))
     end

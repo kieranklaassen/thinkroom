@@ -445,7 +445,7 @@ export class CableProvider {
     try {
       build()
     } catch (error) {
-      // Partial: nothing from this session is sent.
+      // Unfinished: the stored document stays as it is.
       this.discarded = true
       throw error
     } finally {

@@ -58,7 +58,7 @@ export async function downloadDocumentMarkdown(editor: Editor, title: string): P
   )
 }
 
-/** The stored source, byte for byte, for a document no editor can open. */
+/** The stored source, byte for byte, for a document shown without an editor. */
 export async function downloadStoredSource(slug: string, title: string): Promise<void> {
   const response = await fetch(`/d/${slug}.json`)
   if (!response.ok) throw new Error(`HTTP ${response.status}`)

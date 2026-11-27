@@ -152,9 +152,8 @@ class Document < ApplicationRecord
     )
   end
 
-  # True when the preview can only show the source. The editor is then not
-  # started: at such depths it can run out of stack or never finish, and what
-  # it could not build it would drop from the shared document.
+  # True when the preview shows the source. The page then starts no editor and
+  # claims no seed, so the shared document stays as it is stored.
   def source_only?(**preview_options)
     DocumentPreviewHtml.source_only?(preview_html(**preview_options), current_content)
   end

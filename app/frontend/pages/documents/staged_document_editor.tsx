@@ -42,8 +42,7 @@ interface Props extends Omit<EditorProps, 'onReady' | 'onUnavailable'> {
   /** Top-level blocks in contentHtml, so the preview can adopt the editor's
    *  long-document rendering (content-visibility) and keep its geometry. */
   contentBlocks: number
-  /** contentHtml is the source as text because its formatting is too complex;
-   *  it stays, and no editor starts. */
+  /** contentHtml is the source as text: it stays, and no editor starts. */
   sourceOnly: boolean
   /** SSR/hydration island flag — the live editor mounts only client-side. */
   isClient: boolean

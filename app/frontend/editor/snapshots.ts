@@ -131,8 +131,8 @@ export function createSnapshotScheduler(options: {
    *  console — the CRDT keeps every edit while agents and previews serve
    *  the last accepted copy. Fired once per scheduler lifetime. */
   onTooLarge?: () => void
-  /** The server could not check the snapshot's HTML (too deep), so the saved
-   *  source is stale in the same way. Fired once per scheduler lifetime. */
+  /** The server answered `too_complex`: the saved source is stale in the same
+   *  way. Fired once per scheduler lifetime. */
   onTooComplex?: () => void
 }): SnapshotScheduler {
   const { editor, ydoc, slug, contentFormat, canWrite, onTooLarge, onTooComplex } = options

@@ -1,7 +1,7 @@
-# The one parse of document HTML. The parser refuses a tree nested past its
-# depth limit (and an element with too many attributes); this names that
-# refusal so each reader of a document can answer it: a preview or a text shows
-# the source, a write that must be sanitized is refused with the message.
+# The one parse of document HTML. It names the parser's own limits as
+# TooComplex so each reader of a document answers them the same way: a preview
+# or a text shows the source, and a write that must be sanitized first returns
+# the message.
 class DocumentHtml
   class TooComplex < StandardError
     MESSAGE = "This HTML is nested too deeply or has too many attributes on one element. Simplify it and try again.".freeze
