@@ -5,7 +5,7 @@ module Api
 
       def show
         render json: {
-          account: current_api_user.slice(:id, :name, :email),
+          account: current_api_user.public_identity,
           token: { name: current_cli_token.name, created_at: current_cli_token.created_at }
         }
       end
