@@ -42,10 +42,10 @@ class LogContentTest < ActionDispatch::IntegrationTest
 
   # Runs the block once per level on a fresh log; the log must be free of the
   # marker and must hold what was not meant to be filtered.
-  def assert_no_content_logged(keeps: [])
+  def assert_no_content_logged(keeps: [], forms: FORMS)
     %i[info debug].each do |level|
       log = capture_log(level) { yield level }
-      FORMS.each do |form|
+      forms.each do |form|
         line = log.each_line.find { |text| text.include?(form) }
         assert_nil line&.byteslice(0, 400)&.scrub, "#{level} log holds #{form}"
       end
@@ -621,6 +621,145 @@ class LogContentTest < ActionDispatch::IntegrationTest
     end
   ensure
     image&.close!
+  end
+
+  BUNDLE_LINE = "/feedback_runs/bundle/[FILTERED]"
+
+  def feedback_run
+    run = featured_user!.feedback_runs.new(client_session_id: "session")
+    run.archive.attach(io: StringIO.new("PK\x03\x04data".b), filename: "bundle.zip", content_type: "application/zip")
+    run.tap(&:save!)
+  end
+
+  # A token as it is, with every character percent-encoded, and in halves.
+  def forms_of(token)
+    encoded = token.each_char.map { |char| format("%%%02X", char.ord) }.join
+    [ token, encoded, token.first(20), token.last(20), encoded.first(60), encoded.last(60) ]
+  end
+
+  test "bundle paths in request lines" do
+    token = feedback_run.signed_id(expires_in: 1.hour, purpose: :feedback_bundle)
+    encoded = token.each_char.map { |char| format("%%%02X", char.ord) }.join
+    line = ->(verb, path) { /Started #{verb} "#{Regexp.escape(path)}" for / }
+    keeps = [
+      line["GET", BUNDLE_LINE], line["HEAD", BUNDLE_LINE], line["GET", "#{BUNDLE_LINE}.zip"], line["POST", BUNDLE_LINE],
+      line["GET", "//feedback_runs//bundle//[FILTERED]"], line["GET", "/feedback%5Fruns/%62undle/[FILTERED]"],
+      line["GET", "/feedback_runs%2Fbundle%2f[FILTERED]"], line["GET", "#{BUNDLE_LINE}?mode=read&[FILTERED]=[FILTERED]"],
+      /Processing by FeedbackBundlesController#show as ZIP\n  Parameters: \{"\[FILTERED\]" => "\[FILTERED\]"/,
+      /Redirected to \[FILTERED\]\nCompleted 302/
+    ]
+    with_env_config("action_dispatch.show_exceptions" => :all, "action_dispatch.show_detailed_exceptions" => false) do
+      assert_no_content_logged(keeps:, forms: forms_of(token)) do
+        [ "/feedback_runs/bundle/#{token}", "/feedback_runs/bundle/#{encoded}", "//feedback_runs//bundle//#{token}",
+          "/feedback_runs/bundle/#{token}/", "/feedback_runs/bundle/#{token}.zip", "/feedback_runs/bundle/#{token}?mode=read&token=#{token}" ].each do |path|
+          get path
+          assert_response :redirect, path
+          assert_match %r{/rails/active_storage/}, response.location
+        end
+        head "/feedback_runs/bundle/#{token}"
+        assert_response :redirect
+        [ "/feedback_runs/bundle/#{token}/more", "/feedback_runs/bundle/more/#{token}", "/feedback%5Fruns/%62undle/#{token}",
+          "/feedback_runs%2Fbundle%2f#{token}", "/feedback_runs/bundle/%FF#{token}", "/feedback_runs/bundle/x%0A#{token}" ].each { |path| get path }
+        post "/feedback_runs/bundle/#{token}"
+        assert_response :not_found
+      end
+    end
+  end
+
+  test "bundle paths with another token" do
+    assert_no_content_logged(keeps: [ /Started GET "#{Regexp.escape(BUNDLE_LINE)}" for /, /Completed 404/ ]) do
+      [ MARK, "#{MARK}.#{MARK}", "#{MARK}--#{MARK}.zip", MARK.each_char.map { |char| "%%%02X" % char.ord }.join ].each do |token|
+        get "/feedback_runs/bundle/#{token}"
+        assert_response :not_found
+        head "/feedback_runs/bundle/#{token}"
+        assert_response :not_found
+      end
+    end
+  end
+
+  test "bundle paths when the request fails" do
+    with_env_config("action_dispatch.show_exceptions" => :all, "action_dispatch.show_detailed_exceptions" => false) do
+      assert_no_content_logged(keeps: [ /Started GET "#{Regexp.escape(BUNDLE_LINE)}" for /, /^RuntimeError:/, /^ActiveRecord::RecordNotFound:/ ]) do
+        [ RuntimeError, ActiveRecord::RecordNotFound ].each do |error|
+          calling(FeedbackRun, :find_signed!, -> { raise error, "/feedback_runs/bundle/#{MARK}" }) { get "/feedback_runs/bundle/#{MARK}" }
+        end
+        assert_response :not_found
+      end
+    end
+  end
+
+  test "bundle paths in redirects" do
+    located = %r{Redirected to http://\S+/feedback_runs/bundle/\[FILTERED\]}
+    assert_no_content_logged(keeps: [ /#{located}\nCompleted 301/, /#{located}\?mode=read\nCompleted 30[23]/ ]) do
+      host! "127.0.0.1"
+      get "/feedback_runs/bundle/#{MARK}/more"
+      assert_redirected_to %r{\Ahttp://localhost.*#{MARK}}
+      host! "www.example.com"
+      post document_comments_path(@document.slug), params: { body: MARK },
+           headers: BROWSER.merge("Referer" => "http://www.example.com/feedback_runs/bundle/#{MARK}?mode=read")
+      assert_response :redirect
+      assert_includes response.location, MARK
+    end
+  end
+
+  test "bundle paths in development error lines" do
+    previous = Rails.env
+    log = capture_log(:debug) do
+      Rails.env = "development"
+      with_env_config("action_dispatch.show_exceptions" => :all) { get "/feedback_runs/bundle/#{MARK}/more" }
+    ensure
+      Rails.env = previous
+    end
+    assert_match %r{RoutingError \(No route matches \[GET\] "/feedback_runs/bundle/\[FILTERED\]}, log
+    assert_not_includes log, MARK
+  end
+
+  test "bundle paths without a first slash, and more than one in a message" do
+    request = ActionDispatch::Request.new("PATH_INFO" => "feedback_runs/bundle/#{MARK}", "rack.input" => StringIO.new)
+    assert_equal "feedback_runs/bundle/[FILTERED]", request.filtered_path
+    shown = LogContent.hide_bundle("/feedback_runs/bundle/#{MARK}?mode=read /feedback_runs/bundle/#{MARK}")
+    assert_equal "#{BUNDLE_LINE}?mode=read #{BUNDLE_LINE}", shown
+  end
+
+  test "other paths are logged as they are" do
+    paths = [ "/feedback_runs/bundle", "/feedback_runs/bundle/", "/feedback_runs/7", "/feedback_runs/bundles/x", "/bundle/x" ]
+    with_env_config("action_dispatch.show_exceptions" => :all) do
+      log = capture_log(:info) { paths.each { |path| get path } }
+      paths.each { |path| assert_includes log, %(Started GET "#{path}" for ) }
+    end
+  end
+
+  test "the owner of a pin" do
+    pin_twice = lambda do |*|
+      DocumentPin.where(document: @document).delete_all
+      assert DocumentPin.pin!(@document, user: nil, token: MARK)
+      # As when another request pins between the check and the insert.
+      calling(DocumentPin, :for_owner, -> { DocumentPin.none }) { assert DocumentPin.pin!(@document, user: nil, token: MARK) }
+      assert_equal [ [ nil, MARK ] ], DocumentPin.where(document: @document).pluck(:user_id, :owner_token)
+    end
+    assert_no_content_logged(&pin_twice)
+
+    columns = '("user_id","owner_token","document_id","created_at","updated_at")'
+    statement = %(INSERT INTO "document_pins" #{columns} VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING RETURNING "id")
+    inserts = capture_log(:debug, &pin_twice).lines.grep(/DocumentPin Insert \(/)
+    assert_equal 2, inserts.size
+    inserts.each do |line|
+      assert_includes line, statement
+      assert_includes line, %(["owner_token", "[FILTERED]"], ["document_id", #{@document.id}])
+    end
+  end
+
+  test "a pin that cannot be stored" do
+    @document.delete
+    error = nil
+    assert_no_content_logged do
+      error = assert_raises(ActiveRecord::InvalidForeignKey) do
+        DocumentPin.transaction(requires_new: true) do
+          DocumentPin.pin!(@document, user: nil, token: MARK)
+        end
+      end
+    end
+    assert_not_includes error.message, MARK
   end
 
   test "server rendering failures" do

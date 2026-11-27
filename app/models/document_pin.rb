@@ -37,7 +37,7 @@ class DocumentPin < ApplicationRecord
       raise CapReached if pins.count >= MAX_PER_OWNER
 
       now = Time.current
-      insert_all([ owner.merge(document_id: document.id, created_at: now, updated_at: now) ])
+      insert_ignoring_conflict(owner.merge(document_id: document.id, created_at: now, updated_at: now))
       true
     end
 
@@ -46,6 +46,21 @@ class DocumentPin < ApplicationRecord
     end
 
     private
+
+    # As insert_all, which writes the values into the statement, with binds.
+    def insert_ignoring_conflict(attributes)
+      binds = attributes.map do |name, value|
+        ActiveRecord::Relation::QueryAttribute.new(name.to_s, value, type_for_attribute(name))
+      end
+      with_connection do |connection|
+        columns = attributes.keys.map { |name| connection.quote_column_name(name) }.join(",")
+        values = Array.new(binds.size, "?").join(", ")
+        connection.exec_query(<<~SQL.squish, "#{name} Insert", binds)
+          INSERT INTO #{quoted_table_name} (#{columns}) VALUES (#{values})
+          ON CONFLICT DO NOTHING RETURNING #{connection.quote_column_name(primary_key)}
+        SQL
+      end
+    end
 
     def owner_attributes(user:, token:)
       if user
