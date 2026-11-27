@@ -15,6 +15,7 @@ import {
   rejectInlineSuggestion,
   type InlineSuggestion,
 } from '../../editor/suggest_changes'
+import { HTML_ACCOUNT_NOTICE } from '../../editor/html_guard'
 import type { ReviewableSuggestion } from '../../components/suggestion_card'
 import { patchJSON } from '../../lib/csrf'
 import type { SuggestionPayload } from '../../types/payloads'
@@ -140,6 +141,9 @@ export function useSuggestionReview({
                   })
                 }
               },
+              onError: (errors) => {
+                if (typeof errors.html_account === 'string') setSuggestionNotice(errors.html_account)
+              },
               onFinish: () => resolve(),
             },
           )
@@ -239,7 +243,10 @@ export function useSuggestionReview({
         ids: applicable.map((suggestion) => suggestion.id),
       })
       if (response.ok) {
-        const { accepted } = (await response.json()) as { accepted: SuggestionPayload[] }
+        const { accepted, needs_account: needsAccount } = (await response.json()) as {
+          accepted: SuggestionPayload[]
+          needs_account: number
+        }
         // The merge loop is fully synchronous — no await can widen the
         // window in which the live doc diverges between merges. Failed
         // merges collect here and reopen in parallel afterwards (each
@@ -268,6 +275,11 @@ export function useSuggestionReview({
         const reopened = reopenResults.filter(Boolean).length
         const reopenFailed = reopenResults.length - reopened
         const notices: string[] = []
+        if (needsAccount > 0) {
+          notices.push(
+            `${HTML_ACCOUNT_NOTICE}. ${needsAccount} suggestion${needsAccount === 1 ? ' was' : 's were'} left pending.`,
+          )
+        }
         if (blocked.length > 0) {
           notices.push(skippedSuggestionNotice(blocked.length))
         }

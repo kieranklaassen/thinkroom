@@ -28,6 +28,7 @@ type SyncMessage = {
     | 'awareness'
     | 'awareness-leave'
     | 'write-denied'
+    | 'html-refused'
   update?: string
   sv?: string
   checksum?: string
@@ -46,6 +47,8 @@ type SyncMessage = {
   seq?: number
   /** Reason string from nack frames or early subscribe-time rejections (e.g. 'retryable', 'invalid', 'stale'). */
   reason?: string
+  /** Pieces of HTML an html-refused frame added, with how many. */
+  html?: Record<string, number>
   /** Document#content_generation at the time of this message. */
   generation?: number
   /** True when a write-denied frame was rejected for staleness (the
@@ -113,6 +116,7 @@ export type ProviderEvent =
   | 'write-denied'
   | 'stale'
   | 'access-changed'
+  | 'html-refused'
 
 /** Origin tag for the page's server-rendered Yjs state applied at session
  *  creation (collab_session.ts). It is server state, never a local change. */
@@ -183,6 +187,10 @@ export class CableProvider {
   // The local doc was superseded and the page is reloading: nothing more is
   // sent from it or merged into it.
   discarded = false
+  // The server refused HTML in the outbox: it is kept, and waits for a change.
+  private htmlRefused = false
+  /** What the last refusal named; read on 'html-refused'. */
+  refusedHtml: Record<string, number> = {}
   // Peer updates that arrived while `seedClaim` was unsettled. Merging them
   // into a seed the server then refuses would double the text.
   private heldUpdates: Uint8Array[] = []
@@ -442,6 +450,7 @@ export class CableProvider {
     if (
       this.destroyed ||
       this.discarded ||
+      this.htmlRefused ||
       !this.canWrite ||
       !this.synced ||
       this.inFlight ||
@@ -684,6 +693,17 @@ export class CableProvider {
           this.flush('update')
         }
         break
+      case 'html-refused':
+        if (!this.inFlight || data.seq !== this.inFlight.seq) break
+        // Nothing is dropped. A listener turns the HTML into text, which joins
+        // the outbox as a change, and the whole of it is sent as one update.
+        this.requeueInFlight()
+        this.queued = [Y.mergeUpdates(this.queued)]
+        this.retryAttempt = 0
+        this.htmlRefused = true
+        this.refusedHtml = data.html ?? {}
+        this.emit('html-refused')
+        break
       case 'update':
       case 'sync-reply':
         this.serverChecksum = null
@@ -738,6 +758,7 @@ export class CableProvider {
     // them; the page's server-rendered hydration is server state too.
     if (origin === this || origin === SERVER_HYDRATE_ORIGIN || !this.canWrite) return
     this.enqueue(update)
+    this.htmlRefused = false
     this.flush('update')
   }
 

@@ -398,6 +398,7 @@ class DocumentsController < InertiaController
     document = Document.find_by!(slug: params[:slug])
     @write_document = document
     document.assert_write_access!(token: owner_token, user: current_user)
+    document.assert_html_account!(current_user)
     if params.key?(:content) && params.key?(:markdown)
       return render json: { error: "Send content or legacy markdown, not both." },
                     status: :unprocessable_entity
@@ -434,6 +435,7 @@ class DocumentsController < InertiaController
     document = Document.find_by!(slug: params[:slug])
     @write_document = document
     document.assert_write_access!(token: owner_token, user: current_user)
+    document.assert_html_account!(current_user)
     update = params[:update].to_s
     return head :content_too_large if update.bytesize > MAX_SYNC_UPDATE_B64_BYTES
 

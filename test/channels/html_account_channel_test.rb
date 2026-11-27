@@ -30,7 +30,7 @@ class HtmlAccountChannelTest < ActionCable::Channel::TestCase
     transmissions.last
   end
 
-  %w[text remove move break tag_text].each do |name|
+  %w[text remove move break tag_text provenance_split].each do |name|
     test "a guest update that adds no HTML is stored: #{name}" do
       document = document_with_html
       join(document)
@@ -57,10 +57,12 @@ class HtmlAccountChannelTest < ActionCable::Channel::TestCase
     end
   end
 
-  test "a guest tree that cannot be read completely is refused while it holds HTML" do
-    document = document_with_html
-    join(document)
-    assert_equal "html-refused", send_update(document, "unreadable")["type"]
+  %w[unreadable mark_split_deep element_split_deep].each do |name|
+    test "a guest tree that cannot be read completely is refused while it holds HTML: #{name}" do
+      document = document_with_html
+      join(document)
+      assert_equal "html-refused", send_update(document, name)["type"]
+    end
   end
 
   test "a guest update waits for what it depends on" do

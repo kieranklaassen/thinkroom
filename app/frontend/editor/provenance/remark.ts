@@ -1,11 +1,9 @@
 import { $remark } from '@milkdown/kit/utils'
+import { escapeMarkupAttribute } from '../markdown_text'
 import { findSpanClose, type MdastNode } from '../remark_spans'
 
 const OPEN_SPAN =
   /^<span\s+data-provenance(?:="")?\s*(?:data-kind="([^"]*)")?\s*(?:data-author="([^"]*)")?\s*(?:data-state="([^"]*)")?\s*>$/
-
-const escapeAttr = (value: string): string =>
-  value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 
 /**
  * Serialization: emit provenance mdast nodes as HTML spans. Markdown stays
@@ -26,9 +24,9 @@ export const provenanceStringify = $remark('provenanceStringify', () =>
           info: unknown,
         ) => {
           const inner = state.containerPhrasing(node, info)
-          const kind = escapeAttr((node.kind as string) ?? 'human')
-          const author = escapeAttr((node.author as string) ?? '')
-          const reviewState = escapeAttr((node.state as string) ?? 'verbatim')
+          const kind = escapeMarkupAttribute((node.kind as string) ?? 'human')
+          const author = escapeMarkupAttribute((node.author as string) ?? '')
+          const reviewState = escapeMarkupAttribute((node.state as string) ?? 'verbatim')
           return `<span data-provenance data-kind="${kind}" data-author="${author}" data-state="${reviewState}">${inner}</span>`
         },
       },

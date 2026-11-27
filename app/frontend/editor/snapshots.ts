@@ -132,10 +132,13 @@ export function createSnapshotScheduler(options: {
    *  console — the CRDT keeps every edit while agents and previews serve
    *  the last accepted copy. Fired once per scheduler lifetime. */
   onTooLarge?: () => void
+  /** The server refused HTML in the snapshot (403). Fired once, too. */
+  onHtmlRefused?: () => void
 }): SnapshotScheduler {
-  const { editor, ydoc, slug, contentFormat, canWrite, onTooLarge } = options
+  const { editor, ydoc, slug, contentFormat, canWrite, onTooLarge, onHtmlRefused } = options
   let timer: ReturnType<typeof setTimeout> | null = null
   let reportedTooLarge = false
+  let reportedHtml = false
   const lifetime = new AbortController()
 
   const push = () => {
@@ -148,6 +151,10 @@ export function createSnapshotScheduler(options: {
         if (outcome.status === 413 && !reportedTooLarge) {
           reportedTooLarge = true
           onTooLarge?.()
+        }
+        if (outcome.status === 403 && !reportedHtml) {
+          reportedHtml = true
+          onHtmlRefused?.()
         }
       },
     )

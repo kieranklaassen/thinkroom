@@ -98,6 +98,15 @@ import {
 } from './mermaid'
 import { richBlockWidthControls } from './rich_block_width'
 import { documentSizeGuard, documentSizeGuardCtx } from './document_size_guard'
+import {
+  HTML_KEPT_AS_TEXT_NOTICE,
+  HTML_NOT_SAVED_NOTICE,
+  HTML_SNAPSHOT_NOTICE,
+  htmlGuard,
+  htmlGuardCtx,
+  keepRefusedHtmlAsText,
+} from './html_guard'
+import { configureMarkdownText } from './markdown_text'
 
 export interface EditorHandle {
   editor: Editor
@@ -335,6 +344,8 @@ function CollabEditor({
   taskInteractiveRef.current = taskInteractive
   const canWriteRef = useRef(canWrite)
   canWriteRef.current = canWrite
+  const needsAccountRef = useRef(connectionIdentity === 'guest')
+  needsAccountRef.current = connectionIdentity === 'guest'
   // Suggesting only syncs into plugin state after start() — the gate that
   // keeps seed/initial-sync transactions out of the dispatch transform.
   const startedRef = useRef(false)
@@ -350,6 +361,10 @@ function CollabEditor({
             ...prev,
             onRefused: () => callbacksRef.current.onNotice?.(REFUSED_EDIT_NOTICE),
           }))
+          ctx.set(htmlGuardCtx.key, {
+            needsAccount: () => needsAccountRef.current,
+            onKeptAsText: () => callbacksRef.current.onNotice?.(HTML_KEPT_AS_TEXT_NOTICE),
+          })
           ctx.set(sketchControlsCtx.key, {
             edit: (data, mount, wrapper) => setSketchDraft({ data, mount, wrapper }),
             save: (data) => saveSketchRef.current(data),
@@ -385,6 +400,7 @@ function CollabEditor({
             enableHtmlFileUploader: true,
           }))
           configureCleanClipboard(ctx)
+          configureMarkdownText(ctx)
           configureSlashMenu(ctx)
           renderSoftBreaks(ctx)
           // The defaults are bare text ('+', 'left', …) — real icons required.
@@ -436,6 +452,7 @@ function CollabEditor({
         // already-attributed text (KTD 6 registration order).
         .use(suggestState)
         .use(suggestGuard)
+        .use(htmlGuard)
         .use(documentSizeGuard)
         .use(selectionWatcher)
         .use(agentCursors)
@@ -469,6 +486,11 @@ function CollabEditor({
     provider.on('stale', stale)
     provider.on('access-changed', accessChanged)
     provider.on('rejected', rejected)
+    const htmlRefused = () => {
+      const turned = keepRefusedHtmlAsText(ydoc, provider.refusedHtml)
+      callbacksRef.current.onNotice?.(turned > 0 ? HTML_KEPT_AS_TEXT_NOTICE : HTML_NOT_SAVED_NOTICE)
+    }
+    provider.on('html-refused', htmlRefused)
     // Discarded while no editor was listening (a remount reusing the session).
     if (provider.discarded) stale()
 
@@ -482,6 +504,7 @@ function CollabEditor({
       contentFormat,
       canWrite: () => canWriteRef.current,
       onTooLarge: () => callbacksRef.current.onNotice?.(SNAPSHOT_TOO_LARGE_NOTICE),
+      onHtmlRefused: () => callbacksRef.current.onNotice?.(HTML_SNAPSHOT_NOTICE),
     })
     const scheduleSnapshot = snapshots.schedule
 
@@ -618,6 +641,7 @@ function CollabEditor({
       provider.off('stale', stale)
       provider.off('access-changed', accessChanged)
       provider.off('rejected', rejected)
+      provider.off('html-refused', htmlRefused)
       unbindMermaidHints?.()
       if (spansFrame) cancelAnimationFrame(spansFrame)
       snapshots.dispose()

@@ -117,7 +117,10 @@ export const frontmatterSchema = $nodeSchema('frontmatter', () => ({
   toMarkdown: {
     match: (node) => node.type.name === 'frontmatter',
     runner: (state, node) => {
-      state.addNode('yaml', undefined, node.attrs.value as string)
+      const value = String(node.attrs.value)
+      // A fence line inside would end it early.
+      if (/^---[ \t]*$/m.test(value)) state.addNode('code', undefined, value, { lang: 'yaml' })
+      else state.addNode('yaml', undefined, value)
     },
   },
 }))

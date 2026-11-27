@@ -1,3 +1,4 @@
+import { HTML_ACCOUNT_NOTICE } from '../../editor/html_guard'
 import { findCommentAnchorRange } from '../../editor/comment_anchors'
 import { clearHighlight, domRange, setHighlight } from '../../lib/highlights'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
@@ -310,6 +311,7 @@ export default function DocumentShow({
   const isReading = effectiveMode === 'read'
   // Compound writing rides inside Comment mode for featured accounts.
   const showCompound = effectiveMode === 'comment' && writingAvailable
+  const signInPath = `/login?return_to=${encodeURIComponent(documentModePath(doc.slug, effectiveMode))}`
   const connectionIdentity = viewer.account ? `account:${viewer.account.id}` : 'guest'
   const editorSessionKey = `${doc.slug}:${ownership.can_write ? 'write' : 'read'}`
   // Live handle for code that runs after awaits or inside stable callbacks —
@@ -1014,9 +1016,19 @@ export default function DocumentShow({
         {!isReading && (
           <ClaimBanner slug={doc.slug} ownership={ownership} claimerName={identity.name} />
         )}
+        {ownership.html_needs_account && (
+          <div className="doc-notice" role="status">
+            <span>Editing HTML needs an account. <a href={signInPath}>Sign in</a></span>
+          </div>
+        )}
         {!isReading && (suggestionNotice || editorNotice) && (
           <div className="doc-notice" role="status">
-            <span>{suggestionNotice ?? editorNotice}</span>
+            <span>
+              {suggestionNotice ?? editorNotice}
+              {!viewer.account && (suggestionNotice ?? editorNotice)?.startsWith(HTML_ACCOUNT_NOTICE) && (
+                <> <a href={signInPath}>Sign in</a></>
+              )}
+            </span>
             <button
               type="button"
               aria-label="Dismiss notice"

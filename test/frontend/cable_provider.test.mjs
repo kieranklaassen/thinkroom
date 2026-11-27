@@ -232,6 +232,30 @@ test('retryable NACK merges inFlight back ahead of queued edits and retries with
   h.receive({ type: 'ack', seq: 2 })
 })
 
+test('an html refusal keeps the outbox, waits for a change and resends everything as one update', (t) => {
+  const h = createHarness(t)
+  h.receive(emptySyncFrame(0))
+  h.doc.getText('t').insert(0, 'first-')
+  h.doc.getText('t').insert(6, 'second-')
+  let refused = null
+  h.provider.on('html-refused', () => {
+    refused = h.provider.refusedHtml
+  })
+
+  h.receive({ type: 'html-refused', seq: 9, html: { '<b>': 1 } })
+  assert.equal(refused, null)
+  h.receive({ type: 'html-refused', seq: 1, html: { '<i>': 1 } })
+  assert.deepEqual(refused, { '<i>': 1 })
+  assert.equal(h.sentUpdates().length, 1)
+
+  h.doc.getText('t').insert(13, 'third')
+  assert.equal(h.sentUpdates().length, 2)
+  const serverDoc = new Y.Doc()
+  Y.applyUpdate(serverDoc, fromBase64(h.sentUpdates()[1].update))
+  assert.equal(serverDoc.getText('t').toString(), 'first-second-third')
+  h.receive({ type: 'ack', seq: 2 })
+})
+
 test('ACK timeout requeues inFlight ahead of queued edits and retries', async (t) => {
   const h = createHarness(t, { ackTimeoutMs: 40, retryBaseMs: 20, retryMaxMs: 200 })
   h.receive(emptySyncFrame(0))

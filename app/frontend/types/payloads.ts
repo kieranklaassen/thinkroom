@@ -138,5 +138,7 @@ export interface OwnershipPayload {
   link_access: LinkAccess
   editing_locked: boolean
   can_write: boolean
+  /** The link allows editing, but this is an HTML document and there is no account. */
+  html_needs_account: boolean
   can_comment: boolean
 }

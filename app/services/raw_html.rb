@@ -7,7 +7,10 @@ class RawHtml
   # The page shows Markdown in two readings: the preview's, and the editor's,
   # which also knows front matter and footnotes and has no table limit.
   PREVIEW = { header_ids: nil }.freeze
-  EDITOR = { header_ids: nil, footnotes: true, front_matter_delimiter: "---" }.freeze
+  EDITOR = {
+    parse: { leave_footnote_definitions: true },
+    extension: { header_ids: nil, footnotes: true, front_matter_delimiter: "---" }
+  }.freeze
 
   # What the editor itself writes into Markdown: an empty line, and the ends of
   # its own spans and tracked changes.
@@ -25,13 +28,13 @@ class RawHtml
   ROOT = "prosemirror"
   NODE = "html"
   NODE_TAG = "<html"
+  MAX_LIVE_DEPTH = 512
 
   class << self
     # Each piece of raw HTML as written.
     def in_markdown(source)
       source = source.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "�").scrub("�")
-      most(literals(DocumentMarkdown.parse(source, extension: PREVIEW)),
-           literals(Commonmarker.parse(source, options: { extension: EDITOR })))
+      most(literals(DocumentMarkdown.parse(source, extension: PREVIEW)), *editor_readings(source))
     end
 
     # The elements and comments of a HTML body.
@@ -41,11 +44,12 @@ class RawHtml
     # is complete and cheap, and shows every node; the renderer lists their
     # values, and stops at some depth and at a tree it does not know.
     def in_live(ydoc)
-      shown = ydoc.read_xml(ROOT).to_s.scan(NODE_TAG).size
+      xml = ydoc.read_xml(ROOT).to_s
+      shown = xml.scan(NODE_TAG).size
       return {} if shown.zero?
 
-      values, written = live_nodes(ydoc)
-      raise Unreadable unless values.size + written >= shown
+      values, written = live_nodes(ydoc, xml)
+      raise Unreadable unless values.size + written == shown
 
       tally(values)
     end
@@ -75,6 +79,26 @@ class RawHtml
 
     private
 
+    # Commonmarker and the editor's parser differ in three places, so the source
+    # is also read the way the editor sees it there. A line of spaces is an empty
+    # line in a footnote, too. After front matter that never closes, the editor
+    # knows no lists or quotes. In a comment it allows dashes, and a comment that
+    # never closes hides nothing that follows.
+    def editor_readings(source)
+      source = source.gsub(/^[ \t]+(?=\r?$)/, "")
+      root = Commonmarker.parse(source, options: EDITOR)
+      sources = []
+      if source.match?(/\A---[ \t]*$/) && root.first_child&.type != :frontmatter
+        sources << source.gsub(/(?<=\n|\r) {0,3}(?=[-+*>0-9])/, "x ")
+      end
+      sources += [ source, *sources ].flat_map { |text| [ text.gsub("<!--", "x!--"), plain_comments(text) ] } if source.include?("<!--")
+      [ literals(root), *sources.map { |text| literals(Commonmarker.parse(text, options: EDITOR)) } ]
+    end
+
+    def plain_comments(source)
+      source.gsub(/(<!)?-{2,}(>)?/) { "#{"<!--" if $1}#{"_" unless $2 && !$1}#{"-->" if $2}" }
+    end
+
     def literals(root)
       found = []
       pending = [ root ]
@@ -91,20 +115,32 @@ class RawHtml
 
     def tally(values) = values.map(&:squish).reject { |value| pieces(value).empty? }.tally
 
-    def live_nodes(ydoc)
+    def live_nodes(ydoc, xml)
       types = Y::ProseMirror.new(ydoc).node_types(ROOT) or raise Unreadable
+      # Register every tag closed in read_xml as a mark so unknown marks stay
+      # wrapped instead of letting adjacent text runs merge into "<html".
+      marks = xml.scan(%r{</([^\s>]+)>}).flatten.uniq.to_h { |name| [ name, { tag: "span" } ] }
+      sentinel = SecureRandom.hex(8)
+      marker = /#{sentinel}:(\d+):/
       values = []
       written = 0
       rules = types.keys.to_h do |type|
         [ type, { contains: :blocks, render: lambda { |node|
+          heights = node.content.scan(marker).map { |match| match.first.to_i }
+          height = (heights.max || 0) + 1
+          raise Unreadable if height >= MAX_LIVE_DEPTH
+
           value = node.attrs["value"]
           values << (value.is_a?(String) ? value : JSON.generate(value)) if type == NODE
           node.attrs.each_value { |attribute| written += attribute.to_s.scan(NODE_TAG).size }
-          DocumentHtml.parse(node.content).xpath(".//text()").each { |text| written += text.text.scan(NODE_TAG).size }
-          ""
+          clean = node.content.gsub(marker, " ")
+          if clean.include?("html")
+            DocumentHtml.parse(clean).xpath(".//text()").each { |text| written += text.text.scan(NODE_TAG).size }
+          end
+          "#{sentinel}:#{height}:"
         } } ]
       end
-      Y::ProseMirror.new(ydoc, nodes: rules).to_html(ROOT) or raise Unreadable
+      Y::ProseMirror.new(ydoc, nodes: rules, marks:).to_html(ROOT) or raise Unreadable
       [ values, written ]
     rescue SystemStackError, DocumentHtml::TooComplex
       raise Unreadable

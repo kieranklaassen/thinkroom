@@ -258,6 +258,8 @@ class HtmlAccountTest < ActionDispatch::IntegrationTest
     assert_needs_account
     snapshot(document, "<p>bye</p>")
     assert_needs_account
+    post document_snapshot_path(document.slug), params: { content: "<p>bye</p>" }, as: :json
+    assert_needs_account
     assert_equal "<p>hi</p>", document.reload.content_snapshot
 
     sign_in_as(account)
