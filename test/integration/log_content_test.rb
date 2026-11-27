@@ -111,10 +111,14 @@ class LogContentTest < ActionDispatch::IntegrationTest
 
     assert_no_content_logged(keeps: [ /Parameters: .*#{@document.slug}/, /"generation" => 0/, /"cid" => "#{TAB}"/ ]) do
       post document_sync_update_path(@document.slug), as: :json, headers: BROWSER, params: {
-        update:, updates: [ update, [ update ], { part: update } ], state_vector:, generation: 0, cid: TAB,
+        update:, state_vector:, generation: 0, cid: TAB,
         content: LARGE, spans: [ { text: MARK, kind: "ai", state: "pending" } ], render_hints: { mermaid: { MARK => 1 } }
       }
       assert_response :no_content
+      post document_sync_update_path(@document.slug), as: :json, headers: BROWSER, params: {
+        update:, updates: [ update, [ update ], { part: update } ], state_vector:, generation: 0, cid: TAB
+      }
+      assert_response :unprocessable_entity
       post document_snapshot_path(@document.slug), as: :json, headers: BROWSER, params: {
         content: "# #{MARK}\n#{LARGE}", spans: [ { text: MARK } ], state_vector:, agent_name: "Scout"
       }
@@ -123,6 +127,40 @@ class LogContentTest < ActionDispatch::IntegrationTest
       assert_response :success
     end
     assert_equal "seeded", @document.reload.seed_state
+  end
+
+  test "a large edit saved in several pieces, relayed, and sent to another tab" do
+    ydoc = Y::Doc.new
+    vector = nil
+    pieces = Array.new(3) do
+      ydoc.get_text("t") << LARGE
+      piece = vector ? ydoc.encode_state_as_update(vector) : ydoc.encode_state_as_update
+      vector = ydoc.encode_state_vector
+      Base64.strict_encode64(piece)
+    end
+    save = lambda do
+      connection, socket = connect_cable
+      send_frame(connection, command: "subscribe", identifier:)
+      wait_for_frame(socket) { |frame| frame.include?("confirm_subscription") }
+      post document_sync_update_path(@document.slug), as: :json, headers: BROWSER,
+           params: { updates: pieces, generation: 0, cid: TAB }
+      assert_response :no_content
+      wait_for_frame(socket) { |frame| ActiveSupport::JSON.decode(frame).dig("message", "updates") == pieces }
+      send_frame(connection, command: "unsubscribe", identifier:)
+    end
+
+    assert_no_content_logged(keeps: [ /Parameters: .*#{@document.slug}/, /"generation" => 0/, /"cid" => "#{TAB}"/ ]) { save.call }
+
+    # The lines searched above are written.
+    log = capture_log(:debug) { save.call }
+    assert_match(/Broadcasting to sync:.*type: "update", "\[FILTERED\]" => "\[FILTERED\]"/, log)
+    assert_match(/SyncChannel transmitting .*"type" => "update", "\[FILTERED\]" => "\[FILTERED\]"/, log)
+    assert_match(/event=merge\.yjs .*outcome=appended .*update_bytes=#{pieces.sum { |piece| Base64.strict_decode64(piece).bytesize }}/, log)
+    assert_match(/event=fold\.yjs .*outcome=folded/, log)
+
+    stored = Y::Doc.new
+    stored.apply_update(Base64.strict_decode64(YjsPersistence.state_b64(@document.reload).first))
+    assert_equal LARGE * 3, stored.get_text("t").to_s
   end
 
   test "saves over the sync channel" do
@@ -364,7 +402,7 @@ class LogContentTest < ActionDispatch::IntegrationTest
     update, = update_with("text")
     with_env_config("action_dispatch.show_exceptions" => :all, "action_dispatch.show_detailed_exceptions" => true) do
       assert_no_content_logged(keeps: /RuntimeError:/) do
-        failing(YjsPersistence, :merge_bytes, RuntimeError) do
+        failing(YjsPersistence, :merge_updates, RuntimeError) do
           post document_sync_update_path(@document.slug), params: { update:, generation: 0 }, headers: BROWSER
         end
         assert_includes css_select("textarea#exception-message-for-copy").text, "RuntimeError (#{MARK})"
@@ -378,7 +416,7 @@ class LogContentTest < ActionDispatch::IntegrationTest
     log = capture_log(:info) do
       Rails.env = "development"
       with_env_config("action_dispatch.show_exceptions" => :all) do
-        failing(YjsPersistence, :merge_bytes, RuntimeError) do
+        failing(YjsPersistence, :merge_updates, RuntimeError) do
           post document_sync_update_path(@document.slug), params: { update:, generation: 0 }, headers: BROWSER
         end
       end
@@ -408,15 +446,15 @@ class LogContentTest < ActionDispatch::IntegrationTest
     with_env_config("action_dispatch.show_exceptions" => :all) do
       without_error_details do
         assert_no_content_logged(keeps: [ /RuntimeError:/, %r{^app/controllers/documents_controller\.rb:\d+:in }, /undefined method 'missing_method'/, /Caused by: ActiveRecord::StatementInvalid:/ ]) do
-          failing(YjsPersistence, :merge_bytes, RuntimeError) { post document_sync_update_path(@document.slug), as: :json, params: }
+          failing(YjsPersistence, :merge_updates, RuntimeError) { post document_sync_update_path(@document.slug), as: :json, params: }
           assert_response :internal_server_error
-          calling(YjsPersistence, :merge_bytes, -> { nil.missing_method }) { post document_sync_update_path(@document.slug), as: :json, params: }
+          calling(YjsPersistence, :merge_updates, -> { nil.missing_method }) { post document_sync_update_path(@document.slug), as: :json, params: }
           nested = lambda do
             raise ActiveRecord::StatementInvalid, "no such table:\nINSERT #{MARK}"
           rescue ActiveRecord::StatementInvalid
             raise IOError, MARK
           end
-          calling(YjsPersistence, :merge_bytes, nested) { post document_sync_update_path(@document.slug), as: :json, params: }
+          calling(YjsPersistence, :merge_updates, nested) { post document_sync_update_path(@document.slug), as: :json, params: }
           post "/rails/active_storage/blobs/redirect/x/#{MARK}.png"
         end
       end
@@ -454,7 +492,7 @@ class LogContentTest < ActionDispatch::IntegrationTest
         end
       end
       assert_raises(RuntimeError) { SteppingJob.perform_now(MARK.reverse) }
-      calling(YjsPersistence, :merge_bytes, -> { raise Document::EditingLockedError, MARK }) do
+      calling(YjsPersistence, :merge_updates, -> { raise Document::EditingLockedError, MARK }) do
         post document_sync_update_path(@document.slug), as: :json, params: { update: "AAA=", generation: 0 }
       end
     end
