@@ -18,7 +18,7 @@ class DocumentSocialPreview
   attr_reader :title, :description, :page_title, :author, :labels, :display_title
 
   def initialize(document)
-    fragment = DocumentPlainText.fragment(format: document.content_format, content: document.current_content)
+    fragment = DocumentPlainText.readable(format: document.content_format, content: document.current_content)
     # Same value as Document#display_title, from the one parse this card needs.
     @display_title = (DocumentTitle.in(fragment) if document.current_content.present?) || document.title
     raw_title = @display_title.to_s.squish.presence || "Untitled"

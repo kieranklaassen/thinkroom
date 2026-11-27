@@ -227,4 +227,13 @@ class HtmlDocumentSanitizerTest < ActiveSupport::TestCase
     refute_match(/data-thinkroom-sketch|data-scene/, result)
     assert_includes result, "Visible fallback"
   end
+
+  test "elements dropped with their content are found wherever they stand" do
+    source = "<svg><style>a</style></svg><div><math><mi>b</mi></math><template>c</template></div><style>d</style>"
+    fragment = Nokogiri::HTML5.fragment(source)
+    found = fragment.xpath(HtmlDocumentSanitizer::DROPPED)
+
+    assert_equal %w[svg style math template style], found.map(&:name)
+    assert_equal fragment.css(HtmlDocumentSanitizer::DROP_WITH_CONTENT.join(",")).to_a, found.to_a
+  end
 end
