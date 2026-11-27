@@ -184,6 +184,9 @@ export class CableProvider {
   // sent from it or merged into it.
   discarded = false
   private binding = false
+  // The first bind did not finish, so the local doc no longer speaks for the
+  // document: only edits queued before it are still owed.
+  detached = false
   // Peer updates that arrived while `seedClaim` was unsettled. Merging them
   // into a seed the server then refuses would double the text.
   private heldUpdates: Uint8Array[] = []
@@ -439,19 +442,35 @@ export class CableProvider {
     return [...this.doc.store.clients.keys()].some((client) => stateVector.has(client))
   }
 
-  /** Runs the editor's first bind; what it writes is sent only once it finished. */
-  bind(build: () => void): void {
+  /**
+   * Runs the editor's first bind; what it writes is sent only once it finished.
+   * Unfinished, its writes are dropped and nothing more is taken from this
+   * doc, while edits queued before it still go out. `complete` also counts a
+   * bind that deletes anything as unfinished: showing a document removes none
+   * of it.
+   */
+  bind(build: () => void, { complete = false } = {}): void {
+    const earlier = this.queued
+    let deleted = false
+    const watch = (transaction: Y.Transaction) => {
+      if (transaction.deleteSet.clients.size > 0) deleted = true
+    }
+    this.queued = []
     this.binding = true
+    if (complete) this.doc.on('afterTransaction', watch)
     try {
       build()
+      if (deleted) throw new Error('the editor does not hold the whole document')
+      this.queued = [...earlier, ...this.queued]
     } catch (error) {
-      // Unfinished: the stored document stays as it is.
-      this.discarded = true
+      this.detached = true
+      this.queued = earlier
       throw error
     } finally {
       this.binding = false
+      if (complete) this.doc.off('afterTransaction', watch)
+      this.flush('update')
     }
-    this.flush('update')
   }
 
   private flush(type: 'sync-reply' | 'update' = 'update'): void {
@@ -512,6 +531,7 @@ export class CableProvider {
    */
   persistCurrentState = (snapshot?: DurableSnapshotPayload): void => {
     if (!this.canWrite || this.discarded) return
+    if (this.detached) snapshot = undefined
     const parts = this.unackedParts()
     const pending = parts.length > 0 ? Y.mergeUpdates(parts) : null
     const sentClaim = this.seedClaim
@@ -630,7 +650,7 @@ export class CableProvider {
         else this.updateSequence = 0
         // Apply server's delta or full state (empty string on checksum match);
         // any unacked local edits stay in the outbox and flush immediately once synced.
-        if (data.update) {
+        if (data.update && !this.detached) {
           Y.applyUpdate(this.doc, fromBase64(data.update), this)
         }
         this.serverChecksum = data.checksum ?? null
@@ -652,7 +672,7 @@ export class CableProvider {
           // A claim is for a seed still to be stored. With content here and
           // none of this client's own unsettled there is nothing to claim, and
           // holding it would keep peer edits back and get the next edit refused.
-          this.takeOrDeclineSeedClaim(data.seed_claim, localDocEmpty || this.seedClaim !== null)
+          this.takeOrDeclineSeedClaim(data.seed_claim, !this.detached && (localDocEmpty || this.seedClaim !== null))
         }
         // An unshared seed is safe to show only where it can never be sent.
         const showLocally = Boolean(data.seed_pending) && !this.canWrite
@@ -704,6 +724,7 @@ export class CableProvider {
       case 'update':
       case 'sync-reply':
         this.serverChecksum = null
+        if (this.detached) break
         try {
           const update = fromBase64(data.update!)
           if (this.localSeed) {
@@ -753,7 +774,7 @@ export class CableProvider {
   private handleDocUpdate = (update: Uint8Array, origin: unknown): void => {
     // Updates we applied from the wire carry `this` as origin — don't echo
     // them; the page's server-rendered hydration is server state too.
-    if (origin === this || origin === SERVER_HYDRATE_ORIGIN || !this.canWrite) return
+    if (this.detached || origin === this || origin === SERVER_HYDRATE_ORIGIN || !this.canWrite) return
     this.enqueue(update)
     this.flush('update')
   }

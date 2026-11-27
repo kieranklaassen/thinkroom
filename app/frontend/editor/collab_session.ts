@@ -31,7 +31,8 @@ export function acquireSession(
   initialGeneration?: number | null,
 ): CollabSession {
   let session = sessions.get(slug)
-  if (session && (session.canWrite !== canWrite || session.connectionIdentity !== connectionIdentity)) {
+  // A detached session's doc is not reused; its earlier edits go out here.
+  if (session && (session.provider.detached || session.canWrite !== canWrite || session.connectionIdentity !== connectionIdentity)) {
     if (session.destroyTimer) clearTimeout(session.destroyTimer)
     session.provider.destroy()
     session.ydoc.destroy()

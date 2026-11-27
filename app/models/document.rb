@@ -152,10 +152,11 @@ class Document < ApplicationRecord
     )
   end
 
-  # True when the preview shows the source. The page then starts no editor and
-  # claims no seed, so the shared document stays as it is stored.
+  # True when the preview shows the source and the source is all there is. The
+  # page then starts no editor and claims no seed. A live document can hold
+  # edits its last snapshot does not have yet, so its editor always opens.
   def source_only?(**preview_options)
-    DocumentPreviewHtml.source_only?(preview_html(**preview_options), current_content)
+    DocumentPreviewHtml.source?(preview_html(**preview_options), current_content) && !live_crdt?
   end
 
   # The title to show before the editor mounts. The editor derives the header

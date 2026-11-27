@@ -46,7 +46,7 @@ class DocumentPreviewHtml
       "#{SOURCE_OPENING}#{CGI.escape_html(source.scrub)}</code></pre>"
     end
 
-    def source_only?(html, source)
+    def source?(html, source)
       html.start_with?(SOURCE_OPENING) && html == source_html(source)
     end
 
@@ -155,15 +155,17 @@ class DocumentPreviewHtml
     end
 
     # Read depth first, then render: for a source with much raw HTML, whether it
-    # can be formatted is decided before the full render. Only the depth is read
-    # here, so the filtered tags count as the text they are shown as.
+    # can be formatted is read from a render without the tag filter. That render
+    # is the filtered one only when the source names none of the filter's tags;
+    # any other source goes straight to the full render, which decides.
     DEPTH_FIRST_SIZE = 2_000_000_000
-    FILTERED_TAG = %r{<(?=/?(?:title|textarea|style|xmp|iframe|noembed|noframes|script|plaintext)(?:[\s>]|/>))}i
+    FILTERED_NAME = %r{</?(?:title|textarea|style|xmp|iframe|noembed|noframes|script|plaintext)}i
 
     def refuse_deep_raw_html(source)
       return if source.count("<") * source.bytesize < DEPTH_FIRST_SIZE
+      return if source.match?(FILTERED_NAME)
 
-      DocumentHtml.parse(markdown_html(source, tagfilter: false).gsub(FILTERED_TAG, "&lt;"))
+      DocumentHtml.parse(markdown_html(source, tagfilter: false))
     end
 
     # Block containers whose children are block elements; the whitespace between

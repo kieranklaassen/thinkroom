@@ -175,7 +175,7 @@
     visibility: visible !important;
   }
 
-  .doc-static-preview {
+  .doc-editor-stack:not([data-phase='static']) .doc-static-preview {
     display: none !important;
   }
 

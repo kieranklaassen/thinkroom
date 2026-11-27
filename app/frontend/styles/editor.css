@@ -48,6 +48,10 @@
 .doc-static-preview {
   user-select: none;
 }
+/* Shown without an editor, the preview is the document. */
+.doc-editor-stack[data-phase='static'] .doc-static-preview {
+  user-select: text;
+}
 
 /* Sketches and tables can use the screen's visual bandwidth without making
    prose harder to read. Read/focus layouts grow around the prose center;

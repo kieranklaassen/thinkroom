@@ -161,6 +161,8 @@ export interface EditorProps {
    *  heights) so async renderers reserve their final space up front — the
    *  same hints size the server preview's skeletons. */
   renderHints?: RenderHints
+  /** The saved source is shown as text; the editor opens only if it holds all of the live document. */
+  sourcePreview?: boolean
   onReady?: (handle: EditorHandle) => void
   /** The page keeps its preview for this document; nothing local was kept or sent. */
   onUnavailable?: () => void
@@ -186,6 +188,8 @@ const SNAPSHOT_TOO_LARGE_NOTICE =
   'This document is over the 2 MB source limit, so its saved copy is stale. Shorten it to keep agents and previews current.'
 const SNAPSHOT_TOO_COMPLEX_NOTICE =
   'This document is nested too deeply, so its saved copy is stale. Simplify it to keep agents and previews current.'
+const FIRST_SAVE_NOTICE =
+  'The first save of this document did not finish. Your edits are still synced; edit once more to save its source.'
 
 interface ActiveSketch {
   data: SketchData
@@ -313,6 +317,7 @@ function CollabEditor({
   suggesting = false,
   taskInteractive = editable,
   renderHints,
+  sourcePreview = false,
   onReady,
   onUnavailable,
   onStatus,
@@ -499,16 +504,12 @@ function CollabEditor({
         open()
       } catch (error) {
         console.warn('pruf: the editor could not open this document', error)
-        if (!bound) {
-          callbacksRef.current.onUnavailable?.()
-          return
-        }
-        // Bound: the editor holds the whole document, so it stays.
+        // Never half of an editor: the page keeps its preview instead.
+        callbacksRef.current.onUnavailable?.()
+        return
       }
       ready()
     }
-    // Whether the first bind finished; only then does this editor hold the document.
-    let bound = false
     const open = () => {
       editor.action((ctx) => {
         const service = ctx.get(collabServiceCtx)
@@ -542,32 +543,7 @@ function CollabEditor({
             )
           }
           service.connect()
-        })
-        bound = true
-        if (seed) {
-          if (seedKind && seedKind !== 'human') {
-            // Must run after connect(): only then has ySyncPlugin rendered
-            // the seeded Yjs content into the view. The dispatched marks flow
-            // back through the binding, so peers receive attributed content.
-            attributeSeedToAgent(ctx.get(editorViewCtx), seedAuthor ?? '')
-            // The updated listener skips addToHistory:false transactions, so
-            // the chip never sees the marked doc on its own — push directly.
-            callbacksRef.current.onSpans?.(
-              collectSpans(ctx.get(editorViewCtx).state.doc, {
-                excludePendingInsertions: true,
-              }),
-            )
-          }
-          // Persist the applied (and attributed) seed NOW over HTTP
-          // (keepalive when it fits) instead of waiting for the cable handshake. The cable
-          // path drops local updates until 'sync' arrives, so a claimant that
-          // navigated away within the first seconds burned the seed claim and
-          // left the document blank for every viewer until the claim timeout.
-          // The sync_update endpoint also broadcasts, so already-connected
-          // viewers receive the seeded content live.
-          provider.persistCurrentState(buildSnapshotPayload(ctx, ydoc, contentFormat))
-        }
-
+        }, { complete: sourcePreview })
         ctx.set(selectionCallbackCtx.key, {
           fn: (view, cause) => {
             // Once per frame, with the page's other per-edit updates: a
@@ -581,8 +557,6 @@ function CollabEditor({
             callbacksRef.current.onSelection?.(view, cause)
           },
         })
-        callbacksRef.current.onSpans?.(collectSpans(ctx.get(editorViewCtx).state.doc, { excludePendingInsertions: true }))
-
         ctx.get(listenerCtx).updated((_listenerCtx, doc) => {
           // Live summary updates use the document watcher above: unlike this
           // debounced listener it also sees remote and history-excluded edits.
@@ -602,6 +576,37 @@ function CollabEditor({
             scheduleSnapshot,
           )
         }
+
+        // After the listeners: whatever happens here, later edits are saved.
+        try {
+          if (seed) {
+            if (seedKind && seedKind !== 'human') {
+              // Must run after connect(): only then has ySyncPlugin rendered
+              // the seeded Yjs content into the view. The dispatched marks flow
+              // back through the binding, so peers receive attributed content.
+              attributeSeedToAgent(ctx.get(editorViewCtx), seedAuthor ?? '')
+              // The updated listener skips addToHistory:false transactions, so
+              // the chip never sees the marked doc on its own — push directly.
+              callbacksRef.current.onSpans?.(
+                collectSpans(ctx.get(editorViewCtx).state.doc, {
+                  excludePendingInsertions: true,
+                }),
+              )
+            }
+            // Persist the applied (and attributed) seed NOW over HTTP
+            // (keepalive when it fits) instead of waiting for the cable handshake. The cable
+            // path drops local updates until 'sync' arrives, so a claimant that
+            // navigated away within the first seconds burned the seed claim and
+            // left the document blank for every viewer until the claim timeout.
+            // The sync_update endpoint also broadcasts, so already-connected
+            // viewers receive the seeded content live.
+            provider.persistCurrentState(buildSnapshotPayload(ctx, ydoc, contentFormat))
+          }
+        } catch (error) {
+          console.warn('pruf: the first save did not finish', error)
+          callbacksRef.current.onNotice?.(FIRST_SAVE_NOTICE)
+        }
+        callbacksRef.current.onSpans?.(collectSpans(ctx.get(editorViewCtx).state.doc, { excludePendingInsertions: true }))
       })
     }
     const ready = () => {

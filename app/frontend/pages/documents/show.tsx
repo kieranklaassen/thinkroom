@@ -98,7 +98,7 @@ import {
 import './show.css'
 
 const NO_EDITOR_NOTICE =
-  'The formatting here is too complex to edit in the browser. The document is stored unchanged.'
+  'The formatting here is too complex to edit in the browser. The document is stored unchanged; this is its last saved copy.'
 
 export interface DocumentProps {
   document: {
@@ -118,7 +118,9 @@ export interface DocumentProps {
     yjs_state_checksum: string | null
     content_html: string
     content_blocks: number
-    /** content_html is the source as text, shown without an editor. */
+    /** content_html is the saved source as text. */
+    source_preview: boolean
+    /** …and there is no live document beside it, so no editor starts. */
     source_only: boolean
     display_title: string
     // Persisted render geometry (Mermaid figure heights by source hash):
@@ -412,6 +414,8 @@ export default function DocumentShow({
   // closing over them at registration time.
   const ownershipRef = useRef(ownership)
   ownershipRef.current = ownership
+  const editorUnavailableRef = useRef(editorUnavailable)
+  editorUnavailableRef.current = editorUnavailable
   useWebmcpTools({
     key: doc.slug,
     tools: webmcp.tools,
@@ -428,6 +432,7 @@ export default function DocumentShow({
       if (tool.kind === 'editor') {
         return executeEditorTool(tool, args, {
           handle: handleRef.current,
+          editorUnavailable: editorUnavailableRef.current,
           canWrite: can_write,
           slug: doc.slug,
           contentFormat: doc.content_format,
@@ -1083,6 +1088,7 @@ export default function DocumentShow({
                 contentHtml={doc.content_html}
                 contentBlocks={doc.content_blocks}
                 sourceOnly={doc.source_only}
+                sourcePreview={doc.source_preview}
                 onAvailability={onEditorAvailability}
                 isClient={isClient}
                 onHandle={setHandle}

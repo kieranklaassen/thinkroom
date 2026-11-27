@@ -1067,3 +1067,128 @@ test('an edit typed during a save that was refused goes out with everything stil
     assert.equal(savedText(calls[1]), h.doc.getText('t').toString())
   }
 })
+
+// Records what a save would send; the request itself never leaves.
+function recordSaves(t) {
+  const saves = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (_url, init) => {
+    saves.push(JSON.parse(init.body))
+    return { ok: true, status: 204, json: async () => ({}) }
+  }
+  t.after(() => {
+    globalThis.fetch = realFetch
+  })
+  return saves
+}
+
+const textOf = (...updates) => {
+  const doc = new Y.Doc()
+  updates.forEach((update) => Y.applyUpdate(doc, fromBase64(update)))
+  return doc.getText('t').toString()
+}
+
+test('a bind sends nothing while it runs and one frame after it', (t) => {
+  const h = createHarness(t)
+  h.receive(emptySyncFrame(1))
+
+  h.provider.bind(() => {
+    h.doc.getText('t').insert(0, 'A')
+    h.doc.getText('t').insert(1, 'B')
+    assert.equal(h.sentUpdates().length, 0)
+  })
+
+  assert.equal(h.sentUpdates().length, 1)
+  assert.equal(textOf(h.sentUpdates()[0].update), 'AB')
+})
+
+test('after a bind throws nothing it wrote leaves by cable, save or destroy', (t) => {
+  const saves = recordSaves(t)
+  const h = createHarness(t)
+  h.receive(emptySyncFrame(1))
+
+  assert.throws(() => h.provider.bind(() => {
+    h.doc.getText('t').insert(0, 'partial')
+    throw new Error('no editor')
+  }), /no editor/)
+  h.doc.getText('t').insert(0, 'later')
+  h.disconnect()
+  h.receive(emptySyncFrame(1))
+  h.provider.persistCurrentState({ content: 'partial', spans: [], state_vector: '' })
+  h.provider.destroy()
+
+  assert.equal(h.provider.detached, true)
+  assert.equal(h.sentUpdates().length, 0)
+  assert.deepEqual(saves, [])
+})
+
+test('edits queued before a bind that throws are still sent, without the bind', (t) => {
+  const h = createHarness(t)
+  h.doc.getText('t').insert(0, 'typed')
+
+  assert.throws(() => h.provider.bind(() => {
+    h.doc.getText('t').insert(0, 'partial')
+    throw new Error('no editor')
+  }))
+  h.receive(emptySyncFrame(1))
+
+  assert.equal(h.sentUpdates().length, 1)
+  assert.equal(textOf(h.sentUpdates()[0].update), 'typed')
+  h.receive({ type: 'ack', seq: h.sentUpdates()[0].seq })
+  h.disconnect()
+  h.receive(emptySyncFrame(1))
+  assert.equal(h.sentUpdates().length, 1)
+})
+
+test('edits queued before a bind that throws are saved when the page goes away', (t) => {
+  const saves = recordSaves(t)
+  const h = createHarness(t)
+  h.doc.getText('t').insert(0, 'typed')
+
+  assert.throws(() => h.provider.bind(() => {
+    h.doc.getText('t').insert(0, 'partial')
+    throw new Error('no editor')
+  }))
+  h.provider.destroy()
+
+  assert.equal(saves.length, 1)
+  assert.equal(textOf(saves[0].update), 'typed')
+})
+
+test('edits queued before a bind go out with what it wrote', (t) => {
+  const h = createHarness(t)
+  h.doc.getText('t').insert(0, 'typed')
+  h.provider.bind(() => h.doc.getText('t').insert(5, '!'))
+  h.receive(emptySyncFrame(1))
+
+  assert.equal(h.sentUpdates().length, 1)
+  assert.equal(textOf(h.sentUpdates()[0].update), 'typed!')
+})
+
+test('a bind that must be complete counts a deletion as unfinished', (t) => {
+  for (const complete of [false, true]) {
+    const h = createHarness(t)
+    const server = new Y.Doc()
+    server.getText('t').insert(0, 'stored')
+    h.receive({
+      type: 'sync',
+      update: toBase64(Y.encodeStateAsUpdate(server)),
+      sv: toBase64(Y.encodeStateVector(server)),
+      generation: 1,
+    })
+    const bind = () => h.provider.bind(() => h.doc.getText('t').delete(0, 6), { complete })
+    if (complete) assert.throws(bind)
+    else bind()
+    assert.equal(h.sentUpdates().length, complete ? 0 : 1)
+  }
+})
+
+test('a seed claim granted after a bind threw is declined', (t) => {
+  const h = createHarness(t)
+  assert.throws(() => h.provider.bind(() => {
+    throw new Error('no editor')
+  }))
+  h.receive({ ...emptySyncFrame(1), seed: true, seed_content: '# Hi', seed_claim: 'claim' })
+
+  assert.equal(h.sent.filter((frame) => frame.type === 'seed-decline').length, 1)
+})

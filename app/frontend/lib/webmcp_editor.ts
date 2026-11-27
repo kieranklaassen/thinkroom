@@ -13,6 +13,8 @@ const PREVIOUS_CONTENT_LIMIT = 256 * 1024
 export const NOT_WRITABLE_ERROR =
   'This link no longer allows editing. Ask the owner for an edit link or propose a suggestion instead.'
 export const EDITOR_LOADING_ERROR = 'editor is still loading; retry in a moment'
+export const NO_EDITOR_ERROR =
+  'this document is shown without an editor and cannot be changed in the browser; do not retry. The document was not changed. Its owner can change it through the agent API or CLI.'
 export const EMPTY_CONTENT_ERROR = 'refused: new content is empty; the document was not changed'
 export const NO_PROVENANCE_ERROR =
   'this editor cannot attribute agent text; the document was not changed'
@@ -28,6 +30,8 @@ const PERSISTENCE_LAG_NOTE = 'snapshot not persisted yet; reads may lag until th
 export interface EditorToolContext {
   /** Null until the collaborative editor has started. */
   handle: EditorHandle | null
+  /** The page shows this document without an editor; `handle` stays null. */
+  editorUnavailable: boolean
   /** Read at call time: tools register once per slug, access can change later. */
   canWrite: boolean
   slug: string
@@ -68,6 +72,7 @@ export async function executeEditorTool(
 
     if (!context.canWrite) return refuse({ error: NOT_WRITABLE_ERROR })
     const { handle } = context
+    if (!handle && context.editorUnavailable) return refuse({ error: NO_EDITOR_ERROR })
     if (!handle) return refuse({ error: EDITOR_LOADING_ERROR })
     if (context.signal.aborted) return refuse({ error: 'cancelled' })
 

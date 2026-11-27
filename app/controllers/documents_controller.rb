@@ -131,6 +131,7 @@ class DocumentsController < InertiaController
           editable: preview_editable,
           sketch_interactive: preview_sketch_interactive
         )
+        source_preview = DocumentPreviewHtml.source?(content_html, document.current_content)
         yjs_state_b64 = embedded_yjs_state_b64(document)
         document.slice(:id, :slug, :title, :content_format, :content_generation).merge(
         # Only the client that won the seed claim applies the template; on
@@ -152,7 +153,8 @@ class DocumentsController < InertiaController
         # editor will use, so the two layers keep the same geometry.
         content_html:,
         content_blocks: DocumentPreviewHtml.block_count(content_html),
-        source_only: DocumentPreviewHtml.source_only?(content_html, document.current_content),
+        source_preview:,
+        source_only: source_preview && !document.live_crdt?,
         # Client-measured render geometry (Mermaid figure heights) persisted
         # from earlier snapshots; the editor pre-sizes its diagram figures from
         # the same hints the preview skeletons used, so neither layer jumps
