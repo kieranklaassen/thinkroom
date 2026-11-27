@@ -433,12 +433,24 @@ class DocumentsController < InertiaController
     document = Document.find_by!(slug: params[:slug])
     @write_document = document
     document.assert_write_access!(token: owner_token, user: current_user)
-    updates = params.key?(:updates) ? Array(params[:updates]).map(&:to_s) : [ params[:update].to_s ]
+    split = params.key?(:updates)
+    updates = split ? Array(params[:updates]).map(&:to_s) : [ params[:update].to_s ]
     return head :content_too_large if updates.size > YjsPersistence::MAX_SPLIT_UPDATES
     return head :content_too_large if updates.any? { |update| update.bytesize > MAX_SYNC_UPDATE_B64_BYTES }
 
+    if split
+      decoded_sizes = updates.map { |update| decoded_base64_bytesize(update) }
+      return head :content_too_large if decoded_sizes.any? { |size| size && size > MAX_SYNC_UPDATE_BYTES }
+      if decoded_sizes.any?(&:nil?) || decoded_sizes.sum <= MAX_SYNC_UPDATE_BYTES
+        return render json: { error: "Invalid Yjs update." }, status: :unprocessable_entity
+      end
+    end
+
     decoded = updates.map { |update| Base64.strict_decode64(update) }
     return head :content_too_large if decoded.any? { |update| update.bytesize > MAX_SYNC_UPDATE_BYTES }
+    if split && decoded.reject { |update| update == YjsPersistence::EMPTY_UPDATE }.sum(&:bytesize) <= MAX_SYNC_UPDATE_BYTES
+      return render json: { error: "Invalid Yjs update." }, status: :unprocessable_entity
+    end
 
     generation = YjsPersistence.parse_generation(params[:generation])
     YjsPersistence.merge_updates(
@@ -471,6 +483,19 @@ class DocumentsController < InertiaController
   end
 
   private
+
+  def decoded_base64_bytesize(encoded)
+    return nil unless (encoded.bytesize % 4).zero?
+
+    padding = if encoded.end_with?("==")
+      2
+    elsif encoded.end_with?("=")
+      1
+    else
+      0
+    end
+    [ (encoded.bytesize / 4) * 3 - padding, 0 ].max
+  end
 
   # Shared tail of the snapshot and sync_update actions: normalize + persist
   # the derived snapshot, guard against stale state vectors, then run the

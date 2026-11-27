@@ -114,11 +114,14 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   test "sync_update stores a split edit whole and relays it in one message" do
     client = Y::Doc.new
     text = client.get_text("t")
-    text << "first "
+    half = YjsPersistence::MAX_UPDATE_BYTES / 2
+    text << ("a" * half)
     first = Base64.strict_encode64(client.encode_state_as_update)
     vector = client.encode_state_vector
-    text << "second"
+    text << ("b" * half)
     second = Base64.strict_encode64(client.encode_state_as_update(vector))
+    assert_operator Base64.strict_decode64(first).bytesize + Base64.strict_decode64(second).bytesize,
+                    :>, YjsPersistence::MAX_UPDATE_BYTES
 
     relayed = capture_broadcasts(SyncChannel.broadcasting_for(@document)) do
       post document_sync_update_path(@document.slug),
@@ -130,19 +133,88 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     state, = YjsPersistence.state_b64(@document.reload)
     stored = Y::Doc.new
     stored.apply_update(Base64.strict_decode64(state))
-    assert_equal "first second", stored.get_text("t").to_s
+    assert_equal ("a" * half) + ("b" * half), stored.get_text("t").to_s
+  end
+
+  test "sync_update refuses updates that fit in one update before decoding any piece" do
+    client = Y::Doc.new
+    text = client.get_text("t")
+    text << "first "
+    small_first = Base64.strict_encode64(client.encode_state_as_update)
+    vector = client.encode_state_vector
+    text << "second"
+    small_second = Base64.strict_encode64(client.encode_state_as_update(vector))
+
+    # Two valid pieces totaling less than one update are refused without storing or relaying.
+    assert_no_broadcasts(SyncChannel.broadcasting_for(@document)) do
+      post document_sync_update_path(@document.slug),
+           params: { updates: [ small_first, small_second ], generation: @document.content_generation },
+           as: :json
+    end
+    assert_response :unprocessable_entity
+    assert_not @document.reload.live_crdt?
+
+    # Two undecodable Base64 strings whose encoded lengths (less padding) total
+    # exactly MAX_UPDATE_BYTES must be refused before Base64.strict_decode64 runs.
+    half = YjsPersistence::MAX_UPDATE_BYTES / 2
+    b64_len = ((half + 2) / 3) * 4
+    pad = (3 - (half % 3)) % 3
+    undecodable_half = ("!" * (b64_len - pad)) + ("=" * pad)
+    assert_equal YjsPersistence::MAX_UPDATE_BYTES, ((b64_len / 4) * 3 - pad) * 2
+
+    decoded_piece = false
+    original_decode = Base64.method(:strict_decode64)
+    Base64.define_singleton_method(:strict_decode64) do |value|
+      decoded_piece = true if value == undecodable_half
+      original_decode.call(value)
+    end
+    begin
+      assert_no_broadcasts(SyncChannel.broadcasting_for(@document)) do
+        post document_sync_update_path(@document.slug),
+             params: { updates: [ undecodable_half, undecodable_half ], generation: @document.content_generation },
+             as: :json
+      end
+      assert_response :unprocessable_entity
+      assert_not decoded_piece, "updates totaling at most one update must be refused before decoding"
+    ensure
+      Base64.define_singleton_method(:strict_decode64, original_decode)
+    end
+    assert_not @document.reload.live_crdt?
+
+    # One byte over MAX_UPDATE_BYTES crosses the threshold and is accepted.
+    make_pair = lambda do |second_len|
+      doc = Y::Doc.new(1)
+      t = doc.get_text("t")
+      t << ("a" * half)
+      first_raw = doc.encode_state_as_update
+      sv = doc.encode_state_vector
+      t << ("b" * second_len)
+      [ first_raw, doc.encode_state_as_update(sv) ]
+    end
+    p1_raw, p2_raw = make_pair.call(half)
+    p1_raw, p2_raw = make_pair.call(half + (YjsPersistence::MAX_UPDATE_BYTES + 1) - (p1_raw.bytesize + p2_raw.bytesize))
+    assert_equal YjsPersistence::MAX_UPDATE_BYTES + 1, p1_raw.bytesize + p2_raw.bytesize
+
+    post document_sync_update_path(@document.slug),
+         params: {
+           updates: [ Base64.strict_encode64(p1_raw), Base64.strict_encode64(p2_raw) ],
+           generation: @document.content_generation
+         },
+         as: :json
+    assert_response :no_content
   end
 
   test "sync_update refuses a split edit with an oversized, malformed, missing or surplus piece" do
     client = Y::Doc.new
-    client.get_text("t") << "fits"
+    client.get_text("t") << ("a" * (YjsPersistence::MAX_UPDATE_BYTES / 2 + 100))
     fits = Base64.strict_encode64(client.encode_state_as_update)
     oversized = Base64.strict_encode64("x" * (YjsPersistence::MAX_UPDATE_BYTES + 1))
+    large_garbage = Base64.strict_encode64("garbage" * ((YjsPersistence::MAX_UPDATE_BYTES / 2) / 7 + 10))
     {
       [ fits, oversized ] => :content_too_large,
       [ fits ] * (YjsPersistence::MAX_SPLIT_UPDATES + 1) => :content_too_large,
       [ fits, "not-base64" ] => :unprocessable_entity,
-      [ fits, Base64.strict_encode64("garbage") ] => :unprocessable_entity,
+      [ fits, large_garbage ] => :unprocessable_entity,
       [] => :unprocessable_entity
     }.each do |updates, status|
       assert_no_broadcasts(SyncChannel.broadcasting_for(@document)) do
