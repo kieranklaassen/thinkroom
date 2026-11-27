@@ -595,6 +595,13 @@ export class CableProvider {
     this.refreshSaveState()
   }
 
+  /** Retry an edit refused on this connection once write access returns. */
+  retryRefused(): void {
+    if (!this.refused()) return
+    this.refusedPart = null
+    this.flush('update')
+  }
+
   // No frame holds this part, so it goes over HTTP, whose answer is its receipt.
   private startUpload(part: Uint8Array): void {
     const upload = { part, abort: new AbortController() }
@@ -657,19 +664,29 @@ export class CableProvider {
   }
 
   /**
-   * Persist strictly the merged unacked outbox bytes (`inFlight` +
-   * `queued`) over an HTTP request so discrete edits or an immediate
-   * navigation/unload survive ActionCable teardown: `keepalive` when the body
-   * fits what browsers allow, ordinary otherwise.
+   * Persist unacked outbox parts up to the first that cannot be sent or is
+   * already uploading (and none while an edit is refused), over HTTP so
+   * discrete edits or an immediate navigation/unload survive ActionCable
+   * teardown: `keepalive` when the body fits what browsers allow, ordinary
+   * otherwise.
    */
   persistCurrentState = (snapshot?: DurableSnapshotPayload): void => {
+    this.persistUnacked(snapshot, false)
+  }
+
+  private persistUnacked(snapshot?: DurableSnapshotPayload, includeUploading = false): void {
     if (!this.canWrite || this.discarded) return
     const unacked = this.unackedParts()
+    const uploading =
+      !includeUploading && this.upload && !this.upload.abort.signal.aborted
+        ? this.upload.part
+        : null
     const parts: Uint8Array[] = []
     const allPieces: Uint8Array[] = []
     let totalBytes = 0
     if (!this.refused()) {
       for (const part of unacked) {
+        if (part === uploading) break
         const partPieces = this.piecesOf(part)
         if (!partPieces) break
         const nextPieces = [...allPieces, ...partPieces]
@@ -1042,7 +1059,7 @@ export class CableProvider {
     // Whoever stays is still here.
     else removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload')
     if (this.inFlight || this.queued.length > 0) {
-      this.persistCurrentState()
+      this.persistUnacked(undefined, true)
     }
   }
 }

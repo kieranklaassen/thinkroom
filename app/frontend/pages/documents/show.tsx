@@ -606,6 +606,13 @@ export default function DocumentShow({
     }
   }, [handle, reloadChangedAccess])
 
+  const prevCanWriteRef = useRef(ownership.can_write)
+  useEffect(() => {
+    const regained = !prevCanWriteRef.current && ownership.can_write
+    prevCanWriteRef.current = ownership.can_write
+    if (regained) handle?.provider.retryRefused()
+  }, [handle, ownership.can_write])
+
   // Priority-ordered dispatch: text selection → mobile suggestion tap →
   // click-to-comment → AI review span. Exactly one target (or none) comes
   // out — the single textTarget cell makes that mutual exclusion structural.
