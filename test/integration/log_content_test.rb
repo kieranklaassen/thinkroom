@@ -676,6 +676,13 @@ class LogContentTest < ActionDispatch::IntegrationTest
     assert_not_includes log, MARK
   end
 
+  test "bundle paths without a first slash, and more than one in a message" do
+    request = ActionDispatch::Request.new("PATH_INFO" => "feedback_runs/bundle/#{MARK}", "rack.input" => StringIO.new)
+    assert_equal "feedback_runs/bundle/[FILTERED]", request.filtered_path
+    shown = LogContent.hide_bundle("/feedback_runs/bundle/#{MARK}?mode=read /feedback_runs/bundle/#{MARK}")
+    assert_equal "#{BUNDLE_LINE}?mode=read #{BUNDLE_LINE}", shown
+  end
+
   test "other paths are logged as they are" do
     paths = [ "/feedback_runs/bundle", "/feedback_runs/bundle/", "/feedback_runs/7", "/feedback_runs/bundles/x", "/bundle/x" ]
     with_env_config("action_dispatch.show_exceptions" => :all) do

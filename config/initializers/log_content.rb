@@ -40,15 +40,15 @@ module LogContent
   DESCRIPTIVE = [ NameError, NoMethodError, ActionController::ParameterMissing ].freeze
 
   # A feedback bundle's path, as written: its last part, up to a file format.
-  bundle = "/feedback_runs/bundle/".each_char.map do |char|
+  bundle = "feedback_runs/bundle/".each_char.map do |char|
     "(?:#{char}|%#{char.unpack1("H*")})#{"++" if char == "/"}"
   end
-  BUNDLE = /(?<prefix>#{bundle.join})[^?]+?(?<format>\.(?:zip|json|html|txt))?(?=\?|\z)/i
+  BUNDLE = %r{(?<prefix>(?:\A|/|%2f)#{bundle.join})[^?]+?(?<format>\.(?:zip|json|html|txt))?(?=\?|\z)}i
 
   class << self
     # The path or URL, also inside a message, without a bundle's token.
     def hide_bundle(text)
-      text.b.sub(BUNDLE) { "#{$~[:prefix]}#{FILTERED}#{$~[:format]}" }.force_encoding(text.encoding)
+      text.b.gsub(BUNDLE) { "#{$~[:prefix]}#{FILTERED}#{$~[:format]}" }.force_encoding(text.encoding)
     end
 
     def redact(params)
