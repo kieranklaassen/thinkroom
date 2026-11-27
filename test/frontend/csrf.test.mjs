@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { patchJSON, postJSON } from '../../app/frontend/lib/csrf.ts'
+import { adoptSessionCsrfToken, jsonHeaders, patchJSON, postJSON } from '../../app/frontend/lib/csrf.ts'
 
 globalThis.document ??= {
   querySelector: () => ({ content: 'test-csrf-token' }),
@@ -39,3 +39,20 @@ for (const [method, send] of Object.entries({ POST: postJSON, PATCH: patchJSON }
     assert.equal(headers.get('X-CSRF-Token'), 'test-csrf-token')
   })
 }
+
+test('adopting the session token replaces the first load token, and a missing cookie keeps it', (t) => {
+  const original = globalThis.document
+  const meta = { content: 'first-load' }
+  globalThis.document = { cookie: 'pruf_focus=1', querySelector: () => meta }
+  t.after(() => {
+    globalThis.document = original
+  })
+
+  adoptSessionCsrfToken()
+  assert.equal(jsonHeaders()['X-CSRF-Token'], 'first-load')
+
+  document.cookie = 'OTHER-XSRF-TOKEN=no; XSRF-TOKEN=a-b%2Bc%3D%3D; pruf_focus=1'
+  assert.equal(jsonHeaders()['X-CSRF-Token'], 'first-load', 'the cookie alone changes nothing')
+  adoptSessionCsrfToken()
+  assert.equal(jsonHeaders()['X-CSRF-Token'], 'a-b+c==')
+})

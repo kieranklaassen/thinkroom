@@ -87,6 +87,7 @@ import type {
   WritingReviewerPayload,
 } from '../../types/payloads'
 import { setCookie, setCookieFlag } from '../../lib/cookies'
+import { adoptSessionCsrfToken } from '../../lib/csrf'
 import { applyTheme, type ThemeName } from '../../lib/theme'
 import { matchesShortcut } from '../../lib/shortcuts'
 import { ThemePicker, ThemeSwitcher } from '../../components/theme_picker'
@@ -576,6 +577,15 @@ export default function DocumentShow({
   }, [ownership.yours])
   const reloadChangedAccess = useCallback(() => {
     router.reload({ only: ['document', 'ownership', 'viewer'], async: true })
+  }, [])
+  // Only a page still waiting for its content: it adopts the session along with
+  // the access, before the editor that saves with it mounts.
+  const reloadWaitingAccess = useCallback(() => {
+    router.reload({
+      only: ['document', 'ownership', 'viewer'],
+      async: true,
+      onBeforeUpdate: adoptSessionCsrfToken,
+    })
   }, [])
   const reloadAfterContentReset = useCallback(() => {
     presencePoll.stop()
@@ -1100,7 +1110,7 @@ export default function DocumentShow({
                 // real state. Same recovery action as content_reset, reached via
                 // the sync channel or a refused durable save of the seed.
                 onStale={reloadAfterContentReset}
-                onAccessChanged={reloadChangedAccess}
+                onAccessChanged={reloadWaitingAccess}
                 // The sync channel rejects its resubscription when the doc is
                 // gone; same exit path as the deleted broadcast.
                 onRejected={onDocumentGone}

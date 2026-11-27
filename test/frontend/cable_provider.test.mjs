@@ -471,32 +471,43 @@ test('a reconnect with unchanged access or with local content does not report an
   assert.equal(holding.doc.getText('t').toString(), 'typed')
 })
 
-test('a waiting writer whose requests go unanswered reports its access once and keeps asking', async (t) => {
+test('a waiting writer whose requests go unanswered reports its access once and keeps asking', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
   const h = createHarness(t, { seedRetryMs: 5, ackTimeoutMs: 10 })
   const events = recordEvents(h)
   const requests = () => h.sent.filter((frame) => frame.type === 'seed-request').length
+  const unansweredRequest = () => {
+    t.mock.timers.tick(5)
+    t.mock.timers.tick(10)
+  }
   h.receive(pendingSyncFrame())
-  await pause(150)
-  assert.ok(requests() >= 2)
+  unansweredRequest()
+  unansweredRequest()
+  unansweredRequest()
+  assert.equal(requests(), 3)
   assert.deepEqual(events, ['access-changed'])
 
   h.receive(pendingSyncFrame())
-  await pause(150)
-  assert.deepEqual(events, ['access-changed', 'access-changed'], 'an answer starts a new run')
+  unansweredRequest()
+  unansweredRequest()
+  assert.equal(requests(), 5)
+  assert.deepEqual(events, ['access-changed', 'access-changed'], 'an answer, late or not, ends the run')
 
   h.receive({ type: 'update', update: contentUpdate(), cid: 'peer' })
-  const settled = requests()
-  await pause(60)
+  unansweredRequest()
   assert.deepEqual(events, ['access-changed', 'access-changed', 'synced'])
-  assert.equal(requests(), settled)
+  assert.equal(requests(), 5)
 })
 
-test('a waiting writer whose requests are answered does not report its access', async (t) => {
-  const h = createHarness(t, { seedRetryMs: 5 })
+test('a waiting writer whose requests are answered does not report its access', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const h = createHarness(t, { seedRetryMs: 5, ackTimeoutMs: 10 })
   const events = recordEvents(h)
   h.receive(pendingSyncFrame())
-  for (let i = 0; i < 3; i += 1) {
-    await pause(30)
+  for (let answered = 1; answered <= 3; answered += 1) {
+    t.mock.timers.tick(5)
+    assert.equal(h.sent.filter((frame) => frame.type === 'seed-request').length, answered)
+    t.mock.timers.tick(9)
     h.receive(pendingSyncFrame())
   }
   assert.deepEqual(events, [])

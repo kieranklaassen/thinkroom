@@ -25,6 +25,29 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     assert_equal "claimed", @document.reload.seed_state
   end
 
+  test "an access reload after a sign-in brings the token that page saves with" do
+    user = User.create!(name: "Owner", email: "owner@example.com", password: PASSWORD)
+    with_forgery_protection { get document_page_path(@document.slug), headers: browser }
+    first_load_token = css_select("meta[name=csrf-token]").first["content"]
+    claim = @document.reload.seed_claim_token
+    sign_in_as(user)
+
+    with_forgery_protection do
+      get document_page_path(@document.slug), headers: browser.merge(
+        "X-Inertia" => "true",
+        "X-Inertia-Version" => InertiaController.safe_vite_digest.to_s,
+        "X-Inertia-Partial-Component" => "documents/show",
+        "X-Inertia-Partial-Data" => "document,ownership,viewer"
+      )
+      assert_response :ok
+
+      post_seed(claim, token: first_load_token)
+      assert_response :unprocessable_entity
+      post_seed(claim, token: cookies["XSRF-TOKEN"])
+      assert_response :no_content
+    end
+  end
+
   test "the page grant carries the claim, and only with the grant" do
     get document_page_path(@document.slug), headers: browser
     assert_inertia_props { |props| props[:document][:seed_claim] == @document.reload.seed_claim_token }
@@ -316,10 +339,18 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     { "User-Agent" => "Mozilla/5.0" }
   end
 
-  def post_seed(claim)
+  def with_forgery_protection
+    original = ActionController::Base.allow_forgery_protection
+    ActionController::Base.allow_forgery_protection = true
+    yield
+  ensure
+    ActionController::Base.allow_forgery_protection = original
+  end
+
+  def post_seed(claim, token: nil)
     ydoc = Y::Doc.new
     ydoc.get_text("t") << "body"
-    post "/d/#{@document.slug}/sync_update", as: :json, params: {
+    post "/d/#{@document.slug}/sync_update", as: :json, headers: { "X-CSRF-Token" => token }.compact, params: {
       update: Base64.strict_encode64(ydoc.encode_state_as_update), generation: 0, seed_claim: claim
     }
   end

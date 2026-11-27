@@ -392,7 +392,8 @@ export class CableProvider {
       this.seedTimer = setTimeout(() => {
         this.waitForSeed()
         // Only a writer is answered, so this connection may no longer be one:
-        // signing in from another tab leaves it as it was. Once until answered.
+        // signing in from another tab leaves it as it was. A slow or lost
+        // answer looks the same. At most one report until an answer arrives.
         if (firstUnanswered) this.emit('access-changed')
       }, this.ackTimeoutMs)
     }, this.seedRetryMs)
