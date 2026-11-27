@@ -374,7 +374,9 @@ function recordEvents(h) {
   return events
 }
 
-const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+// Real time also while a test mocks the provider's timers.
+const realSetTimeout = setTimeout
+const pause = (ms) => new Promise((resolve) => realSetTimeout(resolve, ms))
 
 test('an ungranted empty handshake does not sync the editor and finishes on the first real content', (t) => {
   const h = createHarness(t)
@@ -1072,7 +1074,13 @@ test('an edit typed during a save that was refused goes out with everything stil
 
 const MAX_UPDATE = 2 * 1024 * 1024
 
-const LARGE = '漢'.repeat(1_600_000)
+const LARGE = '漢'.repeat(800_000)
+
+// The provider's clock moves only when the test says so.
+function mockClock(t) {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  return (ms) => t.mock.timers.tick(ms)
+}
 
 function applySave(call, server) {
   const updates = call.body.updates ?? [call.body.update]
@@ -1083,6 +1091,7 @@ function applySave(call, server) {
 }
 
 test('an edit larger than one frame is saved whole in one request, between what came before and after', async (t) => {
+  mockClock(t)
   const { calls } = stubLimitedFetch(t)
   const h = createHarness(t)
   const server = new Y.Doc()
@@ -1105,12 +1114,15 @@ test('an edit larger than one frame is saved whole in one request, between what 
 })
 
 test('a large edit is retried after a failed request and after a lost connection', async (t) => {
+  const tick = mockClock(t)
   const { calls } = stubLimitedFetch(t)
   const h = createHarness(t, { retryBaseMs: 5 })
   h.receive(emptySyncFrame(1))
   h.doc.getText('t').insert(0, LARGE)
   await calls[0].fail()
-  await pause(30)
+  tick(4)
+  assert.equal(calls.length, 1)
+  tick(1)
   assert.equal(calls.length, 2)
   h.disconnect()
   assert.equal(calls[1].signal.aborted, true, 'nothing else would end a request on a lost connection')
@@ -1128,6 +1140,7 @@ const statesOf = (h) => {
 }
 
 test('a large edit the server refuses is stuck, kept, and not sent again on this connection', async (t) => {
+  const tick = mockClock(t)
   for (const status of [413, 422, 403, 423]) {
     const { calls } = stubLimitedFetch(t)
     const h = createHarness(t, { retryBaseMs: 5 })
@@ -1137,7 +1150,7 @@ test('a large edit the server refuses is stuck, kept, and not sent again on this
     await calls[0].respond(status)
     h.doc.getText('t').insert(0, 'later ')
     h.provider.persistCurrentState()
-    await pause(40)
+    tick(20_000)
     assert.equal(calls.length, 1)
     assert.equal(h.sentUpdates().length, 0)
     assert.deepEqual(states, ['sending', 'stuck'], 'said once, not on every edit')
@@ -1154,6 +1167,7 @@ test('a large edit the server refuses is stuck, kept, and not sent again on this
 })
 
 test('a refusal ends when another save stores its edit', async (t) => {
+  mockClock(t)
   const { calls } = stubLimitedFetch(t)
   const h = createHarness(t)
   h.receive(emptySyncFrame(1))
@@ -1168,8 +1182,9 @@ test('a refusal ends when another save stores its edit', async (t) => {
 })
 
 test('a refusal does not outlive its edit: a later large edit that only fails is still retried', async (t) => {
+  const tick = mockClock(t)
   const { calls } = stubLimitedFetch(t)
-  const h = createHarness(t, { retryBaseMs: 40, retryMaxMs: 40, uploadWarnMs: 10 })
+  const h = createHarness(t, { retryBaseMs: 2_000, retryMaxMs: 2_000, uploadWarnMs: 1_000 })
   h.receive(emptySyncFrame(1))
   h.doc.getText('t').insert(0, LARGE)
   h.provider.persistCurrentState()
@@ -1178,32 +1193,35 @@ test('a refusal does not outlive its edit: a later large edit that only fails is
   h.doc.getText('t').insert(0, LARGE)
   assert.equal(calls.length, 3)
   await calls[2].respond(503)
-  await pause(20)
+  tick(1_000)
   assert.equal(h.provider.saveState, 'stuck')
-  await pause(60)
+  assert.equal(calls.length, 3)
+  tick(1_000)
   assert.equal(calls.length, 4, 'nothing refused this one')
   await calls[3].respond()
   assert.equal(h.provider.saveState, null)
 })
 
 test('each large edit has its own time before it is called unsaved', async (t) => {
+  const tick = mockClock(t)
   const { calls } = stubLimitedFetch(t)
-  const h = createHarness(t, { uploadWarnMs: 1500 })
+  const h = createHarness(t, { uploadWarnMs: 30_000 })
   h.receive(emptySyncFrame(1))
   const states = statesOf(h)
   h.doc.getText('t').insert(0, LARGE)
-  await pause(700)
-  const owedAt = performance.now()
+  tick(20_000)
   h.doc.getText('t').insert(0, LARGE)
+  tick(5_000)
   await calls[0].respond()
-  for (let i = 0; i < 1_000 && h.provider.saveState !== 'stuck'; i += 1) await pause(5)
-  assert.equal(h.provider.saveState, 'stuck')
-  // Timers may fire a little early, never by what the first edit waited.
-  assert.ok(performance.now() - owedAt >= 1490, `${performance.now() - owedAt} ms`)
-  assert.deepEqual(states, ['sending', 'stuck'])
+  assert.equal(calls.length, 2)
+  tick(24_999)
+  assert.deepEqual(states, ['sending'], 'the first edit takes its time with it')
+  tick(1)
+  assert.deepEqual(states, ['sending', 'stuck'], 'and does not delay the second')
 })
 
 test('a large edit that cannot even be sent is called unsaved, and no longer once it is stored', async (t) => {
+  const tick = mockClock(t)
   const situations = {
     'before the first handshake': () => {},
     offline: (h) => { h.receive(emptySyncFrame(1)); h.disconnect() },
@@ -1212,11 +1230,13 @@ test('a large edit that cannot even be sent is called unsaved, and no longer onc
   }
   for (const [name, arrange] of Object.entries(situations)) {
     const { calls } = stubLimitedFetch(t)
-    const h = createHarness(t, { uploadWarnMs: 20, ackTimeoutMs: 5_000 })
+    const h = createHarness(t, { uploadWarnMs: 1_000, ackTimeoutMs: 5_000 })
     arrange(h)
     h.doc.getText('t').insert(0, LARGE)
     assert.equal(h.provider.saveState, 'sending', name)
-    await pause(60)
+    tick(999)
+    assert.equal(h.provider.saveState, 'sending', name)
+    tick(1)
     assert.equal(h.provider.saveState, 'stuck', name)
     if (name.startsWith('behind')) h.receive({ type: 'ack', seq: 1 })
     else if (calls.length === 0) h.receive(emptySyncFrame(1))
@@ -1226,6 +1246,7 @@ test('a large edit that cannot even be sent is called unsaved, and no longer onc
 })
 
 test('a connection that replaces a half-open one tries a refused edit again', async (t) => {
+  mockClock(t)
   const { calls } = stubLimitedFetch(t)
   const h = createHarness(t)
   h.receive(emptySyncFrame(1))
@@ -1238,6 +1259,7 @@ test('a connection that replaces a half-open one tries a refused edit again', as
 })
 
 test('a refusal that was read only after the connection dropped does not count for the next one', async (t) => {
+  const tick = mockClock(t)
   for (const reconnect of ['before', 'after']) {
     const { calls } = stubLimitedFetch(t)
     const h = createHarness(t, { retryBaseMs: 5 })
@@ -1248,16 +1270,17 @@ test('a refusal that was read only after the connection dropped does not count f
     if (reconnect === 'before') h.receive(emptySyncFrame(1))
     await answered
     if (reconnect === 'after') h.receive(emptySyncFrame(1))
-    await pause(20)
+    tick(5)
     assert.equal(calls.length, 2, `handshake ${reconnect} the answer was read`)
     await calls[1].respond(413)
-    await pause(30)
+    tick(20_000)
     assert.equal(calls.length, 2, 'refused on this connection')
     assert.equal(h.provider.saveState, 'stuck')
   }
 })
 
 test('a large seed refused for a claim since renewed is sent again under the new one', async (t) => {
+  const tick = mockClock(t)
   const { calls } = stubLimitedFetch(t)
   const h = createHarness(t, { retryBaseMs: 5 })
   const events = recordEvents(h)
@@ -1266,7 +1289,7 @@ test('a large seed refused for a claim since renewed is sent again under the new
   h.doc.getText('t').insert(0, LARGE)
   h.receive(grant('claim-b'))
   await calls[0].respond(409, { seed_refused: true })
-  await pause(20)
+  tick(5)
   assert.equal(events.includes('stale'), false)
   assert.equal(calls.length, 2)
   assert.equal(calls[1].body.seed_claim, 'claim-b')
@@ -1274,6 +1297,7 @@ test('a large seed refused for a claim since renewed is sent again under the new
 })
 
 test('a large edit refused as stale or locked recovers the way a frame does', async (t) => {
+  mockClock(t)
   for (const [status, event, state] of [[409, 'stale', null], [423, 'write-denied', 'stuck']]) {
     const { calls } = stubLimitedFetch(t)
     const h = createHarness(t)
@@ -1282,7 +1306,6 @@ test('a large edit refused as stale or locked recovers the way a frame does', as
     h.receive(emptySyncFrame(1))
     h.doc.getText('t').insert(0, LARGE)
     await calls[0].respond(status)
-    await pause(5)
     assert.deepEqual(events, [[event, state]], 'stuck is known before access is reloaded')
     assert.equal(h.provider.unackedParts().length > 0, state !== null)
   }
@@ -1307,18 +1330,20 @@ test('a frame refused as locked keeps the large edit queued behind it, and one r
 })
 
 test('5xx, 408, 429 and lost answers are retried with backoff, one request at a time', async (t) => {
+  const tick = mockClock(t)
   for (const status of [500, 503, 408, 429, 0]) {
     const { calls } = stubLimitedFetch(t)
     const h = createHarness(t, { retryBaseMs: 10, retryMaxMs: 20 })
     h.receive(emptySyncFrame(1))
     h.doc.getText('t').insert(0, LARGE)
-    for (let i = 0; i < 8; i += 1) {
+    for (let i = 0; i < 4; i += 1) {
       assert.equal(h.provider.saveState, 'sending', 'a failure that is retried is not a refusal')
       const answered = calls.length
       await (status ? calls[answered - 1].respond(status) : calls[answered - 1].fail())
-      await pause(5)
-      assert.ok(calls.length <= answered + 1, 'one request at a time')
-      while (calls.length === answered) await pause(5)
+      tick(i === 0 ? 9 : 19)
+      assert.equal(calls.length, answered, 'not before its backoff')
+      tick(1)
+      assert.equal(calls.length, answered + 1, 'one request at a time')
     }
     await calls.at(-1).respond()
     assert.equal(h.provider.saveState, null)
@@ -1327,6 +1352,7 @@ test('5xx, 408, 429 and lost answers are retried with backoff, one request at a 
 })
 
 test('a request that never answers is given up at its deadline and sent again', async (t) => {
+  const tick = mockClock(t)
   const { calls } = stubLimitedFetch(t)
   const deadlines = []
   const h = createHarness(t, {
@@ -1335,18 +1361,21 @@ test('a request that never answers is given up at its deadline and sent again', 
   })
   h.receive(emptySyncFrame(1))
   h.doc.getText('t').insert(0, LARGE)
-  await pause(30)
+  tick(19)
+  assert.equal(calls[0].signal.aborted, false)
+  tick(1)
   assert.equal(calls[0].signal.aborted, true)
   await calls[0].fail()
-  await pause(15)
+  tick(5)
   assert.equal(calls.length, 2)
   assert.ok(deadlines[0] > MAX_UPDATE)
   await calls[1].respond()
-  await pause(30)
+  tick(20_000)
   assert.equal(calls[1].signal.aborted, false, 'an answered request keeps no deadline')
 })
 
 test('a second handshake during an upload does not send it twice', async (t) => {
+  mockClock(t)
   const { calls } = stubLimitedFetch(t)
   const h = createHarness(t)
   h.receive(emptySyncFrame(1))
@@ -1359,6 +1388,7 @@ test('a second handshake during an upload does not send it twice', async (t) => 
 })
 
 test('a save withholds an edit that cannot be split and everything after it', async (t) => {
+  const tick = mockClock(t)
   const { calls } = stubLimitedFetch(t)
   const h = createHarness(t)
   const states = statesOf(h)
@@ -1372,7 +1402,8 @@ test('a save withholds an edit that cannot be split and everything after it', as
   assert.equal(calls[0].body.content, undefined, 'no source is saved ahead of the edits it shows')
   await calls[0].respond()
   h.provider.persistCurrentState(snapshotOf(10))
-  await pause(5)
+  tick(20_000)
+  await pause(0)
   assert.equal(calls.length, 1)
   assert.equal(h.sentUpdates().length, 1)
   assert.deepEqual(states.at(-1), 'stuck')
@@ -1411,6 +1442,7 @@ test('small edits beside a large one do not count towards the pieces of a save',
 })
 
 test('lost access reloads a waiting page, or is held for an unsaved large edit, never both', async (t) => {
+  mockClock(t)
   const { calls } = stubLimitedFetch(t)
   const lostAccess = () => pendingSyncFrame({ seed_content: '# Template' })
 
@@ -1462,6 +1494,7 @@ test('a peer applies the pieces of a split edit together', (t) => {
 })
 
 test('a seed larger than one frame is saved whole with its claim', async (t) => {
+  mockClock(t)
   const { calls } = stubLimitedFetch(t)
   const h = createHarness(t)
   h.receive({ ...emptySyncFrame(1), seed: true, seed_claim: 'claim-a', seed_content: '# Seed' })
@@ -1473,6 +1506,7 @@ test('a seed larger than one frame is saved whole with its claim', async (t) => 
 })
 
 test('leaving the page asks first while a large edit is unsaved', async (t) => {
+  mockClock(t)
   const { calls } = stubLimitedFetch(t)
   const h = createHarness(t)
   h.receive(emptySyncFrame(1))
