@@ -226,6 +226,40 @@ class SnapshotTest < ActionDispatch::IntegrationTest
     assert_not @document.reload.live_crdt?
   end
 
+  test "sync_update enforces the split piece count and total byte limits before decoding" do
+    assert_equal 5, YjsPersistence::MAX_SPLIT_UPDATES
+    assert_equal 7.megabytes, YjsPersistence::MAX_SPLIT_UPDATE_BYTES
+
+    # 6 pieces totaling 6 MiB (within total limit, one piece past piece limit) -> 413 before decode.
+    one_mb = "!" * (((1.megabyte + 2) / 3) * 4 - 2) + "=="
+    # 4 pieces totaling 7 MiB + 1 byte (within piece limit, one byte past total limit) -> 413 before decode.
+    two_mb_bytes = YjsPersistence::MAX_UPDATE_BYTES
+    two_mb_b64 = ("!" * (((two_mb_bytes + 2) / 3) * 4 - 1)) + "="
+    tail_bytes = YjsPersistence::MAX_SPLIT_UPDATE_BYTES + 1 - (3 * two_mb_bytes)
+    tail_pad = (3 - (tail_bytes % 3)) % 3
+    tail_b64 = ("!" * (((tail_bytes + 2) / 3) * 4 - tail_pad)) + ("=" * tail_pad)
+
+    decoded_any = false
+    original_decode = Base64.method(:strict_decode64)
+    Base64.define_singleton_method(:strict_decode64) do |value|
+      decoded_any = true if value.start_with?("!")
+      original_decode.call(value)
+    end
+    begin
+      [ [ one_mb ] * 6, [ two_mb_b64, two_mb_b64, two_mb_b64, tail_b64 ] ].each do |updates|
+        assert_no_broadcasts(SyncChannel.broadcasting_for(@document)) do
+          post document_sync_update_path(@document.slug),
+               params: { updates:, generation: @document.content_generation }, as: :json
+        end
+        assert_response :content_too_large
+      end
+      assert_not decoded_any, "oversized split requests must be refused before decoding"
+    ensure
+      Base64.define_singleton_method(:strict_decode64, original_decode)
+    end
+    assert_not @document.reload.live_crdt?
+  end
+
   test "locked requests are denied before snapshot and sync payload validation" do
     @document.update!(
       owner_token: "someone-else",

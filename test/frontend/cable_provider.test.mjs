@@ -1556,3 +1556,84 @@ test('splitting keeps surrogate pairs, deletions and structure', () => {
     assert.deepEqual(copy.getText('t').toDelta(), doc.getText('t').toDelta())
   }
 })
+
+test('the largest 3-byte text the document size guard allows is saved in one split request', async (t) => {
+  mockClock(t)
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t)
+  const server = new Y.Doc()
+  h.receive(emptySyncFrame(1))
+  // MAX_DOCUMENT_SIZE = 2 MiB UTF-16 units; 1 paragraph boundary = 2 units.
+  const maxChars = 2 * 1024 * 1024 - 2
+  h.doc.transact(() => {
+    const p = new Y.XmlElement('paragraph')
+    const txt = new Y.XmlText()
+    txt.insert(0, '漢'.repeat(maxChars), {
+      provenance: { kind: 'human', author: 'Test Author', state: 'verbatim' },
+    })
+    p.insert(0, [txt])
+    h.doc.getXmlFragment('prosemirror').insert(0, [p])
+  })
+  assert.equal(calls.length, 1)
+  assert.ok(calls[0].body.updates.length <= 5, `${calls[0].body.updates.length} pieces`)
+  const totalBytes = calls[0].body.updates.reduce((sum, u) => sum + fromBase64(u).length, 0)
+  assert.ok(totalBytes <= 7 * 1024 * 1024, `${totalBytes} bytes`)
+  applySave(calls[0], server)
+  await calls[0].respond()
+  assert.equal(h.provider.saveState, null)
+  assert.equal(h.provider.unackedParts().length, 0)
+})
+
+test('an edit beyond the total or piece limit is called stuck immediately, never sent, and leaving asks', (t) => {
+  mockClock(t)
+  const { calls } = stubLimitedFetch(t)
+
+  // Over total limit (> 7 MiB)
+  const overBytes = createHarness(t)
+  overBytes.receive(emptySyncFrame(1))
+  overBytes.doc.getText('t').insert(0, '漢'.repeat(2_500_000))
+  assert.equal(overBytes.provider.saveState, 'stuck')
+  assert.equal(calls.length, 0)
+  assert.equal(overBytes.sentUpdates().length, 0)
+  let asked = false
+  overBytes.provider.handleUnload({ preventDefault: () => { asked = true } })
+  assert.equal(asked, true)
+  assert.equal(calls.length, 0)
+
+  // Over piece limit (> 5 pieces while total bytes <= 7 MiB: 6 paragraphs of ~1.05 MiB each)
+  const overPieces = createHarness(t)
+  overPieces.receive(emptySyncFrame(1))
+  overPieces.doc.transact(() => {
+    const els = []
+    for (let i = 0; i < 6; i += 1) {
+      const p = new Y.XmlElement('paragraph')
+      const txt = new Y.XmlText()
+      txt.insert(0, '漢'.repeat(350_000))
+      p.insert(0, [txt])
+      els.push(p)
+    }
+    overPieces.doc.getXmlFragment('prosemirror').insert(0, els)
+  })
+  assert.equal(overPieces.provider.saveState, 'stuck')
+  assert.equal(calls.length, 0)
+  assert.equal(overPieces.sentUpdates().length, 0)
+})
+
+test('two large edits beyond one save on leaving send the first edit within the limit', (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t, { initialGeneration: 1 })
+  // Two separate 4.2 MiB edits: each fits in one save, together (8.4 MiB) they exceed 7 MiB.
+  const fourMb = '漢'.repeat(1_400_000)
+  h.doc.getText('a').insert(0, fourMb)
+  h.doc.getText('b').insert(0, fourMb)
+  h.provider.destroy()
+  assert.equal(calls.length, 1)
+  const updates = calls[0].body.updates
+  assert.ok(updates.length <= 5, `${updates.length} pieces`)
+  const totalBytes = updates.reduce((sum, u) => sum + fromBase64(u).length, 0)
+  assert.ok(totalBytes <= 7 * 1024 * 1024, `${totalBytes} bytes`)
+  const server = new Y.Doc()
+  applySave(calls[0], server)
+  assert.equal(server.getText('a').length, fourMb.length)
+  assert.equal(server.getText('b').length, 0)
+})

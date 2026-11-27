@@ -104,6 +104,10 @@ const DEFAULT_SEED_RETRY_MS = 3_000
 // Mirrors YjsPersistence::MAX_UPDATE_BYTES: the server takes no larger update,
 // over the socket or HTTP.
 const MAX_UPDATE_BYTES = 2 * 1024 * 1024
+// Mirrors YjsPersistence::MAX_SPLIT_UPDATES and MAX_SPLIT_UPDATE_BYTES, sized
+// from MAX_DOCUMENT_SIZE (document_size_guard.ts): 6 MiB text + 1 MiB structure.
+const MAX_SPLIT_UPDATES = 5
+const MAX_SPLIT_UPDATE_BYTES = 7 * 1024 * 1024
 // What merging may add to a part: a filler for a gap before it.
 const MERGE_BYTES_PER_PART = 16
 
@@ -403,7 +407,13 @@ export class CableProvider {
   private piecesOf(part: Uint8Array): Uint8Array[] | null {
     if (part.length <= MAX_UPDATE_BYTES) return [part]
     if (!this.pieces.has(part)) {
-      this.pieces.set(part, splitUpdate(part, MAX_UPDATE_BYTES))
+      const pieces = part.length > MAX_SPLIT_UPDATE_BYTES ? null : splitUpdate(part, MAX_UPDATE_BYTES)
+      const total = pieces?.reduce((sum, piece) => sum + piece.length, 0) ?? Infinity
+      const usable =
+        pieces && pieces.length <= MAX_SPLIT_UPDATES && total <= MAX_SPLIT_UPDATE_BYTES
+          ? pieces
+          : null
+      this.pieces.set(part, usable)
       this.refreshSaveState()
     }
     return this.pieces.get(part) ?? null
@@ -419,7 +429,12 @@ export class CableProvider {
     const large = unacked.filter((part) => part.length > MAX_UPDATE_BYTES)
     // From when it is owed, not from a failure: it may not even be sent.
     for (const part of large) if (!this.unsaved.has(part)) this.warnIfStillUnsaved(part)
-    const stuck = large.some((part) => this.unsaved.has(part) || this.pieces.get(part) === null)
+    const stuck = large.some(
+      (part) =>
+        this.unsaved.has(part) ||
+        part.length > MAX_SPLIT_UPDATE_BYTES ||
+        this.pieces.get(part) === null,
+    )
     const state = stuck ? 'stuck' : large.length > 0 ? 'sending' : null
     if (state === this.saveState) return
     this.saveState = state
@@ -650,8 +665,26 @@ export class CableProvider {
   persistCurrentState = (snapshot?: DurableSnapshotPayload): void => {
     if (!this.canWrite || this.discarded) return
     const unacked = this.unackedParts()
-    const stuck = this.refused() ? 0 : unacked.findIndex((part) => !this.piecesOf(part))
-    const parts = stuck === -1 ? unacked : unacked.slice(0, stuck)
+    const parts: Uint8Array[] = []
+    const allPieces: Uint8Array[] = []
+    let totalBytes = 0
+    if (!this.refused()) {
+      for (const part of unacked) {
+        const partPieces = this.piecesOf(part)
+        if (!partPieces) break
+        const nextPieces = [...allPieces, ...partPieces]
+        const nextBytes = totalBytes + partPieces.reduce((sum, piece) => sum + piece.length, 0)
+        if (
+          parts.length > 0 &&
+          (nextBytes > MAX_SPLIT_UPDATE_BYTES || packUpdates(nextPieces).length > MAX_SPLIT_UPDATES)
+        ) {
+          break
+        }
+        parts.push(part)
+        allPieces.push(...partPieces)
+        totalBytes = nextBytes
+      }
+    }
     const withheld = parts.length < unacked.length
     if (parts.length > 0 || (snapshot && !withheld)) void this.save(parts, withheld ? undefined : snapshot)
   }

@@ -47,8 +47,13 @@ class YjsPersistence
   # oversized wire payloads are rejected before allocating/decoding.
   MAX_UPDATE_B64_BYTES = (MAX_UPDATE_BYTES * 4 / 3) + 4
 
-  # How many updates one split edit may hold (see merge_updates).
-  MAX_SPLIT_UPDATES = 8
+  # Maximum pieces and total decoded bytes one split edit may carry (see
+  # merge_updates). Mirrors CableProvider and derives from MAX_DOCUMENT_SIZE
+  # (2 MiB UTF-16 units in app/frontend/editor/document_size_guard.ts): up to
+  # 6 MiB of 3-byte UTF-8 text plus 1 MiB for nodes and marks, across at most
+  # 5 pieces (4 full 2 MiB pieces plus 1 leading piece before a split string).
+  MAX_SPLIT_UPDATES = 5
+  MAX_SPLIT_UPDATE_BYTES = 7.megabytes
 
   class << self
     # Parse a wire-supplied content_generation into a non-negative Integer, or

@@ -388,6 +388,7 @@ class DocumentsController < InertiaController
   MAX_STATE_VECTOR_BYTES = 64.kilobytes
   MAX_SYNC_UPDATE_BYTES = YjsPersistence::MAX_UPDATE_BYTES
   MAX_SYNC_UPDATE_B64_BYTES = YjsPersistence::MAX_UPDATE_B64_BYTES
+  MAX_SPLIT_UPDATE_BYTES = YjsPersistence::MAX_SPLIT_UPDATE_BYTES
   MAX_SNAPSHOT_SPANS = 2_000
   MAX_SNAPSHOT_SPAN_TEXT = 280
   PROVENANCE_KINDS = %w[human ai].freeze
@@ -441,6 +442,7 @@ class DocumentsController < InertiaController
     if split
       decoded_sizes = updates.map { |update| decoded_base64_bytesize(update) }
       return head :content_too_large if decoded_sizes.any? { |size| size && size > MAX_SYNC_UPDATE_BYTES }
+      return head :content_too_large if decoded_sizes.compact.sum > MAX_SPLIT_UPDATE_BYTES
       if decoded_sizes.any?(&:nil?) || decoded_sizes.sum <= MAX_SYNC_UPDATE_BYTES
         return render json: { error: "Invalid Yjs update." }, status: :unprocessable_entity
       end
@@ -448,6 +450,7 @@ class DocumentsController < InertiaController
 
     decoded = updates.map { |update| Base64.strict_decode64(update) }
     return head :content_too_large if decoded.any? { |update| update.bytesize > MAX_SYNC_UPDATE_BYTES }
+    return head :content_too_large if split && decoded.sum(&:bytesize) > MAX_SPLIT_UPDATE_BYTES
     if split && decoded.reject { |update| update == YjsPersistence::EMPTY_UPDATE }.sum(&:bytesize) <= MAX_SYNC_UPDATE_BYTES
       return render json: { error: "Invalid Yjs update." }, status: :unprocessable_entity
     end
