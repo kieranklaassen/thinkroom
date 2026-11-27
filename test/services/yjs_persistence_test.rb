@@ -527,7 +527,7 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     assert_equal edit["text"], text_of(doc)
   end
 
-  test "a split edit sent again leaves no rows and no second copy" do
+  test "a split edit sent again skips the fold and leaves no rows or second copy" do
     doc = Document.create!(title: "Split repeat")
     client = Y::Doc.new
     text = client.get_text("t")
@@ -537,11 +537,194 @@ class YjsPersistenceTest < ActiveSupport::TestCase
     text << "second"
     second = client.encode_state_as_update(vector)
 
-    3.times do
+    assert_notification("fold.yjs") do
       YjsPersistence.merge_updates(doc.reload, [ first, second ], generation: doc.content_generation)
+    end
+    assert_not doc.reload.yjs_document_updates.exists?
+
+    2.times do
+      folds = capture_notifications("fold.yjs") do
+        YjsPersistence.merge_updates(doc.reload, [ first, second ], generation: doc.content_generation)
+      end
+      assert_empty folds, "an already-stored split edit must skip the immediate fold"
       assert_not doc.reload.yjs_document_updates.exists?
     end
     assert_equal "first second", text_of(doc)
+  end
+
+  test "an incomplete split edit is refused before locking and stores nothing" do
+    doc = Document.create!(title: "Incomplete split", seed_markdown: "# Seed")
+
+    # Three contiguous pieces on one text (a, b, c) plus a separate-root piece (root_c).
+    client = Y::Doc.new(77)
+    t = client.get_text("t")
+    t << "a"
+    piece_a = client.encode_state_as_update
+    sv_a = client.encode_state_vector
+    t << "b"
+    piece_b = client.encode_state_as_update(sv_a)
+    sv_b = client.encode_state_vector
+    t << "c"
+    piece_c = client.encode_state_as_update(sv_b)
+
+    root_client = Y::Doc.new(88)
+    root_client.get_text("r1") << "A"
+    root_a = root_client.encode_state_as_update
+    root_sv_a = root_client.encode_state_vector
+    root_client.get_text("r2") << "B"
+    root_sv_b = root_client.encode_state_vector
+    root_client.get_text("r3") << "C"
+    root_c = root_client.encode_state_as_update(root_sv_b)
+
+    # Delete of absent content
+    del_client = Y::Doc.new(99)
+    del_client.get_text("t") << "target"
+    del_sv = del_client.encode_state_vector
+    del_client.get_text("t").delete(0, 6)
+    absent_delete = del_client.encode_state_as_update(del_sv)
+
+    # Missing cross-client origin
+    origin_a = Y::Doc.new(101)
+    origin_a.get_text("t") << "base"
+    origin_b = Y::Doc.new(102)
+    origin_b.apply_update(origin_a.encode_state_as_update)
+    sv_origin = origin_b.encode_state_vector
+    origin_b.get_text("t").insert(2, "mid")
+    missing_origin = origin_b.encode_state_as_update(sv_origin)
+
+    # Hold the document mutex to prove the completeness check runs outside the write lock.
+    YjsPersistence.send(:lock_for, doc.id).synchronize do
+      {
+        "missing middle (same text)" => [ piece_a, piece_c ],
+        "missing middle (separate roots)" => [ root_a, root_c ],
+        "reordered pieces" => [ piece_b, piece_a ],
+        "missing base" => [ piece_b, piece_c ],
+        "delete of absent content" => [ piece_a, absent_delete ],
+        "missing cross-client origin" => [ piece_a, missing_origin ]
+      }.each do |label, bad_pieces|
+        assert_raises(ArgumentError, label) do
+          YjsPersistence.merge_updates(doc, bad_pieces, generation: doc.content_generation)
+        end
+      end
+    end
+
+    doc.reload
+    assert_not doc.yjs_document_updates.exists?, "incomplete split edits must store no rows"
+    assert_nil doc.yjs_state
+    assert_equal "pending", doc.seed_state
+  end
+
+  test "a complete split edit accepts a base in the unfolded tail, a concurrent fold, or another client's pending row" do
+    doc = Document.create!(title: "Tail base")
+    writer = Y::Doc.new(111)
+    writer.get_text("t") << "base "
+    base = writer.encode_state_as_update
+    sv_base = writer.encode_state_vector
+    writer.get_text("t") << "part1 "
+    p1 = writer.encode_state_as_update(sv_base)
+    sv_p1 = writer.encode_state_vector
+    writer.get_text("t") << "part2"
+    p2 = writer.encode_state_as_update(sv_p1)
+
+    # Base sits in the unfolded tail alongside another client's pending row.
+    other = Y::Doc.new(222)
+    other.get_text("t") << "missing"
+    other_sv = other.encode_state_vector
+    other.get_text("t") << "pending"
+    other_pending = other.encode_state_as_update(other_sv)
+
+    YjsPersistence.merge_bytes(doc, base, generation: doc.content_generation)
+    YjsPersistence.merge_bytes(doc, other_pending, generation: doc.content_generation)
+    assert_nil doc.reload.yjs_state
+
+    YjsPersistence.merge_updates(doc.reload, [ p1, p2 ], generation: doc.content_generation)
+    assert_equal "base part1 part2", text_of(doc.reload)
+  end
+
+  test "a complete split edit succeeds when a fold runs between reading the tail and reloading the document" do
+    doc = Document.create!(title: "Concurrent fold")
+    writer = Y::Doc.new(112)
+    writer.get_text("t") << "base "
+    base = writer.encode_state_as_update
+    sv_base = writer.encode_state_vector
+    writer.get_text("t") << "part1 "
+    p1 = writer.encode_state_as_update(sv_base)
+    sv_p1 = writer.encode_state_vector
+    writer.get_text("t") << "part2"
+    p2 = writer.encode_state_as_update(sv_p1)
+
+    YjsPersistence.merge_bytes(doc, base, generation: doc.content_generation)
+    stale_doc = Document.find(doc.id)
+    folded = false
+    original_reload = stale_doc.method(:reload)
+    stale_doc.define_singleton_method(:reload) do |*args|
+      unless folded
+        folded = true
+        YjsPersistence.fold!(Document.find(id))
+      end
+      original_reload.call(*args)
+    end
+
+    YjsPersistence.merge_updates(stale_doc, [ p1, p2 ], generation: doc.content_generation)
+    assert folded
+    assert_equal "base part1 part2", text_of(doc.reload)
+  end
+
+  test "a repeated split edit still refuses a malformed or superseded seed claim" do
+    doc = Document.create!(title: "Repeat claim", seed_content: "# Seed")
+    claim_a, claim_b = expired_then_reclaimed(doc)
+    client = Y::Doc.new(113)
+    client.get_text("t") << "one "
+    p1 = client.encode_state_as_update
+    sv1 = client.encode_state_vector
+    client.get_text("t") << "two"
+    p2 = client.encode_state_as_update(sv1)
+
+    YjsPersistence.merge_updates(doc.reload, [ p1, p2 ], generation: doc.content_generation, seed_claim: claim_b)
+    assert_raises(Document::StaleSeedClaimError) do
+      YjsPersistence.merge_updates(doc.reload, [ p1, p2 ], generation: doc.content_generation, seed_claim: "not-a-claim")
+    end
+
+    other = Y::Doc.new(114)
+    other.get_text("t") << "other "
+    o1 = other.encode_state_as_update
+    o_sv = other.encode_state_vector
+    other.get_text("t") << "seed"
+    o2 = other.encode_state_as_update(o_sv)
+    assert_raises(Document::StaleSeedClaimError) do
+      YjsPersistence.merge_updates(doc.reload, [ o1, o2 ], generation: doc.content_generation, seed_claim: claim_a)
+    end
+  end
+
+  test "a split edit whose document is replaced before the lock is rejected as stale" do
+    doc = Document.create!(title: "Replaced split", seed_content: "# Seed")
+    client = Y::Doc.new(130)
+    client.get_text("t") << "one "
+    p1 = client.encode_state_as_update
+    sv1 = client.encode_state_vector
+    client.get_text("t") << "two"
+    p2 = client.encode_state_as_update(sv1)
+    stale_generation = doc.content_generation
+
+    # Simulate replacement landing right as the lock is entered.
+    original_lock = YjsPersistence.singleton_class.instance_method(:lock_for)
+    replaced = false
+    YjsPersistence.define_singleton_method(:lock_for) do |id|
+      unless replaced
+        replaced = true
+        Document.find(doc.id).replace_content!(source: "# Replaced")
+      end
+      original_lock.bind_call(self, id)
+    end
+    begin
+      assert_raises(Document::StaleGenerationError) do
+        YjsPersistence.merge_updates(doc, [ p1, p2 ], generation: stale_generation)
+      end
+    ensure
+      YjsPersistence.singleton_class.define_method(:lock_for, original_lock)
+    end
+    assert_not doc.reload.yjs_document_updates.exists?
+    assert_nil doc.yjs_state
   end
 
   test "a failure while storing a split edit stores none of it" do

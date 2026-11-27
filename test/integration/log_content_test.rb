@@ -139,6 +139,8 @@ class LogContentTest < ActionDispatch::IntegrationTest
       Base64.strict_encode64(piece)
     end
     save = lambda do
+      @document.yjs_document_updates.delete_all
+      @document.update_columns(yjs_state: nil, yjs_state_vector: nil, yjs_state_checksum: nil, seed_state: "pending")
       connection, socket = connect_cable
       send_frame(connection, command: "subscribe", identifier:)
       wait_for_frame(socket) { |frame| frame.include?("confirm_subscription") }

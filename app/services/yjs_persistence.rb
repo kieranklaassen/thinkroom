@@ -113,6 +113,12 @@ class YjsPersistence
           raise ArgumentError, "undecodable Yjs update for document #{document.id}"
         end
 
+        non_empty = updates - [ EMPTY_UPDATE ]
+        split_check, snapshot_marker =
+          if non_empty.many?
+            validate_split_updates(document, non_empty, generation:, payload:)
+          end
+
         entered_at = monotonic_ms
         lock_for(document.id).synchronize do
           document.with_lock do
@@ -141,6 +147,12 @@ class YjsPersistence
             unless seed_claim.nil? || seed_claim_holds?(document, updates.first, seed_claim)
               payload[:outcome] = "rejected_seed_claim"
               raise Document::StaleSeedClaimError, "Another seed is already stored."
+            end
+
+            if split_check == :already_stored &&
+               [ document.yjs_state_checksum, document.yjs_state.present? ] == snapshot_marker
+              payload[:outcome] = "noop"
+              next true
             end
 
             # The durable act: an O(update) append. A single update builds no
@@ -463,6 +475,89 @@ class YjsPersistence
     # raises inside yrs.
     def decodable_update?(update)
       !load_verified_blob(update).nil?
+    end
+
+    # Verify a split edit is complete against the current integrated document
+    # state before acquiring the write lock. Reading tail rows before reloading
+    # the document ensures a concurrent fold between the two reads only adds to
+    # what we load. Returns [:already_stored, marker] when every piece is
+    # already present, or [:ready, marker] when every piece integrates in order
+    # with nothing left pending.
+    def validate_split_updates(document, updates, generation:, payload:)
+      ydoc, marker = load_integrated_doc_for_split(document, generation:, payload:)
+
+      if updates.all? { |update| ydoc.update_ready?(update) && !ydoc.update_advances?(update) }
+        return [ :already_stored, marker ]
+      end
+
+      updates.each do |update|
+        sv = decode_state_vector(ydoc.encode_state_vector)
+        unless contiguous_with_state?(update, sv)
+          payload[:outcome] = "rejected_incomplete"
+          raise ArgumentError, "incomplete split Yjs update for document #{document.id}"
+        end
+        ydoc.apply_update(update)
+        if ydoc.update_advances?(update)
+          payload[:outcome] = "rejected_incomplete"
+          raise ArgumentError, "incomplete split Yjs update for document #{document.id}"
+        end
+      end
+
+      if ydoc.pending? || !updates.all? { |update| ydoc.update_ready?(update) }
+        payload[:outcome] = "rejected_incomplete"
+        raise ArgumentError, "incomplete split Yjs update for document #{document.id}"
+      end
+
+      [ :ready, marker ]
+    end
+
+    def load_integrated_doc_for_split(document, generation:, payload:, healed: false)
+      tail_rows = YjsDocumentUpdate.where(document_id: document.id).order(:id).to_a
+      document.reload
+      unless generation == document.content_generation
+        payload[:outcome] = "rejected_stale"
+        raise Document::StaleGenerationError,
+              "Client generation #{generation} is behind document generation #{document.content_generation}."
+      end
+
+      ydoc = load_ydoc(document)
+      marker = [ document.yjs_state_checksum, document.yjs_state.present? ]
+
+      tail_rows.each do |row|
+        next unless row.content_generation == document.content_generation
+
+        begin
+          ydoc.apply_update(row.payload)
+        rescue StandardError
+          # Poison-pill rows are quarantined on the next fold.
+        end
+      end
+
+      if ydoc.pending?
+        compacted = load_verified_blob(ydoc.compacted_state_update)
+        ydoc = compacted if compacted
+      end
+
+      [ ydoc, marker ]
+    rescue CorruptStateError => e
+      raise if healed
+
+      with_document_lock(document) do
+        YjsRecovery.heal_corrupt_state!(document, e)
+      end
+      load_integrated_doc_for_split(document, generation:, payload:, healed: true)
+    end
+
+    def contiguous_with_state?(update, state_vector)
+      client_count, index = decode_var_uint(update, 0)
+      return true if client_count.zero? || client_count > 1
+
+      struct_count, index = decode_var_uint(update, index)
+      return true if struct_count.zero?
+
+      client_id, index = decode_var_uint(update, index)
+      first_clock, = decode_var_uint(update, index)
+      first_clock <= state_vector.fetch(client_id, 0)
     end
 
     def load_verified_blob(blob)
