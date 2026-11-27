@@ -1,6 +1,6 @@
 ---
 title: "A document's Yjs state outgrows its saved source: one 4 MB paste, a 10 MB CRDT, a 72-byte snapshot"
-module: documents/show editor, YjsPersistence, SyncChannel
+module: documents/show editor, CableProvider, YjsPersistence, SyncChannel
 date: 2026-09-17
 problem_type: data_integrity
 component: rails_controller
@@ -27,13 +27,13 @@ applies_when:
 
 ## Context
 
-Document `9FQ2F6xpMt` (id 1150) served a 14.6 MB page: `yjs_state_b64` was 14.5 MB (10.8 MB binary) while `content` was still the 72-byte "Untitled" template. The binary contained about 66,000 occurrences of `provenance`, which read like provenance marks multiplying on every session.
+One document served a 14.6 MB page: `yjs_state_b64` was 14.5 MB (10.8 MB binary) while `content` was still the 72-byte "Untitled" template. The binary contained about 66,000 occurrences of `provenance`, which read like provenance marks multiplying on every session.
 
-Decoding the state with `yjs` told a different story. Two clients only: the seeder (71 clock units, the template) and one browser client (`clientID 4142641551`, 4.35 million clock units) whose every provenance mark is `human / Kieran Klaassen`. The fragment holds 12,131 top-level blocks and 34,203 text runs of a pasted Cursor agent transcript, 4.2 million characters, in monotonically increasing clock order: one client appended it in one sitting. Each text run carries one provenance mark, which Yjs stores as an open/close pair of format items, hence two `provenance` strings per run. Re-encoding through a fresh `Y.Doc` gave the identical 10,872,124 bytes: nothing was redundant. The document was simply 4 MB of pasted text.
+Decoding the state with `yjs` told a different story. Two clients only: the seeder (71 clock units, the template) and one browser client (4.35 million clock units) whose every provenance mark names the same person. The fragment holds 12,131 top-level blocks and 34,203 text runs of a pasted agent transcript, 4.2 million characters, in monotonically increasing clock order: one client appended it in one sitting. Each text run carries one provenance mark, which Yjs stores as an open/close pair of format items, hence two `provenance` strings per run. Re-encoding through a fresh `Y.Doc` gave the identical 10,872,124 bytes: nothing was redundant. The document was simply 4 MB of pasted text.
 
-The saved source stayed the template because `POST /d/:slug/snapshot` caps content at `MAX_SNAPSHOT_BYTES` (2 MB) and answered 413 on every debounce, logged only as `console.warn`, while the CRDT path (SyncChannel) has no cap. The two limits were asymmetric, so the document could outgrow the server's own source limit with nobody told.
+The saved source stayed the template because `POST /d/:slug/snapshot` caps content at `MAX_SNAPSHOT_BYTES` (2 MB) and answered 413 on every debounce, logged only as `console.warn`, while the CRDT path (SyncChannel) had no cap. The two limits were asymmetric, so the document could outgrow the server's own source limit with nobody told.
 
-A second, smaller write surfaced while checking that "open without editing writes nothing": it did not hold. `Y.encodeStateAsUpdate(doc, serverVector)` always appends the whole delete set, so a joiner's sync-reply on any document with deletion history is a zero-struct delete-set frame. `YjsPersistence.merge` short-circuits only the exactly-empty update, appended that frame as a row on every open, and the next handshake folded it away with a full load of the blob. On the incident document, every open cost a 10.8 MB decode and re-encode.
+A second, smaller write surfaced while checking that "open without editing writes nothing": it did not hold. `Y.encodeStateAsUpdate(doc, serverVector)` always appends the whole delete set, so a joiner's sync-reply built that way was a zero-struct delete-set frame on any document with deletion history. `YjsPersistence` short-circuited only the exactly-empty update, appended that frame as a row on every open, and the next handshake folded it away with a full load of the blob. On the incident document, every open cost a 10.8 MB decode and re-encode.
 
 ## Guidance
 
@@ -41,11 +41,13 @@ A second, smaller write surfaced while checking that "open without editing write
 
 **2. When a write path fails permanently, tell the user, not the console.** A 413 on the durable snapshot now raises a visible notice through the editor's `onNotice` callback: the saved copy is stale until the document is shortened.
 
-**3. A joiner owes the server nothing unless it has something.** `CableProvider` replies to the handshake only when a local change happened since the last handshake (`pendingLocalChanges`; hydration from the page's `yjs_state_b64` is tagged `server-hydrate` and does not count, and an `update` sent live can still be lost before a disconnect while a delete-only edit leaves no structs to notice) or the encoded diff carries structs. The server keeps its fold-time classification of delete-set echoes for older clients.
+**3. A joiner owes the server nothing unless it has something.** `CableProvider` does not diff against the server's vector to find what it owes. It keeps every unacknowledged local edit in an outbox (`inFlight` and `queued`) and flushes exactly that after the handshake, so an update lost before a disconnect and a delete-only edit are both resent, and an open without edits sends nothing. Hydration from the page's `yjs_state_b64` carries `SERVER_HYDRATE_ORIGIN` and never enters the outbox. If a delete-set echo does reach the server, `YjsPersistence.perform_fold` compares the state vector and the delete set of a state without gaps, not its encoded bytes, so the echo does not rewrite what is stored.
 
 **4. Do not embed what the browser cannot use.** `documents#show` omits `yjs_state_b64` above `MAX_EMBEDDED_STATE_BYTES` (1 MB); the editor takes the handshake path it already has for a document with no embedded state.
 
 **5. Keep an operator path that does not need the CLI or an owner session.** `bin/rails "yjs:compact[slug]"` folds and re-encodes (content unchanged, previous blob archived as a checkpoint, second run reports `unchanged`). `bin/rails "yjs:reset[slug]"` replaces the live state with the saved source through `Document#replace_content!` (state archived as a `replacement`, generation bumped, editors reload). Compaction cannot shrink a document that is genuinely large; that one needs the reset.
+
+The commands and what to know before running them on a live document are in `DEPLOYING.md`. A reset leaves the replaced state recoverable in `yjs_state_archives` only until `YjsStateArchive::MAX_PER_KIND` newer replacement archives push it out.
 
 ## Why This Matters
 
@@ -54,14 +56,3 @@ The symptom pointed at the wrong mechanism. String counts in a CRDT blob describ
 ## When to Apply
 
 Any time a client-side data structure is mirrored by a server-side projection with its own limit (CRDT and snapshot, canvas scene and thumbnail, editor JSON and HTML export). And whenever a Yjs client sends `encodeStateAsUpdate(doc, remoteVector)`: check whether the recipient already has every delete, because the delete set travels regardless.
-
-## Production runbook for the incident document
-
-From a checkout of `main` with `.kamal/deploy.env` sourced (see `DEPLOYING.md`):
-
-```bash
-bin/kamal app exec --reuse 'bin/rails "yjs:compact[9FQ2F6xpMt]"'   # expected: 10872124 -> 10872124 bytes, unchanged
-bin/kamal app exec --reuse 'bin/rails "yjs:reset[9FQ2F6xpMt]"'     # archives the 10.8 MB state, seeds the 72-byte template
-```
-
-The reset discards the pasted transcript from the live document. It stays recoverable in `yjs_state_archives` (kind `replacement`, the pre-bump generation) until five newer replacement archives push it out.
