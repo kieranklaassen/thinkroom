@@ -386,9 +386,15 @@ export class CableProvider {
     if (!this.canWrite) return
     this.seedTimer = setTimeout(() => {
       // Answered with a whole new handshake: content, a grant, or still pending.
+      const firstUnanswered = !this.seedRequested
       this.seedRequested = true
       this.send({ type: 'seed-request' })
-      this.seedTimer = setTimeout(() => this.waitForSeed(), this.ackTimeoutMs)
+      this.seedTimer = setTimeout(() => {
+        this.waitForSeed()
+        // Only a writer is answered, so this connection may no longer be one:
+        // signing in from another tab leaves it as it was. Once until answered.
+        if (firstUnanswered) this.emit('access-changed')
+      }, this.ackTimeoutMs)
     }, this.seedRetryMs)
   }
 
