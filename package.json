@@ -4,10 +4,10 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/rails__actioncable": "^8.0.3",
-    "eslint": "^10.6.0",
+    "eslint": "^10.9.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "playwright": "^1.61.1",
-    "typescript-eslint": "^8.63.0",
+    "typescript-eslint": "^8.72.2",
     "vite": "^8.2.2",
     "vite-plugin-ruby": "^5.2.2"
   },
