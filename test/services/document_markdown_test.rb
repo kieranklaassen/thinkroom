@@ -54,9 +54,46 @@ class DocumentMarkdownTest < ActiveSupport::TestCase
     assert_equal 202, html.scan('<a href="mailto:ada@example.com">').size
   end
 
+  test "a table of very many columns shows as text" do
+    [ "", "> ", "- " ].each do |container|
+      html = DocumentMarkdown.to_html(table(1_001, container:), **OPTIONS)
+
+      assert_no_match(/<table/, html)
+      assert_includes html, "|---|"
+    end
+    assert_no_match(/<table/, DocumentMarkdown.to_html(table(1_001).gsub("\n", "\r"), **OPTIONS))
+  end
+
+  test "tables of very many cells show as text" do
+    [
+      table(10, rows: 2_000), table(10, rows: 2_000, row: "a"), table(10, rows: 2_000, row: "|-|"),
+      table(10, rows: 2_000, row: "a", newline: "\r\n"), table(10, rows: 2_000, row: "a", newline: "\r"),
+      "#{table(10, rows: 500, row: "a")}\n" * 4, "a\n:-:\n#{"b\n" * 20_000}", "a|b\n-|-\n#{"c\n" * 10_000}"
+    ].each do |source|
+      assert_no_match(/<table/, DocumentMarkdown.to_html(source, **OPTIONS))
+    end
+  end
+
+  test "ordinary tables stay as they are" do
+    [
+      table(1_000), table(10, rows: 1_999), table(10, rows: 1_999, row: "a"), "#{table(3)}\n" * 2_000,
+      "#{table(8)}\n#{"a\n" * 30_000}", "a | b\n--|--\n`x|y` | c\\|d\n", "a || b\n" * 1_000,
+      "#{table(2)}\n```\n#{"- " * 40}\n#{"line\n" * 600}```\n", "#{table(2)}\n```\n#{"----- " * 10}\n#{"#{"value " * 10}\n" * 2_001}```\n"
+    ].each do |source|
+      assert_equal Commonmarker.to_html(source, **OPTIONS), DocumentMarkdown.to_html(source, **OPTIONS)
+    end
+  end
+
   test "the text of a document is read without heading ids" do
     fragment = DocumentPlainText.fragment(format: "markdown", content: "# Notes\n\n# Notes")
 
     assert_empty fragment.css("[id], a")
+  end
+
+  private
+
+  def table(columns, rows: 2, row: "|#{"a|" * columns}", container: "", newline: "\n")
+    lines = [ "|#{"a|" * columns}", "|#{"---|" * columns}", *[ row ] * rows ]
+    lines.each_with_index.map { |line, index| "#{index.zero? || container != "- " ? container : "  "}#{line}#{newline}" }.join
   end
 end
