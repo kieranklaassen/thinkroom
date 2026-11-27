@@ -35,6 +35,9 @@ module Proof
     # stays on.
     config.flipper.preload = false
 
+    # As in production everywhere: no log line that lists unpermitted names.
+    config.action_controller.action_on_unpermitted_parameters = false
+
     # Don't generate system test files.
     config.generators.system_tests = nil
   end
