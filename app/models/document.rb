@@ -123,7 +123,7 @@ class Document < ApplicationRecord
     key = [ content_format, content ]
     unless @plain_text && @plain_text_key == key
       fragment = @parsed_source[1] if @parsed_source && @parsed_source[0] == content
-      fragment ||= DocumentPlainText.fragment(format: content_format, content:)
+      fragment ||= DocumentPlainText.readable(format: content_format, content:)
       @plain_text = DocumentPlainText.text(fragment, format: content_format).freeze
       @plain_text_key = [ content_format, content.dup ]
       @parsed_source = nil # reading the text replaced the fragment's sketches
@@ -152,6 +152,14 @@ class Document < ApplicationRecord
     )
   end
 
+  # False when the content is too complex to format; its page is the source.
+  def formattable?(**preview_options)
+    DocumentPreviewHtml.block_count(preview_html(**preview_options))
+    true
+  rescue DocumentHtml::TooComplex
+    false
+  end
+
   # The title to show before the editor mounts. The editor derives the header
   # title from the document's first H1; deriving the same thing here means the
   # header reads correctly on first paint instead of flashing the stored title.
@@ -159,7 +167,7 @@ class Document < ApplicationRecord
     content = current_content
     return title if content.blank?
 
-    DocumentTitle.call(format: content_format, content: content).presence || title
+    DocumentTitle.in(DocumentPlainText.readable(format: content_format, content:)).presence || title
   end
 
   def claimed? = user_id.present? || owner_token.present?

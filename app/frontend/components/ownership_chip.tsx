@@ -25,6 +25,14 @@ interface Props {
 export function OwnershipChip({ slug, ownership, claimerName }: Props) {
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  // Once the document is yours, whether claimed here, in the banner or in another
+  // tab, a message from before no longer holds.
+  const [wasYours, setWasYours] = useState(ownership.yours)
+  if (ownership.yours !== wasYours) {
+    setWasYours(ownership.yours)
+    if (ownership.yours) setDeleteError(null)
+  }
   // Ref guards double-fires synchronously — state updates only take effect
   // after the next render commit, leaving a same-frame window for a second
   // click (Enter bounce, mobile double-tap) to dispatch a duplicate request.
@@ -40,6 +48,14 @@ export function OwnershipChip({ slug, ownership, claimerName }: Props) {
     }),
   })
 
+  // A refusal usually comes with another ownership state, so the message goes
+  // with every one of them.
+  const refusal = deleteError && (
+    <span className="header-menu-access-error" role="alert">
+      {deleteError}
+    </span>
+  )
+
   if (ownership.yours) {
     if (confirming) {
       return (
@@ -51,10 +67,25 @@ export function OwnershipChip({ slug, ownership, claimerName }: Props) {
               if (deleteInFlight.current) return
               deleteInFlight.current = true
               setDeleting(true)
+              setDeleteError(null)
               router.delete(`/d/${slug}`, {
-                // Success navigates home and unmounts; only failure needs
-                // recovery — without this the chip froze on 'Deleting…'.
-                onError: () => {
+                // Success leaves for home, another component, which is sent
+                // whole. A refusal comes back to this page: scoped, it keeps
+                // the open editor instead of loading the page again.
+                only: ['ownership', 'activities'],
+                preserveScroll: 'errors',
+                onError: (errors) => {
+                  setDeleteError(String(errors.document ?? 'Delete failed — please try again'))
+                },
+                onNetworkError: (error) => {
+                  // Also called when showing the answer failed; that error is
+                  // not a lost connection and stays uncaught.
+                  if (!('code' in error) || error.code !== 'ERR_NETWORK') return
+                  setDeleteError('Connection lost. This document may already be deleted.')
+                  // Handled here; otherwise the visit rejects with no one to catch it.
+                  return false
+                },
+                onFinish: () => {
                   deleteInFlight.current = false
                   setDeleting(false)
                   setConfirming(false)
@@ -75,34 +106,43 @@ export function OwnershipChip({ slug, ownership, claimerName }: Props) {
       )
     }
     return (
-      <button
-        className="chrome-toggle"
-        aria-pressed="true"
-        title="You own this document — click to delete it"
-        onClick={() => setConfirming(true)}
-      >
-        Yours — delete…
-      </button>
+      <>
+        <button
+          className="chrome-toggle"
+          aria-pressed="true"
+          title="You own this document — click to delete it"
+          onClick={() => setConfirming(true)}
+        >
+          Yours — delete…
+        </button>
+        {refusal}
+      </>
     )
   }
 
   if (ownership.claimed) {
     return (
-      <span className="ownership-owner" title="This document has been claimed">
-        Owned by {ownership.owner_name}
-      </span>
+      <>
+        <span className="ownership-owner" title="This document has been claimed">
+          Owned by {ownership.owner_name}
+        </span>
+        {refusal}
+      </>
     )
   }
 
-  if (!ownership.claimable) return null
+  if (!ownership.claimable) return refusal
 
   return (
-    <button
-      className="chrome-toggle"
-      title="Claim this document to your browser — claiming lets you delete it"
-      onClick={claim}
-    >
-      {claimFailed ? 'Claim failed — try again' : 'Claim this doc'}
-    </button>
+    <>
+      <button
+        className="chrome-toggle"
+        title="Claim this document to your browser — claiming lets you delete it"
+        onClick={claim}
+      >
+        {claimFailed ? 'Claim failed — try again' : 'Claim this doc'}
+      </button>
+      {refusal}
+    </>
   )
 }
