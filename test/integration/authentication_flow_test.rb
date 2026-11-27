@@ -2,6 +2,7 @@ require "test_helper"
 
 class AuthenticationFlowTest < ActionDispatch::IntegrationTest
   include SessionCookieAssertions
+  include CompoundWritingHelpers
 
   setup do
     WriteRateLimited::STORE.clear
@@ -26,6 +27,29 @@ class AuthenticationFlowTest < ActionDispatch::IntegrationTest
     assert_equal user, document.reload.user
     assert_nil document.owner_token
     assert_not_equal original_token, cookies[:owner_token]
+  end
+
+  test "registration does not accept an address in the form kept for Google accounts" do
+    assert_no_difference("User.count") do
+      post signup_path, params: {
+        name: "Kieran", email: "kieran@example.com.123.GOOGLE.invalid",
+        password: PASSWORD, password_confirmation: PASSWORD
+      }
+    end
+
+    assert_redirected_to signup_path
+    assert_nil session[:user_id]
+    assert_equal "Couldn’t create that account. Check your details and try again.", inertia_error(:form)
+  end
+
+  test "registration does not accept an email a Google account uses" do
+    User.create!(name: "Kieran", email: "kieran@example.com", google_uid: "google-123")
+
+    assert_no_difference("User.count") do
+      post signup_path, params: {
+        name: "Other", email: "kieran@example.com", password: PASSWORD, password_confirmation: PASSWORD
+      }
+    end
   end
 
   test "password login uses a generic failure and promotes claimed documents" do

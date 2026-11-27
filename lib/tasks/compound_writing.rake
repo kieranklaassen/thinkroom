@@ -8,10 +8,10 @@ namespace :compound_writing do
     puts "Installed #{pack.name} #{pack.version} at #{pack.short_sha} with #{pack.lens_structs.size} lenses"
     next if args[:email].blank?
 
-    user = User.find_by(email: args[:email].to_s.strip.downcase) or abort "No account with email #{args[:email].inspect}"
+    user = flags_user!(args[:email])
     Flipper.enable_actor(CompoundWriting::FLAG, user)
     outcome = UserWritingPack.subscribe!(user, pack)
-    puts "#{outcome.change.to_s.capitalize} subscription for #{user.email} (#{outcome.subscription.enabled_lenses.size} lenses on)"
+    puts "#{outcome.change.to_s.capitalize} subscription for #{flags_label(user)} (#{outcome.subscription.enabled_lenses.size} lenses on)"
   end
 
   desc "List packs and their lenses"

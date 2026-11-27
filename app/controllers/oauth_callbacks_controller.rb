@@ -3,21 +3,13 @@ class OauthCallbacksController < InertiaController
     auth = request.env["omniauth.auth"]
     return google_failure unless valid_google_auth?(auth)
 
-    uid = auth.uid.to_s
     email = auth.info.email.to_s.strip.downcase
-    user = User.find_by(google_uid: uid)
-    return redirect_to complete_authentication(user), status: :see_other if user
-
-    if User.exists?(email:)
-      return redirect_to auth_path_with_return(login_path), inertia: {
-        errors: { email: "Use your email and password for this account" }
-      }
-    end
-
     name = Document.normalize_display_name(auth.info.name) || email.split("@", 2).first
-    user = User.create!(name:, email:, google_uid: uid)
+    user = User.for_google!(uid: auth.uid.to_s, email:, name:)
+    return google_failure unless user
+
     redirect_to complete_authentication(user), status: :see_other
-  rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
+  rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique, ActiveRecord::StatementTimeout
     google_failure
   end
 
