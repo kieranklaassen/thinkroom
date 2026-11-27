@@ -18,6 +18,7 @@ const STUBS = {
     export const Head = () => null
     export const Link = ({ as = 'a', prefetch, method, ...props }) => createElement(as, props)
     export const useForm = () => ({ post() {}, processing: false, data: {}, errors: {} })
+    export const usePage = () => ({ props: { errors: {} } })
   `),
   '@ruby-native/react': stub(`
     export const NativeNavbar = () => null
