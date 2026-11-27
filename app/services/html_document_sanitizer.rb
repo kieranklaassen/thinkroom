@@ -31,6 +31,8 @@ class HtmlDocumentSanitizer
   MAX_AUTHOR_LENGTH = 255
   MAX_SUGGESTION_ID_LENGTH = 255
   DROP_WITH_CONTENT = %w[script style iframe object embed template svg math].freeze
+  # The same elements by local name: svg and math have a namespace.
+  DROPPED = "descendant::*[#{DROP_WITH_CONTENT.map { |name| "local-name()='#{name}'" }.join(" or ")}]".freeze
   PROVENANCE_ATTRIBUTES = %w[data-provenance data-kind data-author data-state].freeze
   SUGGESTION_ATTRIBUTES = %w[data-suggestion-id data-author].freeze
   SKETCH_ATTRIBUTES = %w[
@@ -56,7 +58,7 @@ class HtmlDocumentSanitizer
     def sanitize(source, trusted_metadata:)
       original = source.to_s
       source_fragment = DocumentHtml.parse(original)
-      source_fragment.css(DROP_WITH_CONTENT.join(",")).remove
+      source_fragment.xpath(DROPPED).remove
       sanitized = Rails::HTML5::SafeListSanitizer.new.sanitize(
         source_fragment.to_html,
         tags: TAGS,
