@@ -7,7 +7,6 @@ module OwnProcessHelpers
 
   private
 
-  # What the script printed, run as `bin/rails runner` runs it.
   def run_in_own_rails(script, stdin_data: "", limit: OWN_PROCESS_LIMIT)
     run_in_own_process(Rails.root.join("bin/rails").to_s, "runner", script, stdin_data:, limit:)
   end
