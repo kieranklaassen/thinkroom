@@ -25,25 +25,19 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
     assert_equal "claimed", @document.reload.seed_state
   end
 
-  test "an access reload after a sign-in brings the token that page saves with" do
+  test "after a sign-in the first load's token is refused and the next full load's is accepted" do
     user = User.create!(name: "Owner", email: "owner@example.com", password: PASSWORD)
     with_forgery_protection { get document_page_path(@document.slug), headers: browser }
-    first_load_token = css_select("meta[name=csrf-token]").first["content"]
+    first_load_token = page_token
     claim = @document.reload.seed_claim_token
     sign_in_as(user)
 
     with_forgery_protection do
-      get document_page_path(@document.slug), headers: browser.merge(
-        "X-Inertia" => "true",
-        "X-Inertia-Version" => InertiaController.safe_vite_digest.to_s,
-        "X-Inertia-Partial-Component" => "documents/show",
-        "X-Inertia-Partial-Data" => "document,ownership,viewer"
-      )
-      assert_response :ok
-
       post_seed(claim, token: first_load_token)
       assert_response :unprocessable_entity
-      post_seed(claim, token: cookies["XSRF-TOKEN"])
+
+      get document_page_path(@document.slug), headers: browser
+      post_seed(claim, token: page_token)
       assert_response :no_content
     end
   end
@@ -338,6 +332,8 @@ class DocumentSeedClaimTest < ActionDispatch::IntegrationTest
   def browser
     { "User-Agent" => "Mozilla/5.0" }
   end
+
+  def page_token = css_select("meta[name=csrf-token]").first["content"]
 
   def with_forgery_protection
     original = ActionController::Base.allow_forgery_protection

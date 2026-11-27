@@ -60,6 +60,7 @@ import { useDocumentIdentity } from './use_document_identity'
 import { useFollowPresence } from './use_follow_presence'
 import { useComments } from './use_comments'
 import { useCommentAnchors } from './use_comment_anchors'
+import { useWaitingAccess, viewerIdentity } from './use_waiting_access'
 import { useCompoundReview } from './use_compound_review'
 import { useHighlighter } from './use_highlighter'
 import { useFloatingChrome, type TextTarget } from './use_floating_chrome'
@@ -87,7 +88,6 @@ import type {
   WritingReviewerPayload,
 } from '../../types/payloads'
 import { setCookie, setCookieFlag } from '../../lib/cookies'
-import { adoptSessionCsrfToken } from '../../lib/csrf'
 import { applyTheme, type ThemeName } from '../../lib/theme'
 import { matchesShortcut } from '../../lib/shortcuts'
 import { ThemePicker, ThemeSwitcher } from '../../components/theme_picker'
@@ -311,7 +311,7 @@ export default function DocumentShow({
   const isReading = effectiveMode === 'read'
   // Compound writing rides inside Comment mode for featured accounts.
   const showCompound = effectiveMode === 'comment' && writingAvailable
-  const connectionIdentity = viewer.account ? `account:${viewer.account.id}` : 'guest'
+  const connectionIdentity = viewerIdentity(viewer)
   const editorSessionKey = `${doc.slug}:${ownership.can_write ? 'write' : 'read'}`
   // Live handle for code that runs after awaits or inside stable callbacks —
   // a closure-captured handle goes stale when the editor remounts mid-flight.
@@ -578,15 +578,7 @@ export default function DocumentShow({
   const reloadChangedAccess = useCallback(() => {
     router.reload({ only: ['document', 'ownership', 'viewer'], async: true })
   }, [])
-  // Only a page still waiting for its content: it adopts the session along with
-  // the access, before the editor that saves with it mounts.
-  const reloadWaitingAccess = useCallback(() => {
-    router.reload({
-      only: ['document', 'ownership', 'viewer'],
-      async: true,
-      onBeforeUpdate: adoptSessionCsrfToken,
-    })
-  }, [])
+  const reloadWaitingAccess = useWaitingAccess(doc.slug, { document: doc, ownership, viewer })
   const reloadAfterContentReset = useCallback(() => {
     presencePoll.stop()
     window.location.reload()

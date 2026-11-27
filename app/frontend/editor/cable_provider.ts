@@ -399,6 +399,17 @@ export class CableProvider {
     }, this.seedRetryMs)
   }
 
+  /** Waiting for the first content, with nothing in the local doc. */
+  get awaitingContent(): boolean {
+    return this.seedWaiting && this.doc.store.clients.size === 0
+  }
+
+  /** The page is loading again: nothing arriving meanwhile may bind an editor. */
+  discardWait(): void {
+    this.discarded = true
+    this.stopSeedWait()
+  }
+
   private completeSync(): void {
     this.stopSeedWait()
     this.synced = true
