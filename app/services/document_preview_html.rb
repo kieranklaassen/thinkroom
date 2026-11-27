@@ -48,7 +48,7 @@ class DocumentPreviewHtml
       return 0 if html.blank?
 
       CACHE.fetch([ "document-preview-blocks", CACHE_VERSION, Digest::SHA256.hexdigest(html) ]) do
-        children = Nokogiri::HTML5.fragment(html).element_children
+        children = DocumentHtml.parse(html).element_children
         count = children.count { |node| !mermaid_widget_figure?(node) }
         count += 1 if trailing_paragraph?(children.last)
         count
@@ -119,7 +119,7 @@ class DocumentPreviewHtml
       # Security boundary: document content is authored by humans and agents, so
       # it is sanitized before it can reach dangerouslySetInnerHTML on the client.
       sanitized = HtmlDocumentSanitizer.snapshot(html).content
-      fragment = Nokogiri::HTML5.fragment(sanitized)
+      fragment = DocumentHtml.parse(sanitized)
       collapse_block_whitespace(fragment)
       collapse_break_newlines(fragment)
       add_trailing_breaks(fragment)
@@ -148,7 +148,7 @@ class DocumentPreviewHtml
       # zero-mermaid document; without the substring the loop can't match.
       return html unless html.match?(/lang="mermaid"/i)
 
-      fragment = Nokogiri::HTML5.fragment(html)
+      fragment = DocumentHtml.parse(html)
       fragment.css("pre[lang]").each do |pre|
         next unless pre["lang"].to_s.casecmp?("mermaid")
 

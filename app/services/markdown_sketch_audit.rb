@@ -26,7 +26,7 @@ class MarkdownSketchAudit
       source = content.to_s
       return Result.new(fence_count: 0, unrecognized_count: 0) if source.blank?
 
-      self.in(DocumentPlainText.fragment(format: "markdown", content: source))
+      self.in(DocumentPlainText.readable(format: "markdown", content: source))
     end
 
     # The audit of an already parsed source. Read it before the text

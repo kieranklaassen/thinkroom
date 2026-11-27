@@ -1,0 +1,10 @@
+<main style="max-width: 46rem; margin: 0 auto; padding: 3rem 1.5rem; font-family: Georgia, serif;">
+  <h1><%= @source_title %></h1>
+  <p role="status">
+    The formatting here is too complex to show, so this is the source. It is stored unchanged.
+    <%= link_to "Open it as plain text", @source_text_path %>
+  </p>
+  <%# The parser drops one line break after the tag; this is that one. %>
+  <pre id="document-source" style="white-space: pre-wrap; overflow-wrap: anywhere;">
+<%= @source %></pre>
+</main>

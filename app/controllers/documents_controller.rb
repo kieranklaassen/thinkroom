@@ -98,6 +98,12 @@ class DocumentsController < InertiaController
     # mode-dependent chrome (Mermaid source visibility, sketch caption
     # affordance) is identical on both sides of the preview → editor swap.
     writable = document.writable_by?(owner_token, user: current_user)
+    preview_editable = writable && %w[edit suggest].include?(mode)
+    preview_sketch_interactive = writable && mode == "edit"
+    if document_prop_requested? &&
+       !document.formattable?(editable: preview_editable, sketch_interactive: preview_sketch_interactive)
+      return render_source(document, social_preview)
+    end
 
     # Claim the seed at page-render time so a fresh document paints its
     # template from props instead of waiting for the WebSocket round-trip.
@@ -112,8 +118,6 @@ class DocumentsController < InertiaController
     seed_granted = initial_render? && !prefetch_request? && !link_preview_request &&
       writable && document.try_claim_seed
     seed_claim = document.seed_claim_token if seed_granted
-    preview_editable = writable && %w[edit suggest].include?(mode)
-    preview_sketch_interactive = writable && mode == "edit"
 
     render inertia: "documents/show", props: {
       # Cookie-backed UI prefs and the path-derived mode are both available to
@@ -494,6 +498,9 @@ class DocumentsController < InertiaController
     DocumentAsset.claim_from_html!(document:, source: content) if document.html?
     broadcast_title(document) if title != previous_title
     { normalized: normalization&.changed? || false }
+  rescue DocumentHtml::TooComplex => e
+    render json: { error: e.message }, status: :unprocessable_entity
+    nil
   end
 
   def broadcast_title(document)
@@ -676,6 +683,24 @@ class DocumentsController < InertiaController
   # seed claim.
   def initial_render?
     request.headers["X-Inertia-Partial-Component"].blank?
+  end
+
+  # A partial reload that leaves the document prop alone never shows the content.
+  def document_prop_requested?
+    requested = request.headers["X-Inertia-Partial-Data"].to_s.split(",")
+    initial_render? || requested.empty? || requested.include?("document")
+  end
+
+  # The document as text, on a page that starts no editor. An Inertia request
+  # is sent to load that page whole.
+  def render_source(document, social_preview)
+    return inertia_location(request.original_url) if request.inertia?
+
+    @without_scripts = true
+    @source = document.current_content.to_s.scrub.tr("\0", "\uFFFD")
+    @source_title = social_preview.display_title
+    @source_text_path = document_page_path(document.slug, format: :txt)
+    render "documents/source", formats: :html
   end
 
   # Link prefetchers fetch pages no editor will mount in. Sec-Purpose is
