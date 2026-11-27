@@ -458,6 +458,9 @@ try {
   await postDraft('Identical feedback.')
   await cardsPage.getByRole('button', { name: 'Check saved comments', exact: true }).waitFor()
   const otherCommenter = await browser.newPage()
+  // Guest names are random and can collide; a saved check matches by author
+  // name, so the other author needs a name that is never generated.
+  await otherCommenter.addInitScript((name) => localStorage.setItem('proof:identity', JSON.stringify({ name, color: '#3d7ab6' })), 'Other Commenter')
   await otherCommenter.goto(`${BASE}/d/${recoveryDoc.slug}/comment`)
   await waitForLive(otherCommenter)
   await postDraft('Identical feedback.', otherCommenter)
