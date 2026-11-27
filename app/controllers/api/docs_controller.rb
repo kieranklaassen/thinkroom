@@ -62,7 +62,7 @@ module Api
     # GET /api/docs/:slug — the document's full live state.
     def show
       touch_presence
-      render json: AgentGuide.state(document, request.base_url)
+      render json: AgentGuide.state(document, request.base_url, viewer_user: current_api_user)
     end
 
     # PATCH/PUT /api/docs/:slug — revise a document in place. Unclaimed drafts
@@ -185,7 +185,7 @@ module Api
     def index_notes
       return [ "Authenticated with a Thinkroom CLI token; documents are scoped to that account." ] if current_api_user
 
-      [ "Send a Bearer token from `thinkroom login` to list account documents. Anonymous requests can still create documents with POST /api/docs." ]
+      [ "Send a Bearer token from `thinkroom login` to list account documents. Anonymous requests can still create Markdown documents without HTML with POST /api/docs." ]
     end
 
     # A seed-stage document is revisable in place by the agent/anonymous flow

@@ -256,6 +256,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   end
 
   test "HTML snapshot rejects the legacy markdown field" do
+    sign_in_as(User.create!(name: "Ann", email: "ann-legacy@example.com", password: PASSWORD))
     document = Document.create!(
       title: "HTML",
       content_format: "html",
@@ -275,6 +276,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   end
 
   test "HTML snapshot requires a state vector" do
+    sign_in_as(User.create!(name: "Ann", email: "ann-sv@example.com", password: PASSWORD))
     document = Document.create!(
       title: "HTML",
       content_format: "html",

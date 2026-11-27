@@ -1,6 +1,5 @@
 require "test_helper"
 
-# Creating or suggesting HTML needs an account.
 class HtmlAccountTest < ActionDispatch::IntegrationTest
   include ActionCable::TestHelper
   include CompoundWritingHelpers
@@ -8,6 +7,11 @@ class HtmlAccountTest < ActionDispatch::IntegrationTest
   UPDATES = JSON.parse(Rails.root.join("test/fixtures/files/html_account_updates.json").read).freeze
   WITH_HTML = "Hello\n\nWith <mark>note</mark>\n".freeze
   AGENT = { "X-Agent-Name" => "Scout" }.freeze
+  BROWSER = { "User-Agent" => "Mozilla/5.0" }.freeze
+
+  setup do
+    YjsPersistence::SEEN_HTML.clear
+  end
 
   def account
     @account ||= User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD)
@@ -102,8 +106,16 @@ class HtmlAccountTest < ActionDispatch::IntegrationTest
 
   test "an HTML document is revised by its account, and retitled by anyone who could" do
     document = Document.create!(title: "H", content_format: "html", seed_content: "<p>hi</p>")
+    get api_doc_path(document.slug), headers: AGENT, as: :json
+    assert_not response.parsed_body.dig("ownership", "can_write")
+    assert response.parsed_body.dig("ownership", "html_needs_account")
+    get api_doc_path(document.slug), headers: bearer, as: :json
+    assert response.parsed_body.dig("ownership", "can_write")
+    assert_not response.parsed_body.dig("ownership", "html_needs_account")
+
     patch api_doc_path(document.slug), params: { content: "<p>bye</p>" }, headers: AGENT, as: :json
     assert_needs_account
+    assert_no_match(/Markdown/, response.parsed_body["next_action"])
     patch api_doc_path(document.slug), params: { content: "plain" }, headers: AGENT, as: :json
     assert_needs_account
     patch api_doc_path(document.slug), params: { title: "New <b>" }, headers: AGENT, as: :json
@@ -243,17 +255,29 @@ class HtmlAccountTest < ActionDispatch::IntegrationTest
   end
 
   test "an HTML document is read and commented on without an account, not edited" do
-    document = Document.create!(title: "H", content_format: "html", seed_content: "<p>hi</p>", content_snapshot: "<p>hi</p>")
-    get document_page_path(document.slug)
+    document = Document.create!(title: "H", content_format: "html", seed_content: "<p>hi</p>")
+    get document_page_path(document.slug), headers: BROWSER
     assert_response :success
+    assert_equal "pending", document.reload.seed_state
     assert_not document.ownership_props("guest")[:can_write]
     assert document.ownership_props("guest")[:html_needs_account]
-    get document_mode_path(document.slug, "edit")
+    get document_mode_path(document.slug, "edit"), headers: BROWSER
     assert_redirected_to document_page_path(document.slug)
-    get document_mode_path(document.slug, "comment")
+    get document_mode_path(document.slug, "suggest"), headers: BROWSER
+    assert_redirected_to document_page_path(document.slug)
+    get document_mode_path(document.slug, "comment"), headers: BROWSER
     assert_response :success
     post document_comments_path(document.slug), params: { body: "a <b>" }
     assert_equal 1, document.comments.count
+
+    suggestion = document.suggestions.create!(author_name: "A", author_kind: "agent", body: "<p>x</p>")
+    patch reject_suggestion_path(suggestion), headers: { "Accept" => "application/json" }
+    assert_needs_account
+    assert_equal "pending", suggestion.reload.status
+    patch document_highlight_names_path(document.slug), params: { names: { yellow: "Note" } }, as: :json
+    assert_needs_account
+
+    document.update!(content_snapshot: "<p>hi</p>")
     sync(document, "plain")
     assert_needs_account
     snapshot(document, "<p>bye</p>")
@@ -263,7 +287,7 @@ class HtmlAccountTest < ActionDispatch::IntegrationTest
     assert_equal "<p>hi</p>", document.reload.content_snapshot
 
     sign_in_as(account)
-    get document_mode_path(document.slug, "edit")
+    get document_mode_path(document.slug, "edit"), headers: BROWSER
     assert_response :success
     assert_not document.ownership_props(nil, viewer_user: account)[:html_needs_account]
   end

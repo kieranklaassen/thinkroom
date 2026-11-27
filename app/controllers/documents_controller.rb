@@ -78,7 +78,7 @@ class DocumentsController < InertiaController
     end
 
     if request.format.json? || params[:format] == "json"
-      return render json: AgentGuide.state(document, request.base_url)
+      return render json: AgentGuide.state(document, request.base_url, viewer_user: current_user)
     end
     if params[:format] == "txt" || (agent_user_agent? && !link_preview_request)
       return render plain: AgentGuide.text(document, request.base_url, include_content: true)
@@ -294,6 +294,7 @@ class DocumentsController < InertiaController
     end
 
     with_document_write_access(document) do
+      document.assert_html_account!(current_user)
       document.update!(highlight_names: HighlightPalette.merge_names(document.highlight_names, names))
     end
     DocumentMetaChannel.broadcast_event(document, :highlight_names)

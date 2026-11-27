@@ -11,12 +11,8 @@ class YjsPersistence
   # YjsRecovery.heal_corrupt_state! and retry.
   class CorruptStateError < StandardError; end
 
-  # A guest's update is judged against the document it lands in, so it waits
-  # for the updates it depends on. Transports answer it as retryable.
   class UpdateNotReadyError < StandardError; end
 
-  # HTML a guest's browser has seen in a document, so it can restore what it
-  # removed. Per process, like the awareness cache.
   SEEN_HTML = ActiveSupport::Cache::MemoryStore.new(size: 8.megabytes, expires_in: 2.hours)
 
   # Bounded 64-stripe in-process lock table. ActionCable handles channel
@@ -85,9 +81,6 @@ class YjsPersistence
     #
     # `seed_claim` is present on a claimant's writes until its seed is known to
     # be stored. The first seed stored wins; see seed_claim_holds?.
-    #
-    # `html` is whether the update may add HTML, which needs an account. One that
-    # may not is judged against the document it lands in, which loads it.
     def merge_bytes(document, update, generation:, seed_claim: nil, token: nil, user: nil, html: user.present?)
       update = update.b
       ActiveSupport::Notifications.instrument(
@@ -238,7 +231,7 @@ class YjsPersistence
 
           # The staleness gate must compare against the full live state,
           # so unfolded tail rows are folded into the snapshot first.
-          perform_fold(document) if document.yjs_document_updates.exists?
+          folded_ydoc = perform_fold(document) if document.yjs_document_updates.exists?
 
           if client_state && document.yjs_state.present?
             server_state = begin
@@ -258,7 +251,7 @@ class YjsPersistence
             end
           end
 
-          refuse_added_source!(document, content) unless user
+          refuse_added_source!(document, content, ydoc: folded_ydoc) unless user
 
           attributes = { title:, content_snapshot: content, provenance_spans: spans }
           if render_hints.present?
@@ -443,7 +436,7 @@ class YjsPersistence
       document.assert_html_account!(nil)
       ydoc = load_or_heal_ydoc(document)
       YjsDocumentUpdate.where(document_id: document.id, content_generation: document.content_generation)
-                       .order(:id).each { |row| ydoc.apply_update(row.payload) rescue nil }
+                       .order(:id).pluck(:payload).each { |payload| ydoc.apply_update(payload) rescue nil }
       raise UpdateNotReadyError, "update depends on missing updates" unless ydoc.update_ready?(update)
 
       key = [ document.id, document.content_generation, token ]
@@ -452,13 +445,16 @@ class YjsPersistence
       SEEN_HTML.write(key, seen) if token.present? && before.any?
       ydoc.apply_update(update)
       after = RawHtml.in_live(ydoc)
-      return if RawHtml.more(after, seen).empty?
-
-      source = RawHtml.in_markdown(document.current_content)
-      added = RawHtml.more(after, RawHtml.most(seen, source))
+      added = RawHtml.more(after, seen)
       return if added.empty?
-      # The editor and the source may cut the same HTML into other pieces.
-      return if !document.live_crdt? && RawHtml.more_markup(RawHtml.markup(after), RawHtml.markup(source)).empty?
+
+      unless document.live_crdt?
+        source = RawHtml.in_markdown(document.current_content)
+        added = RawHtml.more(after, RawHtml.most(seen, source))
+        return if added.empty?
+        # The editor and the source may cut the same HTML into other pieces.
+        return if RawHtml.more_markup(RawHtml.markup(after), RawHtml.markup(source)).empty?
+      end
 
       raise Document::HtmlAccountRequiredError.new(added)
     rescue RawHtml::Unreadable
@@ -466,20 +462,21 @@ class YjsPersistence
     end
 
     # Callers hold both locks and have folded the update tail.
-    def refuse_added_source!(document, content)
+    def refuse_added_source!(document, content, ydoc: nil)
       document.assert_html_account!(nil)
       html = RawHtml.markup(RawHtml.in_markdown(content))
       return if html.empty?
 
+      source = RawHtml.markup(RawHtml.in_markdown(document.current_content))
+      return if RawHtml.more_markup(html, source).empty?
+
       live = begin
-        RawHtml.in_live(load_or_heal_ydoc(document))
+        RawHtml.in_live(ydoc || load_or_heal_ydoc(document))
       rescue RawHtml::Unreadable
         {}
       end
-      source = RawHtml.in_markdown(document.current_content)
-      known = RawHtml.most(RawHtml.markup(source), RawHtml.markup(live))
-      added = RawHtml.more_markup(html, known)
-      raise Document::HtmlAccountRequiredError if added.any?
+      known = RawHtml.most(source, RawHtml.markup(live))
+      Document.assert_no_html!(RawHtml.more_markup(html, known))
     end
 
     # Callers hold both locks. While nothing is stored any claimant may write,

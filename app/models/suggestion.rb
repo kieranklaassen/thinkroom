@@ -64,7 +64,6 @@ class Suggestion < ApplicationRecord
   end
   private_class_method :resolve_pending
 
-  # Merging it would write HTML into the document.
   def brings_html? = document.html? || RawHtml.in_markdown(body).any?
 
   def accept!(by: nil)
@@ -87,7 +86,6 @@ class Suggestion < ApplicationRecord
   # or every pending row when ids are omitted, in one transaction. A row
   # resolved concurrently by a single accept loses its pending status and is
   # excluded — the caller only merges winners, so no text applies twice.
-  # With `html: false`, rows that bring HTML stay pending, and are yielded.
   def self.accept_all!(document:, by: nil, ids: nil, html: true)
     document.transaction do
       pending = document.suggestions.pending
@@ -95,8 +93,8 @@ class Suggestion < ApplicationRecord
       # A row lost to a concurrent resolve since this read changes nothing.
       pending = pending.order(:id)
       unless html
-        left, pending = pending.to_a.partition { |row| document.html? || RawHtml.in_markdown(row.body).any? }
-        yield left if left.any?
+        left, pending = pending.to_a.partition(&:brings_html?)
+        yield left if left.any? && block_given?
       end
       won = (html ? pending.ids : pending.map(&:id)).select { |id| resolve_pending(id, "accepted", by:) }
       document.suggestions.where(id: won).order(:id).to_a

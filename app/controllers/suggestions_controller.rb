@@ -97,6 +97,9 @@ class SuggestionsController < InertiaController
   def reopen
     by = preferred_name(params[:by], fallback: "human")
     with_document_write_access(@suggestion.document) do
+      @suggestion.document.assert_html_account!(current_user)
+      raise Document::HtmlAccountRequiredError if current_user.nil? && @suggestion.brings_html?
+
       @suggestion.reopen_after_failed_apply!(by:)
       Activity.log!(
         document: @suggestion.document,
@@ -114,6 +117,7 @@ class SuggestionsController < InertiaController
 
   def reject
     with_document_write_access(@suggestion.document) do
+      @suggestion.document.assert_html_account!(current_user)
       @suggestion.reject!(by: preferred_name(params[:by], fallback: "human"))
       log_suggestion_activity("rejected_suggestion", "rejected “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
     end

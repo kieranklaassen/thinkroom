@@ -68,6 +68,7 @@ const insert = (state, parse, source) => state.tr.insert(state.doc.content.size,
 test('HTML added without an account becomes text, every line of it', async () => {
   const { state, parse, serialize, notices } = await guarded('Hello')
   const next = state.apply(insert(state, parse, '<div>\n<b>hi</b>\n</div>'))
+  next.doc.check()
   assert.deepEqual(htmlValues(next.doc), [])
   assert.match(next.doc.textContent, /<div>\n<b>hi<\/b>\n<\/div>/)
   assert.equal(notices.length, 1)
@@ -90,6 +91,25 @@ test('existing HTML can be moved and restored, and not copied', async () => {
   const copied = pasted.apply(insert(pasted, parse, '<mark>'))
   assert.deepEqual(htmlValues(copied.doc), ['<mark>'])
   assert.equal(notices.length, 1)
+})
+
+test('pasting a duplicate above existing HTML converts the new copy and keeps the original', async () => {
+  const { state, parse, notices } = await guarded('First\n\nSecond <mark>')
+  const next = state.apply(state.tr.insert(0, parse('<mark>').content))
+  next.doc.check()
+  assert.deepEqual(htmlValues(next.doc), ['<mark>'])
+  assert.equal(notices.length, 1)
+  // The first paragraph holds the newly pasted text; the original HTML node remains in the last paragraph.
+  assert.equal(next.doc.firstChild.textContent, '<mark>')
+  assert.deepEqual(htmlValues(next.doc.lastChild), ['<mark>'])
+})
+
+test('inline code with a pipe inside a GFM table cell stays escaped', async () => {
+  const { serialize, parse } = await buildEditor()
+  const doc = parse('| a | b |\n| - | - |\n| `x \\| <b>` | ok |\n')
+  const saved = serialize(doc)
+  assert.deepEqual(htmlValues(parse(saved)), [], saved)
+  assert.match(saved, /`x \\\| <b>`/)
 })
 
 test('what arrives from others is left alone', async () => {

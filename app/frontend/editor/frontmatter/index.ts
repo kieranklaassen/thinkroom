@@ -147,17 +147,38 @@ const frontmatterGuard = $prose(
         const type = newState.schema.nodes.frontmatter
         if (!type) return null
 
-        let pos = -1
-        let found: Node | null = null
-        newState.doc.forEach((child, offset) => {
-          if (!found && child.type === type) {
-            pos = offset
-            found = child
+        let topFound: { pos: number; node: Node } | null = null
+        const extra: { pos: number; node: Node }[] = []
+        newState.doc.descendants((node, pos, parent) => {
+          if (node.type !== type) return true
+          if (parent === newState.doc && !topFound) {
+            topFound = { pos, node }
+          } else {
+            extra.push({ pos, node })
           }
+          return false
         })
-        if (!found || pos <= 0) return null
+        if (extra.length === 0 && (!topFound || (topFound as { pos: number }).pos <= 0)) return null
 
-        const tr = newState.tr.delete(pos, pos + (found as Node).nodeSize).insert(0, found)
+        const tr = newState.tr
+        const codeBlock = newState.schema.nodes.code_block
+        for (const { pos, node } of extra.reverse()) {
+          const raw = String(node.attrs.value ?? '')
+          if (codeBlock) {
+            tr.replaceWith(
+              pos,
+              pos + node.nodeSize,
+              codeBlock.create({ language: 'yaml' }, raw ? newState.schema.text(raw) : undefined),
+            )
+          } else {
+            tr.delete(pos, pos + node.nodeSize)
+          }
+        }
+        if (topFound && (topFound as { pos: number }).pos > 0) {
+          const { pos, node } = topFound as { pos: number; node: Node }
+          const mapped = tr.mapping.map(pos)
+          tr.delete(mapped, mapped + node.nodeSize).insert(0, node)
+        }
         tr.setMeta(SKIP_PROVENANCE, true)
         tr.setMeta('addToHistory', false)
         return tr

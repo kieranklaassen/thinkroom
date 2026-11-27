@@ -19,13 +19,20 @@ class RawHtmlTest < ActiveSupport::TestCase
     "a definition that is a footnote" => "[^1]: <b>",
     "a footnote nothing refers to" => "[^1]: =<b>",
     "a footnote after a line of spaces" => "[^1]: a\n  \n    <div>",
+    "a footnote after a CR line of spaces" => "[^1]: a\r  \r    <div>",
     "after front matter" => "---\na: |\n ```\n---\n\n<div>",
+    "after front matter with trailing space on closing fence" => "---\n```\n--- \n\n<a href=\"https://example.com\">x</a>",
     "a list after front matter that never closes" => "---\n-     <b>",
+    "a list after CRLF front matter that never closes" => "---\r\n-     <b>",
     "a comment with dashes" => "a <!-- b -- c -->",
     "a declaration after a comment that never closes" => "a <!-- <!X y>",
     "a CDATA after doubled open-comment" => "a <<!--\n<![CDATA[z]]>",
     "a break with an attribute" => "<br class=\"x\">",
     "a span of another kind" => "<span class=\"x\">a</span>",
+    "stray closing span" => "plain </span> text",
+    "valueless suggestion tag" => "<ins data-suggestion-id>x</ins>",
+    "invalid highlighter color" => "<span data-highlighter data-color=\"bogus\">x</span>",
+    "multiline provenance block" => "<span data-provenance data-kind=\"human\" data-author=\"Ann\" data-state=\"verbatim\">\nplain",
     "editor markup with more attributes" => "<span data-highlighter data-color=\"blue\" onclick=\"x\">a</span>"
   }.freeze
 
@@ -81,6 +88,9 @@ class RawHtmlTest < ActiveSupport::TestCase
       "<script>y</script>", "<td>x</td>", "</section>", "<!DOCTYPE html>" ].each do |source|
       assert RawHtml.more(RawHtml.markup(RawHtml.in_markdown(source)), before).any?, source
     end
+    assert_empty RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("<div class=\"a\">\n\nhi\n\n</div>")), before)
+    assert RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("<div class=\"a\">\n\nhi\n\n</div>\n\n</div>")), before).any?
+    assert RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("</section>")), before).any?
   end
 
   test "a HTML body counts its elements, and plain text has none" do

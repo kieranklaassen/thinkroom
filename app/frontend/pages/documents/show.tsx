@@ -1,4 +1,4 @@
-import { HTML_ACCOUNT_NOTICE } from '../../editor/html_guard'
+import type { DocumentNotice } from '../../editor/html_guard'
 import { findCommentAnchorRange } from '../../editor/comment_anchors'
 import { clearHighlight, domRange, setHighlight } from '../../lib/highlights'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
@@ -236,7 +236,7 @@ export default function DocumentShow({
   const [reviewNotice, setReviewNotice] = useState('')
   // Editor-originated notices (refused oversized edit, snapshot refused as
   // too large); share the doc-notice slot with suggestion notices.
-  const [editorNotice, setEditorNotice] = useState<string | null>(null)
+  const [editorNotice, setEditorNotice] = useState<DocumentNotice | null>(null)
   // Hydration-safe init from server-rendered prefs: cookies supply panel/focus/
   // width while the URL supplies mode, so SSR and the first client render agree.
   const [panelOpen, setPanelOpen] = useState(ui.panel_open)
@@ -313,7 +313,7 @@ export default function DocumentShow({
   const showCompound = effectiveMode === 'comment' && writingAvailable
   const signInPath = `/login?return_to=${encodeURIComponent(documentModePath(doc.slug, effectiveMode))}`
   const connectionIdentity = viewer.account ? `account:${viewer.account.id}` : 'guest'
-  const editorSessionKey = `${doc.slug}:${ownership.can_write ? 'write' : 'read'}`
+  const editorSessionKey = `${doc.slug}:${ownership.can_write ? 'write' : 'read'}:${connectionIdentity}`
   // Live handle for code that runs after awaits or inside stable callbacks —
   // a closure-captured handle goes stale when the editor remounts mid-flight.
   const handleRef = useRef<EditorHandle | null>(null)
@@ -404,9 +404,9 @@ export default function DocumentShow({
     key: doc.slug,
     tools: webmcp.tools,
     execute: (tool, args, signal) => {
-      const { yours, can_write, can_comment, link_access } = ownershipRef.current
+      const { yours, can_write, html_needs_account, can_comment, link_access } = ownershipRef.current
       const viewerContext = {
-        ownership: { yours, can_write, can_comment, link_access },
+        ownership: { yours, can_write, html_needs_account, can_comment, link_access },
         mode: modeRef.current,
         share_url: webmcp.share_url,
         note: VIEWER_CONTEXT_NOTE,
@@ -1021,21 +1021,35 @@ export default function DocumentShow({
             <span>Editing HTML needs an account. <a href={signInPath}>Sign in</a></span>
           </div>
         )}
-        {!isReading && (suggestionNotice || editorNotice) && (
+        {!isReading && suggestionNotice && (
           <div className="doc-notice" role="status">
             <span>
-              {suggestionNotice ?? editorNotice}
-              {!viewer.account && (suggestionNotice ?? editorNotice)?.startsWith(HTML_ACCOUNT_NOTICE) && (
+              {suggestionNotice.text}
+              {suggestionNotice.offerSignIn && (
                 <> <a href={signInPath}>Sign in</a></>
               )}
             </span>
             <button
               type="button"
               aria-label="Dismiss notice"
-              onClick={() => {
-                setSuggestionNotice(null)
-                setEditorNotice(null)
-              }}
+              onClick={() => setSuggestionNotice(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+        {editorNotice && (
+          <div className="doc-notice" role="status">
+            <span>
+              {editorNotice.text}
+              {editorNotice.offerSignIn && (
+                <> <a href={signInPath}>Sign in</a></>
+              )}
+            </span>
+            <button
+              type="button"
+              aria-label="Dismiss notice"
+              onClick={() => setEditorNotice(null)}
             >
               Dismiss
             </button>
@@ -1085,6 +1099,7 @@ export default function DocumentShow({
                 slug={doc.slug}
                 identity={identity}
                 canWrite={ownership.can_write}
+                authenticated={Boolean(viewer.account)}
                 connectionIdentity={connectionIdentity}
                 contentFormat={doc.content_format}
                 contentGeneration={doc.content_generation}

@@ -20,10 +20,15 @@ module Api
     end
 
     rescue_from Document::HtmlAccountRequiredError do |e|
+      next_action = if @document&.html?
+        "Run `thinkroom login` and send the access token as a Bearer token."
+      else
+        "Run `thinkroom login` and send the access token as a Bearer token, or send Markdown without HTML."
+      end
       render json: {
         error: e.message,
         error_code: Document::HtmlAccountRequiredError::CODE,
-        next_action: "Run `thinkroom login` and send the access token as a Bearer token, or send Markdown without HTML."
+        next_action:
       }, status: :forbidden
     end
 

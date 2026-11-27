@@ -3,8 +3,6 @@ class Document < ApplicationRecord
   class CommentingLockedError < StandardError; end
   class NotOwnerError < StandardError; end
 
-  # Creating or suggesting HTML needs an account: a signed-in user, or the user
-  # of a Thinkroom access token. `html` counts the pieces that were refused.
   class HtmlAccountRequiredError < StandardError
     CODE = "html_account_required".freeze
     MESSAGE = "Adding HTML needs an account. Sign in to add it.".freeze
@@ -206,7 +204,6 @@ class Document < ApplicationRecord
     link_access == "edit" || owned_by?(token, user:)
   end
 
-  # Writing content: an HTML document's content is all HTML.
   def editable_by?(token, user: nil)
     writable_by?(token, user:) && (user.present? || !html?)
   end
@@ -215,12 +212,14 @@ class Document < ApplicationRecord
     raise HtmlAccountRequiredError if html? && user.nil?
   end
 
-  # A new source may keep the HTML this document's source has.
   def assert_source_allowed!(source, user:)
     return if user
 
     assert_html_account!(user)
-    self.class.assert_no_html!(RawHtml.more(RawHtml.in_markdown(source), RawHtml.in_markdown(current_content)))
+    incoming = RawHtml.in_markdown(source)
+    return if incoming.empty?
+
+    self.class.assert_no_html!(RawHtml.more(incoming, RawHtml.in_markdown(current_content)))
   end
 
   def self.assert_no_html!(html)

@@ -27,17 +27,20 @@ export const configureMarkdownText = (ctx: Ctx): void => {
         const start = value.slice(0, value.length - end.length)
         return state.safe(start, { ...info, after: end || info.after, encode: [] } as typeof info) + end
       },
-      inlineCode: (node) => {
-        const value = String(node.value).replace(/\s*[\r\n]\s*/g, ' ')
-        const fence = '`'.repeat(longestRun(value) + 1)
-        const pad = /^`|`$|^ .* $/.test(value) && /[^ ]/.test(value) ? ' ' : ''
-        return fence + pad + value + pad + fence
-      },
+      inlineCode: Object.assign(
+        (node: { value?: unknown }, _parent: unknown, state: { stack: string[] }) => {
+          const value = String(node.value).replace(/\s*[\r\n]\s*/g, ' ')
+          const fence = '`'.repeat(longestRun(value) + 1)
+          const pad = /^`|`$|^ .* $/.test(value) && /[^ ]/.test(value) ? ' ' : ''
+          const serialized = fence + pad + value + pad + fence
+          return state.stack.includes('tableCell') ? serialized.replace(/\|/g, '\\$&') : serialized
+        },
+        { peek: () => '`' },
+      ),
     },
   })
 }
 
-/** An attribute of the editor's own markup, which must stay on one line. */
 export const escapeMarkupAttribute = (value: unknown): string =>
   String(value ?? '')
     .replace(/\s+/g, ' ')

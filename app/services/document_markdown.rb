@@ -14,7 +14,6 @@ class DocumentMarkdown
       Commonmarker.to_html(source, options: limited(source, options), plugins:)
     end
 
-    # The tree that to_html renders.
     def parse(source, **options) = Commonmarker.parse(source, options: limited(source, options))
 
     private

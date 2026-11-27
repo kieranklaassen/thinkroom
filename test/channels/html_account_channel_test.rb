@@ -7,6 +7,10 @@ class HtmlAccountChannelTest < ActionCable::Channel::TestCase
   UPDATES = JSON.parse(Rails.root.join("test/fixtures/files/html_account_updates.json").read).freeze
   include CompoundWritingHelpers
 
+  setup do
+    YjsPersistence::SEEN_HTML.clear
+  end
+
   def account
     @account ||= User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD)
   end
@@ -30,7 +34,7 @@ class HtmlAccountChannelTest < ActionCable::Channel::TestCase
     transmissions.last
   end
 
-  %w[text remove move break tag_text provenance_split].each do |name|
+  %w[text remove move break tag_text provenance_split frontmatter_plain link_attr_html].each do |name|
     test "a guest update that adds no HTML is stored: #{name}" do
       document = document_with_html
       join(document)
@@ -57,8 +61,8 @@ class HtmlAccountChannelTest < ActionCable::Channel::TestCase
     end
   end
 
-  %w[unreadable mark_split_deep element_split_deep].each do |name|
-    test "a guest tree that cannot be read completely is refused while it holds HTML: #{name}" do
+  %w[unreadable mark_split_deep element_split_deep space_mark_deep frontmatter_html forged_editor_html].each do |name|
+    test "a guest tree that cannot be read completely or smuggles HTML is refused: #{name}" do
       document = document_with_html
       join(document)
       assert_equal "html-refused", send_update(document, name)["type"]
@@ -96,6 +100,13 @@ class HtmlAccountChannelTest < ActionCable::Channel::TestCase
     claim = transmissions.last["seed_claim"]
     assert_equal "html-refused", send_update(document, "seed_with_more", "seed_claim" => claim)["type"]
     assert_equal "ack", send_update(document, "seed", seq: 2, "seed_claim" => claim)["type"]
+  end
+
+  test "a guest stores a seed whose HTML is grouped differently from Commonmarker's split" do
+    document = Document.create!(title: "Doc", seed_content: "Hello\n\nWith <mark>note</mark>\n")
+    join(document)
+    claim = transmissions.last["seed_claim"]
+    assert_equal "ack", send_update(document, "base", seq: 1, "seed_claim" => claim)["type"]
   end
 
   test "a guest's copy of the saved source comes back after the live state was emptied" do

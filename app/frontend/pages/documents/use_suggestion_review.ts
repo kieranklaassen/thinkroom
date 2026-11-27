@@ -15,7 +15,7 @@ import {
   rejectInlineSuggestion,
   type InlineSuggestion,
 } from '../../editor/suggest_changes'
-import { HTML_ACCOUNT_NOTICE } from '../../editor/html_guard'
+import { HTML_ACCOUNT_NOTICE, type DocumentNotice } from '../../editor/html_guard'
 import type { ReviewableSuggestion } from '../../components/suggestion_card'
 import { patchJSON } from '../../lib/csrf'
 import type { SuggestionPayload } from '../../types/payloads'
@@ -45,8 +45,8 @@ export interface SuggestionReview {
   pendingSuggestionCount: number
   acceptAllSuggestions: () => Promise<void>
   acceptingAll: boolean
-  suggestionNotice: string | null
-  setSuggestionNotice: (notice: string | null) => void
+  suggestionNotice: DocumentNotice | null
+  setSuggestionNotice: (notice: DocumentNotice | null) => void
 }
 
 /**
@@ -63,7 +63,7 @@ export function useSuggestionReview({
   identityName,
   docTick,
 }: Options): SuggestionReview {
-  const [suggestionNotice, setSuggestionNotice] = useState<string | null>(null)
+  const [suggestionNotice, setSuggestionNotice] = useState<DocumentNotice | null>(null)
   const suggestionsRef = useRef(suggestions)
   suggestionsRef.current = suggestions
 
@@ -102,13 +102,14 @@ export function useSuggestionReview({
         }
         const applicability = suggestionApplicability(live.editor, suggestion, contentFormat)
         if (!applicability.ok) {
-          setSuggestionNotice(
-            applicability.reason === 'ambiguous'
-              ? 'This quoted text appears more than once. The suggestion is still pending so no content was changed.'
-              : applicability.reason === 'missing'
-                ? 'The quoted text has changed or was removed. The suggestion is still pending so no content was changed.'
-                : 'This suggestion has no editable content and was left pending.',
-          )
+          setSuggestionNotice({
+            text:
+              applicability.reason === 'ambiguous'
+                ? 'This quoted text appears more than once. The suggestion is still pending so no content was changed.'
+                : applicability.reason === 'missing'
+                  ? 'The quoted text has changed or was removed. The suggestion is still pending so no content was changed.'
+                  : 'This suggestion has no editable content and was left pending.',
+          })
           resolve()
           return
         }
@@ -132,17 +133,19 @@ export function useSuggestionReview({
                   flashMergedRange(editor, merged)
                 } else {
                   void reopenSuggestion(suggestion.id).then((reopened) => {
-                    setSuggestionNotice(
-                      reopened
+                    setSuggestionNotice({
+                      text: reopened
                         ? 'The document changed before this suggestion could be merged. It was returned to pending.'
                         : 'The document changed before this suggestion could be merged, and Thinkroom could not restore it to pending. Refresh before reviewing it again.',
-                    )
+                    })
                     router.reload({ only: ['suggestions', 'activities'], async: true })
                   })
                 }
               },
               onError: (errors) => {
-                if (typeof errors.html_account === 'string') setSuggestionNotice(errors.html_account)
+                if (typeof errors.html_account === 'string') {
+                  setSuggestionNotice({ text: errors.html_account, offerSignIn: true })
+                }
               },
               onFinish: () => resolve(),
             },
@@ -231,7 +234,7 @@ export function useSuggestionReview({
       }
     }
     if (applicable.length === 0) {
-      setSuggestionNotice(skippedSuggestionNotice(blocked.length))
+      setSuggestionNotice({ text: skippedSuggestionNotice(blocked.length) })
       return
     }
     setSuggestionNotice(null)
@@ -292,7 +295,9 @@ export function useSuggestionReview({
             `${reopened} suggestion${reopened === 1 ? '' : 's'} changed before merging and returned to pending.`,
           )
         }
-        setSuggestionNotice(notices.length > 0 ? notices.join(' ') : null)
+        setSuggestionNotice(
+          notices.length > 0 ? { text: notices.join(' '), offerSignIn: needsAccount > 0 } : null,
+        )
         succeeded = true
       } else {
         console.warn('pruf: accept all rejected', response.status)

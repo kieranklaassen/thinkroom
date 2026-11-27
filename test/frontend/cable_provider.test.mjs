@@ -232,11 +232,10 @@ test('retryable NACK merges inFlight back ahead of queued edits and retries with
   h.receive({ type: 'ack', seq: 2 })
 })
 
-test('an html refusal keeps the outbox, waits for a change and resends everything as one update', (t) => {
+test('an html refusal keeps the outbox, waits for recovery and resends everything as one update', (t) => {
   const h = createHarness(t)
   h.receive(emptySyncFrame(0))
   h.doc.getText('t').insert(0, 'first-')
-  h.doc.getText('t').insert(6, 'second-')
   let refused = null
   h.provider.on('html-refused', () => {
     refused = h.provider.refusedHtml
@@ -246,14 +245,62 @@ test('an html refusal keeps the outbox, waits for a change and resends everythin
   assert.equal(refused, null)
   h.receive({ type: 'html-refused', seq: 1, html: { '<i>': 1 } })
   assert.deepEqual(refused, { '<i>': 1 })
+  assert.equal(h.provider.htmlRefused, true)
   assert.equal(h.sentUpdates().length, 1)
 
+  // Ordinary typing while refused does not trigger a resend storm.
+  h.doc.getText('t').insert(6, 'second-')
+  assert.equal(h.sentUpdates().length, 1)
+
+  // Once the listener cleans the HTML and calls retryAfterHtmlCleaned, everything goes out as one update.
   h.doc.getText('t').insert(13, 'third')
+  h.provider.retryAfterHtmlCleaned()
+  assert.equal(h.provider.htmlRefused, false)
   assert.equal(h.sentUpdates().length, 2)
   const serverDoc = new Y.Doc()
   Y.applyUpdate(serverDoc, fromBase64(h.sentUpdates()[1].update))
   assert.equal(serverDoc.getText('t').toString(), 'first-second-third')
   h.receive({ type: 'ack', seq: 2 })
+})
+
+test('an html refusal with already-queued local edits re-probes the merged outbox once', (t) => {
+  const h = createHarness(t)
+  h.receive(emptySyncFrame(0))
+  h.doc.getText('t').insert(0, 'first-')
+  h.doc.getText('t').insert(6, 'cleaned')
+  assert.equal(h.sentUpdates().length, 1)
+
+  h.receive({ type: 'html-refused', seq: 1, html: { '<i>': 1 } })
+  assert.equal(h.sentUpdates().length, 2)
+  assert.equal(h.provider.htmlRefused, false)
+  const serverDoc = new Y.Doc()
+  Y.applyUpdate(serverDoc, fromBase64(h.sentUpdates()[1].update))
+  assert.equal(serverDoc.getText('t').toString(), 'first-cleaned')
+  h.receive({ type: 'ack', seq: 2 })
+})
+
+test('persistCurrentState emits html-refused on 403 html_account_required', async (t) => {
+  const h = createHarness(t)
+  h.receive(emptySyncFrame(0))
+  h.doc.getText('t').insert(0, 'draft')
+  let refused = null
+  h.provider.on('html-refused', () => {
+    refused = h.provider.refusedHtml
+  })
+  const originalFetch = globalThis.fetch
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ error_code: 'html_account_required', html: { '<b>': 1 } }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+  h.provider.persistCurrentState()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(h.provider.htmlRefused, true)
+  assert.deepEqual(refused, { '<b>': 1 })
 })
 
 test('ACK timeout requeues inFlight ahead of queued edits and retries', async (t) => {

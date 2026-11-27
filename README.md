@@ -68,12 +68,14 @@ tools for agents that drive a browser. In Chrome 149+ (origin trial, or
 `chrome://flags/#enable-webmcp-testing` locally), a document page exposes
 `thinkroom_*` tools on `document.modelContext` for reading, suggesting,
 commenting, resolving, presence, events, and creating unclaimed drafts; the
-index exposes guide and create. Every write carries an `agent_name` and runs at
-anonymous link-holder privilege, never the viewer's account. A writable
-document page — opened through an Edit link, claimed or not, or owned by the
-viewer — also exposes `thinkroom_update_document`, the in-page equivalent of
-`thinkroom update`: it replaces the whole document through the live editor,
-with the replaced text landing as pending AI provenance for human review.
+index exposes guide and create. Request tools carry an `agent_name` and run at
+anonymous link-holder privilege (creating or suggesting HTML, raw HTML in
+Markdown included, returns 403 `html_account_required`). A writable document
+page — opened through an Edit link, claimed or not, or owned by the viewer (and
+signed in for HTML documents) — also exposes `thinkroom_update_document`, the
+in-page equivalent of `thinkroom update`: it replaces the whole document through
+the live editor (adding HTML requires a signed-in viewer), with the replaced
+text landing as pending AI provenance for human review.
 Retitling without a heading, review decisions, claiming, and link access
 remain with the CLI and with humans.
 

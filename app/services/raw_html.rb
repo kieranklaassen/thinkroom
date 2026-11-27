@@ -1,44 +1,44 @@
-# The HTML in a document's source or live state, as counts of each piece, so a
-# write can be compared with what is already there.
 class RawHtml
-  # A live tree that holds HTML and was not read completely.
   class Unreadable < StandardError; end
 
-  # The page shows Markdown in two readings: the preview's, and the editor's,
-  # which also knows front matter and footnotes and has no table limit.
   PREVIEW = { header_ids: nil }.freeze
   EDITOR = {
     parse: { leave_footnote_definitions: true },
     extension: { header_ids: nil, footnotes: true, front_matter_delimiter: "---" }
   }.freeze
 
-  # What the editor itself writes into Markdown: an empty line, and the ends of
-  # its own spans and tracked changes.
   EMPTY_LINES = [ "<br />", "<br>", "<br >", "<br/>" ].freeze
-  ENDS = %w[</span> </ins> </del>].freeze
-  EDITOR_MARKUP = {
-    "span" => [ HtmlDocumentSanitizer::PROVENANCE_ATTRIBUTES, HtmlDocumentSanitizer::HIGHLIGHTER_ATTRIBUTES ],
-    "ins" => [ HtmlDocumentSanitizer::SUGGESTION_ATTRIBUTES ],
-    "del" => [ HtmlDocumentSanitizer::SUGGESTION_ATTRIBUTES ]
-  }.freeze
-
-  # Elements whose content is not text.
-  OPAQUE = %w[script style textarea title iframe noscript noembed noframes xmp plaintext].freeze
+  EDITOR_END_TAG = { "span" => "</span>", "ins" => "</ins>", "del" => "</del>" }.freeze
+  RAW_CONTENT_ELEMENTS = %w[script style textarea title iframe noscript noembed noframes xmp plaintext].freeze
 
   ROOT = "prosemirror"
   NODE = "html"
+  FRONTMATTER = "frontmatter"
   NODE_TAG = "<html"
+  FRONTMATTER_TAG = "<frontmatter"
   MAX_LIVE_DEPTH = 512
 
+  MARK_ATTRS = {
+    "link" => { "data-href" => :href, "data-title" => :title },
+    "provenance" => { "data-author" => :author },
+    "suggestInsertion" => { "data-author" => :author, "data-suggestion-id" => :suggestionId },
+    "suggestDeletion" => { "data-author" => :author, "data-suggestion-id" => :suggestionId }
+  }.freeze
+
   class << self
-    # Each piece of raw HTML as written.
     def in_markdown(source)
-      source = source.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "�").scrub("�")
+      source = source.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\uFFFD").scrub("\uFFFD")
+      return {} unless source.include?("<")
+
       most(literals(DocumentMarkdown.parse(source, extension: PREVIEW)), *editor_readings(source))
     end
 
-    # The elements and comments of a HTML body.
-    def in_html(source) = nodes(source.to_s).map { |node| piece(node) }.tally
+    def in_html(source)
+      source = source.to_s
+      return {} unless source.include?("<")
+
+      nodes(source).map { |node| piece(node) }.tally
+    end
 
     # Each raw HTML node's value in the live document. Reading the tree as text
     # is complete and cheap, and shows every node; the renderer lists their
@@ -46,12 +46,13 @@ class RawHtml
     def in_live(ydoc)
       xml = ydoc.read_xml(ROOT).to_s
       shown = xml.scan(NODE_TAG).size
-      return {} if shown.zero?
+      has_frontmatter = xml.include?(FRONTMATTER_TAG)
+      return {} if shown.zero? && !has_frontmatter
 
-      values, written = live_nodes(ydoc, xml)
+      values, written, frontmatter_html = live_nodes(ydoc, xml)
       raise Unreadable unless values.size + written == shown
 
-      tally(values)
+      most(tally_live(values), frontmatter_html)
     end
 
     # The markup of literals, without the text beside it: Markdown can join a
@@ -62,36 +63,43 @@ class RawHtml
       end
     end
 
-    # What markup `after` has more of. The end of an element that is there can
-    # be a literal of its own.
     def more_markup(after, before)
-      ends = before.keys.grep(Array).map { |piece| "</#{piece.first}>" }
-      more(after, before).except(*ends)
+      allowed = before.dup
+      before.each do |piece, count|
+        next unless piece.is_a?(Array) && piece.first != "comment"
+
+        closing = "</#{piece.first}>"
+        allowed[closing] = allowed.fetch(closing, 0) + count
+      end
+      more(after, allowed)
     end
 
-    # What `after` has more of than `before`.
     def more(after, before)
       after.filter_map { |piece, count| [ piece, count - before.fetch(piece, 0) ] if count > before.fetch(piece, 0) }.to_h
     end
 
-    # The larger count of each piece.
     def most(*counts) = counts.reduce({}) { |all, count| all.merge(count) { |_piece, one, other| [ one, other ].max } }
 
     private
 
-    # Commonmarker and the editor's parser differ in three places, so the source
-    # is also read the way the editor sees it there. A line of spaces is an empty
-    # line in a footnote, too. After front matter that never closes, the editor
-    # knows no lists or quotes. In a comment it allows dashes, and a comment that
-    # never closes hides nothing that follows.
+    # Commonmarker and the editor's parser differ in a few places, so the source
+    # is also read the way the editor sees it there. Line endings and lines of
+    # spaces normalize for footnotes and front matter; front matter fences may
+    # carry trailing spaces; after front matter that never closes, the editor
+    # knows no lists or quotes; in a comment it allows dashes, and a comment
+    # that never closes hides nothing that follows.
     def editor_readings(source)
-      source = source.gsub(/^[ \t]+(?=\r?$)/, "")
-      root = Commonmarker.parse(source, options: EDITOR)
+      source = source.gsub(/\r\n?/, "\n").gsub(/^[ \t]+$/, "")
+      normalized_fm = source.gsub(/^---[ \t]+$/, "---")
+      root = Commonmarker.parse(normalized_fm, options: EDITOR)
       sources = []
-      if source.match?(/\A---[ \t]*$/) && root.first_child&.type != :frontmatter
-        sources << source.gsub(/(?<=\n|\r) {0,3}(?=[-+*>0-9])/, "x ")
+      sources << source if normalized_fm != source
+      if normalized_fm.match?(/\A---(?:\n|\z)/) && root.first_child&.type != :frontmatter
+        sources << normalized_fm.gsub(/(?<=\n) {0,3}(?=[-+*>0-9])/, "x ")
       end
-      sources += [ source, *sources ].flat_map { |text| [ text.gsub("<!--", "x!--"), plain_comments(text) ] } if source.include?("<!--")
+      if normalized_fm.include?("<!--")
+        sources += [ normalized_fm, *sources ].flat_map { |text| [ text.gsub("<!--", "x!--"), plain_comments(text) ] }
+      end
       [ literals(root), *sources.map { |text| literals(Commonmarker.parse(text, options: EDITOR)) } ]
     end
 
@@ -110,50 +118,103 @@ class RawHtml
           child = child.next_sibling
         end
       end
-      tally(found)
+      tally_markdown(found)
     end
 
-    def tally(values) = values.map(&:squish).reject { |value| pieces(value).empty? }.tally
+    def tally_markdown(values)
+      editor_opens = Hash.new(0)
+      kept = Hash.new(0)
+      values.map(&:strip).tally.each do |stripped, count|
+        if (tag = valid_editor_open_tag(stripped))
+          editor_opens[tag] += count
+        elsif !pieces(stripped).empty?
+          kept[stripped.squish] += count
+        end
+      end
+      editor_opens.each do |tag, open_count|
+        closing = EDITOR_END_TAG.fetch(tag)
+        next unless kept.key?(closing)
+
+        remaining = kept[closing] - open_count
+        if remaining > 0
+          kept[closing] = remaining
+        else
+          kept.delete(closing)
+        end
+      end
+      kept
+    end
+
+    # Real editor marks in Yjs are Y.XmlText formatting attributes, never html
+    # nodes, so live html nodes only exempt empty-line <br /> placeholders.
+    def tally_live(values)
+      values.map(&:squish).tally.reject { |value, _count| value.empty? || EMPTY_LINES.include?(value) }
+    end
 
     def live_nodes(ydoc, xml)
       types = Y::ProseMirror.new(ydoc).node_types(ROOT) or raise Unreadable
       # Register every tag closed in read_xml as a mark so unknown marks stay
       # wrapped instead of letting adjacent text runs merge into "<html".
-      marks = xml.scan(%r{</([^\s>]+)>}).flatten.uniq.to_h { |name| [ name, { tag: "span" } ] }
+      closing_tags = xml.scan(%r{</([^<>]+)>}).flatten.uniq
+      raise Unreadable if closing_tags.any? { |name| name.match?(/\s/) }
+
+      marks = closing_tags.to_h do |name|
+        attrs = MARK_ATTRS[name]
+        [ name, attrs ? { tag: "span", attrs: } : { tag: "span" } ]
+      end
       sentinel = SecureRandom.hex(8)
       marker = /#{sentinel}:(\d+):/
       values = []
+      frontmatter_html = {}
       written = 0
       rules = types.keys.to_h do |type|
         [ type, { contains: :blocks, render: lambda { |node|
-          heights = node.content.scan(marker).map { |match| match.first.to_i }
-          height = (heights.max || 0) + 1
+          max_child = 0
+          if node.content.include?(sentinel)
+            node.content.scan(marker) { max_child = [ max_child, Regexp.last_match(1).to_i ].max }
+          end
+          height = max_child + 1
           raise Unreadable if height >= MAX_LIVE_DEPTH
 
-          value = node.attrs["value"]
-          values << (value.is_a?(String) ? value : JSON.generate(value)) if type == NODE
-          node.attrs.each_value { |attribute| written += attribute.to_s.scan(NODE_TAG).size }
-          clean = node.content.gsub(marker, " ")
-          if clean.include?("html")
-            DocumentHtml.parse(clean).xpath(".//text()").each { |text| written += text.text.scan(NODE_TAG).size }
+          if type == NODE
+            value = node.attrs["value"]
+            values << (value.is_a?(String) ? value : JSON.generate(value))
+          elsif type == FRONTMATTER
+            fm_html = in_markdown(node.attrs["value"].to_s)
+            frontmatter_html = most(frontmatter_html, fm_html) if fm_html.any?
+          end
+          node.attrs.each_value do |attribute|
+            text = attribute.to_s
+            written += text.scan(NODE_TAG).size if text.include?(NODE_TAG)
+          end
+          if node.content.include?("&lt;html") || node.content.include?(NODE_TAG)
+            clean = node.content.gsub(marker, " ")
+            DocumentHtml.parse(clean).xpath(".//text() | .//@*[starts-with(name(), 'data-')]").each do |item|
+              content = item.is_a?(Nokogiri::XML::Attr) ? item.value : item.text
+              written += content.scan(NODE_TAG).size if content.include?(NODE_TAG)
+            end
           end
           "#{sentinel}:#{height}:"
         } } ]
       end
       Y::ProseMirror.new(ydoc, nodes: rules, marks:).to_html(ROOT) or raise Unreadable
-      [ values, written ]
+      [ values, written, frontmatter_html ]
     rescue SystemStackError, DocumentHtml::TooComplex
       raise Unreadable
     end
 
     def pieces(literal)
       literal = literal.strip
-      return [] if literal.empty? || EMPTY_LINES.include?(literal) || ENDS.include?(literal)
+      return [] if literal.empty? || EMPTY_LINES.include?(literal)
+      return [] if valid_editor_open_tag(literal)
+      if (match = literal.match(/\A<\/([a-zA-Z][a-zA-Z0-9-]*)\s*>\z/))
+        return [ "</#{match[1].downcase}>" ]
+      end
 
       found = nodes(literal)
       return [ literal.squish ] if found.empty?
 
-      found.reject { |node| editor_markup?(node) }.map { |node| piece(node) }
+      found.map { |node| piece(node) }
     rescue DocumentHtml::TooComplex
       [ literal.squish ]
     end
@@ -165,12 +226,55 @@ class RawHtml
       return [ "comment", node.content ] if node.comment?
 
       [ node.name, node.attribute_nodes.map { |attribute| [ attribute.name, attribute.value ] }.sort,
-        (node.content if OPAQUE.include?(node.name)) ]
+        (node.content if RAW_CONTENT_ELEMENTS.include?(node.name)) ]
+    end
+
+    def valid_editor_open_tag(literal)
+      return nil if literal.include?("\n") || !literal.match?(/\A<(?:span|ins|del)\b[^>]*>\z/i)
+
+      found = nodes(literal)
+      return nil unless found.size == 1 && editor_markup?(found.first)
+
+      found.first.name
+    rescue DocumentHtml::TooComplex
+      nil
     end
 
     def editor_markup?(node)
       names = node.attribute_nodes.map(&:name)
-      EDITOR_MARKUP[node.name]&.any? { |allowed| names.any? && names.all? { |name| allowed.include?(name) } && node[allowed.first] }
+      case node.name
+      when "span"
+        valid_provenance?(node, names) || valid_highlighter?(node, names)
+      when "ins", "del"
+        valid_suggestion?(node, names)
+      else
+        false
+      end
+    end
+
+    def valid_provenance?(node, names)
+      names.any? &&
+        names.all? { |name| HtmlDocumentSanitizer::PROVENANCE_ATTRIBUTES.include?(name) } &&
+        !node["data-provenance"].nil? &&
+        HtmlDocumentSanitizer::PROVENANCE_KINDS.include?(node["data-kind"]) &&
+        HtmlDocumentSanitizer::PROVENANCE_STATES.include?(node["data-state"]) &&
+        node["data-author"].to_s.length <= HtmlDocumentSanitizer::MAX_AUTHOR_LENGTH
+    end
+
+    def valid_highlighter?(node, names)
+      names.any? &&
+        names.all? { |name| HtmlDocumentSanitizer::HIGHLIGHTER_ATTRIBUTES.include?(name) } &&
+        !node["data-highlighter"].nil? &&
+        HighlightPalette::COLOR_IDS.include?(node["data-color"])
+    end
+
+    def valid_suggestion?(node, names)
+      suggestion_id = node["data-suggestion-id"].to_s
+      names.any? &&
+        names.all? { |name| HtmlDocumentSanitizer::SUGGESTION_ATTRIBUTES.include?(name) } &&
+        suggestion_id.present? &&
+        suggestion_id.length <= HtmlDocumentSanitizer::MAX_SUGGESTION_ID_LENGTH &&
+        node["data-author"].to_s.length <= HtmlDocumentSanitizer::MAX_AUTHOR_LENGTH
     end
   end
 end
