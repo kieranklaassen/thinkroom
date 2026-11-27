@@ -1,7 +1,7 @@
 import { editorViewCtx, schemaCtx, serializerCtx, type Editor } from '@milkdown/kit/core'
 import { downloadBlob } from '../lib/download'
 import { stripActivityMarks } from './clipboard'
-import { serializeHtml } from './document_format'
+import { serializeHtml, type DocumentFormat } from './document_format'
 import { sketchToSvg } from './sketch/export'
 import { portableSketchFigure, serializePortableMarkdown } from './sketch/portable'
 import { normalizeSketchData } from './sketch/scene'
@@ -56,6 +56,18 @@ export async function downloadDocumentMarkdown(editor: Editor, title: string): P
     new Blob([markdown], { type: 'text/markdown;charset=utf-8' }),
     safeFilename(title, 'md'),
   )
+}
+
+/** The stored source, byte for byte, for a document no editor can open. */
+export async function downloadStoredSource(slug: string, title: string): Promise<void> {
+  const response = await fetch(`/d/${slug}.json`)
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  const { content, content_format: format } = (await response.json()) as {
+    content: string
+    content_format: DocumentFormat
+  }
+  const [type, extension] = format === 'html' ? ['text/html', 'html'] : ['text/markdown', 'md']
+  downloadBlob(new Blob([content], { type: `${type};charset=utf-8` }), safeFilename(title, extension))
 }
 
 const sketchDataFromFigure = (figure: HTMLElement) => {

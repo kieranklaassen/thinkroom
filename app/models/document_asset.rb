@@ -64,12 +64,19 @@ class DocumentAsset < ApplicationRecord
       source = source.to_s
       return [] unless source.match?(MAY_REFERENCE_BLOB)
 
-      Nokogiri::HTML5.fragment(source).css("img[src]").filter_map do |image|
-        match = ACTIVE_STORAGE_SRC.match(image["src"].to_s)
+      image_sources(source).filter_map do |src|
+        match = ACTIVE_STORAGE_SRC.match(src)
         ActiveStorage::Blob.find_signed(match[1])&.id if match
       rescue ActiveSupport::MessageVerifier::InvalidSignature, ActiveRecord::RecordNotFound
         nil
       end.uniq
+    end
+
+    def image_sources(source)
+      DocumentHtml.parse(source).css("img[src]").map { |image| image["src"].to_s }
+    rescue DocumentHtml::TooComplex
+      # The source is sanitizer output, whose attributes are double-quoted.
+      source.scan(/src="([^"]*)"/).flatten
     end
 
     def ensure_capacity!(incoming_bytes)

@@ -44,11 +44,11 @@ class HtmlDocumentSanitizer
 
   class << self
     def external(source)
-      sanitize(source, trusted_metadata: false)
+      DocumentHtml.within_limits { sanitize(source, trusted_metadata: false) }
     end
 
     def snapshot(source)
-      sanitize(source, trusted_metadata: true)
+      DocumentHtml.within_limits { sanitize(source, trusted_metadata: true) }
     end
 
     private

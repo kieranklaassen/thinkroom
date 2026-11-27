@@ -24,6 +24,8 @@ class DocumentPreviewHtml
   # of every input; uncompressed so a hit is a hash lookup, not an inflate.
   CACHE = ActiveSupport::Cache::MemoryStore.new(size: 64.megabytes, compress: false)
   CACHE_VERSION = 1
+  TOO_COMPLEX_NOTICE = "The formatting here is too complex to show, so this is the source.".freeze
+  SOURCE_OPENING = "<p><em>#{TOO_COMPLEX_NOTICE}</em></p><pre><code>".freeze
 
   class << self
     # editable: whether the editor will mount with contenteditable (Edit or
@@ -39,6 +41,15 @@ class DocumentPreviewHtml
       CACHE.fetch(key) { render(format:, source:, editable:, sketch_interactive:, render_hints:) }
     end
 
+    # What a source too complex to format shows instead: itself, as text.
+    def source_html(source)
+      "#{SOURCE_OPENING}#{CGI.escape_html(source.scrub)}</code></pre>"
+    end
+
+    def source_only?(html, source)
+      html.start_with?(SOURCE_OPENING) && html == source_html(source)
+    end
+
     # Top-level blocks in a rendered preview: the same count the editor sees
     # as doc.childCount, so the server preview and the live editor agree on
     # whether a document is long (editor/long_document.ts). Two structural
@@ -48,10 +59,14 @@ class DocumentPreviewHtml
       return 0 if html.blank?
 
       CACHE.fetch([ "document-preview-blocks", CACHE_VERSION, Digest::SHA256.hexdigest(html) ]) do
-        children = Nokogiri::HTML5.fragment(html).element_children
+        children = DocumentHtml.parse(html).element_children
         count = children.count { |node| !mermaid_widget_figure?(node) }
         count += 1 if trailing_paragraph?(children.last)
         count
+      rescue DocumentHtml::TooComplex
+        # The wrappers a preview adds (tables, sketches) can take it past the
+        # limit it was rendered under; it then counts as a short document.
+        0
       end
     end
 
@@ -98,28 +113,14 @@ class DocumentPreviewHtml
       html = if format == "html"
         source
       else
-        # header_ids: nil drops Commonmarker's empty heading anchor (<a class=
-        # "anchor">). The live Milkdown editor renders a bare <h1>, so without
-        # this the preview's heading is structurally taller and the first
-        # paragraph jumps ~30px when the editor swaps in.
-        #
-        # render.unsafe passes raw HTML through to the sanitizer below instead
-        # of dropping it. The editor parses inline HTML (provenance spans,
-        # suggestion ins/del) into marks, so a preview that drops those tags
-        # loses their tint until the swap — a visible color flash.
-        # HtmlDocumentSanitizer remains the security boundary either way.
-        rendered = Commonmarker.to_html(
-          source,
-          options: { render: { unsafe: true }, extension: { header_ids: nil } },
-          plugins: { table: true, strikethrough: true, tasklist: true }
-        )
-        mark_mermaid_fences(rendered)
+        refuse_deep_raw_html(source)
+        mark_mermaid_fences(markdown_html(source))
       end
 
       # Security boundary: document content is authored by humans and agents, so
       # it is sanitized before it can reach dangerouslySetInnerHTML on the client.
       sanitized = HtmlDocumentSanitizer.snapshot(html).content
-      fragment = Nokogiri::HTML5.fragment(sanitized)
+      fragment = DocumentHtml.parse(sanitized)
       collapse_block_whitespace(fragment)
       collapse_break_newlines(fragment)
       add_trailing_breaks(fragment)
@@ -131,6 +132,38 @@ class DocumentPreviewHtml
       hints = render_hints.is_a?(Hash) ? render_hints.fetch("mermaid", {}) : {}
       replace_mermaid(fragment, editable:, hints:)
       fragment.to_html
+    rescue DocumentHtml::TooComplex
+      source_html(source)
+    end
+
+    # header_ids: nil drops Commonmarker's empty heading anchor (<a class=
+    # "anchor">). The live Milkdown editor renders a bare <h1>, so without
+    # this the preview's heading is structurally taller and the first
+    # paragraph jumps ~30px when the editor swaps in.
+    #
+    # render.unsafe passes raw HTML through to the sanitizer instead of
+    # dropping it. The editor parses inline HTML (provenance spans,
+    # suggestion ins/del) into marks, so a preview that drops those tags
+    # loses their tint until the swap — a visible color flash.
+    # HtmlDocumentSanitizer remains the security boundary either way.
+    def markdown_html(source, tagfilter: true)
+      Commonmarker.to_html(
+        source,
+        options: { render: { unsafe: true }, extension: { header_ids: nil, tagfilter: } },
+        plugins: { table: true, strikethrough: true, tasklist: true }
+      )
+    end
+
+    # The renderer's tag filter takes time that grows with the square of a raw
+    # HTML block, so a source where that is noticeable (about a tenth of a
+    # second) is first parsed without it. Only its depth is read.
+    RAW_HTML_COST = 2_000_000_000
+    FILTERED_TAG = %r{<(?=/?(?:title|textarea|style|xmp|iframe|noembed|noframes|script|plaintext)(?:[\s>]|/>))}i
+
+    def refuse_deep_raw_html(source)
+      return if source.count("<") * source.bytesize < RAW_HTML_COST
+
+      DocumentHtml.parse(markdown_html(source, tagfilter: false).gsub(FILTERED_TAG, "&lt;"))
     end
 
     # Block containers whose children are block elements; the whitespace between
@@ -148,7 +181,7 @@ class DocumentPreviewHtml
       # zero-mermaid document; without the substring the loop can't match.
       return html unless html.match?(/lang="mermaid"/i)
 
-      fragment = Nokogiri::HTML5.fragment(html)
+      fragment = DocumentHtml.parse(html)
       fragment.css("pre[lang]").each do |pre|
         next unless pre["lang"].to_s.casecmp?("mermaid")
 

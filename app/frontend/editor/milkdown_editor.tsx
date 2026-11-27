@@ -162,6 +162,8 @@ export interface EditorProps {
    *  same hints size the server preview's skeletons. */
   renderHints?: RenderHints
   onReady?: (handle: EditorHandle) => void
+  /** The editor could not show this document; nothing local was kept or sent. */
+  onUnavailable?: () => void
   onStatus?: (status: ConnectionStatus) => void
   onSpans?: (spans: ProvenanceSpan[]) => void
   onSelection?: SelectionCallback
@@ -182,6 +184,8 @@ const REFUSED_EDIT_NOTICE =
   'That edit was not applied: it would push this document past its 2 MB limit.'
 const SNAPSHOT_TOO_LARGE_NOTICE =
   'This document is over the 2 MB source limit, so its saved copy is stale. Shorten it to keep agents and previews current.'
+const SNAPSHOT_TOO_COMPLEX_NOTICE =
+  'This document is nested too deeply, so its saved copy is stale. Simplify it to keep agents and previews current.'
 
 interface ActiveSketch {
   data: SketchData
@@ -310,6 +314,7 @@ function CollabEditor({
   taskInteractive = editable,
   renderHints,
   onReady,
+  onUnavailable,
   onStatus,
   onSpans,
   onSelection,
@@ -323,8 +328,8 @@ function CollabEditor({
   const insertSketchRef = useRef<() => void>(() => undefined)
   const saveSketchRef = useRef<(data: SketchData) => void>(() => undefined)
   const deleteSketchRef = useRef<(id: string) => void>(() => undefined)
-  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice })
-  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice }
+  const callbacksRef = useRef({ onReady, onUnavailable, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice })
+  callbacksRef.current = { onReady, onUnavailable, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice }
   // Ref so the editable() closure always reads the live value; the effect
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
@@ -482,6 +487,7 @@ function CollabEditor({
       contentFormat,
       canWrite: () => canWriteRef.current,
       onTooLarge: () => callbacksRef.current.onNotice?.(SNAPSHOT_TOO_LARGE_NOTICE),
+      onTooComplex: () => callbacksRef.current.onNotice?.(SNAPSHOT_TOO_COMPLEX_NOTICE),
     })
     const scheduleSnapshot = snapshots.schedule
 
@@ -489,6 +495,17 @@ function CollabEditor({
     const start = () => {
       if (started || cancelled) return
       started = true
+      try {
+        open()
+      } catch (error) {
+        // Formatting too deep to build runs out of stack. What was built so
+        // far is partial, so this session sends none of it.
+        console.warn('pruf: the editor could not open this document', error)
+        provider.discarded = true
+        callbacksRef.current.onUnavailable?.()
+      }
+    }
+    const open = () => {
       editor.action((ctx) => {
         const service = ctx.get(collabServiceCtx)
         ctx.set(readPointerAwarenessCtx.key, provider.awareness)

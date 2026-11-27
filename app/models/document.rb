@@ -152,6 +152,13 @@ class Document < ApplicationRecord
     )
   end
 
+  # True when the preview can only show the source. The editor is then not
+  # started: at such depths it can run out of stack or never finish, and what
+  # it could not build it would drop from the shared document.
+  def source_only?(**preview_options)
+    DocumentPreviewHtml.source_only?(preview_html(**preview_options), current_content)
+  end
+
   # The title to show before the editor mounts. The editor derives the header
   # title from the document's first H1; deriving the same thing here means the
   # header reads correctly on first paint instead of flashing the stored title.

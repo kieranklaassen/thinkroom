@@ -26,6 +26,7 @@ import { bindReadPointerBroadcast } from '../../editor/read_pointers'
 import {
   downloadDocumentHtml,
   downloadDocumentMarkdown,
+  downloadStoredSource,
   printDocument,
 } from '../../editor/document_export'
 import { ProvenanceSummaryChip } from '../../components/provenance_summary'
@@ -114,6 +115,8 @@ export interface DocumentProps {
     yjs_state_checksum: string | null
     content_html: string
     content_blocks: number
+    /** content_html is the source as text: no editor can start for it. */
+    source_only: boolean
     display_title: string
     // Persisted render geometry (Mermaid figure heights by source hash):
     // the server sized the content_html skeletons from these, and the editor
@@ -236,6 +239,8 @@ export default function DocumentShow({
   // Editor-originated notices (refused oversized edit, snapshot refused as
   // too large); share the doc-notice slot with suggestion notices.
   const [editorNotice, setEditorNotice] = useState<string | null>(null)
+  // No editor opens for this document; exports serve the stored source.
+  const [editorUnavailable, setEditorUnavailable] = useState(doc.source_only)
   // Hydration-safe init from server-rendered prefs: cookies supply panel/focus/
   // width while the URL supplies mode, so SSR and the first client render agree.
   const [panelOpen, setPanelOpen] = useState(ui.panel_open)
@@ -380,14 +385,16 @@ export default function DocumentShow({
 
   const exportMarkdown = useCallback(async () => {
     const live = handleRef.current
+    if (!live && editorUnavailable) return downloadStoredSource(doc.slug, documentTitle)
     if (!live) throw new Error('Document editor is not ready')
     await downloadDocumentMarkdown(live.editor, documentTitle)
-  }, [documentTitle])
+  }, [doc.slug, documentTitle, editorUnavailable])
   const exportHtml = useCallback(async () => {
     const live = handleRef.current
+    if (!live && editorUnavailable) return downloadStoredSource(doc.slug, documentTitle)
     if (!live) throw new Error('Document editor is not ready')
     await downloadDocumentHtml(live.editor, documentTitle)
-  }, [documentTitle])
+  }, [doc.slug, documentTitle, editorUnavailable])
   // handleSelection is a stable callback — it reads the live mode via ref.
   const modeRef = useRef(effectiveMode)
   modeRef.current = effectiveMode
@@ -900,7 +907,7 @@ export default function DocumentShow({
           setActiveSheet((current) => (current === 'activity' ? null : 'activity'))
         }
         onOpenTheme={() => setActiveSheet('theme')}
-        exportReady={Boolean(handle)}
+        exportReady={Boolean(handle) || editorUnavailable}
         onExportMarkdown={exportMarkdown}
         onExportHtml={exportHtml}
       />
@@ -987,7 +994,7 @@ export default function DocumentShow({
             )}
             <SharePopover
               agentsActive={presences.length}
-              exportReady={Boolean(handle)}
+              exportReady={Boolean(handle) || editorUnavailable}
               linkAccess={ownership.link_access}
               canChangeAccess={ownership.yours}
               onExportMarkdown={exportMarkdown}
@@ -1068,6 +1075,8 @@ export default function DocumentShow({
                 key={editorSessionKey}
                 contentHtml={doc.content_html}
                 contentBlocks={doc.content_blocks}
+                sourceOnly={doc.source_only}
+                onUnavailable={() => setEditorUnavailable(true)}
                 isClient={isClient}
                 onHandle={setHandle}
                 slug={doc.slug}

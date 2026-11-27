@@ -109,11 +109,13 @@ class DocumentsController < InertiaController
     # applied template anywhere (every write path is canWrite-gated), so a
     # grant to them is burned for SEED_CLAIM_TIMEOUT and every viewer sees
     # a blank document until it expires.
-    seed_granted = initial_render? && !prefetch_request? && !link_preview_request &&
-      writable && document.try_claim_seed
-    seed_claim = document.seed_claim_token if seed_granted
+    # Nor does a document that shows as its source: no editor starts for it.
     preview_editable = writable && %w[edit suggest].include?(mode)
     preview_sketch_interactive = writable && mode == "edit"
+    seed_granted = initial_render? && !prefetch_request? && !link_preview_request &&
+      writable && !document.source_only?(editable: preview_editable, sketch_interactive: preview_sketch_interactive) &&
+      document.try_claim_seed
+    seed_claim = document.seed_claim_token if seed_granted
 
     render inertia: "documents/show", props: {
       # Cookie-backed UI prefs and the path-derived mode are both available to
@@ -150,6 +152,7 @@ class DocumentsController < InertiaController
         # editor will use, so the two layers keep the same geometry.
         content_html:,
         content_blocks: DocumentPreviewHtml.block_count(content_html),
+        source_only: DocumentPreviewHtml.source_only?(content_html, document.current_content),
         # Client-measured render geometry (Mermaid figure heights) persisted
         # from earlier snapshots; the editor pre-sizes its diagram figures from
         # the same hints the preview skeletons used, so neither layer jumps
@@ -494,6 +497,9 @@ class DocumentsController < InertiaController
     DocumentAsset.claim_from_html!(document:, source: content) if document.html?
     broadcast_title(document) if title != previous_title
     { normalized: normalization&.changed? || false }
+  rescue DocumentHtml::TooComplex => e
+    render json: { error: e.message }, status: :unprocessable_entity
+    nil
   end
 
   def broadcast_title(document)
