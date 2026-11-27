@@ -53,6 +53,10 @@ export interface Comments {
   resolveComment: (comment: CommentPayload) => void
 }
 
+// Inertia also calls onNetworkError when showing an answer failed. Returning
+// false swallows the error, which only a lost connection deserves.
+const isLostConnection = (error: Error) => 'code' in error && error.code === 'ERR_NETWORK'
+
 /** Comment submission/resolution and the anchored composer lifecycle. */
 export function useComments({
   comments,
@@ -141,7 +145,10 @@ export function useComments({
             preserveScroll: true, only: ['comments', 'activities', 'ownership'], async: true,
             onError: (errors) => { failed(String(errors.comment ?? 'Could not post this comment.')) },
             onHttpException: (response) => failed(`Could not post this comment (${response.status}).`, response.status >= 500 || response.status === 408),
-            onNetworkError: () => failed('Connection lost. This comment may already be saved.', true),
+            onNetworkError: (error) => {
+              failed('Connection lost. This comment may already be saved.', true)
+              return !isLostConnection(error)
+            },
             onCancel: () => { failed('Posting was interrupted. Check whether the comment was saved.', true) },
             onFinish: () => { postingRef.current = false },
           },
@@ -185,14 +192,17 @@ export function useComments({
             },
             onError: () => { failed() },
             onHttpException: failed,
-            onNetworkError: failed,
+            onNetworkError: (error) => {
+              failed()
+              return !isLostConnection(error)
+            },
             onCancel: () => { failed() },
             onFinish: () => {
               resolvingRef.current.delete(comment.id)
               setResolvingComments(new Set(resolvingRef.current))
               // A confirmed response already carries fresh comments. Reconcile
               // uncertain outcomes; Inertia preserves any pending optimistic post.
-              if (!confirmed) router.reload({ only: ['comments', 'ownership'], onHttpException: () => false, onNetworkError: () => false })
+              if (!confirmed) router.reload({ only: ['comments', 'ownership'], onHttpException: () => false, onNetworkError: (error) => !isLostConnection(error) })
             },
           },
         )
@@ -247,7 +257,7 @@ export function useComments({
         }
       },
       onHttpException: () => false,
-      onNetworkError: () => false,
+      onNetworkError: (error) => !isLostConnection(error),
       onFinish: () => { if (generation === checkGeneration.current) setCheckingComment(false) },
     })
   }, [failedComment, checkingComment])
