@@ -1,7 +1,9 @@
 require "test_helper"
-require "open3"
+require_relative "../test_helpers/own_process_helpers"
 
 class DocumentOgImageServiceTest < ActiveSupport::TestCase
+  include OwnProcessHelpers
+
   test "renders a social-compatible PNG at the declared dimensions" do
     script = <<~'RUBY'
       document = Document.new(
@@ -18,10 +20,7 @@ class DocumentOgImageServiceTest < ActiveSupport::TestCase
       )
     RUBY
 
-    stdout, stderr, status = Open3.capture3(
-      { "RAILS_ENV" => "test" }, Rails.root.join("bin/rails").to_s, "runner", script
-    )
-    assert status.success?, stderr
+    stdout = run_in_own_rails(script)
     result = JSON.parse(stdout)
 
     assert result["png"]
@@ -113,10 +112,7 @@ class DocumentOgImageServiceTest < ActiveSupport::TestCase
       puts JSON.generate(max_delta: (right_gutter - background).abs.max)
     RUBY
 
-    stdout, stderr, status = Open3.capture3(
-      { "RAILS_ENV" => "test" }, Rails.root.join("bin/rails").to_s, "runner", script
-    )
-    assert status.success?, stderr
+    stdout = run_in_own_rails(script)
 
     assert_equal 0, JSON.parse(stdout)["max_delta"]
   end
