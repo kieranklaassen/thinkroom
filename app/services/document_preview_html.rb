@@ -17,13 +17,32 @@
 #   - Sketches render as the real sketch figure (border/caption/tape) with a
 #     server-drawn SVG of the scene — not a gray placeholder.
 class DocumentPreviewHtml
-  # A long document's preview costs hundreds of milliseconds to render
-  # (Commonmarker, the sanitizer and several Nokogiri passes over the whole
-  # source) and is requested on every page load, yet only changes with its
-  # inputs. Recent renders stay in a bounded in-process LRU keyed by a digest
-  # of every input; uncompressed so a hit is a hash lookup, not an inflate.
+  # Rendering a long document's preview (Commonmarker, HtmlDocumentSanitizer,
+  # and a single Nokogiri DOM transform pass) is requested on every page load,
+  # yet only changes with its inputs. Recent renders stay in a bounded
+  # in-process LRU keyed by a digest of every input; uncompressed so a hit is
+  # a hash lookup, not an inflate.
   CACHE = ActiveSupport::Cache::MemoryStore.new(size: 64.megabytes, compress: false)
   CACHE_VERSION = 1
+
+  # Milkdown's trailing plugin appends an empty paragraph whenever the last
+  # block is neither a paragraph nor a heading, so the editor holds one block
+  # more than the preview emitted.
+  TRAILING_EXEMPT_BLOCKS = %w[p h1 h2 h3 h4 h5 h6].freeze
+
+  # Block containers whose children are block elements; the whitespace between
+  # those children is the markdown renderer's pretty-printing, never content.
+  WHITESPACE_BLOCK_PARENTS = %w[
+    ul ol li blockquote table thead tbody tr figure dl
+  ].freeze
+  WHITESPACE_BLOCK_PARENTS_SET = WHITESPACE_BLOCK_PARENTS.to_set.freeze
+  ALL_WHITESPACE = /\A\s*\z/
+
+  # Images carry no intrinsic size in markdown, so the preview reflows when
+  # each one loads. Uploaded images are Active Storage blobs whose analyzed
+  # dimensions we know — emit width/height (with height:auto CSS) so the
+  # box is reserved from first paint.
+  SIGNED_BLOB_SRC = %r{\A/rails/active_storage/blobs/(?:redirect|proxy)/([^/]+)/}
 
   class << self
     # editable: whether the editor will mount with contenteditable (Edit or
@@ -48,9 +67,16 @@ class DocumentPreviewHtml
       return 0 if html.blank?
 
       CACHE.fetch([ "document-preview-blocks", CACHE_VERSION, Digest::SHA256.hexdigest(html) ]) do
-        children = DocumentHtml.parse(html).element_children
-        count = children.count { |node| !mermaid_widget_figure?(node) }
-        count += 1 if trailing_paragraph?(children.last)
+        fragment = DocumentHtml.parse(html)
+        count = 0
+        last = nil
+        node = fragment.first_element_child
+        while node
+          count += 1 unless mermaid_widget_figure?(node)
+          last = node
+          node = node.next_element
+        end
+        count += 1 if trailing_paragraph?(last)
         count
       end
     end
@@ -85,11 +111,6 @@ class DocumentPreviewHtml
       sibling&.name == "pre" && sibling["data-language"].to_s.casecmp?("mermaid")
     end
 
-    # Milkdown's trailing plugin appends an empty paragraph whenever the last
-    # block is neither a paragraph nor a heading, so the editor holds one block
-    # more than the preview emitted.
-    TRAILING_EXEMPT_BLOCKS = %w[p h1 h2 h3 h4 h5 h6].freeze
-
     def trailing_paragraph?(last_child)
       last_child.present? && TRAILING_EXEMPT_BLOCKS.exclude?(last_child.name)
     end
@@ -120,24 +141,10 @@ class DocumentPreviewHtml
       # it is sanitized before it can reach dangerouslySetInnerHTML on the client.
       sanitized = HtmlDocumentSanitizer.snapshot(html).content
       fragment = DocumentHtml.parse(sanitized)
-      collapse_block_whitespace(fragment)
-      collapse_break_newlines(fragment)
-      add_trailing_breaks(fragment)
-      annotate_image_dimensions(fragment)
-      wrap_tables(fragment)
-      replace_sketches(fragment, format:, interactive: sketch_interactive)
-      # Both formats: the editor derives diagram figures from any code block
-      # whose language is mermaid, so HTML documents need the placeholder too.
       hints = render_hints.is_a?(Hash) ? render_hints.fetch("mermaid", {}) : {}
-      replace_mermaid(fragment, editable:, hints:)
+      Transformer.new(format:, editable:, sketch_interactive:, hints:).call(fragment)
       fragment.to_html
     end
-
-    # Block containers whose children are block elements; the whitespace between
-    # those children is the markdown renderer's pretty-printing, never content.
-    WHITESPACE_BLOCK_PARENTS = %w[
-      ul ol li blockquote table thead tbody tr figure dl
-    ].freeze
 
     # Commonmarker writes the fenced language to a `lang` attribute, which the
     # document sanitizer intentionally drops. Translate only the Mermaid signal
@@ -149,32 +156,99 @@ class DocumentPreviewHtml
       return html unless html.match?(/lang="mermaid"/i)
 
       fragment = DocumentHtml.parse(html)
-      fragment.css("pre[lang]").each do |pre|
-        next unless pre["lang"].to_s.casecmp?("mermaid")
-
-        pre["data-language"] = "mermaid"
-      end
+      mark_mermaid_pre_elements(fragment)
       fragment.to_html
     end
 
-    # ProseMirror's DOM carries no whitespace text nodes between block elements,
-    # but Commonmarker pretty-prints a "\n" between each one. The editor renders
-    # with white-space: break-spaces, so in the preview those newlines become
-    # phantom blank lines and the first paragraph sits ~30px too low until the
-    # live editor swaps in. Drop the inter-block whitespace so the preview's box
-    # model matches the editor exactly. Inline whitespace (inside p, headings)
-    # and pre/code contents are left untouched.
-    def collapse_block_whitespace(fragment)
-      fragment.xpath(".//text()").each do |node|
-        next unless node.content.match?(/\A\s*\z/)
-
-        parent = node.parent
-        next unless parent
-        next if parent.name == "pre" || parent.name == "code"
-
-        if parent.name == "#document-fragment" || WHITESPACE_BLOCK_PARENTS.include?(parent.name)
-          node.remove
+    def mark_mermaid_pre_elements(parent)
+      node = parent.child
+      while node
+        if node.type == Nokogiri::XML::Node::ELEMENT_NODE
+          if node.name == "pre" && node["lang"]&.casecmp?("mermaid")
+            node["data-language"] = "mermaid"
+          end
+          mark_mermaid_pre_elements(node) if node.child
         end
+        node = node.next_sibling
+      end
+    end
+  end
+
+  # Single-pass DOM transformer combining inter-block whitespace collapsing,
+  # <br>\n stripping, ProseMirror trailing breaks, table-block wrapping,
+  # sketch rendering, Mermaid loading figures, and Active Storage image
+  # dimension annotation.
+  class Transformer
+    def initialize(format:, editable:, sketch_interactive:, hints:)
+      @is_html = format == "html"
+      @editable = editable
+      @sketch_interactive = sketch_interactive
+      @hints = hints.is_a?(Hash) && hints.any? ? hints : nil
+      @image_targets = []
+    end
+
+    def call(fragment)
+      transform_children(fragment, true, false)
+      annotate_image_dimensions
+      fragment
+    end
+
+    private
+
+    def transform_children(parent, collapse_whitespace, in_table)
+      node = parent.child
+      while node
+        next_node = node.next_sibling
+        type = node.type
+
+        if type == Nokogiri::XML::Node::TEXT_NODE
+          node.remove if collapse_whitespace && node.content.match?(ALL_WHITESPACE)
+          node = next_node
+          next
+        end
+
+        unless type == Nokogiri::XML::Node::ELEMENT_NODE
+          node = next_node
+          next
+        end
+
+        name = node.name
+        case name
+        when "br"
+          next_node = collapse_break_newline(node, next_node)
+        when "img"
+          collect_image_target(node)
+        when "p"
+          transform_children(node, false, in_table) if node.child
+          add_trailing_break(node)
+        when "table"
+          transform_children(node, true, true) if node.child
+          wrap_table(node) unless in_table
+        when "figure"
+          if @is_html && replace_html_sketch(node)
+            node = next_node
+            next
+          end
+          transform_children(node, true, in_table) if node.child
+        when "pre"
+          if !@is_html && replace_markdown_sketch(node)
+            node = next_node
+            next
+          end
+          if node["data-language"] == "mermaid"
+            transform_children(node, false, in_table) if @editable && node.child
+            replace_mermaid_pre(node)
+            node = next_node
+            next
+          end
+          transform_children(node, false, in_table) if node.child
+        else
+          if node.child
+            transform_children(node, WHITESPACE_BLOCK_PARENTS_SET.include?(name), in_table)
+          end
+        end
+
+        node = next_node
       end
     end
 
@@ -182,17 +256,20 @@ class DocumentPreviewHtml
     # newline is a second forced break under white-space: break-spaces, so
     # every line break made the preview one full line taller than the editor
     # (which emits a bare <br>). Strip exactly one newline after each <br>.
-    def collapse_break_newlines(fragment)
-      fragment.xpath("descendant::br").each do |br|
-        sibling = br.next_sibling
-        next unless sibling&.text?
+    def collapse_break_newline(br, next_node)
+      sibling = br.next_sibling
+      return next_node unless sibling&.type == Nokogiri::XML::Node::TEXT_NODE
 
-        trimmed = sibling.content.delete_prefix("\n")
-        if trimmed.empty?
-          sibling.remove
-        else
-          sibling.content = trimmed
-        end
+      content = sibling.content
+      return next_node unless content.start_with?("\n")
+
+      if content.bytesize == 1
+        after = sibling.next_sibling
+        sibling.remove
+        after
+      else
+        sibling.content = content.byteslice(1..)
+        next_node
       end
     end
 
@@ -200,19 +277,25 @@ class DocumentPreviewHtml
     # ends in a non-text inline (a block image), after a trailing hard break,
     # and inside empty paragraphs — each adds one line box the plain HTML
     # doesn't have. Replicate the exact DOM so both layers wrap identically.
-    def add_trailing_breaks(fragment)
-      fragment.xpath("descendant::p").each do |paragraph|
-        last = paragraph.children.reject { |node| node.text? && node.content.empty? }.last
+    def add_trailing_break(paragraph)
+      last = nil
+      child = paragraph.child
+      while child
+        last = child unless child.type == Nokogiri::XML::Node::TEXT_NODE && child.content.empty?
+        child = child.next_sibling
+      end
 
-        if last.nil?
-          paragraph << trailing_break(paragraph.document)
-        elsif last.element? && last.name == "img"
+      if last.nil?
+        paragraph << trailing_break(paragraph.document)
+      elsif last.type == Nokogiri::XML::Node::ELEMENT_NODE
+        case last.name
+        when "img"
           separator = Nokogiri::XML::Node.new("img", paragraph.document)
           separator["class"] = "ProseMirror-separator"
           separator["alt"] = ""
           paragraph << separator
           paragraph << trailing_break(paragraph.document)
-        elsif last.element? && last.name == "br"
+        when "br"
           paragraph << trailing_break(paragraph.document)
         end
       end
@@ -224,30 +307,26 @@ class DocumentPreviewHtml
       br
     end
 
-    # Images carry no intrinsic size in markdown, so the preview reflows when
-    # each one loads. Uploaded images are Active Storage blobs whose analyzed
-    # dimensions we know — emit width/height (with height:auto CSS) so the
-    # box is reserved from first paint.
-    SIGNED_BLOB_SRC = %r{\A/rails/active_storage/blobs/(?:redirect|proxy)/([^/]+)/}
+    def collect_image_target(img)
+      src = img["src"]
+      return if src.nil? || img["width"].present? || img["class"]&.include?("ProseMirror-separator")
 
-    def annotate_image_dimensions(fragment)
-      targets = fragment.xpath("descendant::img[@src]").filter_map do |img|
-        next if img["width"].present? || img["class"].to_s.include?("ProseMirror-separator")
+      signed_id = SIGNED_BLOB_SRC.match(src)&.[](1)
+      @image_targets << [ img, signed_id ] if signed_id
+    end
 
-        signed_id = SIGNED_BLOB_SRC.match(img["src"].to_s)&.[](1)
-        [ img, signed_id ] if signed_id
-      end
-      return if targets.empty?
+    def annotate_image_dimensions
+      return if @image_targets.empty?
 
       # One batched SELECT instead of a find_signed per <img>. The signature
       # check (verifier + :blob_id purpose, exactly what Blob.find_signed
       # does) still gates every id; unverifiable or missing blobs just skip.
-      blob_ids = targets.map(&:last).uniq.index_with do |signed_id|
+      blob_ids = @image_targets.map(&:last).uniq.index_with do |signed_id|
         ActiveStorage.verifier.verified(signed_id, purpose: :blob_id)
       end.compact
       blobs = ActiveStorage::Blob.where(id: blob_ids.values).index_by(&:id)
 
-      targets.each do |img, signed_id|
+      @image_targets.each do |img, signed_id|
         metadata = blobs[blob_ids[signed_id]]&.metadata
         width = metadata&.dig("width")
         height = metadata&.dig("height")
@@ -262,18 +341,14 @@ class DocumentPreviewHtml
     # typography (UI font at 0.875em, own cell padding) makes it ~90px taller
     # than a bare prose table. Give the preview the same wrapper so the boxes
     # match; the chrome's interactive handles only appear in the live editor.
-    def wrap_tables(fragment)
-      fragment.xpath("descendant::table").each do |table|
-        next if table.ancestors("table").any?
-
-        block = Nokogiri::XML::Node.new("div", table.document)
-        block["class"] = "milkdown-table-block"
-        wrapper = Nokogiri::XML::Node.new("div", table.document)
-        wrapper["class"] = "table-wrapper"
-        table.replace(block)
-        block << wrapper
-        wrapper << table
-      end
+    def wrap_table(table)
+      block = Nokogiri::XML::Node.new("div", table.document)
+      block["class"] = "milkdown-table-block"
+      wrapper = Nokogiri::XML::Node.new("div", table.document)
+      wrapper["class"] = "table-wrapper"
+      table.replace(block)
+      block << wrapper
+      wrapper << table
     end
 
     # Mermaid: the editor inserts a derived <figure class="mermaid-diagram">
@@ -281,29 +356,42 @@ class DocumentPreviewHtml
     # view is not editable). Mirror that exact structure: a loading figure —
     # min-height from the persisted render hint when one exists, so the box is
     # right-sized before mermaid ever runs — followed by the untouched source.
-    def replace_mermaid(fragment, editable:, hints:)
-      fragment.css('pre[data-language="mermaid"]').each do |pre|
-        figure = Nokogiri::XML::Node.new("figure", pre.document)
-        figure["class"] = "mermaid-diagram"
-        figure["data-state"] = "loading"
-        figure["aria-label"] = "Mermaid diagram"
-        hint = mermaid_hint(hints, pre.at_css("code")&.text.to_s.sub(/\n\z/, ""))
+    def replace_mermaid_pre(pre)
+      figure = Nokogiri::XML::Node.new("figure", pre.document)
+      figure["class"] = "mermaid-diagram"
+      figure["data-state"] = "loading"
+      figure["aria-label"] = "Mermaid diagram"
+      if @hints
+        code_text = first_code_descendant(pre)&.text.to_s.sub(/\n\z/, "")
+        hint = mermaid_hint(code_text)
         figure["style"] = "min-height: #{hint}px" if hint
-        status = Nokogiri::XML::Node.new("span", pre.document)
-        status["class"] = "mermaid-diagram-status"
-        status["role"] = "status"
-        status.content = "Rendering diagram…"
-        figure << status
-
-        pre.add_previous_sibling(figure)
-        pre.remove unless editable
       end
+      status = Nokogiri::XML::Node.new("span", pre.document)
+      status["class"] = "mermaid-diagram-status"
+      status["role"] = "status"
+      status.content = "Rendering diagram…"
+      figure << status
+
+      pre.add_previous_sibling(figure)
+      pre.remove unless @editable
     end
 
-    def mermaid_hint(hints, source)
-      return nil unless hints.is_a?(Hash) && hints.any?
+    def first_code_descendant(parent)
+      node = parent.child
+      while node
+        if node.type == Nokogiri::XML::Node::ELEMENT_NODE
+          return node if node.name == "code"
 
-      value = hints[mermaid_source_hash(source)]
+          found = first_code_descendant(node)
+          return found if found
+        end
+        node = node.next_sibling
+      end
+      nil
+    end
+
+    def mermaid_hint(source)
+      value = @hints[DocumentPreviewHtml.mermaid_source_hash(source)]
       value.is_a?(Integer) && value.positive? ? value : nil
     end
 
@@ -313,32 +401,41 @@ class DocumentPreviewHtml
     # every scene passes ThinkroomSketch validation (element types, colors,
     # points) before anything is rendered, and unrecognized payloads keep
     # their sanitized code-block/figure form.
-    def replace_sketches(fragment, format:, interactive:)
-      sketch_nodes(fragment, format:).each do |node, parsed|
-        node.replace(SketchPreview.figure(node.document, parsed, interactive:))
-      end
+    def replace_html_sketch(node)
+      return false unless node.key?("data-thinkroom-sketch")
+
+      parsed = ThinkroomSketch.parse(
+        node["data-scene"],
+        description: node["data-description"],
+        format_version: node["data-format-version"],
+        id: node["data-sketch-id"].to_s,
+        height: node["data-sketch-height"]
+      )
+      return false unless parsed
+
+      node.replace(SketchPreview.figure(node.document, parsed, interactive: @sketch_interactive))
+      true
     end
 
-    def sketch_nodes(fragment, format:)
-      if format == "html"
-        fragment.css("figure[data-thinkroom-sketch]").filter_map do |node|
-          parsed = ThinkroomSketch.parse(
-            node["data-scene"],
-            description: node["data-description"],
-            format_version: node["data-format-version"],
-            id: node["data-sketch-id"].to_s,
-            height: node["data-sketch-height"]
-          )
-          [ node, parsed ] if parsed
+    # The excalidraw fence sanitizes down to <pre><code>{scene json}</code></pre>
+    # (the lang hint is dropped), so the JSON payload itself is the signal.
+    def replace_markdown_sketch(pre)
+      child = pre.child
+      while child
+        if child.type == Nokogiri::XML::Node::ELEMENT_NODE && child.name == "code"
+          code_text = child.text
+          if code_text.lstrip.start_with?("{")
+            parsed = ThinkroomSketch.parse_markdown_fence(code_text)
+            if parsed
+              pre.replace(SketchPreview.figure(pre.document, parsed, interactive: @sketch_interactive))
+              return true
+            end
+          end
         end
-      else
-        # The excalidraw fence sanitizes down to <pre><code>{scene json}</code></pre>
-        # (the lang hint is dropped), so the JSON payload itself is the signal.
-        fragment.xpath("descendant::pre/code").filter_map do |code|
-          parsed = ThinkroomSketch.parse_markdown_fence(code.text)
-          [ code.parent, parsed ] if parsed
-        end
+        child = child.next_sibling
       end
+      false
     end
   end
+  private_constant :Transformer
 end

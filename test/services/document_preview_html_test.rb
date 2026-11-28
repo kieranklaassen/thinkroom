@@ -314,4 +314,115 @@ class DocumentPreviewHtmlTest < ActiveSupport::TestCase
     assert_includes hinted, "min-height: 240px"
     refute_includes shown, "min-height: 240px"
   end
+
+  test "wraps outer and sibling tables once without wrapping nested tables" do
+    source = <<~HTML
+      <table><tbody><tr><td>
+        <table><tbody><tr><td>inner</td></tr></tbody></table>
+      </td></tr></tbody></table>
+      <table><tbody><tr><td>second</td></tr></tbody></table>
+    HTML
+
+    html = DocumentPreviewHtml.call(format: "html", content: source)
+    fragment = Nokogiri::HTML5.fragment(html)
+
+    assert_equal 2, fragment.css("div.milkdown-table-block").length
+    assert_equal 2, fragment.css("div.table-wrapper").length
+    assert_equal 3, fragment.css("table").length
+    assert_equal 0, fragment.css("table div.milkdown-table-block").length
+  end
+
+  test "adds trailing breaks for empty paragraphs and trailing hard breaks after newline collapse" do
+    html = DocumentPreviewHtml.call(
+      format: "html",
+      content: "<p></p><p>line<br>\n</p><p>line<br>\nnext</p>"
+    )
+
+    assert_includes html, '<p><br class="ProseMirror-trailingBreak"></p>'
+    assert_includes html, '<p>line<br><br class="ProseMirror-trailingBreak"></p>'
+    assert_includes html, "<p>line<br>next</p>"
+  end
+
+  test "preserves text runs adjacent to unwrapped elements instead of dropping surrounding whitespace" do
+    source = "<ul>\n  <li><p>item</p></li>\n</ul>\n<custom-tag>\n  kept\n</custom-tag>"
+
+    html = DocumentPreviewHtml.call(format: "html", content: source)
+
+    assert_equal "<ul><li><p>item</p></li></ul>\n\n  kept\n", html
+  end
+
+  test "handles case-insensitive Mermaid fences in markdown" do
+    html = DocumentPreviewHtml.call(
+      format: "markdown",
+      content: "```MERMAID\nflowchart LR\n  A --> B\n```",
+      editable: false
+    )
+
+    assert_includes html, 'class="mermaid-diagram"'
+    refute_includes html, "flowchart LR"
+  end
+
+  test "removes multi-node all-whitespace runs left by unwrapped tags between blocks" do
+    source = "<ul>\n  <li>a</li>\n  <custom-tag>   </custom-tag>\n  <li>b</li>\n</ul>"
+
+    html = DocumentPreviewHtml.call(format: "html", content: source)
+
+    assert_equal "<ul><li>a</li><li>b</li></ul>", html
+  end
+
+  test "canonicalizes button-scope table unwrapping inside p with ProseMirror trailing breaks" do
+    source = "<p><button><table><tr><td>x</td></tr></table></button></p>"
+
+    html = DocumentPreviewHtml.call(format: "html", content: source)
+
+    assert_equal(
+      '<p><br class="ProseMirror-trailingBreak"></p>' \
+      '<div class="milkdown-table-block"><div class="table-wrapper">' \
+      "<table><tbody><tr><td>x</td></tr></tbody></table></div></div>" \
+      '<p><br class="ProseMirror-trailingBreak"></p>',
+      html
+    )
+  end
+
+  test "annotates Active Storage image dimensions in a batched query" do
+    first = ActiveStorage::Blob.create_and_upload!(
+      io: StringIO.new("\x89PNG\r\n\x1A\nfirst"),
+      filename: "first.png",
+      content_type: "image/png"
+    )
+    first.update!(metadata: first.metadata.merge("width" => 640, "height" => 360))
+
+    second = ActiveStorage::Blob.create_and_upload!(
+      io: StringIO.new("\x89PNG\r\n\x1A\nsecond"),
+      filename: "second.png",
+      content_type: "image/png"
+    )
+    second.update!(metadata: second.metadata.merge("width" => 800, "height" => 450))
+
+    markdown = <<~MD
+      ![first](/rails/active_storage/blobs/redirect/#{first.signed_id}/first.png)
+
+      ![second](/rails/active_storage/blobs/redirect/#{second.signed_id}/second.png)
+    MD
+
+    blob_queries = []
+    subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |*, payload|
+      next if payload[:name] == "SCHEMA" || payload[:cached]
+
+      blob_queries << payload[:sql] if payload[:sql].include?("active_storage_blobs")
+    end
+
+    html = begin
+      DocumentPreviewHtml.call(format: "markdown", content: markdown)
+    ensure
+      ActiveSupport::Notifications.unsubscribe(subscriber)
+    end
+
+    imgs = Nokogiri::HTML5.fragment(html).css("img[src]")
+
+    assert_equal 1, blob_queries.size
+    assert_equal 2, imgs.size
+    assert_equal [ "640", "360" ], [ imgs[0]["width"], imgs[0]["height"] ]
+    assert_equal [ "800", "450" ], [ imgs[1]["width"], imgs[1]["height"] ]
+  end
 end
