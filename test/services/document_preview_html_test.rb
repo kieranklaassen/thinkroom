@@ -361,4 +361,42 @@ class DocumentPreviewHtmlTest < ActiveSupport::TestCase
     assert_includes html, 'class="mermaid-diagram"'
     refute_includes html, "flowchart LR"
   end
+
+  test "removes multi-node all-whitespace runs left by unwrapped tags between blocks" do
+    source = "<ul>\n  <li>a</li>\n  <custom-tag>   </custom-tag>\n  <li>b</li>\n</ul>"
+
+    html = DocumentPreviewHtml.call(format: "html", content: source)
+
+    assert_equal "<ul><li>a</li><li>b</li></ul>", html
+  end
+
+  test "canonicalizes button-scope table unwrapping inside p with ProseMirror trailing breaks" do
+    source = "<p><button><table><tr><td>x</td></tr></table></button></p>"
+
+    html = DocumentPreviewHtml.call(format: "html", content: source)
+
+    assert_equal(
+      '<p><br class="ProseMirror-trailingBreak"></p>' \
+      '<div class="milkdown-table-block"><div class="table-wrapper">' \
+      "<table><tbody><tr><td>x</td></tr></tbody></table></div></div>" \
+      '<p><br class="ProseMirror-trailingBreak"></p>',
+      html
+    )
+  end
+
+  test "annotates Active Storage image dimensions in a batched query" do
+    blob = ActiveStorage::Blob.create_and_upload!(
+      io: StringIO.new("\x89PNG\r\n\x1A\n"),
+      filename: "sample.png",
+      content_type: "image/png"
+    )
+    blob.update!(metadata: blob.metadata.merge("width" => 640, "height" => 360))
+    src = "/rails/active_storage/blobs/redirect/#{blob.signed_id}/sample.png"
+
+    html = DocumentPreviewHtml.call(format: "markdown", content: "![sample](#{src})")
+    img = Nokogiri::HTML5.fragment(html).at_css("img[src]")
+
+    assert_equal "640", img["width"]
+    assert_equal "360", img["height"]
+  end
 end

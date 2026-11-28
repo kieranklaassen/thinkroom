@@ -17,11 +17,11 @@
 #   - Sketches render as the real sketch figure (border/caption/tape) with a
 #     server-drawn SVG of the scene — not a gray placeholder.
 class DocumentPreviewHtml
-  # A long document's preview costs hundreds of milliseconds to render
-  # (Commonmarker, the sanitizer and several Nokogiri passes over the whole
-  # source) and is requested on every page load, yet only changes with its
-  # inputs. Recent renders stay in a bounded in-process LRU keyed by a digest
-  # of every input; uncompressed so a hit is a hash lookup, not an inflate.
+  # Rendering a long document's preview (Commonmarker, HTML5 parsing and
+  # sanitization, and the DOM transform pass) is requested on every page load,
+  # yet only changes with its inputs. Recent renders stay in a bounded
+  # in-process LRU keyed by a digest of every input; uncompressed so a hit is
+  # a hash lookup, not an inflate.
   CACHE = ActiveSupport::Cache::MemoryStore.new(size: 64.megabytes, compress: false)
   CACHE_VERSION = 1
 

@@ -31,8 +31,6 @@ class HtmlDocumentSanitizer
   MAX_AUTHOR_LENGTH = 255
   MAX_SUGGESTION_ID_LENGTH = 255
   DROP_WITH_CONTENT = %w[script style iframe object embed template svg math].freeze
-  # The same elements by local name: svg and math have a namespace.
-  DROPPED = "descendant::*[#{DROP_WITH_CONTENT.map { |name| "local-name()='#{name}'" }.join(" or ")}]".freeze
   PROVENANCE_ATTRIBUTES = %w[data-provenance data-kind data-author data-state].freeze
   SUGGESTION_ATTRIBUTES = %w[data-suggestion-id data-author].freeze
   SKETCH_ATTRIBUTES = %w[
@@ -51,57 +49,66 @@ class HtmlDocumentSanitizer
   THINKROOM_ATTRIBUTES_SET = THINKROOM_ATTRIBUTES.to_set.freeze
   ALIGNMENT_TAGS = %w[td th].to_set.freeze
   SUGGESTION_TAGS = %w[ins del].to_set.freeze
+  # Disallowed HTML5 button-scope barriers whose in-place unwrapping can expose
+  # illegal nesting (such as <table> inside <p> or nested <a>), requiring a
+  # canonical HTML5 re-parse on that rare slow path.
+  BUTTON_SCOPE_BARRIERS = %w[button marquee applet].to_set.freeze
 
-  # Applies Rails::HTML::PermitScrubber / Loofah::HTML5::Scrub directly to a
-  # Nokogiri::HTML5::DocumentFragment in a single pass, avoiding Loofah's
-  # per-node decorator overhead and multiple parse/serialize round-trips.
-  class Scrubber < Rails::HTML::PermitScrubber
+  # Scrubs a Nokogiri::HTML5::DocumentFragment directly in a single pass using
+  # Loofah::HTML5::Scrub for URI, CDATA, CSS, and attribute escaping, avoiding
+  # Loofah's per-node decorator overhead and redundant parse/serialize cycles.
+  class Scrubber
     def initialize(trusted_metadata:)
-      super(prune: false)
-      self.tags = ALLOWED_TAGS
-      self.attributes = trusted_metadata ? ALLOWED_ATTRIBUTES : EXTERNAL_ALLOWED_ATTRIBUTES
+      @tags = ALLOWED_TAGS
+      @attributes = trusted_metadata ? ALLOWED_ATTRIBUTES : EXTERNAL_ALLOWED_ATTRIBUTES
       @trusted_metadata = trusted_metadata
     end
 
     def scrub_fragment(fragment)
-      scrub_children(fragment)
-      fragment
+      reparse = scrub_children(fragment)
+      reparse ? DocumentHtml.parse(fragment.to_html) : fragment
     end
 
     private
 
     def scrub_children(parent)
+      reparse = false
       node = parent.child
       while node
         next_node = node.next_sibling
-        scrub_node_tree(node)
+        reparse = true if scrub_node_tree(node)
         node = next_node
       end
+      reparse
     end
 
     def scrub_node_tree(node)
       case node.type
       when Nokogiri::XML::Node::TEXT_NODE
-        nil
+        false
       when Nokogiri::XML::Node::ELEMENT_NODE
         name = node.name
         if DROP_WITH_CONTENT_SET.include?(name) || node.namespace
           node.remove
-          return
+          return false
         end
 
-        scrub_children(node)
+        reparse = scrub_children(node)
 
         unless @tags.include?(name)
+          reparse = true if BUTTON_SCOPE_BARRIERS.include?(name) && node.first_element_child
           unwrap_node(node)
-          return
+          return reparse
         end
 
         scrub_allowed_element(node, name)
+        reparse
       when Nokogiri::XML::Node::CDATA_SECTION_NODE
         node.replace(Loofah::HTML5::Scrub.cdata_escape(node))
+        false
       else
         node.remove
+        false
       end
     end
 
@@ -152,58 +159,14 @@ class HtmlDocumentSanitizer
       end
 
       Loofah::HTML5::Scrub.force_correct_attribute_escaping!(node) if needs_escaping
-      HtmlDocumentSanitizer.send(:sanitize_style_attribute, name, style_attr) if style_attr
+      sanitize_style_attribute(name, style_attr) if style_attr
 
-      if name == "img" && !HtmlDocumentSanitizer.send(:valid_active_storage_src?, node["src"])
+      if name == "img" && !valid_active_storage_src?(node["src"])
         node.remove
         return
       end
 
-      HtmlDocumentSanitizer.send(:sanitize_thinkroom_metadata, node, trusted: true) if has_thinkroom_attr
-    end
-  end
-
-  TRUSTED_SCRUBBER = Scrubber.new(trusted_metadata: true).freeze
-  EXTERNAL_SCRUBBER = Scrubber.new(trusted_metadata: false).freeze
-
-  private_constant :ALLOWED_TAGS, :ALLOWED_ATTRIBUTES, :EXTERNAL_ALLOWED_ATTRIBUTES,
-                   :DROP_WITH_CONTENT_SET, :THINKROOM_ATTRIBUTES_SET,
-                   :ALIGNMENT_TAGS, :SUGGESTION_TAGS,
-                   :Scrubber, :TRUSTED_SCRUBBER, :EXTERNAL_SCRUBBER
-
-  class << self
-    def external(source)
-      DocumentHtml.within_limits { sanitize(source, trusted_metadata: false) }
-    end
-
-    def snapshot(source)
-      DocumentHtml.within_limits { sanitize(source, trusted_metadata: true) }
-    end
-
-    # Parses and scrubs a trusted snapshot into a Nokogiri::HTML5::DocumentFragment
-    # without serializing to HTML, allowing DocumentPreviewHtml to transform the
-    # same tree in-place instead of round-tripping through HTML again.
-    # An optional block runs on the parsed fragment right before scrubbing.
-    def snapshot_fragment(source)
-      DocumentHtml.within_limits do
-        fragment = DocumentHtml.parse(source.to_s)
-        yield fragment if block_given?
-        TRUSTED_SCRUBBER.scrub_fragment(fragment)
-      end
-    end
-
-    private
-
-    def sanitize(source, trusted_metadata:)
-      original = source.to_s
-      return Result.new(content: "", changed?: false) if original.empty?
-
-      fragment = DocumentHtml.parse(original)
-      scrubber = trusted_metadata ? TRUSTED_SCRUBBER : EXTERNAL_SCRUBBER
-      scrubber.scrub_fragment(fragment)
-
-      content = fragment.to_html
-      Result.new(content:, changed?: content != original)
+      sanitize_thinkroom_metadata(node) if has_thinkroom_attr
     end
 
     def sanitize_style_attribute(name, style_attr)
@@ -219,7 +182,7 @@ class HtmlDocumentSanitizer
       style_attr.remove
     end
 
-    def sanitize_thinkroom_metadata(node, trusted:)
+    def sanitize_thinkroom_metadata(node)
       metadata = {}
       node.attribute_nodes.each do |attr|
         next unless THINKROOM_ATTRIBUTES_SET.include?(attr.name)
@@ -227,7 +190,7 @@ class HtmlDocumentSanitizer
         metadata[attr.name] = attr.value
         attr.remove
       end
-      return if metadata.empty? || !trusted
+      return if metadata.empty?
 
       restore_provenance(node, metadata) if valid_provenance?(node, metadata)
       restore_suggestion(node, metadata) if valid_suggestion?(node, metadata)
@@ -308,6 +271,50 @@ class HtmlDocumentSanitizer
     def restore_highlighter(node, metadata)
       node["data-highlighter"] = ""
       node["data-color"] = metadata["data-color"]
+    end
+  end
+
+  TRUSTED_SCRUBBER = Scrubber.new(trusted_metadata: true).freeze
+  EXTERNAL_SCRUBBER = Scrubber.new(trusted_metadata: false).freeze
+
+  private_constant :ALLOWED_TAGS, :ALLOWED_ATTRIBUTES, :EXTERNAL_ALLOWED_ATTRIBUTES,
+                   :DROP_WITH_CONTENT_SET, :THINKROOM_ATTRIBUTES_SET,
+                   :ALIGNMENT_TAGS, :SUGGESTION_TAGS, :BUTTON_SCOPE_BARRIERS,
+                   :Scrubber, :TRUSTED_SCRUBBER, :EXTERNAL_SCRUBBER
+
+  class << self
+    def external(source)
+      DocumentHtml.within_limits { sanitize(source, trusted_metadata: false) }
+    end
+
+    def snapshot(source)
+      DocumentHtml.within_limits { sanitize(source, trusted_metadata: true) }
+    end
+
+    # Parses and scrubs a trusted snapshot into a Nokogiri::HTML5::DocumentFragment
+    # without serializing to HTML, allowing DocumentPreviewHtml to transform the
+    # same tree in-place instead of round-tripping through HTML again.
+    # An optional block runs on the parsed fragment right before scrubbing.
+    def snapshot_fragment(source)
+      DocumentHtml.within_limits do
+        fragment = DocumentHtml.parse(source.to_s)
+        yield fragment if block_given?
+        TRUSTED_SCRUBBER.scrub_fragment(fragment)
+      end
+    end
+
+    private
+
+    def sanitize(source, trusted_metadata:)
+      original = source.to_s
+      return Result.new(content: "", changed?: false) if original.empty?
+
+      fragment = DocumentHtml.parse(original)
+      scrubber = trusted_metadata ? TRUSTED_SCRUBBER : EXTERNAL_SCRUBBER
+      fragment = scrubber.scrub_fragment(fragment)
+
+      content = fragment.to_html
+      Result.new(content:, changed?: content != original)
     end
   end
 end
