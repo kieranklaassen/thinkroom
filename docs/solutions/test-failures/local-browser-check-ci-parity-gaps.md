@@ -35,7 +35,7 @@ The Playwright browser checks (`script/browser_check.mjs`, `script/native_shell_
   locator.dblclick: Timeout 30000ms exceeded ... waiting for locator('.milkdown .ProseMirror p').filter({ hasText: 'human-<ts>' })
   ```
   The sentinel is typed after the first top-level paragraph and then double-clicked (`script/browser_check.mjs:2090-2094`, `script/browser_check.mjs:2122`). At the time `/d/demo` had the title "The P", 30 comments and 13 suggestions left over from earlier runs, so the paragraph the check targets no longer had the shape it expects.
-- `bin/vite dev` cannot bind its configured port because another project's Vite server already holds `:3036` (`config/vite.json:11`).
+- `bin/vite dev` cannot bind its configured port because another project's Vite server already holds `:3036` (`config/vite.json:12`).
 - On a phone-width layout, a swipe gesture on a list row that sits below the fold does nothing, and the check reports that the row never opened.
 
 ## What Didn't Work
@@ -73,7 +73,7 @@ VITE_RUBY_PORT=3046 bin/vite dev
 VITE_RUBY_PORT=3046 THINKROOM_DOC_CREATION_BURST=500 THINKROOM_DOC_CREATION_DAILY=500 bin/rails s -p 3005
 ```
 
-Keep `skipProxy: false` (`config/vite.json:9`) so assets are still served through the Rails origin.
+Keep `skipProxy: false` (`config/vite.json:10`) so assets are still served through the Rails origin.
 
 With all three in place, `BASE_URL=http://localhost:3005 node script/browser_check.mjs` passed with 218 passing assertions and 0 failures in this session's run, and the other checks passed the same way.
 
