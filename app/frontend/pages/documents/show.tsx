@@ -1,34 +1,14 @@
-import { findCommentAnchorRange } from '../../editor/comment_anchors'
-import { clearHighlight, domRange, setHighlight } from '../../lib/highlights'
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Head, Link, router, usePoll } from '@inertiajs/react'
-import { nativeHaptic } from '@ruby-native/react'
-import { editorViewCtx } from '@milkdown/kit/core'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Head } from '@inertiajs/react'
 import type { EditorView } from '@milkdown/kit/prose/view'
-import { TextSelection } from '@milkdown/kit/prose/state'
+import type { ProvenanceSpan } from '../../editor/provenance'
 import type { ConnectionStatus, EditorHandle } from '../../editor/milkdown_editor'
 import type { DocumentFormat } from '../../editor/document_format'
-import { provenanceIdentityCtx } from '../../editor/provenance'
-import {
-  aiSpanAt,
-  applyReviewState,
-  bindReviewTarget,
-  resolveReviewTarget,
-  nextProvenanceRange,
-  type ProvenanceFilter,
-  type ProvenanceSpan,
-  type ReviewState,
-} from '../../editor/provenance'
-import { refreshAgentCursors } from '../../editor/agent_cursors'
 import type { RenderHints } from '../../editor/cable_provider'
 import { UnsavedEditNotice } from '../../components/unsaved_edit_notice'
 import { bindReadModeCopy } from '../../editor/clipboard'
 import { bindReadPointerBroadcast } from '../../editor/read_pointers'
-import {
-  downloadDocumentHtml,
-  downloadDocumentMarkdown,
-  printDocument,
-} from '../../editor/document_export'
+import { downloadDocumentHtml, downloadDocumentMarkdown } from '../../editor/document_export'
 import { ProvenanceSummaryChip } from '../../components/provenance_summary'
 import { HighlightLegendPanel } from '../../components/highlight_legend_panel'
 import { ReviewPopover } from '../../components/review_popover'
@@ -38,24 +18,25 @@ import { CompoundPanel } from '../../components/compound_panel'
 import { CommentsPanel } from '../../components/comments_panel'
 import { AnchoredComposer } from '../../components/anchored_composer'
 import { SelectionToolbar } from '../../components/selection_toolbar'
-import { PresenceBar } from '../../components/presence_bar'
 import { ActivityPanel, type ActivityFilter } from '../../components/activity_panel'
-import { IdentityChip } from '../../components/identity_chip'
 import { ClaimBanner } from '../../components/claim_banner'
-import { HeaderMenu } from '../../components/header_menu'
+import type { EditorMode } from '../../components/mode_control'
+import type { ThemeName } from '../../lib/theme'
+import { CommentRecovery } from '../../components/comment_recovery'
+import { DocumentHeader } from '../../components/document_header'
+import { VersionUpdateButton } from '../../components/version_update_button'
 import { DocumentWidthHandle } from '../../components/document_width_handle'
-import {
-  MODE_SHORTCUTS,
-  ModeControl,
-  type EditorMode,
-} from '../../components/mode_control'
-import { SharePopover } from '../../components/share_popover'
-import {
-  MobileDock,
-  MobileSheet,
-  SuggestionSheetList,
-  type SheetKind,
-} from '../../components/mobile_dock'
+import { MobileDock, MobileSheet, SuggestionSheetList } from '../../components/mobile_dock'
+import { useDocumentAppearance } from './use_document_appearance'
+import { useDocumentMode, useReadModeFallback } from './use_document_mode'
+import { useDocumentTick } from './use_document_tick'
+import { useDocumentWebmcp } from './use_document_webmcp'
+import { useMobileSheets } from './use_mobile_sheets'
+import { usePanelPreferences } from './use_panel_preferences'
+import { useDocumentShortcuts } from './use_document_shortcuts'
+import { useEditorPresence } from './use_editor_presence'
+import { useDocumentChannel } from './use_document_channel'
+import { useReviewHighlight, useTextTargeting } from './use_text_targeting'
 import { useSuggestionReview } from './use_suggestion_review'
 import { useDocumentIdentity } from './use_document_identity'
 import { useFollowPresence } from './use_follow_presence'
@@ -66,13 +47,7 @@ import { useHighlighter } from './use_highlighter'
 import { useFloatingChrome, type TextTarget } from './use_floating_chrome'
 import { NativeDocBridge } from './native_doc_bridge'
 import { StagedDocumentEditor } from './staged_document_editor'
-import type { ReviewableSuggestion } from '../../components/suggestion_card'
-import { useMetaChannel } from '../../lib/use_meta_channel'
-import { useMediaQuery } from '../../lib/use_media_query'
 import { useIsClient } from '../../lib/use_is_client'
-import { useWebmcpTools } from '../../lib/use_webmcp_tools'
-import { executeManifestTool } from '../../lib/webmcp_execute'
-import { executeEditorTool } from '../../lib/webmcp_editor'
 import type { WebmcpManifest } from '../../lib/webmcp'
 import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
@@ -87,14 +62,8 @@ import type {
   WritingPassPayload,
   WritingReviewerPayload,
 } from '../../types/payloads'
-import { setCookie, setCookieFlag } from '../../lib/cookies'
-import { applyTheme, type ThemeName } from '../../lib/theme'
-import { matchesShortcut } from '../../lib/shortcuts'
-import { ThemePicker, ThemeSwitcher } from '../../components/theme_picker'
-import {
-  RICH_BLOCK_WIDTH_EVENT,
-  type RichBlockWidthEventDetail,
-} from '../../editor/rich_block_width'
+import { setCookie } from '../../lib/cookies'
+import { ThemePicker } from '../../components/theme_picker'
 import './show.css'
 
 export interface DocumentProps {
@@ -159,33 +128,8 @@ export interface DocumentProps {
   nativeApp: SharedProps['nativeApp']
 }
 
-// Tells a browser agent which capabilities in a result are the human viewer's
-// (this tab) versus its own anonymous ones (the API body's `ownership`).
-const VIEWER_CONTEXT_NOTE =
-  "These are the human viewer's capabilities in this tab. Your own capabilities as an anonymous agent are the ownership object in the API body."
-
 const EMPTY_REVIEWERS: WritingReviewerPayload[] = []
 const EMPTY_PACKS: WritingPackPayload[] = []
-
-const documentModePath = (slug: string, mode: EditorMode) =>
-  `/d/${encodeURIComponent(slug)}${mode === 'read' ? '' : `/${mode}`}`
-
-const availableDocumentModes = (canWrite: boolean, canComment: boolean): EditorMode[] => {
-  if (canWrite) return ['edit', 'suggest', 'comment', 'read']
-  if (canComment) return ['comment', 'read']
-  return ['read']
-}
-
-// Server-side anchor cap is 10 KB; a truncated anchor still matches as a
-// prefix within the block (findTextRange matches the exact search string).
-// Single encode + byte slice; a byte-boundary cut mid-codepoint decodes to
-// a trailing U+FFFD that would break prefix matching, so strip it.
-const ANCHOR_BYTE_CAP = 10 * 1024
-const capAnchor = (text: string): string => {
-  const bytes = new TextEncoder().encode(text)
-  if (bytes.length <= ANCHOR_BYTE_CAP) return text
-  return new TextDecoder().decode(bytes.slice(0, ANCHOR_BYTE_CAP)).replace(/�+$/, '')
-}
 
 export default function DocumentShow({
   document: doc,
@@ -221,7 +165,6 @@ export default function DocumentShow({
   // Server-derived first-H1 title so the header reads correctly on first paint;
   // the editor keeps it live via onTitleChange once it mounts.
   const [documentTitle, setDocumentTitle] = useState(doc.display_title || doc.title)
-  const [newVersionAvailable, setNewVersionAvailable] = useState(false)
   // The staged (image-settled) editor handle, reported by StagedDocumentEditor.
   const [handle, setHandle] = useState<EditorHandle | null>(null)
   const [spans, setSpans] = useState<ProvenanceSpan[]>([])
@@ -229,87 +172,19 @@ export default function DocumentShow({
   // click-to-comment, AI review) — one cell, structurally mutually exclusive.
   const [textTarget, setTextTarget] = useState<TextTarget | null>(null)
   const viewRef = useRef<EditorView | null>(null)
-  const textTargetRef = useRef(textTarget)
-  textTargetRef.current = textTarget
-  const reviewTrigger = useRef<HTMLElement | null>(null)
-  const navigatingReview = useRef(false)
-  const [reviewNotice, setReviewNotice] = useState('')
   // Editor-originated notices (refused oversized edit, snapshot refused as
   // too large); share the doc-notice slot with suggestion notices.
   const [editorNotice, setEditorNotice] = useState<string | null>(null)
   const [unsavedEdit, setUnsavedEdit] = useState(false)
-  // Hydration-safe init from server-rendered prefs: cookies supply panel/focus/
-  // width while the URL supplies mode, so SSR and the first client render agree.
-  const [panelOpen, setPanelOpen] = useState(ui.panel_open)
-  const [focusMode, setFocusMode] = useState(ui.focus_mode)
-  const [activityFilter, setActivityFilter] = useState(ui.activity_filter)
-  const [commentsResolved, setCommentsResolved] = useState(ui.comments_resolved)
-  const changeCommentsResolved = (value: boolean) => {
-    setCommentsResolved(value)
-    setCookieFlag('pruf_comments_resolved', value)
-  }
-  const [activityExpanded, setActivityExpanded] = useState(ui.activity_expanded)
-  const activityProps = {
-    activities,
-    filter: activityFilter,
-    expanded: activityExpanded,
-    onFilterChange: (value: ActivityFilter) => {
-      setActivityFilter(value)
-      setCookie('pruf_activity_filter', value)
-    },
-    onExpandedChange: (value: boolean) => {
-      setActivityExpanded(value)
-      setCookieFlag('pruf_activity_expanded', value)
-    },
-  }
-  const [theme, setTheme] = useState(ui.theme)
-  const changeTheme = useCallback((next: ThemeName) => {
-    applyTheme(next)
-    setTheme(next)
-  }, [])
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-  }, [theme])
-  const [documentWidth, setDocumentWidth] = useState<number | null>(ui.document_width)
-  const [richContentWidth, setRichContentWidth] = useState<number | null>(ui.rich_content_width)
-
-  useEffect(() => {
-    const handleRichBlockWidth = (event: Event) => {
-      const detail = (event as CustomEvent<RichBlockWidthEventDetail>).detail
-      setRichContentWidth(detail.width)
-      if (detail.commit) setCookie('pruf_rich_width', detail.width === null ? 'default' : String(detail.width))
-    }
-    window.addEventListener(RICH_BLOCK_WIDTH_EVENT, handleRichBlockWidth)
-    return () => window.removeEventListener(RICH_BLOCK_WIDTH_EVENT, handleRichBlockWidth)
-  }, [])
-  // Demo doc always opens in Edit and stays locked there. Ordinary documents
-  // take mode directly from the Inertia page props/history entry.
-  const demoModeLocked = doc.slug === 'demo'
-  const mode = demoModeLocked ? 'edit' : ui.mode
-  const availableModes = useMemo(
-    () => availableDocumentModes(ownership.can_write, ownership.can_comment),
-    [ownership.can_comment, ownership.can_write],
-  )
-  const modeAvailable = availableModes.includes(mode)
-  const effectiveMode: EditorMode = modeAvailable ? mode : 'read'
-  const modeLocked = demoModeLocked || availableModes.length === 1
-  const changeMode = useCallback((nextMode: EditorMode) => {
-    if (modeLocked || !availableModes.includes(nextMode) || nextMode === mode) return
-
-    // This is an Inertia client-side visit: it pushes URL + props into Inertia
-    // history without fetching or remounting the collaborative editor. Native
-    // Back/Forward restores the matching ui.mode from that history entry.
-    router.push<DocumentProps>({
-      url: documentModePath(doc.slug, nextMode),
-      props: (props) => ({
-        ...props,
-        ui: { ...props.ui, mode: nextMode },
-      }),
-      preserveState: true,
-      preserveScroll: true,
+  const { theme, changeTheme, documentWidth, setDocumentWidth, pageStyle } =
+    useDocumentAppearance(ui)
+  const { availableModes, effectiveMode, demoModeLocked, modeLocked, isReading, changeMode } =
+    useDocumentMode({
+      slug: doc.slug,
+      urlMode: ui.mode,
+      canWrite: ownership.can_write,
+      canComment: ownership.can_comment,
     })
-  }, [availableModes, doc.slug, mode, modeLocked])
-  const isReading = effectiveMode === 'read'
   // Compound writing rides inside Comment mode for featured accounts.
   const showCompound = effectiveMode === 'comment' && writingAvailable
   const connectionIdentity = viewer.account ? `account:${viewer.account.id}` : 'guest'
@@ -319,29 +194,7 @@ export default function DocumentShow({
   const handleRef = useRef<EditorHandle | null>(null)
   handleRef.current = handle
 
-  // Review-surface recompute signal, re-derived whenever the Yjs doc
-  // changes. The Yjs 'update' event is the signal — NOT the Milkdown
-  // listener, which skips addToHistory:false transactions and therefore
-  // never fires for remote collaborators' changes (a passive window would
-  // never see new cards). rAF-coalesced so a burst of keystrokes triggers
-  // one recompute.
-  const [docTick, setDocTick] = useState(0)
-  useEffect(() => {
-    if (!handle) return
-    let raf = 0
-    const bump = () => {
-      if (raf) return
-      raf = requestAnimationFrame(() => {
-        raf = 0
-        setDocTick((tick) => tick + 1)
-      })
-    }
-    handle.ydoc.on('update', bump)
-    return () => {
-      if (raf) cancelAnimationFrame(raf)
-      handle.ydoc.off('update', bump)
-    }
-  }, [handle])
+  const docTick = useDocumentTick(handle)
 
   const {
     items: reviewItems,
@@ -359,8 +212,6 @@ export default function DocumentShow({
     identityName: identity.name,
     docTick,
   })
-  const reviewItemsRef = useRef(reviewItems)
-  reviewItemsRef.current = reviewItems
 
   const {
     reloadPass,
@@ -390,41 +241,18 @@ export default function DocumentShow({
     if (!live) throw new Error('Document editor is not ready')
     await downloadDocumentHtml(live.editor, documentTitle)
   }, [documentTitle])
-  // handleSelection is a stable callback — it reads the live mode via ref.
+  // Stable callbacks read the live mode and ownership through these.
   const modeRef = useRef(effectiveMode)
   modeRef.current = effectiveMode
-
-  // WebMCP: register this document's tools once per slug (KTD5). Mode
-  // switches and partial reloads re-render without remounting, so the
-  // executor reads the live mode and ownership through refs instead of
-  // closing over them at registration time.
   const ownershipRef = useRef(ownership)
   ownershipRef.current = ownership
-  useWebmcpTools({
-    key: doc.slug,
-    tools: webmcp.tools,
-    execute: (tool, args, signal) => {
-      const { yours, can_write, can_comment, link_access } = ownershipRef.current
-      const viewerContext = {
-        ownership: { yours, can_write, can_comment, link_access },
-        mode: modeRef.current,
-        share_url: webmcp.share_url,
-        note: VIEWER_CONTEXT_NOTE,
-      }
-      // Editor tools run in-page against the live editor; only this page
-      // holds the handle, so the interpreter never sees them (KTD1–KTD3).
-      if (tool.kind === 'editor') {
-        return executeEditorTool(tool, args, {
-          handle: handleRef.current,
-          canWrite: can_write,
-          slug: doc.slug,
-          contentFormat: doc.content_format,
-          signal,
-          viewerContext,
-        })
-      }
-      return executeManifestTool(tool, args, { signal, viewerContext })
-    },
+  useDocumentWebmcp({
+    slug: doc.slug,
+    contentFormat: doc.content_format,
+    webmcp,
+    handleRef,
+    modeRef,
+    ownershipRef,
   })
   // Leaving Comment mode dismisses any pending click-to-comment affordance.
   useEffect(() => {
@@ -433,22 +261,16 @@ export default function DocumentShow({
     }
   }, [effectiveMode])
 
-  // Compact or coarse-pointer screens: rail and margin cards give way to
-  // anchor markers, a bottom dock, and sheets — the full product, rearranged
-  // for one hand. The pointer branch catches wide landscape iPads. Masked by isClient
-  // so the first render is the desktop layout on both server and client (the
-  // matchMedia read happens only after mount) — the responsive collapse then
-  // applies one frame later, matching the editor mount.
-  const rawIsMobile = useMediaQuery('(max-width: 72rem), (hover: none) and (pointer: coarse)')
-  const isMobile = isClient && rawIsMobile
-  const [activeSheet, setActiveSheet] = useState<SheetKind | null>(null)
-  const [sheetFocusKey, setSheetFocusKey] = useState<string | null>(null)
-  const isMobileRef = useRef(isMobile)
-  isMobileRef.current = isMobile
-
-  useEffect(() => {
-    if (!isMobile) setActiveSheet(null)
-  }, [isMobile])
+  const {
+    isMobile,
+    activeSheet,
+    setActiveSheet,
+    toggleSheet,
+    closeSheet,
+    sheetFocusKey,
+    setSheetFocusKey,
+    openSuggestionSheet,
+  } = useMobileSheets(isClient)
 
   // Read mode has no text-targeted or review actions. Clear anything opened
   // in another mode so switching always lands on a clean document view.
@@ -458,7 +280,7 @@ export default function DocumentShow({
     setTextTarget(null)
     setSuggestionNotice(null)
     setActiveSheet(null)
-  }, [isReading, setSuggestionNotice])
+  }, [isReading, setActiveSheet, setSuggestionNotice])
 
   useEffect(() => {
     if (!handle || !isReading) return
@@ -477,304 +299,52 @@ export default function DocumentShow({
 
   const { peers, followingClientId, toggleFollow } = useFollowPresence(handle)
 
-  // Persist cookie-backed prefs on change so their next SSR paint matches.
-  // Mode is intentionally absent: its shareable URL and Inertia history entry
-  // are the durable source of truth now.
-  useEffect(() => {
-    setCookieFlag('pruf_panel', panelOpen)
-  }, [panelOpen])
-  useEffect(() => {
-    setCookieFlag('pruf_focus', focusMode)
-  }, [focusMode])
+  const {
+    panelOpen,
+    togglePanel,
+    focusMode,
+    setFocusMode,
+    toggleFocus,
+    commentsResolved,
+    changeCommentsResolved,
+    activityPreferences,
+  } = usePanelPreferences(ui)
 
-  // An owner may lock editing while another viewer is on a write-mode URL.
-  // Replace (rather than push) that now-invalid entry with canonical Read so
-  // Back cannot return the viewer to an unavailable mode.
-  useEffect(() => {
-    if (demoModeLocked || availableModes.includes(ui.mode)) return
-
-    router.replace<DocumentProps>({
-      url: documentModePath(doc.slug, 'read'),
-      props: (props) => ({
-        ...props,
-        ui: { ...props.ui, mode: 'read' },
-      }),
-      preserveState: true,
-      preserveScroll: true,
-    })
-  }, [availableModes, demoModeLocked, doc.slug, ui.mode])
-
-  // ⌘1–4 selects Edit/Suggest/Comment/Read. ⌘\ toggles the side panel,
-  // and ⌘. toggles suggestion focus. Control mirrors Command for parity.
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (matchesShortcut(event, 'Period', true)) {
-        event.preventDefault()
-        changeTheme(theme === 'proof' ? 'whitey' : 'proof')
-        return
-      }
-      const modeCode = Object.keys(MODE_SHORTCUTS).find((code) => matchesShortcut(event, code))
-      const shortcutMode = modeCode ? MODE_SHORTCUTS[modeCode] : undefined
-      if (shortcutMode) {
-        if (modeLocked || !availableModes.includes(shortcutMode)) return
-        event.preventDefault()
-        changeMode(shortcutMode)
-        return
-      }
-      if (matchesShortcut(event, 'Backslash')) {
-        event.preventDefault()
-        setPanelOpen((open) => !open)
-      } else if (matchesShortcut(event, 'Period')) {
-        event.preventDefault()
-        setFocusMode((focus) => !focus)
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [availableModes, changeMode, changeTheme, modeLocked, theme])
-
-  // Identity state is the source of truth for the live editor surfaces:
-  // re-applied whenever the handle arrives or the identity changes.
-  // Idempotent — re-writing the same awareness state is a no-op for peers.
-  useEffect(() => {
-    if (!handle) return
-    handle.provider.awareness.setLocalStateField('user', identity)
-    handle.editor.action((ctx) => ctx.set(provenanceIdentityCtx.key, { name: identity.name }))
-  }, [handle, identity])
-
-  // Agent pseudo-cursors track the presences prop.
-  useEffect(() => {
-    if (!handle) return
-    refreshAgentCursors(
-      handle.editor,
-      presences.map((p) => ({ name: p.agent_name, location: p.location_text })),
-    )
-  }, [handle, presences])
-
-  // While agents are shown, poll so silent ones expire from the presence bar.
-  const presencePoll = usePoll(
-    45000,
-    { only: ['presences'], async: true },
-    { autoStart: false },
-  )
-  useEffect(() => {
-    if (presences.length > 0) presencePoll.start()
-    else presencePoll.stop()
-  }, [presences.length, presencePoll])
-
-  // When the doc is deleted (live broadcast, or channel rejection after an
-  // offline delete), leave the editor cleanly instead of 404ing in place.
-  // Stop the presence poll first — Inertia's navigation is async, and a poll
-  // firing in that window would partial-reload the destroyed slug into a 404.
-  const onDocumentGone = useCallback(() => {
-    presencePoll.stop()
-    router.visit('/')
-  }, [presencePoll])
-  const reloadEditingAccess = useCallback(() => {
-    router.reload({
-      only: ownership.yours ? ['ownership'] : ['document', 'ownership'],
-      async: true,
-    })
-  }, [ownership.yours])
-  const reloadChangedAccess = useCallback(() => {
-    router.reload({ only: ['document', 'ownership', 'viewer'], async: true })
-  }, [])
-  const reloadAfterContentReset = useCallback(() => {
-    presencePoll.stop()
-    window.location.reload()
-  }, [presencePoll])
-  useMetaChannel(doc.slug, {
-    onDeleted: onDocumentGone,
-    onTitle: setDocumentTitle,
-    onVersionAvailable: () => setNewVersionAvailable(true),
-    onEditingLock: reloadEditingAccess,
-    onContentReset: reloadAfterContentReset,
-    onWritingPass: reloadPass,
-    connectionIdentity,
+  useReadModeFallback({ slug: doc.slug, urlMode: ui.mode, availableModes, demoModeLocked })
+  useDocumentShortcuts({
+    theme,
+    changeTheme,
+    availableModes,
+    modeLocked,
+    changeMode,
+    togglePanel,
+    toggleFocus,
   })
 
-  useEffect(() => {
-    if (!handle) return
-    const provider = handle.provider
-    provider.on('write-denied', reloadChangedAccess)
-    return () => {
-      provider.off('write-denied', reloadChangedAccess)
-    }
-  }, [handle, reloadChangedAccess])
+  const presencePoll = useEditorPresence(handle, identity, presences)
+  const { newVersionAvailable, onDocumentGone, reloadChangedAccess, reloadAfterContentReset } =
+    useDocumentChannel({
+      slug: doc.slug,
+      handle,
+      yours: ownership.yours,
+      connectionIdentity,
+      presencePoll,
+      onTitle: setDocumentTitle,
+      onWritingPass: reloadPass,
+    })
 
-  // Priority-ordered dispatch: text selection → mobile suggestion tap →
-  // click-to-comment → AI review span. Exactly one target (or none) comes
-  // out — the single textTarget cell makes that mutual exclusion structural.
-  const handleSelection = useCallback((view: EditorView, cause: 'selection' | 'document' = 'selection') => {
-    viewRef.current = view
-    if (navigatingReview.current || modeRef.current === 'read') return
-    if (cause === 'document') {
-      const current = textTargetRef.current
-      if (current?.kind === 'review') {
-        if (!resolveReviewTarget(view.state, current.target)) {
-          setTextTarget(null)
-          setReviewNotice('That passage changed. Choose text to review again.')
-        }
-        return
-      }
-      // A remote edit or undo must not reopen dismissed guidance.
-      if (!current) return
-    }
-    setReviewNotice('')
-    reviewTrigger.current = null
-    const { from, to, empty } = view.state.selection
-
-    // Only require focus when the view is editable: in Comment mode the
-    // root is contenteditable=false, which browsers never focus, so
-    // hasFocus() is always false and the focus gate would make the selection
-    // toolbar unreachable in the read-only mode.
-    if (view.editable && !view.hasFocus()) {
-      setTextTarget(null)
-      return
-    }
-
-    if (!empty) {
-      const text = view.state.doc.textBetween(from, to, '\n')
-      if (text.trim().length > 0) {
-        setTextTarget({ kind: 'selection', text })
-        return
-      }
-    }
-
-    // Mobile: tapping inside a pending suggestion's tinted anchor opens its
-    // sheet card — the touch equivalent of glancing at the margin. The
-    // review items carry ranges from the same parser-aware matcher the
-    // cards anchor with, resolved once per doc version, so this is a plain
-    // containment check instead of per-suggestion document scans.
-    if (isMobileRef.current && empty) {
-      const pos = view.state.selection.head
-      const hit = reviewItemsRef.current.find(
-        (item) =>
-          !item.inline && item.range && pos >= item.range.from && pos <= item.range.to,
-      )
-      if (hit) {
-        setSheetFocusKey(hit.key)
-        setActiveSheet('suggestions')
-        setTextTarget(null)
-        return
-      }
-    }
-
-    // Comment mode: a bare click offers commenting on the clicked block —
-    // no drag-selection needed (Google-Docs click-to-comment). Only
-    // non-empty textblocks; clicks on empty paragraphs, images, or rules
-    // show nothing. Selection-based commenting above keeps working.
-    if (modeRef.current === 'comment' && empty) {
-      const block = view.state.selection.$head.parent
-      const text = block.isTextblock ? block.textContent : ''
-      if (text.trim().length > 0) {
-        setTextTarget({ kind: 'comment', text: capAnchor(text) })
-        return
-      }
-    }
-
-    const span = aiSpanAt(view.state)
-    const target = span ? bindReviewTarget(view.state, span) : null
-    setTextTarget(target ? { kind: 'review', target, keyboard: false } : null)
-  }, [])
-
-  // Review/selection chrome belongs to the text that opened it. ProseMirror
-  // does not dispatch a selection transaction when focus moves to page
-  // chrome, so explicitly clear these transient targets on outside clicks.
-  // Keep clicks on the floating chrome itself alive so its actions still run.
-  useEffect(() => {
-    let editorClickRaf = 0
-    const clearTextTarget = (event: PointerEvent) => {
-      const target = event.target
-      if (!(target instanceof Element)) return
-      if (target.closest('.milkdown .ProseMirror')) {
-        // A dismissed popover leaves ProseMirror's cursor where it was. A
-        // second click on that exact span therefore produces no selection
-        // transaction, so explicitly re-evaluate provenance after the click.
-        if (target.closest('[data-provenance]')) {
-          if (editorClickRaf) cancelAnimationFrame(editorClickRaf)
-          editorClickRaf = requestAnimationFrame(() => {
-            editorClickRaf = 0
-            // Not viewRef: a first click where the cursor already starts
-            // reports no selection, so viewRef can still be null here.
-            try {
-              const view = handleRef.current?.editor.action((ctx) => ctx.get(editorViewCtx))
-              if (view) handleSelection(view)
-            } catch {
-              // editor torn down mid-navigation
-            }
-          })
-        }
-        return
-      }
-      if (
-        target.closest('.selection-toolbar, .review-popover, .comment-composer--anchored, .prov-summary')
-      ) {
-        return
-      }
-
-      setTextTarget(null)
-    }
-
-    window.addEventListener('pointerdown', clearTextTarget, true)
-    return () => {
-      if (editorClickRaf) cancelAnimationFrame(editorClickRaf)
-      window.removeEventListener('pointerdown', clearTextTarget, true)
-    }
-  }, [handleSelection])
-
-  const closeReview = useCallback(() => {
-    setTextTarget(null)
-    textTargetRef.current = null
-    clearHighlight('review-target')
-    const trigger = reviewTrigger.current
-    if (trigger?.isConnected) trigger.focus({ preventScroll: true })
-    else viewRef.current?.focus()
-  }, [])
-
-  const navigateProvenance = useCallback((filter: ProvenanceFilter, trigger: HTMLButtonElement, keyboard: boolean) => {
-    const handle = handleRef.current
-    if (!handle || modeRef.current === 'read') return
-    const view = handle.editor.action((ctx) => ctx.get(editorViewCtx))
-    viewRef.current = view
-    const span = nextProvenanceRange(view.state, filter)
-    clearHighlight('review-target')
-    if (!span) {
-      setTextTarget(null)
-      textTargetRef.current = null
-      setReviewNotice(filter === 'unreviewed'
-        ? 'All caught up — no unreviewed AI text.'
-        : `No ${filter === 'human' ? 'human' : 'AI'} text in this document.`)
-      return
-    }
-    const target = span.attrs.kind === 'ai' ? bindReviewTarget(view.state, span) : null
-    navigatingReview.current = true
-    view.focus()
-    // Reveal the beginning, not the far end of a multi-screen passage.
-    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, span.to, span.from)).scrollIntoView())
-    const start = view.coordsAtPos(span.from)
-    window.scrollBy({ top: start.top - Math.min(300, window.innerHeight * 0.4), behavior: 'instant' })
-    navigatingReview.current = false
-    reviewTrigger.current = trigger
-    const next: TextTarget | null = target ? { kind: 'review', target, keyboard } : null
-    textTargetRef.current = next
-    setTextTarget(next)
-    setReviewNotice(span.attrs.kind === 'human' ? 'Human-written passage selected.' : '')
-    if (!target) trigger.focus({ preventScroll: true })
-  }, [])
-
-  const handleAdvance = useCallback((state: ReviewState) => {
-    const view = viewRef.current
-    const current = textTargetRef.current
-    if (!view || current?.kind !== 'review' || modeRef.current !== 'edit' || !ownershipRef.current.can_write) return
-    const span = resolveReviewTarget(view.state, current.target)
-    if (!span) {
-      setTextTarget(null)
-      setReviewNotice('That passage changed. Choose text to review again.')
-      return
-    }
-    applyReviewState(view, span, state)
-  }, [])
+  const { reviewNotice, handleSelection, closeReview, navigateProvenance, handleAdvance } =
+    useTextTargeting({
+      viewRef,
+      handleRef,
+      modeRef,
+      ownershipRef,
+      textTarget,
+      setTextTarget,
+      reviewItems,
+      isMobile,
+      openSuggestionSheet,
+    })
 
   const {
     failedComment, retryFailedComment, checkFailedComment, dismissFailedComment,
@@ -820,7 +390,7 @@ export default function DocumentShow({
   // opening its sheet when a selection chooses "Comment".
   useEffect(() => {
     if (isMobile && composerAnchor !== null) setActiveSheet('comments')
-  }, [isMobile, composerAnchor])
+  }, [isMobile, composerAnchor, setActiveSheet])
 
   const { highlightGroups, highlightSwatches, jumpToHighlight } = useHighlighter({
     handle,
@@ -858,35 +428,36 @@ export default function DocumentShow({
     isMobile,
   })
 
-  useEffect(() => {
-    const view = viewRef.current
-    const range = reviewActive && liveReviewSpan && view ? domRange(view, liveReviewSpan.from, liveReviewSpan.to) : null
-    setHighlight('review-target', range ? [range] : [])
-    return () => clearHighlight('review-target')
-  }, [reviewActive, liveReviewSpan, docTick])
-
-  useEffect(() => {
-    if (textTarget?.kind !== 'review') return
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented) return
-      event.preventDefault()
-      closeReview()
-    }
-    window.addEventListener('keydown', escape)
-    return () => window.removeEventListener('keydown', escape)
-  }, [textTarget, closeReview])
+  useReviewHighlight({ viewRef, textTarget, reviewActive, liveReviewSpan, docTick, closeReview })
 
   // A marker tap opens the page's own sheet, so that one handler joins the
   // cards here. The object identity is a remeasure signal (see useCompoundReview).
   const findingCards = useMemo<FindingCardsSource>(() => ({
     ...findingCardsBase,
     onMarkerSelect: isMobile ? () => setActiveSheet('reviewers') : undefined,
-  }), [findingCardsBase, isMobile])
+  }), [findingCardsBase, isMobile, setActiveSheet])
 
-  const documentStyle = {
-    ...(documentWidth === null ? {} : { '--document-width': `${documentWidth}px` }),
-    ...(richContentWidth === null ? {} : { '--rich-content-width': `${richContentWidth}px` }),
-  } as CSSProperties
+  const exportReady = Boolean(handle)
+  const provenanceSummary = (
+    <ProvenanceSummaryChip spans={spans} ready={exportReady} onNavigate={navigateProvenance} />
+  )
+  const commentAction = (label: string, text: string) => ({
+    label,
+    onClick: () => {
+      openComposer(text)
+      setTextTarget(null)
+    },
+  })
+  const commentsPanelProps = {
+    showResolved: commentsResolved,
+    onShowResolvedChange: changeCommentsResolved,
+    resolvingComments,
+    comments,
+    anchoredIds,
+    onSubmit: submitComment,
+    onResolve: resolveComment,
+  }
+  const activityProps = { activities, ...activityPreferences }
 
   return (
     <>
@@ -898,121 +469,58 @@ export default function DocumentShow({
         modeLocked={modeLocked}
         isReading={isReading}
         changeMode={changeMode}
-        onToggleActivity={() =>
-          setActiveSheet((current) => (current === 'activity' ? null : 'activity'))
-        }
+        onToggleActivity={() => toggleSheet('activity')}
         onOpenTheme={() => setActiveSheet('theme')}
-        exportReady={Boolean(handle)}
+        exportReady={exportReady}
         onExportMarkdown={exportMarkdown}
         onExportHtml={exportHtml}
       />
       <div
         className={`doc-page ${panelOpen ? '' : 'is-panel-hidden'} ${isReading ? 'is-read-mode' : ''}`}
-        style={Object.keys(documentStyle).length === 0 ? undefined : documentStyle}
+        style={pageStyle}
       >
         {/* The update prompt normally lives in the (native-hidden) header; it
             is the only trigger for reloading an owner-reset or newly deployed
             document, so in the app it floats on its own. */}
         {nativeApp && newVersionAvailable && (
-          <button
-            type="button"
-            className="version-update version-update--native"
-            onClick={() => window.location.reload()}
-          >
-            New version · Update
-          </button>
+          <VersionUpdateButton className="version-update version-update--native" />
         )}
-        <header className="doc-header native-hidden">
-          <div className="doc-header-left">
-            {/* The nav bar's leading button (-> #native-doc-back) owns back in
-                the native shell now that this header hides there; the old
-                header back button had no other consumer. */}
-            <Link href="/" className="doc-home" aria-label="Home">
-              T.
-            </Link>
-            <span className="doc-title">{documentTitle}</span>
-            <ModeControl
-              mode={effectiveMode}
-              onChange={changeMode}
-              availableModes={availableModes}
-              locked={modeLocked}
-              lockedReason={
-                modeLocked && !demoModeLocked
-                  ? 'Can view — the owner limited this link to reading'
-                  : undefined
-              }
-            />
-            <span
-              className={`doc-status doc-status--${status}`}
-              title={status === 'live' ? 'Connected — edits sync live' : 'Connecting…'}
-            />
-            {newVersionAvailable && (
-              <button
-                type="button"
-                className="version-update"
-                onClick={() => window.location.reload()}
-              >
-                New version · Update
-              </button>
-            )}
-          </div>
-          <div className="doc-header-right">
-            {/* ≤3 groups: presence/identity · Share · ⋯ menu. Presence sits on
-                the cluster's open left edge (its reserved lane blends into the
-                header's free middle space) and your own identity chip anchors
-                the right, next to Share. */}
-            <div className="doc-header-people">
-              <PresenceBar
-                humans={peers}
-                agents={presences}
-                compact={isMobile}
-                followingClientId={followingClientId}
-                onFollow={toggleFollow}
-              />
-              {!isReading && <ProvenanceSummaryChip spans={spans} ready={Boolean(handle)} onNavigate={navigateProvenance} />}
-              <IdentityChip
-                identity={identity}
-                guest={guest}
-                authenticated={Boolean(viewer.account)}
-                onRenamed={handleRenamed}
-              />
-            </div>
-            {!isReading && pendingSuggestionCount > 1 && (
-              <button
-                className="accept-all-button"
-                disabled={acceptingAll}
-                onClick={() => void acceptAllSuggestions()}
-                {...nativeHaptic('success')}
-              >
-                {acceptingAll ? 'Accepting…' : `Accept all ${pendingSuggestionCount}`}
-              </button>
-            )}
-            <SharePopover
-              agentsActive={presences.length}
-              exportReady={Boolean(handle)}
-              linkAccess={ownership.link_access}
-              canChangeAccess={ownership.yours}
-              onExportMarkdown={exportMarkdown}
-              onExportHtml={exportHtml}
-              onPrint={printDocument}
-              onOpenChange={setShareOpen}
-            />
-            <ThemeSwitcher theme={theme} onChange={changeTheme} onOpenChange={setThemeOpen} />
-            <HeaderMenu
-              theme={theme}
-              onChangeTheme={changeTheme}
-              panelOpen={panelOpen}
-              onTogglePanel={() => setPanelOpen((open) => !open)}
-              focusMode={focusMode}
-              onToggleFocus={() => setFocusMode((focus) => !focus)}
-              slug={doc.slug}
-              ownership={ownership}
-              claimerName={identity.name}
-              account={viewer.account}
-              feedbackAutomationEnabled={viewer.feedback_automation_enabled}
-            />
-          </div>
-        </header>
+        <DocumentHeader
+          documentTitle={documentTitle}
+          effectiveMode={effectiveMode}
+          availableModes={availableModes}
+          modeLocked={modeLocked}
+          demoModeLocked={demoModeLocked}
+          onChangeMode={changeMode}
+          status={status}
+          newVersionAvailable={newVersionAvailable}
+          peers={peers}
+          presences={presences}
+          isMobile={isMobile}
+          followingClientId={followingClientId}
+          onFollow={toggleFollow}
+          provenanceSummary={!isReading && provenanceSummary}
+          identity={identity}
+          guest={guest}
+          viewer={viewer}
+          onRenamed={handleRenamed}
+          acceptAllCount={isReading ? 0 : pendingSuggestionCount}
+          acceptingAll={acceptingAll}
+          onAcceptAll={acceptAllSuggestions}
+          ownership={ownership}
+          exportReady={exportReady}
+          onExportMarkdown={exportMarkdown}
+          onExportHtml={exportHtml}
+          onShareOpenChange={setShareOpen}
+          theme={theme}
+          onChangeTheme={changeTheme}
+          onThemeOpenChange={setThemeOpen}
+          panelOpen={panelOpen}
+          onTogglePanel={togglePanel}
+          focusMode={focusMode}
+          onToggleFocus={toggleFocus}
+          slug={doc.slug}
+        />
         {!isReading && (
           <ClaimBanner slug={doc.slug} ownership={ownership} claimerName={identity.name} />
         )}
@@ -1033,32 +541,20 @@ export default function DocumentShow({
           </div>
         )}
         {(failedComment || commentNotice) && (
-          <section className="comment-recovery" aria-label="Comment status">
-            {failedComment ? <>
-              <p role="alert">{failedComment.message}</p>
-              {failedComment.anchor && <blockquote className="comment-quote">{failedComment.anchor}</blockquote>}
-              {failedComment.anchor && viewRef.current && !findCommentAnchorRange(viewRef.current.state.doc, failedComment.anchor) && (
-                <p className="comment-scope">Original text changed — retry keeps the quote as context.</p>
-              )}
-              <textarea aria-label="Unsent comment" readOnly value={failedComment.body} />
-              <div className="comment-actions">
-                {failedComment.uncertain
-                  ? <button type="button" disabled={checkingComment} onClick={checkFailedComment}>{checkingComment ? 'Checking…' : 'Check saved comments'}</button>
-                  : <button type="button" disabled={!ownership.can_comment} onClick={retryFailedComment}>Retry comment</button>}
-                {failedComment.uncertain && failedComment.checkedMissing && (
-                  <button type="button" disabled={!ownership.can_comment || checkingComment} onClick={retryFailedComment}>Retry anyway</button>
-                )}
-                <button type="button" onClick={dismissFailedComment}>Discard draft</button>
-              </div>
-              {!ownership.can_comment && <p className="comment-scope">Comment access is no longer available. You can copy your draft.</p>}
-            </> : <>
-              <p role="status">{commentNotice}</p>
-              <button type="button" onClick={clearCommentNotice}>Dismiss</button>
-            </>}
-          </section>
+          <CommentRecovery
+            failedComment={failedComment}
+            retryFailedComment={retryFailedComment}
+            checkFailedComment={checkFailedComment}
+            dismissFailedComment={dismissFailedComment}
+            checkingComment={checkingComment}
+            commentNotice={commentNotice}
+            clearCommentNotice={clearCommentNotice}
+            viewRef={viewRef}
+            canComment={ownership.can_comment}
+          />
         )}
         {!isReading && <div className={`prov-summary-compact ${nativeApp ? 'is-native' : ''}`}>
-          <ProvenanceSummaryChip spans={spans} ready={Boolean(handle)} onNavigate={navigateProvenance} />
+          {provenanceSummary}
         </div>}
         {!isReading && <div className="review-notice" role="status" aria-live="polite">{reviewNotice}</div>}
         <main className="doc-body">
@@ -1137,14 +633,7 @@ export default function DocumentShow({
                   items={reviewItems}
                   handle={handle}
                   focusMode={focusMode || isMobile}
-                  onMarkerSelect={
-                    isMobile
-                      ? (item: ReviewableSuggestion) => {
-                          setSheetFocusKey(item.key)
-                          setActiveSheet('suggestions')
-                        }
-                      : undefined
-                  }
+                  onMarkerSelect={isMobile ? (item) => openSuggestionSheet(item.key) : undefined}
                 />
               </div>
             )}
@@ -1154,18 +643,12 @@ export default function DocumentShow({
               {showCompound && <CompoundPanel {...compoundPanelProps} />}
               {!isReading && (
                 <CommentsPanel
-                  showResolved={commentsResolved}
-                  onShowResolvedChange={changeCommentsResolved}
-                  resolvingComments={resolvingComments}
-                  comments={comments}
+                  {...commentsPanelProps}
                   marginIds={focusMode ? null : anchoredIds}
                   // The desktop composer is the anchored card next to the
                   // selection — the rail keeps the list only.
                   composerAnchor={null}
-                  anchoredIds={anchoredIds}
-                  onSubmit={submitComment}
                   onCancelComposer={closeComposer}
-                  onResolve={resolveComment}
                   onJumpTo={jumpToComment}
                   onHover={hoverAnchor}
                 />
@@ -1189,15 +672,7 @@ export default function DocumentShow({
           <SelectionToolbar
             rootRef={selectionPopover.ref}
             position={selectionPopover.position}
-            actions={[
-              {
-                label: 'Comment',
-                onClick: () => {
-                  openComposer(textTarget.text)
-                  setTextTarget(null)
-                },
-              },
-            ]}
+            actions={[commentAction('Comment', textTarget.text)]}
             swatches={highlightSwatches}
           />
         )}
@@ -1205,15 +680,7 @@ export default function DocumentShow({
           <SelectionToolbar
             rootRef={commentAffordance.ref}
             position={commentAffordance.position}
-            actions={[
-              {
-                label: 'Comment on this paragraph',
-                onClick: () => {
-                  openComposer(textTarget.text)
-                  setTextTarget(null)
-                },
-              },
-            ]}
+            actions={[commentAction('Comment on this paragraph', textTarget.text)]}
           />
         )}
         {!isReading && liveReviewSpan && reviewActive && (
@@ -1243,16 +710,16 @@ export default function DocumentShow({
             commentCount={comments.filter((c) => !c.resolved).length}
             reviewerFindingCount={showCompound ? visibleFindingCount : undefined}
             active={activeSheet}
-            onOpen={(kind) => setActiveSheet((current) => (current === kind ? null : kind))}
+            onOpen={toggleSheet}
           />
         )}
         {showCompound && isMobile && activeSheet === 'reviewers' && (
-          <MobileSheet title="Reviewers" onClose={() => setActiveSheet(null)}>
+          <MobileSheet title="Reviewers" onClose={closeSheet}>
             <CompoundPanel
               {...compoundPanelProps}
               onJumpTo={(finding) => {
                 compoundPanelProps.onJumpTo(finding)
-                setActiveSheet(null)
+                closeSheet()
               }}
             />
           </MobileSheet>
@@ -1261,7 +728,7 @@ export default function DocumentShow({
           <MobileSheet
             title={`Suggestions${reviewItems.length > 0 ? ` · ${reviewItems.length}` : ''}`}
             onClose={() => {
-              setActiveSheet(null)
+              closeSheet()
               setSheetFocusKey(null)
             }}
           >
@@ -1274,31 +741,25 @@ export default function DocumentShow({
           </MobileSheet>
         )}
         {!isReading && isMobile && activeSheet === 'comments' && (
-          <MobileSheet title="Comments" onClose={() => setActiveSheet(null)}>
+          <MobileSheet title="Comments" onClose={closeSheet}>
             <CommentsPanel
-                  showResolved={commentsResolved}
-                  onShowResolvedChange={changeCommentsResolved}
-                  resolvingComments={resolvingComments}
-              comments={comments}
+              {...commentsPanelProps}
               composerAnchor={composerAnchor}
-              anchoredIds={anchoredIds}
-              onSubmit={submitComment}
               onCancelComposer={cancelComposer}
-              onResolve={resolveComment}
               onJumpTo={(comment) => {
                 jumpToComment(comment)
-                setActiveSheet(null)
+                closeSheet()
               }}
             />
           </MobileSheet>
         )}
         {!isReading && isMobile && activeSheet === 'activity' && (
-          <MobileSheet title="Activity" onClose={() => setActiveSheet(null)}>
+          <MobileSheet title="Activity" onClose={closeSheet}>
             <ActivityPanel {...activityProps} />
           </MobileSheet>
         )}
         {activeSheet === 'theme' && (
-          <MobileSheet title="Document theme" onClose={() => setActiveSheet(null)}>
+          <MobileSheet title="Document theme" onClose={closeSheet}>
             <ThemePicker theme={theme} onChange={changeTheme} autoFocus />
           </MobileSheet>
         )}
