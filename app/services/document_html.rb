@@ -9,8 +9,8 @@ class DocumentHtml
   end
 
   class << self
-    def parse(html)
-      within_limits { Nokogiri::HTML5.fragment(html) }
+    def parse(html, max_errors: 0)
+      within_limits { Nokogiri::HTML5.fragment(html, max_errors:) }
     end
 
     def within_limits

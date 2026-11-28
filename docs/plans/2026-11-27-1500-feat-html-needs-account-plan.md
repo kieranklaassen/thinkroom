@@ -55,7 +55,7 @@ Creating or suggesting HTML now needs an account. Today the same writes are open
 - Titles, comments, tags, names and quotes are plain text and are unchanged.
 - No limit on size or nesting and no rendering change.
 - Image uploads are unchanged.
-- `script/html_document_check.mjs` creates an HTML document anonymously and needs a token; `script/` is outside this change, so it is reported instead.
+- `script/html_document_check.mjs` signs in with the check account and authorizes a CLI token before creating and editing its HTML document, after confirming that anonymous HTML creation is refused.
 
 ---
 

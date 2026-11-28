@@ -138,6 +138,10 @@ class HtmlAccountTest < ActionDispatch::IntegrationTest
       post api_doc_suggestions_path(doc.slug), params: { body: "Plain words" }, headers: AGENT, as: :json
       assert_response :created
     end
+    assert_no_difference -> { Suggestion.count } do
+      post api_doc_suggestions_path(html.slug), params: { body: "hello </p></br> world" }, headers: AGENT, as: :json
+      assert_needs_account
+    end
   end
 
   test "a page takes an HTML suggestion from an account only" do
@@ -290,6 +294,47 @@ class HtmlAccountTest < ActionDispatch::IntegrationTest
     get document_mode_path(document.slug, "edit"), headers: BROWSER
     assert_response :success
     assert_not document.ownership_props(nil, viewer_user: account)[:html_needs_account]
+  end
+
+  test "a guest snapshot cannot keep HTML removed from the live document" do
+    document = create_document(content_snapshot: WITH_HTML)
+    YjsPersistence.merge(document, UPDATES["base"], user: account)
+    YjsPersistence.merge(document, UPDATES["remove"], user: account)
+    ydoc = Y::Doc.new
+    ydoc.apply_update(Base64.strict_decode64(UPDATES["base"]))
+    ydoc.apply_update(Base64.strict_decode64(UPDATES["remove"]))
+    sv = Base64.strict_encode64(ydoc.encode_state_vector)
+
+    post document_snapshot_path(document.slug), params: {
+      content: "Hello\n\nWith <mark>note</mark>\n", spans: [], state_vector: sv
+    }, as: :json
+    assert_needs_account
+
+    post document_snapshot_path(document.slug), params: {
+      content: "Hello\n\nWith <mark>note</mark>\n", spans: []
+    }, as: :json
+    assert_response :unprocessable_entity
+  end
+
+  test "signing out disconnects open Action Cable connections for the account" do
+    user = account
+    sign_in_as(user)
+    disconnected = false
+    fake_remote = Object.new
+    fake_remote.define_singleton_method(:disconnect) { disconnected = true }
+    fake_collection = Object.new
+    fake_collection.define_singleton_method(:where) do |identifiers|
+      fake_remote if identifiers[:current_user] == user
+    end
+    original = ActionCable.server.method(:remote_connections)
+    ActionCable.server.define_singleton_method(:remote_connections) { fake_collection }
+    begin
+      delete logout_path
+    ensure
+      ActionCable.server.define_singleton_method(:remote_connections, original)
+    end
+    assert_redirected_to root_path
+    assert disconnected
   end
 
   test "a guest who owns an HTML document still manages it" do

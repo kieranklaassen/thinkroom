@@ -12,6 +12,7 @@ class RawHtmlTest < ActiveSupport::TestCase
     "a list item" => "- one\n- <u>two</u>",
     "a quote" => "> <div>\n> hi",
     "a table cell" => "| a |\n| - |\n| <u>b</u> |",
+    "an extra table column" => "| a |\n| - |\n| x | <a href=\"https://example.com\">link</a> |",
     "a split code span in a table" => "| a | b |\n| - | - |\n| ` | <b> |",
     "a heading" => "# Title <small>x</small>",
     "a link text" => "[<b>x</b>](https://example.com)",
@@ -33,7 +34,16 @@ class RawHtmlTest < ActiveSupport::TestCase
     "valueless suggestion tag" => "<ins data-suggestion-id>x</ins>",
     "invalid highlighter color" => "<span data-highlighter data-color=\"bogus\">x</span>",
     "multiline provenance block" => "<span data-provenance data-kind=\"human\" data-author=\"Ann\" data-state=\"verbatim\">\nplain",
-    "editor markup with more attributes" => "<span data-highlighter data-color=\"blue\" onclick=\"x\">a</span>"
+    "editor markup with more attributes" => "<span data-highlighter data-color=\"blue\" onclick=\"x\">a</span>",
+    "reordered provenance attributes" => '<span data-kind="human" data-provenance data-author="Ann" data-state="verbatim">a</span>',
+    "uppercase provenance tag" => '<SPAN data-provenance data-kind="human" data-author="Ann" data-state="verbatim">a</span>',
+    "single-quoted provenance attributes" => "<span data-provenance data-kind='human' data-author='Ann' data-state='verbatim'>a</span>",
+    "unclosed provenance span" => '<span data-provenance data-kind="human" data-author="Ann" data-state="verbatim">a',
+    "unclosed highlighter span" => '<span data-highlighter data-color="blue">a',
+    "unclosed suggestion tag" => '<ins data-suggestion-id="1" data-author="Ann">a',
+    "non-empty provenance flag attribute" => '<span data-provenance="yes" data-kind="human" data-author="Ann" data-state="verbatim">a</span>',
+    "cross-block provenance close" => "<span data-provenance data-kind=\"human\" data-author=\"Ann\" data-state=\"verbatim\">a\n\n</span>",
+    "reversed editor tags" => '</span><span data-highlighter data-color="blue">'
   }.freeze
 
   PLAIN = {
@@ -90,13 +100,27 @@ class RawHtmlTest < ActiveSupport::TestCase
     end
     assert_empty RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("<div class=\"a\">\n\nhi\n\n</div>")), before)
     assert RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("<div class=\"a\">\n\nhi\n\n</div>\n\n</div>")), before).any?
+    assert RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("<div class=\"a\">hi</div>\n\n</div>")), before).any?
+    assert RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("<div class=\"a\">hi</div></div>")), before).any?
+    assert RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("<div class=\"a\"><a href=\"https://example.com\" x=\"")), before).any?
     assert RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("</section>")), before).any?
   end
 
-  test "a HTML body counts its elements, and plain text has none" do
+  test "a HTML body counts its elements, stray tags and unclosed tags, and plain text has none" do
     assert RawHtml.in_html("<p>hi</p>").any?
     assert RawHtml.in_html("a <!-- c -->").any?
+    assert RawHtml.in_html("hello </p></br> world").any?
+    assert RawHtml.in_html("hello </div> world").any?
+    assert RawHtml.in_html("a <b text").any?
     assert_empty RawHtml.in_html("just text & more")
+    assert_empty RawHtml.in_html("1 < 2 and a < 3")
+  end
+
+  test "live inspection refuses unreadable trees when rendered count disagrees with XML" do
+    updates = JSON.parse(Rails.root.join("test/fixtures/files/html_account_updates.json").read)
+    ydoc = Y::Doc.new
+    ydoc.apply_update(Base64.strict_decode64(updates.fetch("unknown_mark_html_attr")))
+    assert_raises(RawHtml::Unreadable) { RawHtml.in_live(ydoc) }
   end
 
   test "text of any encoding and depth is read" do

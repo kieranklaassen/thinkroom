@@ -10,7 +10,7 @@ class Document < ApplicationRecord
     attr_reader :html
 
     def initialize(html = {})
-      @html = html
+      @html = html.select { |key, _| key.is_a?(String) }
       super(MESSAGE)
     end
   end

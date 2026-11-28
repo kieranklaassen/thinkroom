@@ -13,7 +13,7 @@ class YjsPersistence
 
   class UpdateNotReadyError < StandardError; end
 
-  SEEN_HTML = ActiveSupport::Cache::MemoryStore.new(size: 8.megabytes, expires_in: 2.hours)
+  SEEN_HTML = ActiveSupport::Cache::MemoryStore.new(size: 8.megabytes, expires_in: 15.minutes)
 
   # Bounded 64-stripe in-process lock table. ActionCable handles channel
   # actions on a thread pool; without this, two concurrent receives could
@@ -132,7 +132,11 @@ class YjsPersistence
               raise Document::StaleSeedClaimError, "Another seed is already stored."
             end
 
-            refuse_added_html!(document, update, token:) unless html
+            if html
+              invalidate_seen_html_if_reduced!(document, update)
+            else
+              refuse_added_html!(document, update, token:)
+            end
 
             # The durable act: an O(update) append. No Y::Doc is built on
             # this path — folds materialize the tail into the snapshot
@@ -233,21 +237,28 @@ class YjsPersistence
           # so unfolded tail rows are folded into the snapshot first.
           folded_ydoc = perform_fold(document) if document.yjs_document_updates.exists?
 
-          if client_state && document.yjs_state.present?
-            server_state = begin
-              decode_state_vector(server_state_vector(document))
-            rescue ArgumentError, CorruptStateError
-              # A corrupt stored vector (or, on legacy rows without a
-              # stored vector, a corrupt blob) must not masquerade as
-              # client staleness — heal and derive the truth instead.
-              decode_state_vector(load_or_heal_ydoc(document).encode_state_vector)
-            end
-            current = server_state.all? do |client_id, clock|
-              client_state.fetch(client_id, 0) >= clock
-            end
-            unless current
-              payload[:outcome] = "rejected_stale_vector"
-              return false
+          if document.yjs_state.present?
+            if client_state.nil?
+              if user.nil? && RawHtml.in_markdown(content).any?
+                payload[:outcome] = "rejected_stale_vector"
+                return false
+              end
+            else
+              server_state = begin
+                decode_state_vector(server_state_vector(document))
+              rescue ArgumentError, CorruptStateError
+                # A corrupt stored vector (or, on legacy rows without a
+                # stored vector, a corrupt blob) must not masquerade as
+                # client staleness — heal and derive the truth instead.
+                decode_state_vector(load_or_heal_ydoc(document).encode_state_vector)
+              end
+              current = server_state.all? do |client_id, clock|
+                client_state.fetch(client_id, 0) >= clock
+              end
+              unless current
+                payload[:outcome] = "rejected_stale_vector"
+                return false
+              end
             end
           end
 
@@ -434,15 +445,17 @@ class YjsPersistence
     # Callers hold both locks.
     def refuse_added_html!(document, update, token:)
       document.assert_html_account!(nil)
-      ydoc = load_or_heal_ydoc(document)
-      YjsDocumentUpdate.where(document_id: document.id, content_generation: document.content_generation)
-                       .order(:id).pluck(:payload).each { |payload| ydoc.apply_update(payload) rescue nil }
+      ydoc = load_ydoc_with_tail(document)
       raise UpdateNotReadyError, "update depends on missing updates" unless ydoc.update_ready?(update)
 
-      key = [ document.id, document.content_generation, token ]
+      epoch = seen_html_epoch(document)
+      key = [ document.slug, document.content_generation, epoch, token ]
       before = RawHtml.in_live(ydoc)
       seen = RawHtml.most(before, (SEEN_HTML.read(key) if token.present?) || {})
-      SEEN_HTML.write(key, seen) if token.present? && before.any?
+      if token.present? && before.any?
+        SEEN_HTML.write(key, seen)
+        SEEN_HTML.write(seen_html_active_key(document), true)
+      end
       ydoc.apply_update(update)
       after = RawHtml.in_live(ydoc)
       added = RawHtml.more(after, seen)
@@ -453,7 +466,7 @@ class YjsPersistence
         added = RawHtml.more(after, RawHtml.most(seen, source))
         return if added.empty?
         # The editor and the source may cut the same HTML into other pieces.
-        return if RawHtml.more_markup(RawHtml.markup(after), RawHtml.markup(source)).empty?
+        return if RawHtml.more_markup(RawHtml.markup(after), RawHtml.markup_source(document.current_content)).empty?
       end
 
       raise Document::HtmlAccountRequiredError.new(added)
@@ -461,22 +474,50 @@ class YjsPersistence
       raise Document::HtmlAccountRequiredError
     end
 
+    # Callers hold both locks. When an authenticated update removes live HTML,
+    # bump the document's seen-HTML epoch so prior guest allowances cannot
+    # re-introduce what the account removed.
+    def invalidate_seen_html_if_reduced!(document, update)
+      return unless SEEN_HTML.read(seen_html_active_key(document))
+
+      ydoc = load_ydoc_with_tail(document, heal: false)
+      before = RawHtml.in_live(ydoc)
+      ydoc.apply_update(update)
+      after = RawHtml.in_live(ydoc)
+      if RawHtml.more(before, after).any?
+        SEEN_HTML.write(seen_html_epoch_key(document), seen_html_epoch(document) + 1)
+        SEEN_HTML.delete(seen_html_active_key(document))
+      end
+    rescue StandardError
+      SEEN_HTML.write(seen_html_epoch_key(document), seen_html_epoch(document) + 1)
+      SEEN_HTML.delete(seen_html_active_key(document))
+    end
+
+    def load_ydoc_with_tail(document, heal: true)
+      ydoc = heal ? load_or_heal_ydoc(document) : load_ydoc(document)
+      YjsDocumentUpdate.where(document_id: document.id, content_generation: document.content_generation)
+                       .order(:id).pluck(:payload).each { |payload| ydoc.apply_update(payload) rescue nil }
+      ydoc
+    end
+
+    def seen_html_epoch_key(document) = [ :epoch, document.slug, document.content_generation ]
+    def seen_html_active_key(document) = [ :active, document.slug, document.content_generation ]
+    def seen_html_epoch(document) = SEEN_HTML.read(seen_html_epoch_key(document)) || 0
+
     # Callers hold both locks and have folded the update tail.
     def refuse_added_source!(document, content, ydoc: nil)
       document.assert_html_account!(nil)
-      html = RawHtml.markup(RawHtml.in_markdown(content))
+      html = RawHtml.markup_source(content)
       return if html.empty?
 
-      source = RawHtml.markup(RawHtml.in_markdown(document.current_content))
-      return if RawHtml.more_markup(html, source).empty?
-
-      live = begin
-        RawHtml.in_live(ydoc || load_or_heal_ydoc(document))
-      rescue RawHtml::Unreadable
-        {}
+      known = if document.live_crdt?
+        RawHtml.markup(RawHtml.in_live(ydoc || load_or_heal_ydoc(document)))
+      else
+        RawHtml.markup_source(document.current_content)
       end
-      known = RawHtml.most(source, RawHtml.markup(live))
       Document.assert_no_html!(RawHtml.more_markup(html, known))
+    rescue RawHtml::Unreadable
+      raise Document::HtmlAccountRequiredError
     end
 
     # Callers hold both locks. While nothing is stored any claimant may write,

@@ -61,12 +61,35 @@ class HtmlAccountChannelTest < ActionCable::Channel::TestCase
     end
   end
 
-  %w[unreadable mark_split_deep element_split_deep space_mark_deep frontmatter_html forged_editor_html].each do |name|
-    test "a guest tree that cannot be read completely or smuggles HTML is refused: #{name}" do
+  %w[unreadable mark_split_deep element_split_deep space_mark_deep frontmatter_html forged_editor_html
+     unknown_mark_html_attr fm_code_fence_html fm_indented_html fm_unclosed_fence fm_delimiter].each do |name|
+    test "a guest tree that cannot be read completely or adds HTML is refused: #{name}" do
       document = document_with_html
       join(document)
       assert_equal "html-refused", send_update(document, name)["type"]
     end
+  end
+
+  test "frontmatter HTML does not credit body HTML or a second frontmatter block" do
+    document = Document.create!(title: "Doc", seed_content: "x")
+    YjsPersistence.merge(document, UPDATES["fm_only_b"], user: account)
+    join(document)
+    assert_equal "html-refused", send_update(document, "fm_plus_body_b", seq: 1)["type"]
+    assert_equal "html-refused", send_update(document, "fm_second_b", seq: 2)["type"]
+  end
+
+  test "a guest cannot restore HTML after an account removed it" do
+    document = document_with_html
+    join(document)
+    assert_equal "ack", send_update(document, "text", seq: 1)["type"]
+    unsubscribe
+
+    join(document, user: account)
+    assert_equal "ack", send_update(document, "remove", seq: 1)["type"]
+    unsubscribe
+
+    join(document)
+    assert_equal "html-refused", send_update(document, "restore", seq: 1)["type"]
   end
 
   test "a guest update waits for what it depends on" do

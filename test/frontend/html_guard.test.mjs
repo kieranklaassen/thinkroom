@@ -1,7 +1,35 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
+import { registerHooks } from 'node:module'
+import path from 'node:path'
 import test from 'node:test'
-import { Clock, Container, Ctx } from '@milkdown/kit/ctx'
-import {
+import { fileURLToPath, pathToFileURL } from 'node:url'
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (
+      (specifier.startsWith('./') || specifier.startsWith('../')) &&
+      !path.extname(specifier) &&
+      context.parentURL?.startsWith('file:')
+    ) {
+      const base = path.resolve(path.dirname(fileURLToPath(context.parentURL)), specifier)
+      for (const candidate of [
+        `${base}.ts`,
+        `${base}.tsx`,
+        `${base}/index.ts`,
+        `${base}/index.tsx`,
+        `${base}.js`,
+        `${base}.mjs`,
+      ]) {
+        if (existsSync(candidate)) return nextResolve(pathToFileURL(candidate).href, context)
+      }
+    }
+    return nextResolve(specifier, context)
+  },
+})
+
+const { Clock, Container, Ctx } = await import('@milkdown/kit/ctx')
+const {
   commands,
   config,
   editorViewCtx,
@@ -18,13 +46,18 @@ import {
   serializer,
   serializerCtx,
   SerializerReady,
-} from '@milkdown/kit/core'
-import { EditorState } from '@milkdown/kit/prose/state'
-import { ySyncPluginKey } from 'y-prosemirror'
-import * as Y from 'yjs'
-import { addsHtml, htmlGuard, htmlGuardCtx, keepRefusedHtmlAsText } from '../../app/frontend/editor/html_guard.ts'
-import { configureMarkdownText, escapeMarkupAttribute } from '../../app/frontend/editor/markdown_text.ts'
-import { markdownPresets } from '../../app/frontend/editor/schema_attributes.ts'
+} = await import('@milkdown/kit/core')
+const { EditorState } = await import('@milkdown/kit/prose/state')
+const { ySyncPluginKey } = await import('y-prosemirror')
+const Y = await import('yjs')
+const { addsHtml, htmlGuard, htmlGuardCtx, keepRefusedHtmlAsText } = await import(
+  '../../app/frontend/editor/html_guard.ts'
+)
+const { frontmatter } = await import('../../app/frontend/editor/frontmatter/index.ts')
+const { configureMarkdownText, escapeMarkupAttribute } = await import(
+  '../../app/frontend/editor/markdown_text.ts'
+)
+const { markdownPresets } = await import('../../app/frontend/editor/schema_attributes.ts')
 
 // Milkdown's timers signal each other through window events.
 const events = new EventTarget()
@@ -37,7 +70,7 @@ async function buildEditor() {
   const run = (plugin) => plugin(ctx)
   const core = [schema, parser, serializer, commands, keymap, pasteRule, editorState]
   const runners = [...core, init(Editor.make()), config(async (c) => configureMarkdownText(c))].map(run)
-  runners.push(...[...markdownPresets, ...htmlGuard].map(run))
+  runners.push(...[...markdownPresets, ...frontmatter, ...htmlGuard].map(run))
   runners.forEach((runner) => void runner?.())
   await ctx.wait(SerializerReady)
   await new Promise((resolve) => setTimeout(resolve, 20))
@@ -118,11 +151,34 @@ test('what arrives from others is left alone', async () => {
   assert.deepEqual(htmlValues(state.apply(tr).doc), ['<i>'])
 })
 
-test('a replacement that adds HTML is recognised', async () => {
+test('a replacement that adds HTML or HTML in frontmatter is recognised', async () => {
   const { parse } = await buildEditor()
   assert.equal(addsHtml(parse('a <b>x</b>'), parse('<b>x</b> a')), false)
   assert.equal(addsHtml(parse('a <b>x</b>'), parse('a')), false)
   assert.equal(addsHtml(parse('a <b>x</b>'), parse('a <b>x</b> <b>')), true)
+  assert.equal(addsHtml(parse('Hello'), parse('---\ntitle: plain\n---\n\nHello')), false)
+  assert.equal(addsHtml(parse('Hello'), parse('---\ntitle: <b>hi</b>\n---\n\nHello')), true)
+  assert.equal(addsHtml(parse('---\ntitle: <b>hi</b>\n---\n\nHello'), parse('---\ntitle: <b>hi</b>\n---\n\nUpdated')), false)
+})
+
+test('changing an existing HTML node attribute or adding HTML frontmatter without an account converts it', async () => {
+  const { state, schema: s, notices } = await guarded('Hello\n\n<mark>')
+  let htmlPos = -1
+  state.doc.descendants((node, pos) => {
+    if (node.type.name === 'html') htmlPos = pos
+  })
+  assert.ok(htmlPos >= 0)
+  const mutated = state.apply(state.tr.setNodeAttribute(htmlPos, 'value', '<script>x</script>'))
+  mutated.doc.check()
+  assert.deepEqual(htmlValues(mutated.doc), [])
+  assert.match(mutated.doc.textContent, /<script>x<\/script>/)
+  assert.equal(notices.length, 1)
+
+  const fmAdded = mutated.apply(mutated.tr.insert(0, s.nodes.frontmatter.create({ value: 'title: <b>hi</b>' })))
+  fmAdded.doc.check()
+  assert.equal(fmAdded.doc.firstChild.type.name, 'code_block')
+  assert.match(fmAdded.doc.textContent, /title: <b>hi<\/b>/)
+  assert.equal(notices.length, 2)
 })
 
 test('text saves as text', async () => {

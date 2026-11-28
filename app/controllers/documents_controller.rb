@@ -408,8 +408,8 @@ class DocumentsController < InertiaController
       return render json: { error: "HTML snapshots must use the content field." },
                     status: :unprocessable_entity
     end
-    if document.html? && params[:state_vector].blank?
-      return render json: { error: "HTML snapshots require a Yjs state vector." },
+    if (document.html? || document.live_crdt?) && params[:state_vector].blank?
+      return render json: { error: "Snapshots require a Yjs state vector." },
                     status: :unprocessable_entity
     end
     content = (params.key?(:content) ? params[:content] : params[:markdown]).to_s

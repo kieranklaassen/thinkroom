@@ -1,15 +1,38 @@
 class RawHtml
   class Unreadable < StandardError; end
 
+  class Markup < Hash
+    attr_reader :unclosed
+
+    def initialize
+      super(0)
+      @unclosed = Hash.new(0)
+    end
+  end
+
   PREVIEW = { header_ids: nil }.freeze
   EDITOR = {
     parse: { leave_footnote_definitions: true },
     extension: { header_ids: nil, footnotes: true, front_matter_delimiter: "---" }
   }.freeze
+  EDITOR_NO_TABLE = {
+    parse: EDITOR[:parse],
+    extension: EDITOR[:extension].merge(table: false)
+  }.freeze
 
   EMPTY_LINES = [ "<br />", "<br>", "<br >", "<br/>" ].freeze
   EDITOR_END_TAG = { "span" => "</span>", "ins" => "</ins>", "del" => "</del>" }.freeze
   RAW_CONTENT_ELEMENTS = %w[script style textarea title iframe noscript noembed noframes xmp plaintext].freeze
+
+  PROVENANCE_OPEN = /\A<span[ \t]+data-provenance(?:="")?[ \t]+data-kind="([^"]*)"(?:[ \t]+data-author="([^"]*)")?[ \t]+data-state="([^"]*)"[ \t]*>\z/
+  HIGHLIGHTER_OPEN = /\A<span[ \t]+data-highlighter(?:="")?[ \t]+data-color="([^"]*)"[ \t]*>\z/
+  SUGGESTION_OPEN = /\A<(ins|del)[ \t]+data-suggestion-id="([^"]+)"(?:[ \t]+data-author="([^"]*)")?[ \t]*>\z/
+
+  HTML_TAG_START = %r{</?[a-zA-Z!?]}
+  FRONTMATTER_FENCE = /^[ \t]*(?:---[ \t]*$|`{3,}|~{3,})/
+  FRONTMATTER_BLOCK = /\A---[ \t]*\n(.*?)\n---[ \t]*(?:\n|\z)/m
+  TEMPLATE_UNCLOSED_ERROR = /\AEnd tag 'template' isn't allowed here\. Currently open tags: html, template, (.+)\.\z/
+  INVALID_TAG_FIRST_CHAR = /\AInvalid first character of tag name/
 
   ROOT = "prosemirror"
   NODE = "html"
@@ -27,17 +50,52 @@ class RawHtml
 
   class << self
     def in_markdown(source)
-      source = source.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\uFFFD").scrub("\uFFFD")
+      source = sanitize_encoding(source)
       return {} unless source.include?("<")
 
       most(literals(DocumentMarkdown.parse(source, extension: PREVIEW)), *editor_readings(source))
+    end
+
+    # Parse a Markdown document keeping body HTML and leading YAML frontmatter
+    # HTML in separate namespaces so frontmatter entries cannot credit body HTML.
+    def markup_source(source)
+      source = sanitize_encoding(source)
+      normalized = source.gsub(/\r\n?/, "\n")
+      if (match = normalized.match(FRONTMATTER_BLOCK))
+        root = Commonmarker.parse(normalized.gsub(/^---[ \t]+$/, "---"), options: EDITOR)
+        if root.first_child&.type == :frontmatter
+          fm_raw = match[1]
+          body = normalized.byteslice(match.end(0)..)
+          body_markup = markup(in_markdown(body))
+          frontmatter_html_for(fm_raw).each { |key, count| body_markup[key] += count }
+          return body_markup
+        end
+      end
+
+      markup(in_markdown(source))
     end
 
     def in_html(source)
       source = source.to_s
       return {} unless source.include?("<")
 
-      nodes(source).map { |node| piece(node) }.tally
+      tmpl = DocumentHtml.parse("<template>#{source}</template>", max_errors: 10)
+      frag = DocumentHtml.parse(source, max_errors: 10)
+      tallied = most(
+        tmpl.xpath("descendant::* | descendant::comment()").drop(1).map { |node| piece(node) }.tally,
+        frag.xpath("descendant::* | descendant::comment()").map { |node| piece(node) }.tally
+      )
+      return tallied if tallied.any?
+
+      sanitized = HtmlDocumentSanitizer.external(source).content
+      sanitized_nodes = DocumentHtml.parse(sanitized).xpath("descendant::* | descendant::comment()")
+      return sanitized_nodes.map { |node| piece(node) }.tally if sanitized_nodes.any?
+
+      return { source.squish => 1 } if source.match?(HTML_TAG_START)
+
+      {}
+    rescue DocumentHtml::TooComplex
+      { source.squish => 1 }
     end
 
     # Each raw HTML node's value in the live document. Reading the tree as text
@@ -52,24 +110,38 @@ class RawHtml
       values, written, frontmatter_html = live_nodes(ydoc, xml)
       raise Unreadable unless values.size + written == shown
 
-      most(tally_live(values), frontmatter_html)
+      tally_live(values).merge(frontmatter_html)
     end
 
     # The markup of literals, without the text beside it: Markdown can join a
     # line of text to an HTML block.
     def markup(literals)
-      literals.each_with_object(Hash.new(0)) do |(literal, count), markup|
-        pieces(literal).each { |piece| markup[piece] += count }
+      literals.each_with_object(Markup.new) do |(literal, count), result|
+        if literal.is_a?(Array) && literal.first == :frontmatter
+          result[literal] += count
+        else
+          found, unclosed = pieces_with_unclosed(literal)
+          found.each { |item| result[item] += count }
+          unclosed.each { |tag| result.unclosed[tag] += count }
+        end
       end
     end
 
     def more_markup(after, before)
       allowed = before.dup
+      unclosed = after.respond_to?(:unclosed) ? after.unclosed : {}
+      before_tags = Hash.new(0)
       before.each do |piece, count|
-        next unless piece.is_a?(Array) && piece.first != "comment"
+        next unless piece.is_a?(Array) && piece.first != "comment" && piece.first != :frontmatter
 
-        closing = "</#{piece.first}>"
-        allowed[closing] = allowed.fetch(closing, 0) + count
+        before_tags[piece.first] += count
+      end
+      unclosed.each do |tag, count|
+        credit = [ count, before_tags[tag] ].min
+        next if credit <= 0
+
+        closing = "</#{tag}>"
+        allowed[closing] = allowed.fetch(closing, 0) + credit
       end
       more(after, allowed)
     end
@@ -82,12 +154,17 @@ class RawHtml
 
     private
 
+    def sanitize_encoding(source)
+      source.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\uFFFD").scrub("\uFFFD")
+    end
+
     # Commonmarker and the editor's parser differ in a few places, so the source
     # is also read the way the editor sees it there. Line endings and lines of
     # spaces normalize for footnotes and front matter; front matter fences may
     # carry trailing spaces; after front matter that never closes, the editor
     # knows no lists or quotes; in a comment it allows dashes, and a comment
-    # that never closes hides nothing that follows.
+    # that never closes hides nothing that follows; table: false reads extra
+    # body columns that Commonmarker's GFM table parser discards.
     def editor_readings(source)
       source = source.gsub(/\r\n?/, "\n").gsub(/^[ \t]+$/, "")
       normalized_fm = source.gsub(/^---[ \t]+$/, "---")
@@ -100,7 +177,15 @@ class RawHtml
       if normalized_fm.include?("<!--")
         sources += [ normalized_fm, *sources ].flat_map { |text| [ text.gsub("<!--", "x!--"), plain_comments(text) ] }
       end
-      [ literals(root), *sources.map { |text| literals(Commonmarker.parse(text, options: EDITOR)) } ]
+      readings = [
+        literals(root),
+        literals(Commonmarker.parse(normalized_fm, options: EDITOR_NO_TABLE))
+      ]
+      sources.each do |text|
+        readings << literals(Commonmarker.parse(text, options: EDITOR))
+        readings << literals(Commonmarker.parse(text, options: EDITOR_NO_TABLE))
+      end
+      readings
     end
 
     def plain_comments(source)
@@ -108,39 +193,31 @@ class RawHtml
     end
 
     def literals(root)
-      found = []
+      kept = Hash.new(0)
       pending = [ root ]
-      while (node = pending.pop)
-        found << node.literal if %i[html_block html_inline].include?(node.type)
-        child = node.first_child
+      while (parent = pending.pop)
+        stack = []
+        child = parent.first_child
         while child
-          pending << child
+          case child.type
+          when :html_block
+            stripped = child.literal.strip
+            kept[stripped.squish] += 1 unless pieces(stripped).empty?
+          when :html_inline
+            stripped = child.literal.strip
+            if (tag = valid_editor_open_tag(stripped))
+              stack << [ tag, stripped ]
+            elsif stack.any? && stripped == EDITOR_END_TAG[stack.last.first]
+              stack.pop
+            elsif !pieces(stripped).empty?
+              kept[stripped.squish] += 1
+            end
+          else
+            pending << child if child.first_child
+          end
           child = child.next_sibling
         end
-      end
-      tally_markdown(found)
-    end
-
-    def tally_markdown(values)
-      editor_opens = Hash.new(0)
-      kept = Hash.new(0)
-      values.map(&:strip).tally.each do |stripped, count|
-        if (tag = valid_editor_open_tag(stripped))
-          editor_opens[tag] += count
-        elsif !pieces(stripped).empty?
-          kept[stripped.squish] += count
-        end
-      end
-      editor_opens.each do |tag, open_count|
-        closing = EDITOR_END_TAG.fetch(tag)
-        next unless kept.key?(closing)
-
-        remaining = kept[closing] - open_count
-        if remaining > 0
-          kept[closing] = remaining
-        else
-          kept.delete(closing)
-        end
+        stack.each { |_tag, stripped| kept[stripped.squish] += 1 }
       end
       kept
     end
@@ -149,6 +226,18 @@ class RawHtml
     # nodes, so live html nodes only exempt empty-line <br /> placeholders.
     def tally_live(values)
       values.map(&:squish).tally.reject { |value, _count| value.empty? || EMPTY_LINES.include?(value) }
+    end
+
+    def frontmatter_html_for(raw)
+      normalized = raw.to_s.gsub(/\r\n?/, "\n")
+      found = Hash.new(0)
+      normalized.each_line do |line|
+        found[[ :frontmatter, :fence ]] += 1 if line.match?(FRONTMATTER_FENCE)
+      end
+      in_html(normalized).each do |item, count|
+        found[[ :frontmatter, item ]] += count
+      end
+      found
     end
 
     def live_nodes(ydoc, xml)
@@ -165,7 +254,7 @@ class RawHtml
       sentinel = SecureRandom.hex(8)
       marker = /#{sentinel}:(\d+):/
       values = []
-      frontmatter_html = {}
+      frontmatter_html = Hash.new(0)
       written = 0
       rules = types.keys.to_h do |type|
         [ type, { contains: :blocks, render: lambda { |node|
@@ -180,8 +269,9 @@ class RawHtml
             value = node.attrs["value"]
             values << (value.is_a?(String) ? value : JSON.generate(value))
           elsif type == FRONTMATTER
-            fm_html = in_markdown(node.attrs["value"].to_s)
-            frontmatter_html = most(frontmatter_html, fm_html) if fm_html.any?
+            frontmatter_html_for(node.attrs["value"]).each do |key, count|
+              frontmatter_html[key] += count
+            end
           end
           node.attrs.each_value do |attribute|
             text = attribute.to_s
@@ -204,23 +294,39 @@ class RawHtml
     end
 
     def pieces(literal)
-      literal = literal.strip
-      return [] if literal.empty? || EMPTY_LINES.include?(literal)
-      return [] if valid_editor_open_tag(literal)
-      if (match = literal.match(/\A<\/([a-zA-Z][a-zA-Z0-9-]*)\s*>\z/))
-        return [ "</#{match[1].downcase}>" ]
-      end
-
-      found = nodes(literal)
-      return [ literal.squish ] if found.empty?
-
-      found.map { |node| piece(node) }
-    rescue DocumentHtml::TooComplex
-      [ literal.squish ]
+      pieces_with_unclosed(literal).first
     end
 
-    # A template takes any element, as a table cell.
-    def nodes(html) = DocumentHtml.parse("<template>#{html}</template>").xpath("descendant::* | descendant::comment()").drop(1)
+    def pieces_with_unclosed(literal)
+      literal = literal.strip
+      return [ [], [] ] if literal.empty? || EMPTY_LINES.include?(literal)
+      if (match = literal.match(%r{\A</([a-zA-Z][a-zA-Z0-9-]*)\s*>\z}))
+        return [ [ "</#{match[1].downcase}>" ], [] ]
+      end
+      return [ [ literal.squish ], [] ] if literal.match?(/<\/template\b/i)
+
+      doc = DocumentHtml.parse("<template>#{literal}</template>", max_errors: 10)
+      found = doc.xpath("descendant::* | descendant::comment()").drop(1)
+      return [ [ literal.squish ], [] ] if found.empty?
+
+      unclosed = []
+      unclosed_seen = false
+      doc.errors.each do |error|
+        headline = error.message.lines.first.to_s.strip.sub(/\A\d+:\d+:\s*ERROR:\s*/, "")
+        if !unclosed_seen && (match = headline.match(TEMPLATE_UNCLOSED_ERROR))
+          unclosed_seen = true
+          unclosed = match[1].split(", ")
+        elsif headline.match?(INVALID_TAG_FIRST_CHAR) && found.none?(&:comment?)
+          next
+        else
+          return [ [ literal.squish ], [] ]
+        end
+      end
+
+      [ found.map { |node| piece(node) }, unclosed ]
+    rescue DocumentHtml::TooComplex
+      [ [ literal.squish ], [] ]
+    end
 
     def piece(node)
       return [ "comment", node.content ] if node.comment?
@@ -230,51 +336,19 @@ class RawHtml
     end
 
     def valid_editor_open_tag(literal)
-      return nil if literal.include?("\n") || !literal.match?(/\A<(?:span|ins|del)\b[^>]*>\z/i)
-
-      found = nodes(literal)
-      return nil unless found.size == 1 && editor_markup?(found.first)
-
-      found.first.name
-    rescue DocumentHtml::TooComplex
-      nil
-    end
-
-    def editor_markup?(node)
-      names = node.attribute_nodes.map(&:name)
-      case node.name
-      when "span"
-        valid_provenance?(node, names) || valid_highlighter?(node, names)
-      when "ins", "del"
-        valid_suggestion?(node, names)
-      else
-        false
+      if (match = literal.match(PROVENANCE_OPEN))
+        kind, author, state = match.captures
+        return "span" if HtmlDocumentSanitizer::PROVENANCE_KINDS.include?(kind) &&
+                         HtmlDocumentSanitizer::PROVENANCE_STATES.include?(state) &&
+                         author.to_s.length <= HtmlDocumentSanitizer::MAX_AUTHOR_LENGTH
+      elsif (match = literal.match(HIGHLIGHTER_OPEN))
+        return "span" if HighlightPalette::COLOR_IDS.include?(match[1])
+      elsif (match = literal.match(SUGGESTION_OPEN))
+        tag, suggestion_id, author = match.captures
+        return tag if suggestion_id.length <= HtmlDocumentSanitizer::MAX_SUGGESTION_ID_LENGTH &&
+                      author.to_s.length <= HtmlDocumentSanitizer::MAX_AUTHOR_LENGTH
       end
-    end
-
-    def valid_provenance?(node, names)
-      names.any? &&
-        names.all? { |name| HtmlDocumentSanitizer::PROVENANCE_ATTRIBUTES.include?(name) } &&
-        !node["data-provenance"].nil? &&
-        HtmlDocumentSanitizer::PROVENANCE_KINDS.include?(node["data-kind"]) &&
-        HtmlDocumentSanitizer::PROVENANCE_STATES.include?(node["data-state"]) &&
-        node["data-author"].to_s.length <= HtmlDocumentSanitizer::MAX_AUTHOR_LENGTH
-    end
-
-    def valid_highlighter?(node, names)
-      names.any? &&
-        names.all? { |name| HtmlDocumentSanitizer::HIGHLIGHTER_ATTRIBUTES.include?(name) } &&
-        !node["data-highlighter"].nil? &&
-        HighlightPalette::COLOR_IDS.include?(node["data-color"])
-    end
-
-    def valid_suggestion?(node, names)
-      suggestion_id = node["data-suggestion-id"].to_s
-      names.any? &&
-        names.all? { |name| HtmlDocumentSanitizer::SUGGESTION_ATTRIBUTES.include?(name) } &&
-        suggestion_id.present? &&
-        suggestion_id.length <= HtmlDocumentSanitizer::MAX_SUGGESTION_ID_LENGTH &&
-        node["data-author"].to_s.length <= HtmlDocumentSanitizer::MAX_AUTHOR_LENGTH
+      nil
     end
   end
 end

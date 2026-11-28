@@ -77,6 +77,7 @@ export interface CableProviderOptions {
   retryBaseMs?: number
   retryMaxMs?: number
   seedRetryMs?: number
+  htmlReprobeMs?: number
 }
 
 const toBase64 = (u8: Uint8Array): string => {
@@ -93,6 +94,7 @@ const DEFAULT_ACK_TIMEOUT_MS = 10_000
 const DEFAULT_RETRY_BASE_MS = 250
 const DEFAULT_RETRY_MAX_MS = 8_000
 const DEFAULT_SEED_RETRY_MS = 3_000
+const DEFAULT_HTML_REPROBE_MS = 1_000
 
 // Browsers refuse a keepalive request that takes the total of the page's
 // keepalive bodies in flight past 64 KiB.
@@ -188,6 +190,9 @@ export class CableProvider {
   discarded = false
   htmlRefused = false
   refusedHtml: Record<string, number> = {}
+  private localEditSeq = 0
+  private htmlAutoReprobed = false
+  private htmlReprobeTimer: ReturnType<typeof setTimeout> | null = null
   // Peer updates that arrived while `seedClaim` was unsettled. Merging them
   // into a seed the server then refuses would double the text.
   private heldUpdates: Uint8Array[] = []
@@ -202,6 +207,7 @@ export class CableProvider {
   private readonly retryBaseMs: number
   private readonly retryMaxMs: number
   private readonly seedRetryMs: number
+  private readonly htmlReprobeMs: number
 
   constructor(doc: Y.Doc, slug: string, options?: CableProviderOptions) {
     this.doc = doc
@@ -214,6 +220,7 @@ export class CableProvider {
     this.retryBaseMs = options?.retryBaseMs ?? DEFAULT_RETRY_BASE_MS
     this.retryMaxMs = options?.retryMaxMs ?? DEFAULT_RETRY_MAX_MS
     this.seedRetryMs = options?.seedRetryMs ?? DEFAULT_SEED_RETRY_MS
+    this.htmlReprobeMs = options?.htmlReprobeMs ?? DEFAULT_HTML_REPROBE_MS
     this.awareness = new Awareness(doc)
     this.consumer = options?.consumer ?? getConsumer(options?.connectionIdentity)
 
@@ -367,9 +374,17 @@ export class CableProvider {
     }
   }
 
+  private clearHtmlReprobeTimer(): void {
+    if (this.htmlReprobeTimer) {
+      clearTimeout(this.htmlReprobeTimer)
+      this.htmlReprobeTimer = null
+    }
+  }
+
   private clearTimers(): void {
     this.clearAckTimer()
     this.clearRetryTimer()
+    this.clearHtmlReprobeTimer()
   }
 
   private clearOutbox(): void {
@@ -504,6 +519,7 @@ export class CableProvider {
     const parts = this.unackedParts()
     const pending = parts.length > 0 ? Y.mergeUpdates(parts) : null
     const sentClaim = this.seedClaim
+    const editSeqAtSend = this.localEditSeq
     if (!pending && !snapshot) return
     parts.forEach((part) => this.carriedBySave.add(part))
 
@@ -554,8 +570,14 @@ export class CableProvider {
             error_code?: string
             html?: Record<string, number>
           } | null
-          if (refusal?.error_code === 'html_account_required' && !this.destroyed && !this.discarded) {
-            this.handleHtmlRefused(refusal.html ?? {})
+          if (refusal?.error_code === 'html_account_required') {
+            if (
+              this.localEditSeq === editSeqAtSend &&
+              !this.destroyed &&
+              !this.discarded
+            ) {
+              this.handleHtmlRefused(refusal.html ?? {}, { fromHttp: true })
+            }
             return
           }
         }
@@ -682,8 +704,12 @@ export class CableProvider {
       case 'ack':
         if (!this.inFlight || data.seq !== this.inFlight.seq) break
         this.clearAckTimer()
+        this.clearHtmlReprobeTimer()
         this.inFlight = null
         this.retryAttempt = 0
+        this.htmlAutoReprobed = false
+        this.htmlRefused = false
+        this.refusedHtml = {}
         this.settleSeedClaim()
         this.flush('update')
         break
@@ -755,34 +781,60 @@ export class CableProvider {
 
   retryAfterHtmlCleaned(): void {
     if (!this.htmlRefused) return
+    this.localEditSeq += 1
+    this.clearHtmlReprobeTimer()
+    this.htmlAutoReprobed = false
     this.htmlRefused = false
     this.refusedHtml = {}
     this.flush('update')
   }
 
-  private handleHtmlRefused(html: Record<string, number>): void {
+  private scheduleHtmlReprobe(): void {
+    this.clearHtmlReprobeTimer()
+    if (this.destroyed || this.discarded || !this.canWrite || !this.synced || this.queued.length === 0) return
+    this.htmlReprobeTimer = setTimeout(() => {
+      this.htmlReprobeTimer = null
+      if (this.destroyed || this.discarded || !this.htmlRefused || this.queued.length === 0) return
+      this.htmlAutoReprobed = true
+      this.htmlRefused = false
+      this.refusedHtml = {}
+      this.flush('update')
+    }, this.htmlReprobeMs)
+  }
+
+  private handleHtmlRefused(html: Record<string, number>, { fromHttp = false } = {}): void {
     const hadQueued = this.queued.length > 0
-    if (this.inFlight) this.requeueInFlight()
+    if (!fromHttp && this.inFlight) this.requeueInFlight()
     if (this.queued.length > 1) this.queued = [Y.mergeUpdates(this.queued)]
     this.retryAttempt = 0
+    this.clearHtmlReprobeTimer()
+    // If local edits had already queued behind the refused WS frame (for example
+    // deleting the HTML before the refusal landed), silently re-probe the merged
+    // outbox once before emitting a refusal notice.
+    if (!fromHttp && hadQueued && !this.htmlAutoReprobed && this.queued.length > 0) {
+      this.htmlAutoReprobed = true
+      this.htmlRefused = false
+      this.refusedHtml = {}
+      this.flush('update')
+      return
+    }
+    this.htmlAutoReprobed = false
     this.htmlRefused = true
     this.refusedHtml = html
     this.emit('html-refused')
-    // If local edits had already queued behind the refused frame (for example
-    // deleting the HTML before the refusal landed), re-probe the merged outbox
-    // once rather than stalling on a clean document.
-    if (hadQueued && this.htmlRefused && this.queued.length > 0) {
-      this.htmlRefused = false
-      this.flush('update')
-    }
   }
 
   private handleDocUpdate = (update: Uint8Array, origin: unknown): void => {
     // Updates we applied from the wire carry `this` as origin — don't echo
     // them; the page's server-rendered hydration is server state too.
     if (origin === this || origin === SERVER_HYDRATE_ORIGIN || !this.canWrite) return
+    this.localEditSeq += 1
     this.enqueue(update)
-    this.flush('update')
+    if (this.htmlRefused) {
+      this.scheduleHtmlReprobe()
+    } else {
+      this.flush('update')
+    }
   }
 
   private handleAwarenessUpdate = (

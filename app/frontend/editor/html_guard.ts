@@ -31,6 +31,10 @@ export const htmlGuardCtx = $ctx<
 
 const squish = (value: string): string => value.replace(/\s+/g, ' ').trim()
 
+const FRONTMATTER_HTML = /(?:^[ \t]*(?:---[ \t]*$|`{3,}|~{3,})|<\/?[a-zA-Z!?])/m
+
+const frontmatterHasHtml = (value: string): boolean => FRONTMATTER_HTML.test(value.replace(/\r\n?/g, '\n'))
+
 const htmlNodes = (doc: Node): { node: Node; pos: number; value: string }[] => {
   const found: { node: Node; pos: number; value: string }[] = []
   doc.descendants((node, pos) => {
@@ -39,10 +43,21 @@ const htmlNodes = (doc: Node): { node: Node; pos: number; value: string }[] => {
   return found
 }
 
+const frontmatterHtmlNodes = (doc: Node): { node: Node; pos: number; value: string }[] => {
+  const found: { node: Node; pos: number; value: string }[] = []
+  doc.descendants((node, pos) => {
+    if (node.type.name === 'frontmatter') {
+      const value = String(node.attrs.value ?? '')
+      if (frontmatterHasHtml(value)) found.push({ node, pos, value: squish(value) })
+    }
+  })
+  return found
+}
+
 const fragmentHasHtml = (fragment: Fragment): boolean => {
   let found = false
   fragment.descendants((node) => {
-    if (node.type.name === 'html') {
+    if (node.type.name === 'html' || node.type.name === 'frontmatter') {
       found = true
       return false
     }
@@ -66,13 +81,56 @@ const mayChangeHtml = (transactions: readonly Transaction[]): boolean =>
 
 const isSynced = (tr: Transaction): boolean => Boolean(tr.getMeta(ySyncPluginKey))
 
+const mapSurvivingValues = (
+  entries: { pos: number; value: string }[],
+  transactions: readonly Transaction[],
+): Map<number, string> => {
+  const surviving = new Map<number, string>()
+  for (const { pos, value } of entries) {
+    let mapped = pos
+    let alive = true
+    for (const tr of transactions) {
+      if (!tr.docChanged) continue
+      const result = tr.mapping.mapResult(mapped)
+      if (result.deleted) {
+        alive = false
+        break
+      }
+      mapped = result.pos
+    }
+    if (alive) surviving.set(mapped, value)
+  }
+  return surviving
+}
+
+const findExtraNodes = (
+  allNodes: { node: Node; pos: number; value: string }[],
+  survivingValues: Map<number, string>,
+  seen: Map<string, number>,
+): { node: Node; pos: number; value: string }[] => {
+  const counts = new Map<string, number>()
+  for (const { pos, value } of allNodes) {
+    if (survivingValues.get(pos) === value) counts.set(value, (counts.get(value) ?? 0) + 1)
+  }
+  return allNodes.filter(({ pos, value }) => {
+    if (survivingValues.get(pos) === value) return false
+    counts.set(value, (counts.get(value) ?? 0) + 1)
+    return counts.get(value)! > (seen.get(value) ?? 0)
+  })
+}
+
 const htmlGuardProse = $prose((ctx) => {
-  const seen = new Map<string, number>()
+  const seenHtml = new Map<string, number>()
+  const seenFrontmatter = new Map<string, number>()
   let lastDoc: Node | null = null
-  const remember = (doc: Node): void => {
+  const rememberList = (entries: { value: string }[], target: Map<string, number>): void => {
     const counts = new Map<string, number>()
-    for (const { value } of htmlNodes(doc)) counts.set(value, (counts.get(value) ?? 0) + 1)
-    counts.forEach((count, value) => seen.set(value, Math.max(seen.get(value) ?? 0, count)))
+    for (const { value } of entries) counts.set(value, (counts.get(value) ?? 0) + 1)
+    counts.forEach((count, value) => target.set(value, Math.max(target.get(value) ?? 0, count)))
+  }
+  const remember = (doc: Node): void => {
+    rememberList(htmlNodes(doc), seenHtml)
+    rememberList(frontmatterHtmlNodes(doc), seenFrontmatter)
   }
 
   return new Plugin({
@@ -91,40 +149,44 @@ const htmlGuardProse = $prose((ctx) => {
         return null
       }
 
-      const survivingPos = new Set<number>()
-      for (const { pos } of htmlNodes(oldState.doc)) {
-        let mapped = pos
-        let alive = true
-        for (const tr of transactions) {
-          if (!tr.docChanged) continue
-          const result = tr.mapping.mapResult(mapped)
-          if (result.deleted) {
-            alive = false
-            break
-          }
-          mapped = result.pos
-        }
-        if (alive) survivingPos.add(mapped)
-      }
-
-      const allNodes = htmlNodes(newState.doc)
-      const counts = new Map<string, number>()
-      for (const { pos, value } of allNodes) {
-        if (survivingPos.has(pos)) counts.set(value, (counts.get(value) ?? 0) + 1)
-      }
-      const extra = allNodes.filter(({ pos, value }) => {
-        if (survivingPos.has(pos)) return false
-        counts.set(value, (counts.get(value) ?? 0) + 1)
-        return counts.get(value)! > (seen.get(value) ?? 0)
-      })
-      if (extra.length === 0) {
+      const extraHtml = findExtraNodes(
+        htmlNodes(newState.doc),
+        mapSurvivingValues(htmlNodes(oldState.doc), transactions),
+        seenHtml,
+      )
+      const extraFrontmatter = findExtraNodes(
+        frontmatterHtmlNodes(newState.doc),
+        mapSurvivingValues(frontmatterHtmlNodes(oldState.doc), transactions),
+        seenFrontmatter,
+      )
+      if (extraHtml.length === 0 && extraFrontmatter.length === 0) {
         lastDoc = newState.doc
         return null
       }
 
       const { schema } = newState
       const tr = newState.tr
-      for (const { node, pos } of extra.reverse()) {
+      const replacements = [
+        ...extraHtml.map((entry) => ({ ...entry, kind: 'html' as const })),
+        ...extraFrontmatter.map((entry) => ({ ...entry, kind: 'frontmatter' as const })),
+      ].sort((a, b) => b.pos - a.pos)
+
+      for (const { node, pos, kind } of replacements) {
+        if (kind === 'frontmatter') {
+          const raw = String(node.attrs.value ?? '')
+          const codeBlock = schema.nodes.code_block
+          if (codeBlock) {
+            tr.replaceWith(
+              pos,
+              pos + node.nodeSize,
+              codeBlock.create({ language: 'yaml' }, raw ? schema.text(raw) : undefined),
+            )
+          } else {
+            const para = schema.nodes.paragraph
+            tr.replaceWith(pos, pos + node.nodeSize, para.create(null, raw ? schema.text(raw) : undefined))
+          }
+          continue
+        }
         const lines = String(node.attrs.value).split(/\r?\n/)
         const text = lines.flatMap((line, index) => [
           ...(index > 0 ? [schema.nodes.hardbreak.create({ isInline: true })] : []),
@@ -141,15 +203,21 @@ const htmlGuardProse = $prose((ctx) => {
 
 export const htmlGuard = [htmlGuardCtx, htmlGuardProse].flat()
 
-export function addsHtml(before: Node, after: Node): boolean {
-  const afterNodes = htmlNodes(after)
-  if (afterNodes.length === 0) return false
+const addsEntries = (before: { value: string }[], after: { value: string }[]): boolean => {
+  if (after.length === 0) return false
   const counts = new Map<string, number>()
-  for (const { value } of htmlNodes(before)) counts.set(value, (counts.get(value) ?? 0) + 1)
-  return afterNodes.some(({ value }) => {
+  for (const { value } of before) counts.set(value, (counts.get(value) ?? 0) + 1)
+  return after.some(({ value }) => {
     counts.set(value, (counts.get(value) ?? 0) - 1)
     return counts.get(value)! < 0
   })
+}
+
+export function addsHtml(before: Node, after: Node): boolean {
+  return (
+    addsEntries(htmlNodes(before), htmlNodes(after)) ||
+    addsEntries(frontmatterHtmlNodes(before), frontmatterHtmlNodes(after))
+  )
 }
 
 export function keepRefusedHtmlAsText(ydoc: Y.Doc, refused: Record<string, number>): number {
