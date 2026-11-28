@@ -836,8 +836,10 @@ export class CableProvider {
     })
   }
 
-  private handleUnload = (): void => {
-    removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload')
+  private handleUnload = (event?: Event): void => {
+    if (!(event as PageTransitionEvent | undefined)?.persisted) {
+      removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload')
+    }
     this.sendDurableSave(undefined, true)
   }
 }

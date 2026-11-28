@@ -36,8 +36,8 @@ globalThis.window ??= {
   removeEventListener(event, handler) {
     windowListeners.get(event)?.delete(handler)
   },
-  dispatchEvent(event) {
-    windowListeners.get(event)?.forEach((handler) => handler())
+  dispatchEvent(event, payload) {
+    windowListeners.get(event)?.forEach((handler) => handler(payload))
   },
 }
 globalThis.document ??= {
@@ -1216,4 +1216,64 @@ test('overlapping saves hold unload deduplication until the last save carrying a
   assert.equal(calls.length, 3)
   assert.equal(calls[2].keepalive, true)
   assert.equal(savedText(calls[2]), 'overlap')
+})
+
+test('small edit deduplicates beforeunload followed by pagehide without approaching the keepalive limit', (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t, { ackTimeoutMs: 5000 })
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'small edit')
+
+  window.dispatchEvent('beforeunload')
+  window.dispatchEvent('pagehide')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].keepalive, true)
+  assert.equal(savedText(calls[0]), 'small edit')
+})
+
+test('pagehide upgrades to keepalive after an overlapping keepalive save fails while a non-keepalive save stays in flight', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = editedHarness(t, 30_000)
+
+  // Save 1 uses keepalive (~40 KiB); Save 2 carries the same part with keepalive: false.
+  h.provider.persistCurrentState()
+  h.provider.persistCurrentState()
+  assert.deepEqual(
+    calls.map((call) => call.keepalive),
+    [true, false],
+  )
+
+  // Save 1 fails and frees keepalive room while non-keepalive Save 2 still holds the part.
+  await calls[0].fail()
+  window.dispatchEvent('pagehide')
+  assert.equal(calls.length, 3)
+  assert.equal(calls[2].keepalive, true)
+  assert.equal(savedText(calls[2]).length, 30_000)
+})
+
+test('bfcache pagehide with persisted: true flushes edits while keeping local awareness active after restore', (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t, { ackTimeoutMs: 5000 })
+  h.receive(emptySyncFrame(1))
+  h.provider.awareness.setLocalStateField('user', { name: 'Ada' })
+  h.doc.getText('t').insert(0, 'bfcache-edit')
+
+  window.dispatchEvent('pagehide', { persisted: true })
+  assert.equal(calls.length, 1)
+  assert.equal(savedText(calls[0]), 'bfcache-edit')
+  assert.deepEqual(h.provider.awareness.getLocalState(), { user: { name: 'Ada' } })
+
+  // Simulate bfcache restore: reconnect handshake broadcasts local awareness and later field updates apply.
+  const awarenessFramesBefore = h.sent.filter((frame) => frame.type === 'awareness').length
+  h.disconnect()
+  h.receive(emptySyncFrame(1))
+  h.provider.awareness.setLocalStateField('cursor', { anchor: 3 })
+  assert.deepEqual(h.provider.awareness.getLocalState(), {
+    user: { name: 'Ada' },
+    cursor: { anchor: 3 },
+  })
+  assert.ok(
+    h.sent.filter((frame) => frame.type === 'awareness').length > awarenessFramesBefore,
+    'reconnected session should broadcast restored local awareness',
+  )
 })
