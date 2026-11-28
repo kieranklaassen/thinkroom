@@ -4,7 +4,7 @@ import { registerHooks } from 'node:module'
 import path from 'node:path'
 import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { Awareness, encodeAwarenessUpdate } from 'y-protocols/awareness'
+import { Awareness, encodeAwarenessUpdate, removeAwarenessStates } from 'y-protocols/awareness'
 import * as Y from 'yjs'
 
 registerHooks({
@@ -94,6 +94,10 @@ function assertSendsAfter(h, count, ms) {
   assert.equal(h.updates().length, count + 1, `one frame at ${ms} ms`)
 }
 
+const settled = async () => {
+  for (let i = 0; i < 20; i += 1) await null
+}
+
 const refuse = (h) => h.receive({ type: 'nack', seq: h.updates().at(-1).seq, reason: 'retryable' })
 const accept = (h) => h.receive({ type: 'ack', seq: h.updates().at(-1).seq })
 
@@ -103,7 +107,7 @@ test('retries wait twice as long each time up to the maximum, and any settled ed
     'a final refusal': (h) => h.receive({ type: 'nack', seq: h.updates().at(-1).seq, reason: 'invalid' }),
     'a stored save': async (h) => {
       h.provider.persistCurrentState()
-      for (let i = 0; i < 20; i += 1) await null
+      await settled()
     },
     'a locked document': (h) => h.receive({ type: 'write-denied' }),
     'a new handshake': (h) => h.receive(handshake()),
@@ -226,8 +230,9 @@ test('after a destroy no timer sends anything', (t) => {
     h.type('a')
     prepare(h)
     h.provider.destroy()
-    const [updates, presence] = [h.updates().length, h.presence().length]
+    const [updates, presence, inFlight] = [h.updates().length, h.presence().length, h.provider.inFlight]
     h.tick(60_000)
+    assert.equal(h.provider.inFlight, inFlight)
     assert.deepEqual([h.updates().length, h.presence().length], [updates, presence])
   }
 })
@@ -257,7 +262,7 @@ test('a save takes keepalive only within 64 KiB, and a snapshot only within 60',
   const calls = holdSaves(t)
   const settle = async () => {
     calls.at(-1).fail()
-    for (let i = 0; i < 20; i += 1) await null
+    await settled()
   }
   const snapshot = (length) => ({ content: 's'.repeat(length), spans: [], state_vector: '' })
   h.provider.persistCurrentState(snapshot(0))
@@ -281,10 +286,42 @@ test('a large edit whose save failed is sent again when the page closes', async 
   h.type('x'.repeat(100_000))
   h.provider.persistCurrentState()
   calls[0].fail()
-  for (let i = 0; i < 20; i += 1) await null
+  await settled()
   windowListeners.get('pagehide')()
   assert.equal(calls.length, 2)
   assert.equal(textOf([calls[1].body]).length, 100_000)
+})
+
+test('a receipt or a save that comes after a destroy sends and merges nothing', async (t) => {
+  const h = connect(t)
+  h.receive(handshake({ seed: true, seed_content: 'x', seed_claim: 'claim' }))
+  h.type('a')
+  const peer = new Y.Doc()
+  peer.getText('t').insert(0, 'peer')
+  h.receive({ type: 'update', update: toBase64(Y.encodeStateAsUpdate(peer)) })
+  h.type('b')
+  h.provider.destroy()
+  await settled()
+  assert.equal(h.doc.getText('t').toString(), 'ab')
+  accept(h)
+  assert.equal(h.updates().length, 1)
+})
+
+test('a save of the snapshot alone does not settle the seed claim', async (t) => {
+  const h = connect(t)
+  h.provider.seedClaim = 'claim'
+  h.provider.persistCurrentState({ content: '', spans: [], state_vector: '' })
+  await settled()
+  assert.equal(h.provider.seedClaim, 'claim')
+})
+
+test('what is owed leaves before anyone hears the document is live', (t) => {
+  const h = connect(t)
+  h.type('a')
+  let sentBefore
+  h.provider.on('synced', () => { sentBefore = h.updates().length })
+  h.receive(handshake())
+  assert.equal(sentBefore, 1)
 })
 
 test('an edit the server refuses for good is dropped and the next one goes out at once', (t) => {
@@ -320,7 +357,7 @@ test('a save stored after the handshake sends what is still queued as an ordinar
   h.type('a')
   h.provider.persistCurrentState()
   h.type('b')
-  for (let i = 0; i < 20; i += 1) await null
+  await settled()
   assert.deepEqual(h.updates().map(({ type, seq }) => [type, seq]), [['update', 1], ['update', 2]])
 })
 
@@ -430,6 +467,65 @@ test('a peer’s presence is shown but not sent on, and goes when the peer leave
   h.receive({ type: 'awareness-leave', client_id: peer.clientID })
   h.receive({ type: 'awareness-leave', client_id: h.doc.clientID })
   assert.deepEqual([...h.provider.awareness.getStates().keys()], [h.doc.clientID])
+})
+
+test('presence sent early does not shorten the next window', (t) => {
+  const h = connect(t)
+  h.receive(handshake())
+  const before = h.presence().length
+  h.tick(40)
+  h.provider.awareness.setLocalState({ n: 1 })
+  h.provider.awareness.setLocalState({ n: 2 })
+  h.tick(20)
+  windowListeners.get('blur')()
+  h.tick(10)
+  h.provider.awareness.setLocalState({ n: 3 })
+  h.tick(89)
+  assert.equal(h.presence().length, before + 1)
+  h.tick(1)
+  assert.equal(h.presence().length, before + 2)
+})
+
+test('only this writer’s own changes are sent', (t) => {
+  const h = connect(t)
+  h.receive(handshake())
+  h.tick(1_000)
+  const { awareness } = h.provider
+  const peer = new Awareness(new Y.Doc())
+  const sameId = new Awareness(Object.assign(new Y.Doc(), { clientID: h.doc.clientID }))
+  t.after(() => [peer, sameId].forEach((other) => other.destroy()))
+  for (let n = 0; n < 5; n += 1) [peer, sameId].forEach((other) => other.setLocalState({ n }))
+  const origins = []
+  awareness.on('update', (_change, origin) => origins.push(origin))
+  for (const other of [peer, sameId]) {
+    h.receive({ type: 'awareness', update: toBase64(encodeAwarenessUpdate(other, [other.clientID])) })
+  }
+  h.receive({ type: 'awareness-leave', client_id: peer.clientID })
+  assert.deepEqual(origins, [h.provider, h.provider, h.provider])
+
+  awareness.states.set(peer.clientID, {})
+  removeAwarenessStates(awareness, [peer.clientID], 'timeout')
+  h.tick(1_000)
+  assert.equal(h.presence().length, 1)
+})
+
+test('closing the page says so at once, and a writer who left is not announced again', (t) => {
+  const h = connect(t)
+  h.receive(handshake())
+  windowListeners.get('pagehide')()
+  assert.equal(h.presence().length, 2)
+  h.disconnect()
+  h.receive(handshake())
+  assert.equal(h.presence().length, 2)
+})
+
+test('a waiting presence change is dropped when the document takes a new client id', (t) => {
+  const h = connect(t)
+  h.receive(handshake())
+  h.provider.awareness.setLocalState({ n: 1 })
+  h.doc.clientID += 1
+  h.tick(1_000)
+  assert.equal(h.presence().length, 1)
 })
 
 test('a reconnect asks only for what this document is missing', (t) => {

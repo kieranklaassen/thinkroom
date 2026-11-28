@@ -204,7 +204,6 @@ export class CableProvider {
     this.destroyed = true
     this.handleUnload()
     this.presence.flush()
-    this.presence.cancel()
     this.outbox.stopTimers()
     this.seedWait.stop()
     if (typeof window !== 'undefined') {
