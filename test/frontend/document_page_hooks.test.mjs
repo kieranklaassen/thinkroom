@@ -526,6 +526,11 @@ test('a click away drops the target, but not on its own chrome or in the text', 
   assert.deepEqual(page.textTarget, { kind: 'selection', text: 'words' })
 
   click('.milkdown .ProseMirror', '[data-provenance]')
+  page.handleRef.current = { editor: { action: () => { throw new Error('torn down') } } }
+  runFrames()
+  assert.equal(page.textTarget, REVIEW)
+
+  click('.milkdown .ProseMirror', '[data-provenance]')
   unmount()
   assert.equal(frames.size, 0)
   assert.deepEqual(listeners.get('pointerdown'), [])

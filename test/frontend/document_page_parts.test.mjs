@@ -43,6 +43,7 @@ registerHooks({
 })
 
 const { CommentRecovery } = await import('../../app/frontend/components/comment_recovery.tsx')
+const { VersionUpdateButton } = await import('../../app/frontend/components/version_update_button.tsx')
 const { DocumentHeader } = await import('../../app/frontend/components/document_header.tsx')
 
 const DRAFT = { body: 'My draft', anchor: null, message: 'Connection lost.', uncertain: false, previousIds: [], authorName: 'Ada', checkedMissing: false }
@@ -114,6 +115,14 @@ test('the header shows the connection and a newer version', () => {
   assert.match(header({ status: 'connecting' }), /doc-status--connecting" title="Connecting…"/)
   assert.doesNotMatch(header({}), /version-update/)
   assert.match(header({ newVersionAvailable: true }), /<button type="button" class="version-update">New version · Update<\/button>/)
+})
+
+test('the update button reloads the page', () => {
+  let reloads = 0
+  globalThis.window = { location: { reload: () => { reloads += 1 } } }
+  VersionUpdateButton({ className: 'version-update' }).props.onClick()
+  delete globalThis.window
+  assert.equal(reloads, 1)
 })
 
 test('the header explains a locked mode only when the owner limited it', () => {
