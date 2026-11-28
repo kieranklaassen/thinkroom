@@ -2,6 +2,7 @@
   "all": {
     "sourceCodeDir": "app/frontend",
     "watchAdditionalPaths": [],
+    "devServerConnectionCheck": true,
     "ssrEntrypoint": "~/entrypoints/inertia.tsx"
   },
   "development": {
