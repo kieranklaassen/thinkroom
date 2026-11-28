@@ -1,15 +1,13 @@
 # frozen_string_literal: true
 
-# inertia_rails (3.21.1) renders SSR by POSTing the page JSON to the Node SSR
-# process via Net::HTTP with NO open/read timeout, so it inherits Ruby's ~60s
-# default. A *hung* (not crashed) SSR process would therefore pin a Puma thread
-# for ~60s before the CSR fallback fires — a handful of hung renders exhaust the
-# thread pool and stall the whole app. The gem exposes no timeout config option
-# (see InertiaRails::Configuration::DEFAULTS), so we bound the SSR HTTP call to a
-# short timeout here. A timeout raises inside SSRRenderer#request, which the gem
-# already rescues into an SSRError → on_ssr_error logging → CSR fallback (in
-# production, where ssr_raise_on_error is false). A hung SSR process now fails
-# fast to CSR instead of starving Puma.
+# inertia_rails renders SSR by POSTing the page JSON to the Node SSR process via
+# Net::HTTP. A *hung* (not crashed) SSR process pins a Puma thread until that
+# call times out, so a handful of hung renders can exhaust the thread pool and
+# stall the whole app. The gem (3.23) waits ssr_timeout, 10 seconds by default;
+# here the SSR HTTP call is bounded to a shorter timeout, which replaces the
+# gem's open and read timeouts. The gem wraps a timeout into an SSRError →
+# on_ssr_error logging → CSR fallback (in production, where ssr_raise_on_error
+# is false).
 #
 # Implementation: rather than re-implement the gem's #request body (which would
 # drift if the gem changes its error handling), we leave the gem's request flow
@@ -21,7 +19,7 @@
 # Override INERTIA_SSR_TIMEOUT to tune (seconds).
 InertiaRails::SSRRenderer.class_eval do
   # Loud boot-time guard: if a future gem version removes #request, the patch is
-  # silently dead and a hung SSR process is back to ~60s. Fail at boot instead.
+  # silently dead and a hung SSR process is back to the gem's timeout. Fail at boot instead.
   unless private_method_defined?(:request)
     raise "inertia_ssr_timeout: InertiaRails::SSRRenderer no longer defines #request " \
           "(gem internals changed). Re-verify the SSR HTTP timeout patch against the " \

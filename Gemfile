@@ -50,7 +50,7 @@ group :development do
   gem "web-console"
 end
 
-gem "inertia_rails", "~> 3.22"
+gem "inertia_rails", "~> 3.23"
 
 # Compound writing mode: TypeSafe's Jev model answers the reviewers' yes/no
 # questions through RubyLLM's structured-output API. ruby_llm-typesafe is
