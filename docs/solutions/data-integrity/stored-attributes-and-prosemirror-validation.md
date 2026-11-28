@@ -40,9 +40,9 @@ The lockfile also holds three packages, and a lockfile update must keep the hold
 
 The lockfile holds six Markdown packages for a related reason: the next versions change the text of stored documents or the time it takes to read them. Compared through the editor's own parser and serializer:
 
-- `mdast-util-to-markdown` 2.1.2. 2.2.4 rewrites text on the first edit, for example `snake\_case` becomes `snake_case`.
-- `mdast-util-gfm-task-list-item` 2.0.0. 2.0.1 moves extra spaces to after the checkbox, and with `mdast-util-to-markdown` 2.1.2 it throws when a task item starts with a line break.
-- `mdast-util-gfm-autolink-literal` 2.0.1. 2.1.2 links some text that was plain, such as an address after a slash, and escapes other text.
+- `mdast-util-to-markdown` 2.1.2. The versions checked after it (2.1.3, 2.2.0, 2.2.4, 2.2.5) rewrite text on the first edit, for example `snake\_case` becomes `snake_case`.
+- `mdast-util-gfm-task-list-item` 2.0.0. 2.0.1 moves extra spaces to after the checkbox, and with `mdast-util-to-markdown` 2.1.2 it throws when a task item holds only a line break.
+- `mdast-util-gfm-autolink-literal` 2.0.1. Versions 2.1.0 to 2.1.2 link some text that was plain, such as an address after a slash, and escape other text.
 - `mdast-util-gfm-table` 2.0.0. 2.0.1 writes fewer backslashes before a pipe in code, and with `markdown-table` 3.1.0 it no longer fills short rows.
 - `micromark-core-commonmark` 2.0.3. 2.0.4 reads some adjacent emphasis markers differently, for example `\**b**`.
 - `micromark` 4.0.2. 4.0.3 reads everything the same but takes several times longer on long documents with many lists or quotes.
