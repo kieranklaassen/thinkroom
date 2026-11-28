@@ -179,6 +179,14 @@ export function sketchLabels(scene: SketchScene): string[] {
   ).slice(0, 50)
 }
 
+export const newSketchData = (): SketchData => ({
+  id: crypto.randomUUID(),
+  formatVersion: 1,
+  description: '',
+  height: DEFAULT_SKETCH_HEIGHT,
+  scene: structuredClone(EMPTY_SKETCH_SCENE),
+})
+
 export function sketchAccessibleLabel(data: SketchData): string {
   const labels = sketchLabels(data.scene)
   return [data.description || 'Sketch', labels.length > 0 ? labels.join(', ') : '']

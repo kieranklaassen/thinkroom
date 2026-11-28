@@ -1,103 +1,41 @@
-import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useEffect, useRef } from 'react'
 import * as Y from 'yjs'
-import type { Ctx } from '@milkdown/kit/ctx'
-import {
-  Editor,
-  editorViewCtx,
-  editorViewOptionsCtx,
-  rootCtx,
-} from '@milkdown/kit/core'
-import { listener, listenerCtx } from '@milkdown/kit/plugin/listener'
-import { clipboard } from '@milkdown/kit/plugin/clipboard'
-import { cursor } from '@milkdown/kit/plugin/cursor'
-import { indent } from '@milkdown/kit/plugin/indent'
-import { trailing } from '@milkdown/kit/plugin/trailing'
-import { upload, uploadConfig } from '@milkdown/kit/plugin/upload'
-import { tableBlock, tableBlockConfig } from '@milkdown/kit/component/table-block'
-import type { RenderType } from '@milkdown/kit/component/table-block'
+import { editorViewCtx, type Editor } from '@milkdown/kit/core'
+import { listenerCtx } from '@milkdown/kit/plugin/listener'
 // Base ProseMirror styles the table-block chrome depends on: a positioned
 // .ProseMirror ancestor and the prosemirror-tables fixed-layout/selection CSS.
 import '@milkdown/kit/prose/view/style/prosemirror.css'
 import '@milkdown/kit/prose/tables/style/tables.css'
 import './table_block.css'
 import './frontmatter/frontmatter.css'
-import { collab, collabServiceCtx } from '@milkdown/plugin-collab'
-import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight'
+import { collabServiceCtx } from '@milkdown/plugin-collab'
 import { Milkdown, MilkdownProvider, useEditor } from '@milkdown/react'
-import type { EditorView } from '@milkdown/kit/prose/view'
 import type { CableProvider, RenderHints } from './cable_provider'
 import {
   acquireSession,
-  getSession,
   markSeedApplied,
   releaseSession,
   seedAlreadyApplied,
 } from './collab_session'
-import { buildSnapshotPayload, createSnapshotScheduler } from './snapshots'
-import { firstHeadingTitle } from './document_title'
+import { createChangeReporter } from './change_reporting'
 import { gatedCursorAwareness } from './cursor_awareness'
-import { lazyShikiParser } from './highlighter'
-import { imageUploader } from './upload'
+import type { DocumentFormat } from './document_format'
+import { assembleEditor } from './editor_assembly'
 import type { UserIdentity } from './identity'
-import {
-  provenance,
-  provenanceIdentityCtx,
-  collectSpans,
-  SKIP_PROVENANCE,
-  type ProvenanceSpan,
-} from './provenance'
-import { frontmatter } from './frontmatter'
-import { textHighlighter } from './text_highlighter'
-import {
-  DEFAULT_SKETCH_HEIGHT,
-  EMPTY_SKETCH_SCENE,
-  sketchControlsCtx,
-  sketchNodeViewPlugins,
-  sketchSchemaPlugins,
-  type SketchData,
-} from './sketch'
-import { deleteSketchNode, focusAfterSketchNode, upsertSketchNode } from './sketch/doc_ops'
-import { InlineSketch } from './sketch/sketch_inline'
-import { suggestChangesMarks } from './suggest_changes'
-import { suggestState, suggestDispatch } from './suggest_changes/intercept'
-import { suggestGuard } from './suggest_changes/normalize'
+import { bindMermaidHintPersistence } from './mermaid'
+import type { ProvenanceSpan } from './provenance'
+import { readPointerAwarenessCtx } from './read_pointers'
+import { connectWithSeed } from './seed_application'
+import { selectionCallbackCtx, type SelectionCallback } from './selection_watcher'
+import type { SketchControls } from './sketch/node_view'
+import { useSketchEditing } from './sketch/use_sketch_editing'
+import { buildSnapshotPayload, createSnapshotScheduler } from './snapshots'
 import {
   enableSuggestChanges,
   disableSuggestChanges,
 } from '@handlewithcare/prosemirror-suggest-changes'
-import {
-  alignCenterIcon,
-  alignLeftIcon,
-  alignRightIcon,
-  gripIcon,
-  plusIcon,
-  trashIcon,
-} from './table_icons'
-import { agentCursors } from './agent_cursors'
-import { scrollSettle } from './scroll_settle'
-import { longDocument } from './long_document'
-import { codeBlockView } from './code_block_view'
-import { markdownPresets } from './schema_attributes'
-import { configureCleanClipboard } from './clipboard'
-import { renderSoftBreaks } from './line_breaks'
-import { interactiveTaskListItems, taskPersistenceCtx } from './task_list_items'
-import { selectionCallbackCtx, selectionWatcher, type SelectionCallback } from './selection_watcher'
+import { taskPersistenceCtx } from './task_list_items'
 import type { CollaboratorKind } from '../types/payloads'
-import {
-  htmlDefaultValue,
-  sanitizeHtml,
-  type DocumentFormat,
-} from './document_format'
-import { configureSlashMenu, slashMenu } from './slash_menu'
-import { readPointerAwarenessCtx, readPointers } from './read_pointers'
-import {
-  bindMermaidHintPersistence,
-  mermaidDiagrams,
-  mermaidRenderHintsCtx,
-} from './mermaid'
-import { richBlockWidthControls } from './rich_block_width'
-import { documentSizeGuard, documentSizeGuardCtx } from './document_size_guard'
 
 export interface EditorHandle {
   editor: Editor
@@ -185,99 +123,6 @@ const REFUSED_EDIT_NOTICE =
 const SNAPSHOT_TOO_LARGE_NOTICE =
   'This document is over the 2 MB source limit, so its saved copy is stale. Shorten it to keep agents and previews current.'
 
-interface ActiveSketch {
-  data: SketchData
-  mount: HTMLElement
-  wrapper: HTMLElement
-}
-
-const OPENABLE_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:'])
-// Signed Active Storage paths (blob redirect/proxy and the disk service).
-// These URLs authenticate through their own signature, not the session, so
-// they load fine in an external browser context.
-const FILE_PATH_PREFIX = '/rails/active_storage/'
-
-// Server-rendered on first paint when the request came from the Ruby Native
-// iOS/Android shell (see app/views/layouts/application.html.erb).
-function inNativeShell(): boolean {
-  return document.documentElement.hasAttribute('data-native-app')
-}
-
-function openEditorLink(view: EditorView, event: Event): boolean {
-  if (!(event instanceof MouseEvent) || event.button !== 0 || event.defaultPrevented) {
-    return false
-  }
-
-  const target = event.target
-  const element =
-    target instanceof Element
-      ? target
-      : target instanceof Node
-        ? target.parentElement
-        : null
-  const anchor = element?.closest<HTMLAnchorElement>('a[href]')
-  if (!anchor || !view.dom.contains(anchor)) return false
-
-  let url: URL
-  try {
-    url = new URL(anchor.href, window.location.href)
-  } catch {
-    return false
-  }
-  if (!OPENABLE_LINK_PROTOCOLS.has(url.protocol)) return false
-
-  event.preventDefault()
-  // Inside the Ruby Native shell, window.open leaves the WKWebView for an
-  // external browser context that carries none of the app's cookies — a
-  // same-origin page link would land the signed-in user on a logged-out
-  // session. Navigate the webview itself instead: the session carries and
-  // the target page renders its own native chrome (including back).
-  // Signed file URLs are deliberately excluded — they work externally via
-  // their signature, while an in-place raw-file page would strand the user
-  // with no back affordance in the shell's Normal Mode.
-  const sameOriginPage =
-    url.origin === window.location.origin && !url.pathname.startsWith(FILE_PATH_PREFIX)
-  if (inNativeShell() && sameOriginPage) {
-    if (typeof window.RubyNative?.visit === 'function') window.RubyNative.visit(url.href)
-    else window.location.assign(url.href)
-    return true
-  }
-  window.open(url.href, '_blank', 'noopener,noreferrer')
-  return true
-}
-
-// Attributes a freshly seeded document to its agent author. applyTemplate
-// writes the Yjs fragment directly; the content reaches the ProseMirror view
-// via ySyncPlugin's init render (a remote-tagged transaction the provenance
-// writer skips), so seeded text lands unmarked — and collectSpans counts
-// unmarked text as human. This mirrors applySuggestion's explicit-attribution
-// + SKIP_PROVENANCE pattern, doc-wide. Only unmarked text is touched: if
-// applyTemplate no-opped against another seeder's content, that content
-// already carries marks and this dispatches nothing.
-function attributeSeedToAgent(view: EditorView, author: string): void {
-  const markType = view.state.schema.marks.provenance
-  if (!markType) return
-
-  let tr = view.state.tr
-  let changed = false
-  view.state.doc.descendants((node, pos, parent) => {
-    if (!node.isText) return
-    if (parent && !parent.type.allowsMarkType(markType)) return
-    if (markType.isInSet(node.marks)) return
-    tr = tr.addMark(
-      pos,
-      pos + node.nodeSize,
-      markType.create({ kind: 'ai', author, state: 'pending' }),
-    )
-    changed = true
-  })
-
-  if (!changed) return
-  tr.setMeta(SKIP_PROVENANCE, true)
-  tr.setMeta('addToHistory', false)
-  view.dispatch(tr)
-}
-
 // Sync the Suggest-mode flag into the suggest-changes plugin state. Safe to
 // call before the view mounts — start() applies the current value then.
 function syncSuggesting(editor: Editor, suggesting: boolean): void {
@@ -322,10 +167,6 @@ function CollabEditor({
   onNotice,
   onUnsavedEdit,
 }: EditorProps) {
-  const [sketchDraft, setSketchDraft] = useState<ActiveSketch | undefined>(undefined)
-  const insertSketchRef = useRef<() => void>(() => undefined)
-  const saveSketchRef = useRef<(data: SketchData) => void>(() => undefined)
-  const deleteSketchRef = useRef<(id: string) => void>(() => undefined)
   const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice, onUnsavedEdit })
   callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice, onUnsavedEdit }
   // Ref so the editable() closure always reads the live value; the effect
@@ -338,114 +179,22 @@ function CollabEditor({
   taskInteractiveRef.current = taskInteractive
   const canWriteRef = useRef(canWrite)
   canWriteRef.current = canWrite
+  const sketchControlsRef = useRef<SketchControls>(null)
   // Suggesting only syncs into plugin state after start() — the gate that
   // keeps seed/initial-sync transactions out of the dispatch transform.
   const startedRef = useRef(false)
 
   const { get, loading } = useEditor(
     (root) =>
-      Editor.make()
-        .config((ctx) => {
-          ctx.set(rootCtx, root)
-          ctx.set(provenanceIdentityCtx.key, { name: identity.name })
-          ctx.set(mermaidRenderHintsCtx.key, renderHints?.mermaid ?? {})
-          ctx.update(documentSizeGuardCtx.key, (prev) => ({
-            ...prev,
-            onRefused: () => callbacksRef.current.onNotice?.(REFUSED_EDIT_NOTICE),
-          }))
-          ctx.set(sketchControlsCtx.key, {
-            edit: (data, mount, wrapper) => setSketchDraft({ data, mount, wrapper }),
-            save: (data) => saveSketchRef.current(data),
-            insert: () => insertSketchRef.current(),
-            delete: (id) => deleteSketchRef.current(id),
-            close: (id) => setSketchDraft((current) => current?.data.id === id ? undefined : current),
-            enabled: () => editableRef.current && !suggestingRef.current,
-          })
-          // Read-only modes gate USER input only — ProseMirror still accepts
-          // programmatic transactions (Yjs sync, seeding, suggestion accept).
-          // dispatchTransaction is the suggest-changes wrapper: a pass-through
-          // unless the suggestState plugin says suggesting is enabled, with
-          // remote/undo/resolve transactions never re-intercepted.
-          ctx.update(editorViewOptionsCtx, (prev) => ({
-            ...prev,
-            editable: () => editableRef.current,
-            dispatchTransaction: suggestDispatch,
-            transformPastedHTML: (html) => sanitizeHtml(html, 'external'),
-            handleDOMEvents: {
-              ...prev.handleDOMEvents,
-              click: (view, event) =>
-                prev.handleDOMEvents?.click?.(view, event) || openEditorLink(view, event),
-            },
-          }))
-          ctx.update(highlightPluginConfig.key, (prev) => ({
-            ...prev,
-            parser: lazyShikiParser(),
-            languageExtractor: (node) => (node.attrs.language as string) ?? '',
-          }))
-          ctx.update(uploadConfig.key, (prev) => ({
-            ...prev,
-            uploader: imageUploader(identity.name),
-            enableHtmlFileUploader: true,
-          }))
-          configureCleanClipboard(ctx)
-          configureSlashMenu(ctx)
-          renderSoftBreaks(ctx)
-          // The defaults are bare text ('+', 'left', …) — real icons required.
-          ctx.update(tableBlockConfig.key, (prev) => ({
-            ...prev,
-            renderButton: (renderType: RenderType): string => {
-              switch (renderType) {
-                case 'add_row':
-                case 'add_col':
-                  return plusIcon
-                case 'delete_row':
-                case 'delete_col':
-                  return trashIcon
-                case 'align_col_left':
-                  return alignLeftIcon
-                case 'align_col_center':
-                  return alignCenterIcon
-                case 'align_col_right':
-                  return alignRightIcon
-                case 'col_drag_handle':
-                case 'row_drag_handle':
-                  return gripIcon
-              }
-            },
-          }))
-        })
-        .use(markdownPresets)
-        .use(codeBlockView)
-        .use(interactiveTaskListItems)
-        .use(tableBlock)
-        .use(listener)
-        .use(clipboard)
-        .use(cursor)
-        .use(indent)
-        .use(trailing)
-        .use(highlight)
-        .use(mermaidDiagrams)
-        .use(upload)
-        .use(provenance)
-        .use(textHighlighter)
-        .use(frontmatter)
-        .use(sketchSchemaPlugins)
-        .use(sketchNodeViewPlugins)
-        .use(richBlockWidthControls)
-        .use(slashMenu)
-        .use(suggestChangesMarks)
-        // Order matters: provenanceWriter (inside provenance) runs its
-        // appendTransaction before suggestGuard's — the guard observes
-        // already-attributed text (KTD 6 registration order).
-        .use(suggestState)
-        .use(suggestGuard)
-        .use(documentSizeGuard)
-        .use(selectionWatcher)
-        .use(agentCursors)
-        .use(readPointers)
-        .use(scrollSettle)
-        .use(longDocument)
-        .use(collab),
+      assembleEditor({
+        root,
+        authorName: identity.name,
+        mermaidHints: renderHints?.mermaid,
+        editable: () => editableRef.current,
+        // Filled by useSketchEditing below, before Milkdown runs this factory.
+        sketchControls: () => sketchControlsRef.current!,
+        onEditRefused: () => callbacksRef.current.onNotice?.(REFUSED_EDIT_NOTICE),
+      }),
     [],
   )
 
@@ -480,7 +229,7 @@ function CollabEditor({
 
     let cancelled = false
     let unbindMermaidHints: (() => void) | null = null
-    let spansFrame = 0
+    const reporter = createChangeReporter(() => callbacksRef.current)
     const snapshots = createSnapshotScheduler({
       editor,
       ydoc,
@@ -508,78 +257,25 @@ function CollabEditor({
             provider.persistCurrentState(buildSnapshotPayload(ctx, ydoc, contentFormat)),
           enabled: () => taskInteractiveRef.current,
         })
-        // Consume the seed one-shot: capture to locals before nulling so a
-        // remounted editor never re-applies or re-attributes, and a later
-        // refactor can't clear the author fields out from under the re-mark.
-        const seed = provider.seedContent
-        const seedFormat = provider.seedFormat
-        const seedKind = provider.seedAuthorKind
-        const seedAuthor = provider.seedAuthorName
-        provider.seedContent = null
-        provider.seedAuthorKind = null
-        provider.seedAuthorName = null
-        if (seed) {
-          // Server granted this client the seed claim; the default condition
-          // (remote doc empty) double-guards against racing another seeder.
-          service.applyTemplate(
-            seedFormat === 'html' ? htmlDefaultValue(seed, 'external') : seed,
-          )
-        }
-        service.connect()
-        if (seed) {
-          if (seedKind && seedKind !== 'human') {
-            // Must run after connect(): only then has ySyncPlugin rendered
-            // the seeded Yjs content into the view. The dispatched marks flow
-            // back through the binding, so peers receive attributed content.
-            attributeSeedToAgent(ctx.get(editorViewCtx), seedAuthor ?? '')
-            // The updated listener skips addToHistory:false transactions, so
-            // the chip never sees the marked doc on its own — push directly.
-            callbacksRef.current.onSpans?.(
-              collectSpans(ctx.get(editorViewCtx).state.doc, {
-                excludePendingInsertions: true,
-              }),
-            )
-          }
-          // Persist the applied (and attributed) seed NOW over HTTP
-          // (keepalive when it fits) instead of waiting for the cable handshake. The cable
-          // path drops local updates until 'sync' arrives, so a claimant that
-          // navigated away within the first seconds burned the seed claim and
-          // left the document blank for every viewer until the claim timeout.
-          // The sync_update endpoint also broadcasts, so already-connected
-          // viewers receive the seeded content live.
-          provider.persistCurrentState(buildSnapshotPayload(ctx, ydoc, contentFormat))
-        }
+        connectWithSeed(ctx, ydoc, provider, contentFormat, reporter.reportSpans)
 
-        ctx.set(selectionCallbackCtx.key, {
-          fn: (view, cause) => {
-            // Once per frame, with the page's other per-edit updates: a
-            // synchronous push rendered the page an extra time per keystroke.
-            if (cause === 'document' && !spansFrame) {
-              spansFrame = requestAnimationFrame(() => {
-                spansFrame = 0
-                callbacksRef.current.onSpans?.(collectSpans(view.state.doc, { excludePendingInsertions: true }))
-              })
-            }
-            callbacksRef.current.onSelection?.(view, cause)
-          },
-        })
-        callbacksRef.current.onSpans?.(collectSpans(ctx.get(editorViewCtx).state.doc, { excludePendingInsertions: true }))
+        const view = ctx.get(editorViewCtx)
+        ctx.set(selectionCallbackCtx.key, { fn: reporter.reportSelection })
+        reporter.reportSpans(view)
 
         ctx.get(listenerCtx).updated((_listenerCtx, doc) => {
           // Live summary updates use the document watcher above: unlike this
           // debounced listener it also sees remote and history-excluded edits.
           // Persisted snapshots remain complete, including pending insertions.
-          const title = firstHeadingTitle(doc)
-          if (title) callbacksRef.current.onTitleChange?.(title)
+          reporter.reportTitle(doc)
           scheduleSnapshot()
         })
 
-        const title = firstHeadingTitle(ctx.get(editorViewCtx).state.doc)
-        if (title) callbacksRef.current.onTitleChange?.(title)
+        reporter.reportTitle(view.state.doc)
 
         if (canWrite) {
           unbindMermaidHints = bindMermaidHintPersistence(
-            ctx.get(editorViewCtx).dom,
+            view.dom,
             renderHints?.mermaid,
             scheduleSnapshot,
           )
@@ -601,7 +297,7 @@ function CollabEditor({
     // A hydrated doc binds immediately — no visible empty-editor frame. A
     // fresh doc whose seed claim arrived with the page response also binds
     // immediately, applying the template from props (the one-shot consume in
-    // start() plus applyTemplate's remote-empty guard keep this race-safe
+    // connectWithSeed() plus applyTemplate's remote-empty guard keep this race-safe
     // against a channel-granted seeder). Only a fresh doc with no grant —
     // someone else holds the claim — waits for content or the channel's grant.
     if (provider.synced || ydoc.store.clients.size > 0) {
@@ -626,7 +322,7 @@ function CollabEditor({
       provider.off('rejected', rejected)
       provider.off('unsaved-edit', unsavedEdit)
       unbindMermaidHints?.()
-      if (spansFrame) cancelAnimationFrame(spansFrame)
+      reporter.cancelPending()
       snapshots.dispose()
       try {
         editor.action((ctx) => ctx.get(collabServiceCtx).disconnect())
@@ -665,83 +361,19 @@ function CollabEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [suggesting, loading])
 
-  // Sketch writes bypass the debounced snapshot: a closed sketch editor must
-  // be durable immediately (persistCurrentState uses keepalive when the save
-  // fits, so one followed by navigation still lands).
-  const persistSketchChange = (ctx: Ctx) => {
-    const session = getSession(slug)
-    if (session) {
-      void session.provider.persistCurrentState(
-        buildSnapshotPayload(ctx, session.ydoc, contentFormat),
-      )
-    }
-  }
-
-  const saveSketch = (data: SketchData, activate = false) => {
-    if (!editableRef.current || suggestingRef.current) return
-    const editor = get()
-    if (!editor) return
-    editor.action((ctx) => {
-      if (upsertSketchNode(ctx.get(editorViewCtx), data, activate)) persistSketchChange(ctx)
-    })
-  }
-
-  const deleteSketch = (id: string) => {
-    if (!editableRef.current || suggestingRef.current) return
-    const editor = get()
-    if (!editor) return
-    editor.action((ctx) => {
-      if (deleteSketchNode(ctx.get(editorViewCtx), id)) persistSketchChange(ctx)
-    })
-    setSketchDraft(undefined)
-  }
-
-  saveSketchRef.current = (data) => {
-    setSketchDraft((current) => current?.data.id === data.id ? { ...current, data } : current)
-    saveSketch(data)
-  }
-  deleteSketchRef.current = (id) => deleteSketch(id)
-
-  const focusAfterSketch = (id: string) => {
-    const editor = get()
-    if (!editor) return
-    editor.action((ctx) => focusAfterSketchNode(ctx.get(editorViewCtx), id))
-  }
-
-  insertSketchRef.current = () => {
-    if (!editableRef.current || suggestingRef.current) return
-    saveSketch({
-      id: crypto.randomUUID(),
-      formatVersion: 1,
-      description: '',
-      height: DEFAULT_SKETCH_HEIGHT,
-      scene: structuredClone(EMPTY_SKETCH_SCENE),
-    }, true)
-  }
-
-  useEffect(() => {
-    if (!sketchDraft) return
-    sketchDraft.wrapper.classList.add('is-editing')
-    return () => sketchDraft.wrapper.classList.remove('is-editing')
-  }, [sketchDraft])
+  const sketchEditor = useSketchEditing({
+    slug,
+    contentFormat,
+    get,
+    controlsRef: sketchControlsRef,
+    editableRef,
+    suggestingRef,
+  })
 
   return (
     <>
       <Milkdown />
-      {sketchDraft && sketchDraft.mount.isConnected && createPortal(
-        <InlineSketch
-          data={sketchDraft.data}
-          wrapper={sketchDraft.wrapper}
-          onChange={saveSketch}
-          onDelete={deleteSketch}
-          onDone={(focusAfter = false) => {
-            const id = sketchDraft.data.id
-            setSketchDraft(undefined)
-            if (focusAfter) focusAfterSketch(id)
-          }}
-        />,
-        sketchDraft.mount,
-      )}
+      {sketchEditor}
     </>
   )
 }
