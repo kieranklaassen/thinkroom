@@ -1324,7 +1324,7 @@ test('an edit too large to save is reported once and never sent, nor is anything
 
   h.disconnect()
   h.receive(emptySyncFrame(1))
-  h.provider.persistCurrentState()
+  h.provider.persistCurrentState(snapshotOf(10))
   h.provider.handleUnload()
   await new Promise((resolve) => setTimeout(resolve, 50))
   assert.deepEqual(h.sentUpdates(), [])
