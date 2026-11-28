@@ -17,8 +17,8 @@
 #   - Sketches render as the real sketch figure (border/caption/tape) with a
 #     server-drawn SVG of the scene — not a gray placeholder.
 class DocumentPreviewHtml
-  # Rendering a long document's preview (Commonmarker, HTML5 parsing and
-  # sanitization, and the DOM transform pass) is requested on every page load,
+  # Rendering a long document's preview (Commonmarker, HtmlDocumentSanitizer,
+  # and a single Nokogiri DOM transform pass) is requested on every page load,
   # yet only changes with its inputs. Recent renders stay in a bounded
   # in-process LRU keyed by a digest of every input; uncompressed so a hit is
   # a hash lookup, not an inflate.
@@ -116,7 +116,6 @@ class DocumentPreviewHtml
     end
 
     def render(format:, source:, editable:, sketch_interactive:, render_hints:)
-      mark_mermaid = false
       html = if format == "html"
         source
       else
@@ -135,16 +134,13 @@ class DocumentPreviewHtml
           options: { render: { unsafe: true }, extension: { header_ids: nil } },
           plugins: { table: true, strikethrough: true, tasklist: true }
         )
-        mark_mermaid = rendered.match?(/lang="mermaid"/i)
-        rendered
+        mark_mermaid_fences(rendered)
       end
 
       # Security boundary: document content is authored by humans and agents, so
       # it is sanitized before it can reach dangerouslySetInnerHTML on the client.
-      fragment = HtmlDocumentSanitizer.snapshot_fragment(html) do |parsed|
-        mark_mermaid_fences(parsed) if mark_mermaid
-      end
-
+      sanitized = HtmlDocumentSanitizer.snapshot(html).content
+      fragment = DocumentHtml.parse(sanitized)
       hints = render_hints.is_a?(Hash) ? render_hints.fetch("mermaid", {}) : {}
       Transformer.new(format:, editable:, sketch_interactive:, hints:).call(fragment)
       fragment.to_html
@@ -154,14 +150,24 @@ class DocumentPreviewHtml
     # document sanitizer intentionally drops. Translate only the Mermaid signal
     # to the already-supported data-language attribute before sanitizing so the
     # instant preview can mark diagram blocks without trusting arbitrary HTML.
-    def mark_mermaid_fences(parent)
+    def mark_mermaid_fences(html)
+      # The parse/serialize round-trip is pure overhead for the common
+      # zero-mermaid document; without the substring the loop can't match.
+      return html unless html.match?(/lang="mermaid"/i)
+
+      fragment = DocumentHtml.parse(html)
+      mark_mermaid_pre_elements(fragment)
+      fragment.to_html
+    end
+
+    def mark_mermaid_pre_elements(parent)
       node = parent.child
       while node
         if node.type == Nokogiri::XML::Node::ELEMENT_NODE
           if node.name == "pre" && node["lang"]&.casecmp?("mermaid")
             node["data-language"] = "mermaid"
           end
-          mark_mermaid_fences(node) if node.child
+          mark_mermaid_pre_elements(node) if node.child
         end
         node = node.next_sibling
       end
@@ -196,13 +202,7 @@ class DocumentPreviewHtml
         type = node.type
 
         if type == Nokogiri::XML::Node::TEXT_NODE
-          if collapse_whitespace
-            if next_node&.type == Nokogiri::XML::Node::TEXT_NODE
-              next_node = collapse_text_run(node)
-            elsif node.content.match?(ALL_WHITESPACE)
-              node.remove
-            end
-          end
+          node.remove if collapse_whitespace && node.content.match?(ALL_WHITESPACE)
           node = next_node
           next
         end
@@ -252,40 +252,12 @@ class DocumentPreviewHtml
       end
     end
 
-    # Removing or unwrapping elements during sanitization can leave consecutive
-    # sibling text nodes that a serialize+reparse round-trip would coalesce into
-    # one text node. Treat a contiguous text run as removable only when every
-    # node in the run is whitespace.
-    def collapse_text_run(first_text)
-      run_end = first_text
-      all_whitespace = first_text.content.match?(ALL_WHITESPACE)
-
-      while (sibling = run_end.next_sibling)&.type == Nokogiri::XML::Node::TEXT_NODE
-        all_whitespace &&= sibling.content.match?(ALL_WHITESPACE)
-        run_end = sibling
-      end
-
-      after = run_end.next_sibling
-      if all_whitespace
-        cursor = first_text
-        loop do
-          nxt = cursor.next_sibling
-          cursor.remove
-          break if cursor == run_end
-
-          cursor = nxt
-        end
-      end
-      after
-    end
-
     # Commonmarker renders soft/hard line breaks as "<br>\n" — the literal
     # newline is a second forced break under white-space: break-spaces, so
     # every line break made the preview one full line taller than the editor
     # (which emits a bare <br>). Strip exactly one newline after each <br>.
     def collapse_break_newline(br, next_node)
       sibling = br.next_sibling
-      sibling = sibling.next_sibling while sibling&.type == Nokogiri::XML::Node::TEXT_NODE && sibling.content.empty?
       return next_node unless sibling&.type == Nokogiri::XML::Node::TEXT_NODE
 
       content = sibling.content
@@ -294,7 +266,7 @@ class DocumentPreviewHtml
       if content.bytesize == 1
         after = sibling.next_sibling
         sibling.remove
-        sibling == next_node ? after : next_node
+        after
       else
         sibling.content = content.byteslice(1..)
         next_node

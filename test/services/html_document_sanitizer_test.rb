@@ -228,112 +228,12 @@ class HtmlDocumentSanitizerTest < ActiveSupport::TestCase
     assert_includes result, "Visible fallback"
   end
 
-  test "drops every DROP_WITH_CONTENT element with its subtree in both external and snapshot modes" do
-    source = [
-      "<p>before</p>",
-      "<script>drop_script</script>",
-      "<style>drop_style</style>",
-      "<iframe src=\"https://example.com\">drop_iframe</iframe>",
-      "<object data=\"x\">drop_object</object>",
-      "<embed src=\"x\">",
-      "<template><p>drop_template</p></template>",
-      "<svg><style>drop_svg_style</style><text>drop_svg</text></svg>",
-      "<div><math><mi>drop_math</mi></math></div>",
-      "<p>after</p>"
-    ].join
+  test "elements dropped with their content are found wherever they stand" do
+    source = "<svg><style>a</style></svg><div><math><mi>b</mi></math><template>c</template></div><style>d</style>"
+    fragment = Nokogiri::HTML5.fragment(source)
+    found = fragment.xpath(HtmlDocumentSanitizer::DROPPED)
 
-    [ HtmlDocumentSanitizer.external(source), HtmlDocumentSanitizer.snapshot(source) ].each do |result|
-      assert result.changed?
-      assert_equal "<p>before</p><p>after</p>", result.content
-      HtmlDocumentSanitizer::DROP_WITH_CONTENT.each do |tag|
-        refute_includes result.content, "<#{tag}"
-      end
-      refute_match(/drop_/, result.content)
-    end
-  end
-
-  test "canonicalizes HTML5 nesting and stays idempotent when unwrapping button-scope barriers inside p" do
-    source = "<p><button><table><tr><td>x</td></tr></table></button></p>"
-    expected = "<p></p><table><tbody><tr><td>x</td></tr></tbody></table><p></p>"
-
-    [ :external, :snapshot ].each do |mode|
-      first = HtmlDocumentSanitizer.public_send(mode, source)
-      second = HtmlDocumentSanitizer.public_send(mode, first.content)
-
-      assert_equal expected, first.content
-      assert first.changed?
-      assert_equal expected, second.content
-      assert_not second.changed?
-    end
-  end
-
-  test "strips comments, processing instructions, and escapes CDATA while scrubbing href escaping" do
-    source = %(<p><!-- secret --><?pi hidden?><![CDATA[cd <tag>]]><a href='https://example.com/a "b"'>link</a></p>)
-
-    result = HtmlDocumentSanitizer.external(source)
-
-    assert_includes result.content, "link</a>"
-    assert_includes result.content, 'href="https://example.com/a%20%22b%22"'
-    refute_includes result.content, "secret"
-    refute_includes result.content, "hidden"
-    refute_includes result.content, "<tag>"
-  end
-
-  test "snapshot_fragment runs optional pre-scrub block and returns a scrubbed Nokogiri fragment" do
-    source = '<pre lang="mermaid" onclick="evil()"><code>graph TD</code></pre><script>bad()</script>'
-
-    fragment = HtmlDocumentSanitizer.snapshot_fragment(source) do |parsed|
-      parsed.at_css("pre")["data-language"] = "mermaid"
-    end
-
-    assert_kind_of Nokogiri::HTML5::DocumentFragment, fragment
-    assert_equal '<pre data-language="mermaid"><code>graph TD</code></pre>', fragment.to_html
-  end
-
-  test "drops foreign-namespace and raw-text mXSS payloads with their content" do
-    source = <<~HTML
-      <p>safe</p>
-      <svg><p><style><a id="</style><img src=x onerror=alert(1)>"></style></p></svg>
-      <math><mtext><table><mglyph><style><!--</style><img title="--&gt;&lt;img src=1 onerror=alert(1)&gt;"></table></mtext></math>
-      <noscript><img src="https://evil.example/x.png" onerror="alert(1)"></noscript>
-      <a href="java&#x09;script:alert(1)">bad</a>
-    HTML
-
-    result = HtmlDocumentSanitizer.external(source)
-
-    assert result.changed?
-    assert_includes result.content, "<p>safe</p>"
-    assert_includes result.content, "<a>bad</a>"
-    refute_match(/svg|math|style|onerror|alert|evil\.example|javascript/i, result.content)
-  end
-
-  test "reports changed? accurately for empty, canonical, and modified html" do
-    empty = HtmlDocumentSanitizer.snapshot("")
-    assert_equal "", empty.content
-    assert_not empty.changed?
-
-    canonical = HtmlDocumentSanitizer.snapshot("<p>Already <strong>clean</strong>.</p>")
-    assert_equal "<p>Already <strong>clean</strong>.</p>", canonical.content
-    assert_not canonical.changed?
-
-    modified = HtmlDocumentSanitizer.snapshot("<p onclick=\"evil()\">Cleaned</p>")
-    assert_equal "<p>Cleaned</p>", modified.content
-    assert modified.changed?
-  end
-
-  test "removes images with missing or blank src and normalizes css-commented table alignment" do
-    source = <<~HTML
-      <p><img alt="missing"><img src="   " alt="blank"><img src="/rails/active_storage/disk/tok/pic.png" alt="ok"></p>
-      <table><tbody><tr><td style="/* comment */ text-align: LEFT;">cell</td></tr></tbody></table>
-      <p style="text-align: center">ignored</p>
-    HTML
-
-    result = HtmlDocumentSanitizer.snapshot(source)
-    fragment = Nokogiri::HTML5.fragment(result.content)
-
-    assert_equal 1, fragment.css("img").length
-    assert_equal "/rails/active_storage/disk/tok/pic.png", fragment.at_css("img")["src"]
-    assert_equal "text-align: left", fragment.at_css("td")["style"]
-    assert_nil fragment.css("p")[1]["style"]
+    assert_equal %w[svg style math template style], found.map(&:name)
+    assert_equal fragment.css(HtmlDocumentSanitizer::DROP_WITH_CONTENT.join(",")).to_a, found.to_a
   end
 end

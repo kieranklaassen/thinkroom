@@ -31,6 +31,8 @@ class HtmlDocumentSanitizer
   MAX_AUTHOR_LENGTH = 255
   MAX_SUGGESTION_ID_LENGTH = 255
   DROP_WITH_CONTENT = %w[script style iframe object embed template svg math].freeze
+  # The same elements by local name: svg and math have a namespace.
+  DROPPED = "descendant::*[#{DROP_WITH_CONTENT.map { |name| "local-name()='#{name}'" }.join(" or ")}]".freeze
   PROVENANCE_ATTRIBUTES = %w[data-provenance data-kind data-author data-state].freeze
   SUGGESTION_ATTRIBUTES = %w[data-suggestion-id data-author].freeze
   SKETCH_ATTRIBUTES = %w[
@@ -42,155 +44,64 @@ class HtmlDocumentSanitizer
   ).uniq.freeze
   EXTERNAL_ATTRIBUTES = (ATTRIBUTES - THINKROOM_ATTRIBUTES).freeze
 
-  ALLOWED_TAGS = TAGS.to_set.freeze
-  ALLOWED_ATTRIBUTES = ATTRIBUTES.to_set.freeze
-  EXTERNAL_ALLOWED_ATTRIBUTES = EXTERNAL_ATTRIBUTES.to_set.freeze
-  DROP_WITH_CONTENT_SET = DROP_WITH_CONTENT.to_set.freeze
-  THINKROOM_ATTRIBUTES_SET = THINKROOM_ATTRIBUTES.to_set.freeze
-  ALIGNMENT_TAGS = %w[td th].to_set.freeze
-  SUGGESTION_TAGS = %w[ins del].to_set.freeze
-  # Disallowed HTML5 button-scope barriers whose in-place unwrapping can expose
-  # illegal nesting (such as <table> inside <p> or nested <a>), requiring a
-  # canonical HTML5 re-parse on that rare slow path.
-  BUTTON_SCOPE_BARRIERS = %w[button marquee applet].to_set.freeze
-
-  # Scrubs a Nokogiri::HTML5::DocumentFragment directly in a single pass using
-  # Loofah::HTML5::Scrub for URI, CDATA, CSS, and attribute escaping, avoiding
-  # Loofah's per-node decorator overhead and redundant parse/serialize cycles.
-  class Scrubber
-    def initialize(trusted_metadata:)
-      @tags = ALLOWED_TAGS
-      @attributes = trusted_metadata ? ALLOWED_ATTRIBUTES : EXTERNAL_ALLOWED_ATTRIBUTES
-      @trusted_metadata = trusted_metadata
+  class << self
+    def external(source)
+      DocumentHtml.within_limits { sanitize(source, trusted_metadata: false) }
     end
 
-    def scrub_fragment(fragment)
-      reparse = scrub_children(fragment)
-      reparse ? DocumentHtml.parse(fragment.to_html) : fragment
+    def snapshot(source)
+      DocumentHtml.within_limits { sanitize(source, trusted_metadata: true) }
     end
 
     private
 
-    def scrub_children(parent)
-      reparse = false
-      node = parent.child
-      while node
-        next_node = node.next_sibling
-        reparse = true if scrub_node_tree(node)
-        node = next_node
+    def sanitize(source, trusted_metadata:)
+      original = source.to_s
+      source_fragment = DocumentHtml.parse(original)
+      source_fragment.xpath(DROPPED).remove
+      sanitized = Rails::HTML5::SafeListSanitizer.new.sanitize(
+        source_fragment.to_html,
+        tags: TAGS,
+        attributes: ATTRIBUTES
+      ).to_s
+
+      fragment = DocumentHtml.parse(sanitized)
+      fragment.traverse do |node|
+        next unless node.element?
+
+        sanitize_style(node)
+        sanitize_image(node)
+        sanitize_thinkroom_metadata(node, trusted: trusted_metadata)
       end
-      reparse
+
+      content = fragment.to_html
+      Result.new(content:, changed?: content != original)
     end
 
-    def scrub_node_tree(node)
-      case node.type
-      when Nokogiri::XML::Node::TEXT_NODE
-        false
-      when Nokogiri::XML::Node::ELEMENT_NODE
-        name = node.name
-        if DROP_WITH_CONTENT_SET.include?(name) || node.namespace
-          node.remove
-          return false
-        end
+    def sanitize_style(node)
+      style = node["style"]
+      return unless style
 
-        reparse = scrub_children(node)
-
-        unless @tags.include?(name)
-          reparse = true if BUTTON_SCOPE_BARRIERS.include?(name) && node.first_element_child
-          unwrap_node(node)
-          return reparse
-        end
-
-        scrub_allowed_element(node, name)
-        reparse
-      when Nokogiri::XML::Node::CDATA_SECTION_NODE
-        node.replace(Loofah::HTML5::Scrub.cdata_escape(node))
-        false
+      if %w[td th].include?(node.name) && (match = ALIGNMENT.match(style))
+        node["style"] = "text-align: #{match[1].downcase}"
       else
-        node.remove
-        false
+        node.remove_attribute("style")
       end
     end
 
-    def unwrap_node(node)
-      child = node.child
-      while child
-        next_child = child.next_sibling
-        node.add_previous_sibling(child)
-        child = next_child
-      end
-      node.remove
+    def sanitize_image(node)
+      return unless node.name == "img"
+
+      node.remove unless valid_active_storage_src?(node["src"])
     end
 
-    def scrub_allowed_element(node, name)
-      attrs = node.attribute_nodes
-      if attrs.empty?
-        node.remove if name == "img"
-        return
-      end
+    def sanitize_thinkroom_metadata(node, trusted:)
+      # Most elements carry none of these: nothing to strip or restore.
+      return if THINKROOM_ATTRIBUTES.none? { |attribute| node.key?(attribute) }
 
-      style_attr = nil
-      has_thinkroom_attr = false
-      needs_escaping = false
-
-      attrs.each do |attr|
-        attr_name = attr.name
-        unless @attributes.include?(attr_name)
-          attr.remove
-          next
-        end
-
-        if attr_name == "style"
-          style_attr = attr
-          next
-        end
-
-        has_thinkroom_attr = true if @trusted_metadata && THINKROOM_ATTRIBUTES_SET.include?(attr_name)
-
-        prefixed = Loofah::HTML5::Scrub.prefixed_attribute_name(attr)
-        next if Loofah::HTML5::Scrub.scrub_attribute_value(node, attr, prefixed)
-
-        if prefixed == "src" && !attr.value.match?(/[^[:space:]]/)
-          attr.remove
-          next
-        end
-
-        needs_escaping = true if Loofah::LibxmlWorkarounds::BROKEN_ESCAPING_ATTRIBUTES.include?(attr_name)
-      end
-
-      Loofah::HTML5::Scrub.force_correct_attribute_escaping!(node) if needs_escaping
-      sanitize_style_attribute(name, style_attr) if style_attr
-
-      if name == "img" && !valid_active_storage_src?(node["src"])
-        node.remove
-        return
-      end
-
-      sanitize_thinkroom_metadata(node) if has_thinkroom_attr
-    end
-
-    def sanitize_style_attribute(name, style_attr)
-      if ALIGNMENT_TAGS.include?(name)
-        value = style_attr.value
-        match = ALIGNMENT.match(value) || ALIGNMENT.match(Loofah::HTML5::Scrub.scrub_css(value))
-        if match
-          style_attr.value = "text-align: #{match[1].downcase}"
-          return
-        end
-      end
-
-      style_attr.remove
-    end
-
-    def sanitize_thinkroom_metadata(node)
-      metadata = {}
-      node.attribute_nodes.each do |attr|
-        next unless THINKROOM_ATTRIBUTES_SET.include?(attr.name)
-
-        metadata[attr.name] = attr.value
-        attr.remove
-      end
-      return if metadata.empty?
+      metadata = THINKROOM_ATTRIBUTES.to_h { |attribute| [ attribute, node[attribute] ] }
+      strip_thinkroom_metadata(node)
+      return unless trusted
 
       restore_provenance(node, metadata) if valid_provenance?(node, metadata)
       restore_suggestion(node, metadata) if valid_suggestion?(node, metadata)
@@ -230,7 +141,7 @@ class HtmlDocumentSanitizer
 
     def valid_suggestion?(node, metadata)
       suggestion_id = metadata["data-suggestion-id"].to_s
-      SUGGESTION_TAGS.include?(node.name) &&
+      %w[ins del].include?(node.name) &&
         suggestion_id.present? &&
         suggestion_id.length <= MAX_SUGGESTION_ID_LENGTH &&
         metadata["data-author"].to_s.length <= MAX_AUTHOR_LENGTH
@@ -272,49 +183,9 @@ class HtmlDocumentSanitizer
       node["data-highlighter"] = ""
       node["data-color"] = metadata["data-color"]
     end
-  end
 
-  TRUSTED_SCRUBBER = Scrubber.new(trusted_metadata: true).freeze
-  EXTERNAL_SCRUBBER = Scrubber.new(trusted_metadata: false).freeze
-
-  private_constant :ALLOWED_TAGS, :ALLOWED_ATTRIBUTES, :EXTERNAL_ALLOWED_ATTRIBUTES,
-                   :DROP_WITH_CONTENT_SET, :THINKROOM_ATTRIBUTES_SET,
-                   :ALIGNMENT_TAGS, :SUGGESTION_TAGS, :BUTTON_SCOPE_BARRIERS,
-                   :Scrubber, :TRUSTED_SCRUBBER, :EXTERNAL_SCRUBBER
-
-  class << self
-    def external(source)
-      DocumentHtml.within_limits { sanitize(source, trusted_metadata: false) }
-    end
-
-    def snapshot(source)
-      DocumentHtml.within_limits { sanitize(source, trusted_metadata: true) }
-    end
-
-    # Parses and scrubs a trusted snapshot into a Nokogiri::HTML5::DocumentFragment
-    # without serializing to HTML, allowing DocumentPreviewHtml to transform the
-    # same tree in-place instead of round-tripping through HTML again.
-    # An optional block runs on the parsed fragment right before scrubbing.
-    def snapshot_fragment(source)
-      DocumentHtml.within_limits do
-        fragment = DocumentHtml.parse(source.to_s)
-        yield fragment if block_given?
-        TRUSTED_SCRUBBER.scrub_fragment(fragment)
-      end
-    end
-
-    private
-
-    def sanitize(source, trusted_metadata:)
-      original = source.to_s
-      return Result.new(content: "", changed?: false) if original.empty?
-
-      fragment = DocumentHtml.parse(original)
-      scrubber = trusted_metadata ? TRUSTED_SCRUBBER : EXTERNAL_SCRUBBER
-      fragment = scrubber.scrub_fragment(fragment)
-
-      content = fragment.to_html
-      Result.new(content:, changed?: content != original)
+    def strip_thinkroom_metadata(node)
+      THINKROOM_ATTRIBUTES.each { |attribute| node.remove_attribute(attribute) }
     end
   end
 end

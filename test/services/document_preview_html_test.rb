@@ -385,18 +385,44 @@ class DocumentPreviewHtmlTest < ActiveSupport::TestCase
   end
 
   test "annotates Active Storage image dimensions in a batched query" do
-    blob = ActiveStorage::Blob.create_and_upload!(
-      io: StringIO.new("\x89PNG\r\n\x1A\n"),
-      filename: "sample.png",
+    first = ActiveStorage::Blob.create_and_upload!(
+      io: StringIO.new("\x89PNG\r\n\x1A\nfirst"),
+      filename: "first.png",
       content_type: "image/png"
     )
-    blob.update!(metadata: blob.metadata.merge("width" => 640, "height" => 360))
-    src = "/rails/active_storage/blobs/redirect/#{blob.signed_id}/sample.png"
+    first.update!(metadata: first.metadata.merge("width" => 640, "height" => 360))
 
-    html = DocumentPreviewHtml.call(format: "markdown", content: "![sample](#{src})")
-    img = Nokogiri::HTML5.fragment(html).at_css("img[src]")
+    second = ActiveStorage::Blob.create_and_upload!(
+      io: StringIO.new("\x89PNG\r\n\x1A\nsecond"),
+      filename: "second.png",
+      content_type: "image/png"
+    )
+    second.update!(metadata: second.metadata.merge("width" => 800, "height" => 450))
 
-    assert_equal "640", img["width"]
-    assert_equal "360", img["height"]
+    markdown = <<~MD
+      ![first](/rails/active_storage/blobs/redirect/#{first.signed_id}/first.png)
+
+      ![second](/rails/active_storage/blobs/redirect/#{second.signed_id}/second.png)
+    MD
+
+    blob_queries = []
+    subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |*, payload|
+      next if payload[:name] == "SCHEMA" || payload[:cached]
+
+      blob_queries << payload[:sql] if payload[:sql].include?("active_storage_blobs")
+    end
+
+    html = begin
+      DocumentPreviewHtml.call(format: "markdown", content: markdown)
+    ensure
+      ActiveSupport::Notifications.unsubscribe(subscriber)
+    end
+
+    imgs = Nokogiri::HTML5.fragment(html).css("img[src]")
+
+    assert_equal 1, blob_queries.size
+    assert_equal 2, imgs.size
+    assert_equal [ "640", "360" ], [ imgs[0]["width"], imgs[0]["height"] ]
+    assert_equal [ "800", "450" ], [ imgs[1]["width"], imgs[1]["height"] ]
   end
 end
