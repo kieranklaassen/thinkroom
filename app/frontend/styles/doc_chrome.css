@@ -151,6 +151,13 @@
   font-size: 0.76rem;
 }
 
+/* Stays below the sticky header while the document scrolls. */
+.doc-notice--pinned {
+  position: sticky;
+  top: calc(52px + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
+  z-index: 29;
+}
+
 .doc-notice button {
   border: 0;
   background: transparent;

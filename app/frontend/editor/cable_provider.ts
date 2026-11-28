@@ -143,8 +143,8 @@ export class CableProvider {
   readonly awareness: Awareness
   readonly clientId = crypto.randomUUID()
   synced = false
-  /** A local edit was too large for the server. Every later local edit follows
-   *  it in the Yjs history and cannot apply without it, so none is sent. Undo
+  /** A local edit was too large for the server. Later local edits follow it in
+   *  the Yjs history and can depend on it, so none is sent. Undo
    *  does not help (the history keeps the text), so this lasts as long as the
    *  session. */
   unsavedEdit = false
