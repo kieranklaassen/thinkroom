@@ -176,6 +176,8 @@ export interface EditorProps {
    *  for pushing the document past its size limit, a durable snapshot the
    *  server refused as too large. */
   onNotice?: (message: string) => void
+  /** Whether this session holds an edit too large to save. */
+  onUnsavedEdit?: (unsaved: boolean) => void
 }
 
 const REFUSED_EDIT_NOTICE =
@@ -318,13 +320,14 @@ function CollabEditor({
   onAccessChanged,
   onRejected,
   onNotice,
+  onUnsavedEdit,
 }: EditorProps) {
   const [sketchDraft, setSketchDraft] = useState<ActiveSketch | undefined>(undefined)
   const insertSketchRef = useRef<() => void>(() => undefined)
   const saveSketchRef = useRef<(data: SketchData) => void>(() => undefined)
   const deleteSketchRef = useRef<(id: string) => void>(() => undefined)
-  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice })
-  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice }
+  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice, onUnsavedEdit })
+  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice, onUnsavedEdit }
   // Ref so the editable() closure always reads the live value; the effect
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
@@ -466,9 +469,12 @@ function CollabEditor({
     const stale = () => callbacksRef.current.onStale?.()
     const accessChanged = () => callbacksRef.current.onAccessChanged?.()
     const rejected = () => callbacksRef.current.onRejected?.()
+    const unsavedEdit = () => callbacksRef.current.onUnsavedEdit?.(provider.unsavedEdit)
     provider.on('stale', stale)
     provider.on('access-changed', accessChanged)
     provider.on('rejected', rejected)
+    provider.on('unsaved-edit', unsavedEdit)
+    unsavedEdit()
     // Discarded while no editor was listening (a remount reusing the session).
     if (provider.discarded) stale()
 
@@ -618,6 +624,7 @@ function CollabEditor({
       provider.off('stale', stale)
       provider.off('access-changed', accessChanged)
       provider.off('rejected', rejected)
+      provider.off('unsaved-edit', unsavedEdit)
       unbindMermaidHints?.()
       if (spansFrame) cancelAnimationFrame(spansFrame)
       snapshots.dispose()

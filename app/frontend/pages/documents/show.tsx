@@ -21,6 +21,7 @@ import {
 } from '../../editor/provenance'
 import { refreshAgentCursors } from '../../editor/agent_cursors'
 import type { RenderHints } from '../../editor/cable_provider'
+import { UnsavedEditNotice } from '../../components/unsaved_edit_notice'
 import { bindReadModeCopy } from '../../editor/clipboard'
 import { bindReadPointerBroadcast } from '../../editor/read_pointers'
 import {
@@ -236,6 +237,7 @@ export default function DocumentShow({
   // Editor-originated notices (refused oversized edit, snapshot refused as
   // too large); share the doc-notice slot with suggestion notices.
   const [editorNotice, setEditorNotice] = useState<string | null>(null)
+  const [unsavedEdit, setUnsavedEdit] = useState(false)
   // Hydration-safe init from server-rendered prefs: cookies supply panel/focus/
   // width while the URL supplies mode, so SSR and the first client render agree.
   const [panelOpen, setPanelOpen] = useState(ui.panel_open)
@@ -1014,6 +1016,7 @@ export default function DocumentShow({
         {!isReading && (
           <ClaimBanner slug={doc.slug} ownership={ownership} claimerName={identity.name} />
         )}
+        <UnsavedEditNotice unsaved={unsavedEdit} />
         {!isReading && (suggestionNotice || editorNotice) && (
           <div className="doc-notice" role="status">
             <span>{suggestionNotice ?? editorNotice}</span>
@@ -1105,6 +1108,7 @@ export default function DocumentShow({
                 // gone; same exit path as the deleted broadcast.
                 onRejected={onDocumentGone}
                 onNotice={setEditorNotice}
+                onUnsavedEdit={setUnsavedEdit}
               />
             </article>
             <DocumentWidthHandle

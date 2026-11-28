@@ -1277,3 +1277,121 @@ test('bfcache pagehide with persisted: true flushes edits while keeping local aw
     'reconnected session should broadcast restored local awareness',
   )
 })
+
+const LIMIT_BYTES = 2 * 1024 * 1024
+// One character, three encoded bytes: under the limit by characters only.
+const OVERSIZED_TEXT = '漢'.repeat(LIMIT_BYTES / 3 + 1)
+
+function stubFetch(t, fetch) {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = fetch
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+}
+
+function unsavedEditHarness(t) {
+  const h = createHarness(t)
+  h.notified = 0
+  h.provider.on('unsaved-edit', () => (h.notified += 1))
+  h.receive(emptySyncFrame(1))
+  return h
+}
+
+const serverText = (frames) => {
+  const server = new Y.Doc()
+  for (const frame of frames) Y.applyUpdate(server, fromBase64(frame.update))
+  return server.getText('t').toString()
+}
+
+test('an edit too large to save is reported once and never sent, nor is anything after it', async (t) => {
+  const bodies = []
+  stubFetch(t, async (_url, init) => {
+    bodies.push(JSON.parse(init.body))
+    return { ok: true }
+  })
+  const h = unsavedEditHarness(t)
+  const text = h.doc.getText('t')
+
+  text.insert(0, OVERSIZED_TEXT)
+  assert.equal(h.provider.unsavedEdit, true)
+  assert.equal(h.notified, 1)
+
+  text.insert(0, 'later')
+  text.delete(0, text.length)
+  assert.equal(h.notified, 1)
+  assert.equal(h.provider.unsavedEdit, true, 'removing the text does not make later edits savable')
+
+  h.disconnect()
+  h.receive(emptySyncFrame(1))
+  h.provider.persistCurrentState()
+  h.provider.handleUnload()
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  assert.deepEqual(h.sentUpdates(), [])
+  assert.deepEqual(bodies, [])
+})
+
+test('edits made before one too large to save are still saved', (t) => {
+  const h = unsavedEditHarness(t)
+  const text = h.doc.getText('t')
+  text.insert(0, 'a')
+  text.insert(1, 'b')
+  text.insert(2, OVERSIZED_TEXT)
+  h.receive({ type: 'ack', seq: 1 })
+  h.receive({ type: 'ack', seq: 2 })
+
+  assert.equal(h.sentUpdates().length, 2)
+  assert.equal(serverText(h.sentUpdates()), 'ab')
+  assert.equal(h.provider.unsavedEdit, true)
+})
+
+test('an edit of exactly the limit is sent, and one byte more is not', (t) => {
+  const sizeOf = (length) => {
+    const doc = new Y.Doc()
+    doc.clientID = 1
+    doc.getText('t').insert(0, 'x'.repeat(length))
+    return Y.encodeStateAsUpdate(doc).length
+  }
+  const exact = LIMIT_BYTES - (sizeOf(LIMIT_BYTES - 100) - (LIMIT_BYTES - 100))
+  for (const [length, unsaved] of [[exact, false], [exact + 1, true]]) {
+    const h = unsavedEditHarness(t)
+    h.doc.clientID = 1
+    h.doc.getText('t').insert(0, 'x'.repeat(length))
+    assert.equal(h.provider.unsavedEdit, unsaved)
+    assert.equal(h.sentUpdates().length, unsaved ? 0 : 1)
+    if (!unsaved) assert.equal(fromBase64(h.sentUpdates()[0].update).length, LIMIT_BYTES)
+  }
+})
+
+test('edits that only together pass the limit are sent in separate frames', (t) => {
+  const h = createHarness(t)
+  const text = h.doc.getText('t')
+  for (const letter of ['a', 'b', 'c']) text.insert(text.length, letter.repeat(900_000))
+  h.receive(emptySyncFrame(1))
+  h.receive({ type: 'ack', seq: 1 })
+  h.receive({ type: 'ack', seq: 2 })
+
+  const frames = h.sentUpdates()
+  assert.equal(frames.length, 2)
+  assert.ok(frames.every((frame) => fromBase64(frame.update).length <= LIMIT_BYTES))
+  assert.equal(serverText(frames), text.toString())
+  assert.equal(h.provider.unsavedEdit, false)
+})
+
+test('an HTTP save carries only the waiting edits that fit, and the rest follow', async (t) => {
+  const bodies = []
+  stubFetch(t, async (_url, init) => {
+    bodies.push(JSON.parse(init.body))
+    return { ok: true }
+  })
+  const h = createHarness(t)
+  const text = h.doc.getText('t')
+  for (const letter of ['a', 'b', 'c']) text.insert(text.length, letter.repeat(900_000))
+  h.provider.persistCurrentState()
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  h.receive(emptySyncFrame(1))
+
+  assert.equal(bodies.length, 1)
+  assert.ok(fromBase64(bodies[0].update).length <= LIMIT_BYTES)
+  assert.equal(serverText([...bodies, ...h.sentUpdates()]), text.toString())
+})
