@@ -1,7 +1,27 @@
+/** Signing in or out in another tab replaces the token this page loaded with;
+ *  the cookie is shared by every tab and replaced by those same answers. */
 export function csrfToken(): string {
   return (
-    document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? ''
+    cookieToken() ||
+    (document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '')
   )
+}
+
+function cookieToken(): string {
+  try {
+    const value = /(?:^|;\s*)XSRF-TOKEN=([^;]*)/.exec(document.cookie)?.[1] ?? ''
+    return decodeURIComponent(value)
+  } catch {
+    return ''
+  }
+}
+
+export function sessionHeaders(): Record<string, string> {
+  return {
+    'X-CSRF-Token': csrfToken(),
+    // The answer can set the session cookie; this makes it set the token with it.
+    'X-Requested-With': 'XMLHttpRequest',
+  }
 }
 
 export function jsonHeaders(): Record<string, string> {
@@ -9,7 +29,7 @@ export function jsonHeaders(): Record<string, string> {
     // Without it a refusal is a redirect, which fetch follows to another answer.
     Accept: 'application/json',
     'Content-Type': 'application/json',
-    'X-CSRF-Token': csrfToken(),
+    ...sessionHeaders(),
   }
 }
 

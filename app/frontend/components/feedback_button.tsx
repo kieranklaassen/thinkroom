@@ -4,7 +4,7 @@ import {
   downloadSessionArchive,
   type SessionResult,
 } from 'riffrec'
-import { csrfToken } from '../lib/csrf'
+import { sessionHeaders } from '../lib/csrf'
 
 const LAST_RUN_KEY = 'thinkroom.feedbackRunId'
 
@@ -79,7 +79,7 @@ export function FeedbackButton({ automationEnabled = false }: { automationEnable
     const refresh = async () => {
       try {
         const response = await fetch(`/feedback_runs/${runId}`, {
-          headers: { Accept: 'application/json' },
+          headers: { Accept: 'application/json', ...sessionHeaders() },
         })
         if ([401, 403, 404].includes(response.status)) {
           if (cancelled) return
@@ -127,7 +127,7 @@ export function FeedbackButton({ automationEnabled = false }: { automationEnable
     try {
       const response = await fetch('/feedback_runs', {
         method: 'POST',
-        headers: { Accept: 'application/json', 'X-CSRF-Token': csrfToken() },
+        headers: { Accept: 'application/json', ...sessionHeaders() },
         body,
       })
       const payload = (await response.json()) as FeedbackRunStatus & { error?: string }
