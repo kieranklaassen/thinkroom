@@ -8,10 +8,17 @@ class DocumentMarkdown
   MAX_LINK_TEXT = 100_000_000
   MAX_COLUMNS = 1_000
   MAX_CELLS = 20_000
+  # GFM disallowed raw HTML tags (removed from comrak in 0.56.0). Escaping them
+  # before HTML5 parsing keeps raw-text/script tags from swallowing or corrupting
+  # the rest of an unsafe preview render; HtmlDocumentSanitizer stays the boundary.
+  TAGFILTER = %r{<(?=/?(?:title|textarea|style|xmp|iframe|noembed|noframes|script|plaintext)(?:[\t\n\f\r />]|\z))}i
 
   class << self
     def to_html(source, options: {}, plugins:)
-      Commonmarker.to_html(source, options: limited(source, options), plugins:)
+      html = Commonmarker.to_html(source, options: limited(source, options), plugins:)
+      options.dig(:render, :unsafe) ? html.gsub(TAGFILTER, "&lt;") : html
+    rescue Commonmarker::NestingDepthExceededError
+      raise DocumentHtml::TooComplex
     end
 
     def parse(source, **options) = Commonmarker.parse(source, options: limited(source, options))

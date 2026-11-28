@@ -1,10 +1,11 @@
 require "test_helper"
-require "open3"
+require_relative "../test_helpers/own_process_helpers"
 
 # Very deep nesting is handled: a document that cannot be formatted is read as
 # its source, and a write that cannot be checked gets a reason and stores nothing.
 class DeepNestingTest < ActionDispatch::IntegrationTest
   include CompoundWritingHelpers
+  include OwnProcessHelpers
 
   BROWSER = { "User-Agent" => "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36" }.freeze
   AGENT = { "X-Agent-Name" => "Scout" }.freeze
@@ -188,10 +189,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
       image = Vips::Image.new_from_buffer(DocumentOgImage.call(document), "")
       puts JSON.generate([ image.get("vips-loader"), image.width, image.height ])
     RUBY
-    stdout, stderr, status = Open3.capture3(
-      { "RAILS_ENV" => "test" }, Rails.root.join("bin/rails").to_s, "runner", script, stdin_data: MARKDOWN
-    )
-    assert status.success?, stderr
+    stdout = run_in_own_rails(script, stdin_data: MARKDOWN)
     assert_equal [ "pngload_buffer", DocumentOgImage::WIDTH, DocumentOgImage::HEIGHT ], JSON.parse(stdout)
   end
 

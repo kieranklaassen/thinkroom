@@ -168,11 +168,12 @@ export class CableProvider {
   // edits owe a flush on reconnect or unload — a read-only open has neither
   // and sends nothing.
   //
-  // Both hold parts rather than one update: a part an HTTP save carried is never
-  // merged with later edits, so the save's success settles that part alone.
+  // Both hold parts rather than one update: a part an in-flight HTTP save
+  // carries is never merged with later edits, so the save's success settles
+  // that part alone.
   private inFlight: { seq: number; parts: Uint8Array[] } | null = null
   private queued: Uint8Array[] = []
-  private carriedBySave = new WeakSet<Uint8Array>()
+  private carriedBySave = new WeakMap<Uint8Array, { saves: number; keepalive: number }>()
   private ackTimer: ReturnType<typeof setTimeout> | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryAttempt = 0
@@ -265,6 +266,7 @@ export class CableProvider {
     this.awareness.on('update', this.handleAwarenessUpdate)
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', this.handleUnload)
+      window.addEventListener('pagehide', this.handleUnload)
       window.addEventListener('blur', this.handleBlur)
     }
   }
@@ -288,6 +290,7 @@ export class CableProvider {
     this.stopSeedWait()
     if (typeof window !== 'undefined') {
       window.removeEventListener('beforeunload', this.handleUnload)
+      window.removeEventListener('pagehide', this.handleUnload)
       window.removeEventListener('blur', this.handleBlur)
     }
     this.doc.off('update', this.handleDocUpdate)
@@ -515,18 +518,28 @@ export class CableProvider {
    * fits what browsers allow, ordinary otherwise.
    */
   persistCurrentState = (snapshot?: DurableSnapshotPayload): void => {
+    this.sendDurableSave(snapshot)
+  }
+
+  private sendDurableSave(snapshot?: DurableSnapshotPayload, unload = false): void {
     if (!this.canWrite || this.discarded || this.htmlRefused) return
     const parts = this.unackedParts()
+    if (
+      unload &&
+      (parts.length === 0 ||
+        parts.every((part) => (this.carriedBySave.get(part)?.keepalive ?? 0) > 0))
+    ) {
+      return
+    }
     const pending = parts.length > 0 ? Y.mergeUpdates(parts) : null
     const sentClaim = this.seedClaim
     const editSeqAtSend = this.localEditSeq
     if (!pending && !snapshot) return
-    parts.forEach((part) => this.carriedBySave.add(part))
 
     const updatePayload = {
       update: toBase64(pending ?? EMPTY_UPDATE),
       cid: this.clientId,
-      // Same staleness guard as flush(): this beforeunload/keepalive
+      // Same staleness guard as flush(): this unload/keepalive
       // fallback merges through the identical YjsPersistence.merge_bytes path
       // as SyncChannel, so it always carries content_generation (initialized
       // from page props even before the WebSocket handshake completes).
@@ -549,7 +562,17 @@ export class CableProvider {
     // goes as an ordinary request, which only lasts as long as the page.
     const bodyBytes = byteLength(body)
     const keepalive = fitsKeepalive(bodyBytes)
+    if (unload && !keepalive && parts.every((part) => this.carriedBySave.has(part))) return
     if (keepalive) keepaliveBytesInFlight += bodyBytes
+    for (const part of parts) {
+      const counts = this.carriedBySave.get(part)
+      if (counts) {
+        counts.saves += 1
+        if (keepalive) counts.keepalive += 1
+      } else {
+        this.carriedBySave.set(part, { saves: 1, keepalive: keepalive ? 1 : 0 })
+      }
+    }
 
     void fetch(`/d/${this.slug}/sync_update`, {
       method: 'POST',
@@ -590,6 +613,13 @@ export class CableProvider {
       .catch((error) => console.warn('CableProvider: durable sync failed', error))
       .finally(() => {
         if (keepalive) keepaliveBytesInFlight -= bodyBytes
+        for (const part of parts) {
+          const counts = this.carriedBySave.get(part)
+          if (!counts) continue
+          counts.saves -= 1
+          if (keepalive) counts.keepalive -= 1
+          if (counts.saves <= 0) this.carriedBySave.delete(part)
+        }
       })
   }
 
@@ -902,10 +932,10 @@ export class CableProvider {
     })
   }
 
-  private handleUnload = (): void => {
-    removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload')
-    if (this.inFlight || this.queued.length > 0) {
-      this.persistCurrentState()
+  private handleUnload = (event?: Event): void => {
+    if (!(event as PageTransitionEvent | undefined)?.persisted) {
+      removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload')
     }
+    this.sendDurableSave(undefined, true)
   }
 }
