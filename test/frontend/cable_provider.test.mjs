@@ -260,7 +260,7 @@ test('a broken frame from a peer does not stop later edits from arriving', (t) =
   assert.equal(h.doc.getText('t').toString(), 'from a peer')
 })
 
-test('a document deleted while offline is reported, and nothing typed after is sent', (t) => {
+test('a document deleted while offline is reported, and the offline edits are dropped', (t) => {
   const h = createHarness(t)
   h.receive(emptySyncFrame(0))
   let rejected = 0
@@ -269,8 +269,9 @@ test('a document deleted while offline is reported, and nothing typed after is s
   h.disconnect()
   h.doc.getText('t').insert(0, 'typed offline')
   h.reject()
-  h.doc.getText('t').insert(0, 'typed after ')
-  assert.deepEqual([rejected, h.sentUpdates().length], [1, 0])
+  const fetch = t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 204 }))
+  h.provider.persistCurrentState()
+  assert.deepEqual([rejected, fetch.mock.callCount()], [1, 0])
 })
 
 test('one failing listener does not keep the others from hearing the document is live', (t) => {
