@@ -9,6 +9,10 @@ InertiaRails.configure do |config|
   config.use_script_element_for_initial_page = true
   config.use_data_inertia_head_attribute = true
 
+  # Recording requests for the Inertia DevTools extension is on by default in
+  # development. It writes props and bodies to disk, so it stays off.
+  config.devtools.enabled = false
+
   # SSR. Globally OFF — DocumentsController#show opts in via inertia_config so
   # only the document page is server-rendered (landing/auth stay CSR). In dev
   # the Vite dev server serves SSR through inertia_rails' auto-detected

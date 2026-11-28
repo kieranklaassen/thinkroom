@@ -312,8 +312,8 @@ module LogContent
     def handle_error(error)
       return super if @configuration.ssr_raise_on_error
 
-      # The renderer wraps other errors, such as timeouts, before this.
-      raised = $! unless $!.is_a?(InertiaRails::SSRError)
+      # A connection error, such as a timeout, is the cause of the renderer's own.
+      raised = $!.is_a?(InertiaRails::SSRError) ? $!.cause : $!
       super(LogContent.without_message(error, (raised&.class || error.type || "render error").to_s))
     end
   end
