@@ -19,6 +19,11 @@ class InertiaSsrFallbackTest < ActionDispatch::IntegrationTest
     "a success that is not JSON" => [ "200 OK", "<html>#{MARK}</html>", /JSON::ParserError/ ],
     "an empty success" => [ "200 OK", "", /JSON::ParserError/ ],
     "a success cut short" => [ "200 OK", %({"head":[],"body":"#{MARK}), /JSON::ParserError/ ],
+    "a success without a page" => [ "200 OK", "{}", /unreadable reply/ ],
+    "a success that is a list" => [ "200 OK", %(["#{MARK}"]), /unreadable reply/ ],
+    "a success that is text" => [ "200 OK", MARK.to_json, /unreadable reply/ ],
+    "a success whose head is not a list" => [ "200 OK", { head: MARK, body: MARK }.to_json, /unreadable reply/ ],
+    "a success whose body is not text" => [ "200 OK", { head: [], body: [ MARK ] }.to_json, /unreadable reply/ ],
     "an error that is not an object" => [ "500 Internal Server Error", %(["#{MARK}"]), /TypeError/ ],
     "an error that is not JSON" => [ "502 Bad Gateway", MARK, /render error/ ],
     "a render error" => [ "500 Internal Server Error", { error: MARK, type: "render" }.to_json, /render failed: .*render\z/ ]

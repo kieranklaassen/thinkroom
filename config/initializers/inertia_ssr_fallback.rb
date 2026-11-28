@@ -2,16 +2,25 @@
 
 # A server render that fails must never 500 the document page. inertia_rails
 # (3.23) handles only the errors it raises itself, so a reply it cannot read
-# (a success that is not JSON, an error body that is not an object) would reach
-# the browser as a 500. Here every other error takes the same path: on_ssr_error,
+# (a success that is not JSON or not a page, an error body that is not an object)
+# would reach the browser as a 500. Here each takes the same path: on_ssr_error,
 # then the browser renders, or a raise where ssr_raise_on_error is set.
 module InertiaSSRFallback
   def render
-    super
+    reply = super
+    return reply if reply.nil? || page?(reply)
+
+    handle_error(InertiaRails::SSRError.new("unreadable reply", type: "unreadable reply"))
   rescue InertiaRails::SSRError
     raise
   rescue StandardError => e
     handle_error(InertiaRails::SSRError.new(e.message))
+  end
+
+  private
+
+  def page?(reply)
+    reply.is_a?(Hash) && reply["head"].is_a?(Array) && reply["body"].is_a?(String)
   end
 end
 
