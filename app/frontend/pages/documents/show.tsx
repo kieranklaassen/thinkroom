@@ -1018,7 +1018,7 @@ export default function DocumentShow({
         )}
         {ownership.html_needs_account && (
           <div className="doc-notice" role="status">
-            <span>Editing HTML needs an account. <a href={signInPath}>Sign in</a></span>
+            <span>Editing a document with HTML needs an account. <a href={signInPath}>Sign in</a></span>
           </div>
         )}
         {!isReading && suggestionNotice && (

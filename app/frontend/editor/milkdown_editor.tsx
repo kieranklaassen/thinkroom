@@ -101,10 +101,8 @@ import { documentSizeGuard, documentSizeGuardCtx } from './document_size_guard'
 import {
   HTML_KEPT_AS_TEXT_NOTICE,
   HTML_NOT_SAVED_NOTICE,
-  HTML_SNAPSHOT_NOTICE,
   htmlGuard,
   htmlGuardCtx,
-  keepRefusedHtmlAsText,
   type DocumentNotice,
 } from './html_guard'
 import { configureMarkdownText } from './markdown_text'
@@ -499,22 +497,13 @@ function CollabEditor({
       ydoc,
       slug,
       contentFormat,
-      canWrite: () => canWriteRef.current,
+      canWrite: () => canWriteRef.current && !provider.htmlRefused,
       onTooLarge: () => callbacksRef.current.onNotice?.(SNAPSHOT_TOO_LARGE_NOTICE),
-      onHtmlRefused: () => callbacksRef.current.onNotice?.(HTML_SNAPSHOT_NOTICE),
+      onHtmlRefused: () => callbacksRef.current.onNotice?.(HTML_NOT_SAVED_NOTICE),
     })
     const scheduleSnapshot = snapshots.schedule
 
-    const htmlRefused = () => {
-      const turned = keepRefusedHtmlAsText(ydoc, provider.refusedHtml)
-      if (turned > 0) {
-        provider.retryAfterHtmlCleaned()
-        scheduleSnapshot()
-        callbacksRef.current.onNotice?.(HTML_KEPT_AS_TEXT_NOTICE)
-      } else {
-        callbacksRef.current.onNotice?.(HTML_NOT_SAVED_NOTICE)
-      }
-    }
+    const htmlRefused = () => callbacksRef.current.onNotice?.(HTML_NOT_SAVED_NOTICE)
     provider.on('html-refused', htmlRefused)
     // Discarded or refused while no editor was listening (a remount reusing the session).
     if (provider.discarded) stale()

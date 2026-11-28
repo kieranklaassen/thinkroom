@@ -19,7 +19,7 @@ export const NO_PROVENANCE_ERROR =
 export const TOO_LARGE_ERROR =
   'refused: new content would push this document past its 2 MB limit; the document was not changed'
 export const HTML_ACCOUNT_ERROR =
-  'refused: adding HTML needs an account. Send Markdown without HTML, or have the person sign in; the document was not changed'
+  'refused: creating or suggesting HTML needs an account. Send Markdown without HTML, or have the person sign in; the document was not changed'
 const REPLACE_REFUSALS = {
   empty: EMPTY_CONTENT_ERROR,
   no_provenance: NO_PROVENANCE_ERROR,

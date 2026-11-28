@@ -880,7 +880,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     )
     stale = Suggestion.propose!(
       document: doc, author_name: "Scout", author_kind: "agent",
-      body: "tightened wording", replaces: "This paragraph will be removed."
+      body: "tightened wording", replaces: "This paragraph will be removed.", user:
     )
 
     patch "/api/docs/#{doc.slug}",
@@ -1084,7 +1084,7 @@ class AgentApiTest < ActionDispatch::IntegrationTest
     )
     stale = Suggestion.propose!(
       document: doc, author_name: "Scout", author_kind: "agent",
-      body: "tightened wording", replaces: "This sentence will go away."
+      body: "tightened wording", replaces: "This sentence will go away.", user:
     )
 
     patch "/api/docs/#{doc.slug}",

@@ -43,6 +43,9 @@ class RawHtmlTest < ActiveSupport::TestCase
     "unclosed suggestion tag" => '<ins data-suggestion-id="1" data-author="Ann">a',
     "non-empty provenance flag attribute" => '<span data-provenance="yes" data-kind="human" data-author="Ann" data-state="verbatim">a</span>',
     "cross-block provenance close" => "<span data-provenance data-kind=\"human\" data-author=\"Ann\" data-state=\"verbatim\">a\n\n</span>",
+    "a tracked change in another of its kind" => '<ins data-suggestion-id="1"><ins data-suggestion-id="2">a</ins></ins>',
+    "a fence in front matter that a code block closes" => "---\n```\n---\n\n```\n<b>\n```",
+    "a tag behind many comparisons" => "<div>#{"1 < 2 " * 12}<a href=\"https://example.com\" x=\"",
     "reversed editor tags" => '</span><span data-highlighter data-color="blue">'
   }.freeze
 
@@ -68,64 +71,68 @@ class RawHtmlTest < ActiveSupport::TestCase
 
   HTML.each do |name, source|
     test "HTML is found in #{name}" do
-      assert RawHtml.in_markdown(source).any?, source
+      assert RawHtml.in_markdown?(source), source
     end
   end
 
   PLAIN.each do |name, source|
     test "no HTML is found in #{name}" do
-      assert_empty RawHtml.in_markdown(source), source
+      assert_not RawHtml.in_markdown?(source), source
     end
   end
 
   test "large tables are read as the editor reads them" do
     header = "|" + " a |" * 1_001
     row = "|" + " - |" * 1_001
-    assert RawHtml.in_markdown("#{header}\n#{row}\n| ` | <b> |\n").any?
-  end
-
-  test "a second copy is more, and a move is not" do
-    before = RawHtml.in_markdown("a <u>b</u>\n\nc")
-    assert_empty RawHtml.more(RawHtml.in_markdown("c\n\na <u>b</u>"), before)
-    assert_equal({ "<u>" => 1, "</u>" => 1 }, RawHtml.more(RawHtml.in_markdown("a <u>b</u> <u>b</u>"), before))
-  end
-
-  test "markup ignores text beside it but not its tags, attributes, comments or scripts" do
-    before = RawHtml.markup(RawHtml.in_markdown("<div class=\"a\">hi</div>\n\n<script>x</script>"))
-    same = "<div class=\"a\">hi</div> joined\n\n<script>x</script>"
-    assert_empty RawHtml.more(RawHtml.markup(RawHtml.in_markdown(same)), before)
-    [ "<div class=\"b\">hi</div>", "<div class=\"a\"><i>hi</i></div>", "<div class=\"a\"><!-- c --></div>",
-      "<script>y</script>", "<td>x</td>", "</section>", "<!DOCTYPE html>" ].each do |source|
-      assert RawHtml.more(RawHtml.markup(RawHtml.in_markdown(source)), before).any?, source
-    end
-    assert_empty RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("<div class=\"a\">\n\nhi\n\n</div>")), before)
-    assert RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("<div class=\"a\">\n\nhi\n\n</div>\n\n</div>")), before).any?
-    assert RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("<div class=\"a\">hi</div>\n\n</div>")), before).any?
-    assert RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("<div class=\"a\">hi</div></div>")), before).any?
-    assert RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("<div class=\"a\"><a href=\"https://example.com\" x=\"")), before).any?
-    assert RawHtml.more_markup(RawHtml.markup(RawHtml.in_markdown("</section>")), before).any?
-  end
-
-  test "a HTML body counts its elements, stray tags and unclosed tags, and plain text has none" do
-    assert RawHtml.in_html("<p>hi</p>").any?
-    assert RawHtml.in_html("a <!-- c -->").any?
-    assert RawHtml.in_html("hello </p></br> world").any?
-    assert RawHtml.in_html("hello </div> world").any?
-    assert RawHtml.in_html("a <b text").any?
-    assert_empty RawHtml.in_html("just text & more")
-    assert_empty RawHtml.in_html("1 < 2 and a < 3")
-  end
-
-  test "live inspection refuses unreadable trees when rendered count disagrees with XML" do
-    updates = JSON.parse(Rails.root.join("test/fixtures/files/html_account_updates.json").read)
-    ydoc = Y::Doc.new
-    ydoc.apply_update(Base64.strict_decode64(updates.fetch("unknown_mark_html_attr")))
-    assert_raises(RawHtml::Unreadable) { RawHtml.in_live(ydoc) }
+    assert RawHtml.in_markdown?("#{header}\n#{row}\n| ` | <b> |\n")
   end
 
   test "text of any encoding and depth is read" do
-    assert_empty RawHtml.in_markdown("caf\xE9".b)
-    assert RawHtml.in_markdown("#{'> ' * 3_000}<b>").any?
-    assert RawHtml.in_markdown("a\0 <b>").any?
+    assert_not RawHtml.in_markdown?("caf\xE9".b)
+    assert RawHtml.in_markdown?("#{'> ' * 3_000}<b>")
+    assert RawHtml.in_markdown?("a\0 <b>")
+  end
+
+  test "front matter that is not ASCII ends where the parser ends it" do
+    front = "---\ntitle: #{"日本語" * 5}\n---\n\n"
+    assert_not RawHtml.in_markdown?("#{front}plain `<b>`")
+    assert RawHtml.in_markdown?("#{front}<mark>note</mark>")
+    assert RawHtml.in_markdown?("---\ntitle: #{"日本語" * 5}\nnote: <mark>x</mark>\n---\n\nplain")
+  end
+
+  test "a source the parser refuses counts as HTML" do
+    original = DocumentMarkdown.method(:parse)
+    DocumentMarkdown.define_singleton_method(:parse) { |*, **| raise Commonmarker::NestingDepthExceededError }
+    assert RawHtml.in_markdown?("a < b")
+    assert_not RawHtml.in_markdown?("no markup")
+  ensure
+    DocumentMarkdown.define_singleton_method(:parse, original)
+  end
+
+  test "an HTML node counts wherever it is, and text that names one does not" do
+    assert live?("base")
+    assert live?("deep_html")
+    assert live?("too_deep")
+    assert live?("unreadable", base: true)
+    assert_not live?("plain_code")
+    assert_not live?("break_only")
+    assert_not RawHtml.in_live?(Y::Doc.new)
+  end
+
+  test "live front matter counts by what its saved source holds" do
+    %w[frontmatter_html fm_code_fence_html fm_unclosed_fence fm_list_value].each { |name| assert live?(name, text: true), name }
+    %w[frontmatter_plain fm_indented_html].each { |name| assert_not live?(name, text: true), name }
+  end
+
+  private
+
+  UPDATES = JSON.parse(Rails.root.join("test/fixtures/files/html_account_updates.json").read).freeze
+
+  def live?(name, base: false, text: false)
+    ydoc = Y::Doc.new
+    ydoc.apply_update(Base64.strict_decode64(UPDATES["base"])) if base || text
+    ydoc.apply_update(Base64.strict_decode64(UPDATES["remove"])) if text
+    ydoc.apply_update(Base64.strict_decode64(UPDATES.fetch(name)))
+    RawHtml.in_live?(ydoc)
   end
 end

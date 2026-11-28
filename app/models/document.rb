@@ -5,14 +5,9 @@ class Document < ApplicationRecord
 
   class HtmlAccountRequiredError < StandardError
     CODE = "html_account_required".freeze
-    MESSAGE = "Adding HTML needs an account. Sign in to add it.".freeze
+    MESSAGE = "Creating or suggesting HTML needs an account.".freeze
 
-    attr_reader :html
-
-    def initialize(html = {})
-      @html = html.select { |key, _| key.is_a?(String) }
-      super(MESSAGE)
-    end
+    def initialize(message = MESSAGE) = super
   end
 
   DEFAULT_SEED = "# Untitled\n\nStart writing — everything you type is attributed to you.\n"
@@ -204,26 +199,25 @@ class Document < ApplicationRecord
     link_access == "edit" || owned_by?(token, user:)
   end
 
+  # Content that holds HTML is edited by an account only.
   def editable_by?(token, user: nil)
-    writable_by?(token, user:) && (user.present? || !html?)
+    writable_by?(token, user:) && (user.present? || !raw_html?)
   end
 
-  def assert_html_account!(user)
-    raise HtmlAccountRequiredError if html? && user.nil?
+  # Whether the document is HTML, or its stored or live Markdown holds any.
+  def raw_html?(ydoc: nil)
+    html? || RawHtml.in_markdown?(current_content) || YjsPersistence.raw_html?(self, ydoc:)
   end
 
-  def assert_source_allowed!(source, user:)
+  def assert_html_account!(user, *sources, ydoc: nil)
     return if user
 
-    assert_html_account!(user)
-    incoming = RawHtml.in_markdown(source)
-    return if incoming.empty?
-
-    self.class.assert_no_html!(RawHtml.more(incoming, RawHtml.in_markdown(current_content)))
+    self.class.assert_no_html!(*sources)
+    raise HtmlAccountRequiredError if raw_html?(ydoc:)
   end
 
-  def self.assert_no_html!(html)
-    raise HtmlAccountRequiredError if html.any?
+  def self.assert_no_html!(*sources)
+    raise HtmlAccountRequiredError if sources.any? { |source| RawHtml.in_markdown?(source) }
   end
 
   def commentable_by?(token, user: nil)
@@ -451,7 +445,7 @@ class Document < ApplicationRecord
     seed_claimed_at&.utc&.iso8601(6)
   end
 
-  def ownership_props(viewer_token, viewer_user: nil)
+  def ownership_props(viewer_token, viewer_user: nil, editable: editable_by?(viewer_token, user: viewer_user))
     {
       claimed: claimed?,
       claimable: claimable?,
@@ -459,8 +453,8 @@ class Document < ApplicationRecord
       yours: owned_by?(viewer_token, user: viewer_user),
       link_access:,
       editing_locked: editing_locked?,
-      can_write: editable_by?(viewer_token, user: viewer_user),
-      html_needs_account: writable_by?(viewer_token, user: viewer_user) && !editable_by?(viewer_token, user: viewer_user),
+      can_write: editable,
+      html_needs_account: writable_by?(viewer_token, user: viewer_user) && !editable,
       can_comment: commentable_by?(viewer_token, user: viewer_user)
     }
   end

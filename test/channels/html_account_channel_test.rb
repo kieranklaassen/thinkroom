@@ -7,10 +7,6 @@ class HtmlAccountChannelTest < ActionCable::Channel::TestCase
   UPDATES = JSON.parse(Rails.root.join("test/fixtures/files/html_account_updates.json").read).freeze
   include CompoundWritingHelpers
 
-  setup do
-    YjsPersistence::SEEN_HTML.clear
-  end
-
   def account
     @account ||= User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD)
   end
@@ -34,109 +30,88 @@ class HtmlAccountChannelTest < ActionCable::Channel::TestCase
     transmissions.last
   end
 
-  %w[text remove move break tag_text provenance_split frontmatter_plain link_attr_html].each do |name|
-    test "a guest update that adds no HTML is stored: #{name}" do
-      document = document_with_html
+  def plain_document
+    Document.create!(title: "Doc", seed_content: "x").tap do |document|
+      YjsPersistence.merge(document, UPDATES["base"], user: account)
+      YjsPersistence.merge(document, UPDATES["remove"], user: account)
+    end
+  end
+
+  %w[text break tag_text provenance_split frontmatter_plain link_attr_html unknown_mark_html_attr].each do |name|
+    test "a guest update to a plain document is stored: #{name}" do
+      document = plain_document
       join(document)
       assert_equal "ack", send_update(document, name)["type"]
     end
   end
 
-  { "add" => "<i class=\"x\">", "duplicate" => "<mark>note</mark>", "change" => "<mark>other</mark>",
-    "list_value" => "[\"<i>\"]" }.each do |name, value|
-    test "a guest update that adds HTML is refused and not relayed: #{name}" do
-      document = document_with_html
+  %w[add duplicate list_value restore frontmatter_html fm_code_fence_html fm_unclosed_fence].each do |name|
+    test "a guest update that brings HTML is refused and not relayed: #{name}" do
+      document = plain_document
       join(document)
       rows = YjsDocumentUpdate.count
       assert_no_broadcasts(SyncChannel.broadcasting_for(document)) do
-        assert_equal({ "type" => "html-refused", "seq" => 1, "html" => { value => 1 } }, send_update(document, name))
+        assert_equal({ "type" => "html-refused", "seq" => 1 }, send_update(document, name))
       end
       assert_equal rows, YjsDocumentUpdate.count
     end
 
     test "an account's update is stored: #{name}" do
-      document = document_with_html
+      document = plain_document
       join(document, user: account)
       assert_equal "ack", send_update(document, name)["type"]
     end
   end
 
-  %w[unreadable mark_split_deep element_split_deep space_mark_deep frontmatter_html forged_editor_html
-     unknown_mark_html_attr fm_code_fence_html fm_indented_html fm_unclosed_fence fm_delimiter].each do |name|
-    test "a guest tree that cannot be read completely or adds HTML is refused: #{name}" do
+  %w[text remove move change break unreadable mark_split_deep element_split_deep space_mark_deep].each do |name|
+    test "a guest update to a live document with HTML is refused: #{name}" do
       document = document_with_html
       join(document)
       assert_equal "html-refused", send_update(document, name)["type"]
     end
   end
 
-  test "frontmatter HTML does not credit body HTML or a second frontmatter block" do
-    document = Document.create!(title: "Doc", seed_content: "x")
-    YjsPersistence.merge(document, UPDATES["fm_only_b"], user: account)
+  test "a guest update is refused while the saved source holds HTML" do
+    document = plain_document
+    document.update!(content_snapshot: "With <mark>note</mark>")
     join(document)
-    assert_equal "html-refused", send_update(document, "fm_plus_body_b", seq: 1)["type"]
-    assert_equal "html-refused", send_update(document, "fm_second_b", seq: 2)["type"]
+    assert_equal "html-refused", send_update(document, "text")["type"]
+    document.update!(content_snapshot: "With `<mark>`")
+    assert_equal "ack", send_update(document, "text", seq: 2)["type"]
   end
 
-  test "a guest cannot restore HTML after an account removed it" do
+  test "a guest edits again only after an account removed the HTML, and cannot restore it" do
     document = document_with_html
     join(document)
-    assert_equal "ack", send_update(document, "text", seq: 1)["type"]
+    assert_equal "html-refused", send_update(document, "text")["type"]
     unsubscribe
 
     join(document, user: account)
-    assert_equal "ack", send_update(document, "remove", seq: 1)["type"]
+    assert_equal "ack", send_update(document, "remove")["type"]
     unsubscribe
 
     join(document)
-    assert_equal "html-refused", send_update(document, "restore", seq: 1)["type"]
+    assert_equal "ack", send_update(document, "text")["type"]
+    assert_equal "html-refused", send_update(document, "restore", seq: 2)["type"]
   end
 
   test "a guest update waits for what it depends on" do
-    document = document_with_html
+    document = plain_document
     join(document)
     assert_equal "retryable", send_update(document, "second")["reason"]
     assert_equal "ack", send_update(document, "first", seq: 2)["type"]
     assert_equal "html-refused", send_update(document, "second", seq: 3)["type"]
   end
 
-  test "a guest restores HTML it removed, over either connection" do
-    document = document_with_html
-    join(document)
-    send_update(document, "remove")
-    assert_equal "ack", send_update(document, "restore", seq: 2)["type"]
-  end
-
-  test "another guest cannot add HTML that was removed before it came" do
-    document = document_with_html
-    join(document)
-    send_update(document, "remove")
-    unsubscribe
-    join(document, token: "someone else")
-    assert_equal "html-refused", send_update(document, "restore")["type"]
-  end
-
-  test "a guest stores a seed as it is, and no more" do
-    seed = "Hello\n\nWith <mark>note</mark>\n"
-    document = Document.create!(title: "Doc", seed_content: seed)
-    join(document)
-    claim = transmissions.last["seed_claim"]
-    assert_equal "html-refused", send_update(document, "seed_with_more", "seed_claim" => claim)["type"]
-    assert_equal "ack", send_update(document, "seed", seq: 2, "seed_claim" => claim)["type"]
-  end
-
-  test "a guest stores a seed whose HTML is grouped differently from Commonmarker's split" do
-    document = Document.create!(title: "Doc", seed_content: "Hello\n\nWith <mark>note</mark>\n")
-    join(document)
-    claim = transmissions.last["seed_claim"]
-    assert_equal "ack", send_update(document, "base", seq: 1, "seed_claim" => claim)["type"]
-  end
-
-  test "a guest's copy of the saved source comes back after the live state was emptied" do
-    document = Document.create!(title: "Doc", seed_content: "x", content_snapshot: "Hello\n\nWith <mark>note</mark>\n",
-                                seed_state: "seeded")
-    join(document)
-    assert_equal "ack", send_update(document, "seed")["type"]
+  [ "Hello\n\nWith <mark>note</mark>\n", "---\nnote: <mark>note</mark>\n---\n\nHello\n" ].each do |seed|
+    test "a guest reads a seed with HTML and does not store it: #{seed.lines.first.strip}" do
+      document = Document.create!(title: "Doc", seed_content: seed)
+      join(document)
+      assert_nil transmissions.last["seed"]
+      assert_equal seed, transmissions.last["seed_content"]
+      assert_equal "html-refused", send_update(document, "seed")["type"]
+      assert_not document.reload.live_crdt?
+    end
   end
 
   test "a guest does not edit an HTML document and gets no seed claim for it" do

@@ -7,7 +7,7 @@ import { SKIP_PROVENANCE } from './provenance'
 import { SUGGESTION_MARK_NAMES } from './suggest_changes/marks'
 import { serializeHtml, sourceParser, type DocumentFormat } from './document_format'
 import { firstHeadingTitle } from './document_title'
-import { addsHtml, htmlGuardCtx } from './html_guard'
+import { hasHtml, htmlGuardCtx } from './html_guard'
 import { documentSizeGuardCtx, exceedsDocumentSize } from './document_size_guard'
 
 export interface ReplaceDocumentOptions {
@@ -89,7 +89,7 @@ export function replaceDocumentContent(
       return
     }
 
-    if (ctx.get(htmlGuardCtx.key).needsAccount() && addsHtml(state.doc, parsed)) {
+    if (ctx.get(htmlGuardCtx.key).needsAccount() && (hasHtml(state.doc) || hasHtml(parsed))) {
       outcome = { error: 'html_account_required' }
       return
     }

@@ -103,12 +103,8 @@ export async function pushSnapshot(
     if (signal?.aborted) return { ok: false, status: response.status }
     return pushSnapshot(target, attempt + 1)
   }
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as Record<string, unknown> | null
-    return { ok: false, status: response.status, body }
-  }
   const body = (await response.json().catch(() => null)) as Record<string, unknown> | null
-  return { ok: true, status: response.status, body }
+  return { ok: response.ok, status: response.status, body }
 }
 
 export interface SnapshotScheduler {
@@ -141,31 +137,20 @@ export function createSnapshotScheduler(options: {
   let timer: ReturnType<typeof setTimeout> | null = null
   let reportedTooLarge = false
   let reportedHtml = false
-  let pushSeq = 0
   const lifetime = new AbortController()
 
   const push = () => {
-    if (lifetime.signal.aborted || !canWrite()) return
-    const seq = ++pushSeq
+    if (!canWrite()) return
     void pushSnapshot({ editor, ydoc, slug, contentFormat, signal: lifetime.signal }).then(
       (outcome) => {
-        if (lifetime.signal.aborted || seq !== pushSeq) return
-        if (outcome.ok) {
-          reportedTooLarge = false
-          reportedHtml = false
-          return
-        }
+        if (outcome.ok || lifetime.signal.aborted) return
         if (outcome.status === null) console.warn('pruf: snapshot push failed', outcome.error)
         else console.warn('pruf: snapshot push rejected', outcome.status)
         if (outcome.status === 413 && !reportedTooLarge) {
           reportedTooLarge = true
           onTooLarge?.()
         }
-        if (
-          outcome.status === 403 &&
-          outcome.body?.error_code === 'html_account_required' &&
-          !reportedHtml
-        ) {
+        if (outcome.status === 403 && outcome.body?.error_code === 'html_account_required' && !reportedHtml) {
           reportedHtml = true
           onHtmlRefused?.()
         }
@@ -175,7 +160,6 @@ export function createSnapshotScheduler(options: {
 
   return {
     schedule: () => {
-      if (lifetime.signal.aborted) return
       if (timer) clearTimeout(timer)
       timer = setTimeout(push, SNAPSHOT_DEBOUNCE_MS)
     },

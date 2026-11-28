@@ -209,7 +209,7 @@ class OwnershipFlowTest < ActionDispatch::IntegrationTest
 
       delete_from_open_page
 
-      follow_redirect!(headers: open_page)
+      follow_redirect!(headers: open_page) while response.redirect?
       assert_open_page_refusal
     end
   end

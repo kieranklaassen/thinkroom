@@ -32,7 +32,7 @@ module Api
       unless current_api_user
         raise Document::HtmlAccountRequiredError if format == "html"
 
-        Document.assert_no_html!(RawHtml.in_markdown(content))
+        Document.assert_no_html!(content)
       end
 
       source, normalized, warning, parsed = normalized_source_and_signal(format, content, fallback: Document::DEFAULT_SEED)
@@ -112,7 +112,7 @@ module Api
       end
       return if reject_oversized_content(content)
 
-      document.assert_source_allowed!(content, user: current_api_user) if content.present?
+      document.assert_html_account!(current_api_user, content) if content.present?
 
       normalized = false
       warning = nil

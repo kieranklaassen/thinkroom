@@ -53,6 +53,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
   end
 
   test "the source page shows the source as text, with no script and no seed claim" do
+    sign_in_as(User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD))
     content = "#{MARKDOWN}</pre></template><script>alert(1)</script><img src=x onerror=alert(1)>"
     document = Document.create!(title: "</title><script>alert(2)</script>", seed_content: content)
     [ document_page_path(document.slug), document_mode_path(document.slug, "edit"), document_mode_path(document.slug, "comment") ].each do |path|
@@ -74,6 +75,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
   end
 
   test "an Inertia visit goes to the source page" do
+    sign_in_as(User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD))
     document = deep_document(MARKDOWN)
     [ {}, partial("document", component: "documents/index") ].each do |headers|
       get document_mode_path(document.slug, "edit"), headers: inertia(headers)
@@ -267,7 +269,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
 
   test "a source too deep can be replaced by one that is not" do
     document = deep_document(MARKDOWN)
-    patch api_doc_path(document.slug), params: { content: "fine" }, as: :json, headers: AGENT
+    patch api_doc_path(document.slug), params: { content: "fine" }, as: :json, headers: account_agent
     assert_response :success
     get document_page_path(document.slug), headers: inertia
     assert_response :success

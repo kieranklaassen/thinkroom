@@ -49,8 +49,7 @@ const {
 } = await import('@milkdown/kit/core')
 const { EditorState } = await import('@milkdown/kit/prose/state')
 const { ySyncPluginKey } = await import('y-prosemirror')
-const Y = await import('yjs')
-const { addsHtml, htmlGuard, htmlGuardCtx, keepRefusedHtmlAsText } = await import(
+const { hasHtml, htmlGuard, htmlGuardCtx } = await import(
   '../../app/frontend/editor/html_guard.ts'
 )
 const { frontmatter } = await import('../../app/frontend/editor/frontmatter/index.ts')
@@ -114,29 +113,6 @@ test('HTML added with an account stays HTML', async () => {
   assert.equal(notices.length, 0)
 })
 
-test('existing HTML can be moved and restored, and not copied', async () => {
-  const { state, parse, notices } = await guarded('Hello\n\n<mark>')
-  const cut = state.apply(state.tr.delete(7, state.doc.content.size))
-  assert.deepEqual(htmlValues(cut.doc), [])
-  const pasted = cut.apply(insert(cut, parse, '<mark>'))
-  assert.deepEqual(htmlValues(pasted.doc), ['<mark>'])
-  assert.equal(notices.length, 0)
-  const copied = pasted.apply(insert(pasted, parse, '<mark>'))
-  assert.deepEqual(htmlValues(copied.doc), ['<mark>'])
-  assert.equal(notices.length, 1)
-})
-
-test('pasting a duplicate above existing HTML converts the new copy and keeps the original', async () => {
-  const { state, parse, notices } = await guarded('First\n\nSecond <mark>')
-  const next = state.apply(state.tr.insert(0, parse('<mark>').content))
-  next.doc.check()
-  assert.deepEqual(htmlValues(next.doc), ['<mark>'])
-  assert.equal(notices.length, 1)
-  // The first paragraph holds the newly pasted text; the original HTML node remains in the last paragraph.
-  assert.equal(next.doc.firstChild.textContent, '<mark>')
-  assert.deepEqual(htmlValues(next.doc.lastChild), ['<mark>'])
-})
-
 test('inline code with a pipe inside a GFM table cell stays escaped', async () => {
   const { serialize, parse } = await buildEditor()
   const doc = parse('| a | b |\n| - | - |\n| `x \\| <b>` | ok |\n')
@@ -151,34 +127,17 @@ test('what arrives from others is left alone', async () => {
   assert.deepEqual(htmlValues(state.apply(tr).doc), ['<i>'])
 })
 
-test('a replacement that adds HTML or HTML in frontmatter is recognised', async () => {
-  const { parse } = await buildEditor()
-  assert.equal(addsHtml(parse('a <b>x</b>'), parse('<b>x</b> a')), false)
-  assert.equal(addsHtml(parse('a <b>x</b>'), parse('a')), false)
-  assert.equal(addsHtml(parse('a <b>x</b>'), parse('a <b>x</b> <b>')), true)
-  assert.equal(addsHtml(parse('Hello'), parse('---\ntitle: plain\n---\n\nHello')), false)
-  assert.equal(addsHtml(parse('Hello'), parse('---\ntitle: <b>hi</b>\n---\n\nHello')), true)
-  assert.equal(addsHtml(parse('---\ntitle: <b>hi</b>\n---\n\nHello'), parse('---\ntitle: <b>hi</b>\n---\n\nUpdated')), false)
+test('a document that holds HTML from others is left alone', async () => {
+  const { state, parse, notices } = await guarded('Hello\n\n<mark>')
+  const next = state.apply(insert(state, parse, '<i>'))
+  assert.deepEqual(htmlValues(next.doc), ['<mark>', '<i>'])
+  assert.equal(notices.length, 0)
 })
 
-test('changing an existing HTML node attribute or adding HTML frontmatter without an account converts it', async () => {
-  const { state, schema: s, notices } = await guarded('Hello\n\n<mark>')
-  let htmlPos = -1
-  state.doc.descendants((node, pos) => {
-    if (node.type.name === 'html') htmlPos = pos
-  })
-  assert.ok(htmlPos >= 0)
-  const mutated = state.apply(state.tr.setNodeAttribute(htmlPos, 'value', '<script>x</script>'))
-  mutated.doc.check()
-  assert.deepEqual(htmlValues(mutated.doc), [])
-  assert.match(mutated.doc.textContent, /<script>x<\/script>/)
-  assert.equal(notices.length, 1)
-
-  const fmAdded = mutated.apply(mutated.tr.insert(0, s.nodes.frontmatter.create({ value: 'title: <b>hi</b>' })))
-  fmAdded.doc.check()
-  assert.equal(fmAdded.doc.firstChild.type.name, 'code_block')
-  assert.match(fmAdded.doc.textContent, /title: <b>hi<\/b>/)
-  assert.equal(notices.length, 2)
+test('HTML is told from code and text', async () => {
+  const { parse } = await buildEditor()
+  assert.equal(hasHtml(parse('a <b>x</b>')), true)
+  assert.equal(hasHtml(parse('`<b>` and &lt;b>\n\n    <i>\n')), false)
 })
 
 test('text saves as text', async () => {
@@ -196,25 +155,4 @@ test('text saves as text', async () => {
     assert.equal(parse(saved).textContent, text.replace(/\s*\n\s*/g, ' ').replace(/ +/g, ' '))
   }
   assert.equal(escapeMarkupAttribute('a\n\n"<b>'), 'a &quot;&lt;b>')
-})
-
-test('refused HTML becomes text, only what this page added and no more than was refused', () => {
-  const server = new Y.Doc()
-  const node = (value) => {
-    const element = new Y.XmlElement('html')
-    element.setAttribute('value', value)
-    return element
-  }
-  const paragraph = new Y.XmlElement('paragraph')
-  server.getXmlFragment('prosemirror').insert(0, [paragraph])
-  paragraph.insert(0, [node('<i>')])
-
-  const page = new Y.Doc()
-  Y.applyUpdate(page, Y.encodeStateAsUpdate(server))
-  const own = page.getXmlFragment('prosemirror').get(0)
-  own.insert(1, [new Y.XmlText('typed'), node('<i>'), node('<i>'), node('<b\n x>')])
-
-  assert.equal(keepRefusedHtmlAsText(page, { '<i>': 1, '<b x>': 1 }), 2)
-  assert.equal(own.toString(), '<paragraph><html value="<i>"></html>typed<html value="<i>"></html><i><b<hardbreak isInline="true"></hardbreak> x></paragraph>')
-  assert.equal(keepRefusedHtmlAsText(page, { '<u>': 1 }), 0)
 })

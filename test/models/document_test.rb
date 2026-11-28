@@ -304,7 +304,7 @@ class DocumentTest < ActiveSupport::TestCase
     doc = Document.create!(title: "Live", seed_content: "# Seed\n\nThis will be removed.", yjs_state: "old-crdt-state")
     Suggestion.propose!(
       document: doc, author_name: "Scout", author_kind: "agent",
-      body: "Replacement text", replaces: "This will be removed."
+      body: "Replacement text", replaces: "This will be removed.", user: User.new
     )
     # Mirrors "claim rolls back ownership when the activity insert fails" --
     # the same deliberate choice: a failed activity insert must not leave
@@ -335,7 +335,7 @@ class DocumentTest < ActiveSupport::TestCase
     # a human or agent would actually quote it -- not the raw HTML markup.
     surviving = Suggestion.propose!(
       document: doc, author_name: "Scout", author_kind: "agent",
-      body: "Replacement", replaces: "Please keep this paragraph intact."
+      body: "Replacement", replaces: "Please keep this paragraph intact.", user: User.new
     )
 
     doc.replace_content!(

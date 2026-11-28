@@ -204,7 +204,7 @@ class DocumentsController < InertiaController
                          inertia: { errors: { content: "Document content is too long" } }
     end
     source = raw_content || Document::DEFAULT_SEED
-    Document.assert_no_html!(RawHtml.in_markdown(raw_content)) unless current_user
+    Document.assert_no_html!(raw_content) unless current_user
 
     creator_name = current_user&.name ||
       Document.normalize_owner_name(preferred_name(params[:name], fallback: nil))
@@ -408,8 +408,8 @@ class DocumentsController < InertiaController
       return render json: { error: "HTML snapshots must use the content field." },
                     status: :unprocessable_entity
     end
-    if (document.html? || document.live_crdt?) && params[:state_vector].blank?
-      return render json: { error: "Snapshots require a Yjs state vector." },
+    if document.html? && params[:state_vector].blank?
+      return render json: { error: "HTML snapshots require a Yjs state vector." },
                     status: :unprocessable_entity
     end
     content = (params.key?(:content) ? params[:content] : params[:markdown]).to_s
@@ -436,7 +436,8 @@ class DocumentsController < InertiaController
     document = Document.find_by!(slug: params[:slug])
     @write_document = document
     document.assert_write_access!(token: owner_token, user: current_user)
-    document.assert_html_account!(current_user)
+    snapshot = params[:content].to_s
+    document.assert_html_account!(current_user, *(snapshot if snapshot.bytesize <= MAX_SNAPSHOT_BYTES))
     update = params[:update].to_s
     return head :content_too_large if update.bytesize > MAX_SYNC_UPDATE_B64_BYTES
 

@@ -57,6 +57,7 @@ class SuggestionsController < InertiaController
     end
     needs_account = 0
     accepted = with_document_write_access(document) do
+      document.assert_html_account!(current_user)
       winners = Suggestion.accept_all!(document:, by:, ids:, html: current_user.present?) do |left|
         needs_account = left.size
       end
@@ -81,8 +82,7 @@ class SuggestionsController < InertiaController
 
   def accept
     with_document_write_access(@suggestion.document) do
-      raise Document::HtmlAccountRequiredError if current_user.nil? && @suggestion.brings_html?
-
+      @suggestion.document.assert_html_account!(current_user, @suggestion.body)
       @suggestion.accept!(by: preferred_name(params[:by], fallback: "human"))
       log_suggestion_activity("accepted_suggestion", "accepted “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
     end
@@ -97,9 +97,7 @@ class SuggestionsController < InertiaController
   def reopen
     by = preferred_name(params[:by], fallback: "human")
     with_document_write_access(@suggestion.document) do
-      @suggestion.document.assert_html_account!(current_user)
-      raise Document::HtmlAccountRequiredError if current_user.nil? && @suggestion.brings_html?
-
+      @suggestion.document.assert_html_account!(current_user, @suggestion.body)
       @suggestion.reopen_after_failed_apply!(by:)
       Activity.log!(
         document: @suggestion.document,

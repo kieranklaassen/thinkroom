@@ -40,10 +40,10 @@ takes a required `agent_name`, and the request tools run at anonymous
 link-holder privilege: writes on comment-only or view-only links return 423 with
 a `next_action`, and HTML (raw HTML in Markdown included) returns 403
 `html_account_required`. Writable document pages (opened through an Edit link,
-claimed or not, or owned by the viewer — plus a signed-in account for HTML
-documents) also register `thinkroom_update_document`, the in-page equivalent of
+claimed or not, or owned by the viewer — plus a signed-in account when the
+document holds HTML) also register `thinkroom_update_document`, the in-page equivalent of
 `thinkroom update`: it replaces the whole document through the live editor,
-never through the API (adding HTML requires a signed-in viewer), and the
+never through the API (HTML requires a signed-in viewer), and the
 replaced text lands as pending AI provenance for human review. Retitling without a heading,
 accepting or rejecting, claiming, and link access stay with the CLI and with
 humans.

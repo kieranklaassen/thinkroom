@@ -13,7 +13,7 @@ module DocumentWriteAuthorization
   def render_html_account_required(error)
     back = @write_document ? document_page_path(@write_document.slug) : root_path
     if request.format.json?
-      render json: { error: error.message, error_code: Document::HtmlAccountRequiredError::CODE, html: error.html,
+      render json: { error: error.message, error_code: Document::HtmlAccountRequiredError::CODE,
                      sign_in: login_path(return_to: back) },
              status: :forbidden
     else

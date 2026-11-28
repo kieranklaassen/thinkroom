@@ -36,9 +36,7 @@ class Suggestion < ApplicationRecord
       raise ActiveRecord::RecordInvalid.new(invalid)
     end
 
-    unless user
-      Document.assert_no_html!(document.html? ? RawHtml.in_html(body) : RawHtml.in_markdown(body))
-    end
+    document.assert_html_account!(user, body)
 
     normalization = document.html? ? HtmlDocumentSanitizer.external(body) : nil
     suggestion = document.suggestions.create!(
@@ -64,7 +62,7 @@ class Suggestion < ApplicationRecord
   end
   private_class_method :resolve_pending
 
-  def brings_html? = document.html? || RawHtml.in_markdown(body).any?
+  def brings_html? = RawHtml.in_markdown?(body)
 
   def accept!(by: nil)
     transition!("accepted", by:)
