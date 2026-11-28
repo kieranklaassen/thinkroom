@@ -105,10 +105,8 @@ test('retries wait twice as long each time up to the maximum, and any settled ed
       h.provider.persistCurrentState()
       for (let i = 0; i < 20; i += 1) await null
     },
-    'a new handshake': (h) => {
-      h.receive(handshake())
-      accept(h)
-    },
+    'a locked document': (h) => h.receive({ type: 'write-denied' }),
+    'a new handshake': (h) => h.receive(handshake()),
   }
   const h = connect(t)
   h.receive(handshake())
@@ -125,6 +123,7 @@ test('retries wait twice as long each time up to the maximum, and any settled ed
     refuse(h)
     assertSendsAfter(h, count, 250)
     accept(h)
+    if (h.provider.inFlight) accept(h)
     assert.equal(h.provider.inFlight, null, name)
   }
 })
@@ -154,8 +153,12 @@ test('the wait for a receipt belongs to one frame, and ends with it', (t) => {
   h.tick(6_000)
   assert.ok(h.provider.inFlight, 'the first frame’s wait does not time out the second')
   h.disconnect()
+  h.receive(handshake())
+  h.tick(6_000)
+  assert.ok(h.provider.inFlight, 'a wait from before the drop does not time out the resend')
+  h.disconnect()
   h.tick(60_000)
-  assert.equal(h.updates().length, 2)
+  assert.equal(h.updates().length, 3)
 })
 
 test('edits typed during a backoff wait for it', (t) => {
@@ -204,6 +207,15 @@ test('a deleted document or a locked one ends the backoff and the wait for a rec
     assert.equal(h.updates().length, 1)
     assert.equal(h.provider.queued.length, 0)
   }
+
+  t.mock.timers.reset()
+  const h = connect(t)
+  h.receive(handshake())
+  h.type('a')
+  refuse(h)
+  h.receive({ type: 'write-denied' })
+  h.type('b')
+  assert.equal(h.updates().length, 2, 'a later edit does not sit out the old backoff')
 })
 
 test('after a destroy no timer sends anything', (t) => {
@@ -218,6 +230,61 @@ test('after a destroy no timer sends anything', (t) => {
     h.tick(60_000)
     assert.deepEqual([h.updates().length, h.presence().length], [updates, presence])
   }
+})
+
+test('edits too large for one frame leave oldest first after a drop', (t) => {
+  const h = connect(t)
+  h.receive(handshake())
+  for (const letter of ['a', 'b', 'c']) h.type(letter.repeat(900_000))
+  h.disconnect()
+  h.receive(handshake())
+  assert.ok(textOf([h.updates()[1]]) === 'a'.repeat(900_000))
+})
+
+function holdSaves(t) {
+  const calls = []
+  t.mock.method(globalThis, 'fetch', (_url, { body, keepalive }) =>
+    new Promise((resolve, reject) => {
+      calls.push({ bytes: Buffer.byteLength(body), body: JSON.parse(body), keepalive, fail: () => reject(new Error('offline')) })
+    }),
+  )
+  t.after(() => calls.forEach(({ fail }) => fail()))
+  return calls
+}
+
+test('a save takes keepalive only within 64 KiB, and a snapshot only within 60', async (t) => {
+  const h = connect(t)
+  const calls = holdSaves(t)
+  const settle = async () => {
+    calls.at(-1).fail()
+    for (let i = 0; i < 20; i += 1) await null
+  }
+  const snapshot = (length) => ({ content: 's'.repeat(length), spans: [], state_vector: '' })
+  h.provider.persistCurrentState(snapshot(0))
+  const empty = calls[0].bytes
+  await settle()
+  for (const [bytes, included] of [[60 * 1024, true], [60 * 1024 + 1, false]]) {
+    h.provider.persistCurrentState(snapshot(bytes - empty))
+    assert.equal('content' in calls.at(-1).body, included, `${bytes} bytes`)
+    await settle()
+  }
+
+  h.type('x'.repeat(49_300))
+  h.provider.persistCurrentState()
+  assert.ok(calls.at(-1).bytes > 64 * 1024 && calls.at(-1).bytes < 65 * 1024)
+  assert.equal(calls.at(-1).keepalive, false)
+})
+
+test('a large edit whose save failed is sent again when the page closes', async (t) => {
+  const h = connect(t)
+  const calls = holdSaves(t)
+  h.type('x'.repeat(100_000))
+  h.provider.persistCurrentState()
+  calls[0].fail()
+  for (let i = 0; i < 20; i += 1) await null
+  windowListeners.get('pagehide')()
+  assert.equal(calls.length, 2)
+  assert.equal(textOf([calls[1].body]).length, 100_000)
 })
 
 test('an edit the server refuses for good is dropped and the next one goes out at once', (t) => {
