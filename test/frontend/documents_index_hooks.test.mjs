@@ -6,8 +6,9 @@ import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 // A one-hook runtime: state lives in slots, so calling the hook again after a
-// change is its next render. Effects do not run; the browser check covers them.
-const runtime = { slots: [], cursor: 0, visits: [] }
+// change is its next render. Effects wait for `runEffects`; the browser checks
+// cover focus after an unpin and the phone scroll.
+const runtime = { slots: [], cursor: 0, effects: [], visits: [] }
 globalThis.documentsIndexRuntime = runtime
 
 const stub = (source) => `data:text/javascript,${encodeURIComponent(source)}`
@@ -23,8 +24,8 @@ const STUBS = {
     }
     export const useRef = (initial) => useState({ current: initial })[0]
     export const useCallback = (callback) => callback
-    export const useEffect = () => {}
-    export const useLayoutEffect = () => {}
+    export const useEffect = (effect) => { runtime.effects.push(effect) }
+    export const useLayoutEffect = useEffect
   `),
   '@inertiajs/react': stub(`
     const { visits } = globalThis.documentsIndexRuntime
@@ -62,9 +63,11 @@ function start(hook, ...args) {
   runtime.visits.length = 0
   return () => {
     runtime.cursor = 0
+    runtime.effects = []
     return hook(...args)
   }
 }
+const runEffects = () => runtime.effects.forEach((effect) => effect())
 const lastVisit = () => runtime.visits.at(-1)
 
 const doc = (slug, { title = slug, tags = [], age_group = 'this_week' } = {}) => ({ slug, title, tags, age_group })
@@ -112,6 +115,14 @@ test('earlier pages past the first eight wait for the reveal, unless a filter is
   render().setQuery('')
   render().setShowAllEarlier(true)
   assert.deepEqual(counts(render()), [1, 10, 0])
+})
+
+test('text typed before the page script runs is taken up as the search', () => {
+  const render = start(useContentsFilters, [doc('a'), doc('b')])
+
+  render().searchRef.current = { value: 'b' }
+  runEffects()
+  assert.deepEqual([render().query, slugs(render().visibleDocuments)], ['b', ['b']])
 })
 
 test('a page is deleted only after confirming, and a failure is shown and closes swiped rows', (t) => {
@@ -184,6 +195,8 @@ test('archiving reloads the lists and offers an undo that restores the page', ()
   assert.equal(render().deleteError, 'Not yours')
   lastVisit().options.onError({})
   assert.equal(render().deleteError, 'Archive failed — please try again')
+  render().setArchived(page, false)
+  assert.equal(render().deleteError, null)
 })
 
 test('pinning and unpinning are announced, but not a repeat while the first is on its way', () => {
@@ -212,15 +225,25 @@ test('a copied agent prompt says so for a moment; a refused copy reveals the tex
     configurable: true, value: { clipboard: { writeText: (text) => writeText(text) } },
   })
   const render = start(useAgentPrompt)
+  t.after(() => delete globalThis.window)
+  globalThis.window = { location: { origin: 'https://example.test' } }
+  render()
+  runEffects()
   const settle = () => new Promise((resolve) => setImmediate(resolve))
 
   let copied
   writeText = async (text) => { copied = text }
   render().copyInstruction()
   await settle()
+  assert.match(copied, /POST https:\/\/example\.test\/api\/docs/)
   assert.equal(copied, render().agentInstruction)
   assert.equal(render().copyState, 'copied')
-  t.mock.timers.tick(2400)
+  t.mock.timers.tick(2000)
+  render().copyInstruction()
+  await settle()
+  t.mock.timers.tick(2000)
+  assert.equal(render().copyState, 'copied')
+  t.mock.timers.tick(400)
   assert.equal(render().copyState, 'idle')
 
   writeText = () => Promise.reject(new Error('denied'))
