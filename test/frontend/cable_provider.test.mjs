@@ -232,6 +232,46 @@ test('retryable NACK merges inFlight back ahead of queued edits and retries with
   h.receive({ type: 'ack', seq: 2 })
 })
 
+test('an html refusal stops sending, keeps what was typed and is told once', async (t) => {
+  const h = createHarness(t, { ackTimeoutMs: 20, retryBaseMs: 5, retryMaxMs: 10 })
+  h.receive(emptySyncFrame(0))
+  let events = 0
+  h.provider.on('html-refused', () => {
+    events += 1
+  })
+  h.doc.getText('t').insert(0, 'first-')
+  h.receive({ type: 'html-refused', seq: 1 })
+  h.receive({ type: 'html-refused', seq: 1 })
+  h.doc.getText('t').insert(6, 'second')
+  h.provider.persistCurrentState()
+  await new Promise((resolve) => setTimeout(resolve, 60))
+  h.receive(emptySyncFrame(0))
+
+  assert.equal(events, 1)
+  assert.equal(h.sentUpdates().length, 1)
+  assert.equal(h.doc.getText('t').toString(), 'first-second')
+})
+
+test('a durable save answered html_account_required is the same refusal', async (t) => {
+  const h = createHarness(t)
+  h.receive(emptySyncFrame(0))
+  h.doc.getText('t').insert(0, 'draft')
+  let events = 0
+  h.provider.on('html-refused', () => {
+    events += 1
+  })
+  const originalFetch = globalThis.fetch
+  t.after(() => {
+    globalThis.fetch = originalFetch
+  })
+  globalThis.fetch = async () => new Response(JSON.stringify({ error_code: 'html_account_required' }), { status: 403 })
+
+  h.provider.persistCurrentState()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(events, 1)
+  assert.equal(h.provider.htmlRefused, true)
+})
+
 test('ACK timeout requeues inFlight ahead of queued edits and retries', async (t) => {
   const h = createHarness(t, { ackTimeoutMs: 40, retryBaseMs: 20, retryMaxMs: 200 })
   h.receive(emptySyncFrame(0))

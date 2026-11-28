@@ -78,7 +78,7 @@ class DocumentsController < InertiaController
     end
 
     if request.format.json? || params[:format] == "json"
-      return render json: AgentGuide.state(document, request.base_url)
+      return render json: AgentGuide.state(document, request.base_url, viewer_user: current_user)
     end
     if params[:format] == "txt" || (agent_user_agent? && !link_preview_request)
       return render plain: AgentGuide.text(document, request.base_url, include_content: true)
@@ -97,7 +97,7 @@ class DocumentsController < InertiaController
     # Editor capabilities for THIS view, mirrored into the static preview so
     # mode-dependent chrome (Mermaid source visibility, sketch caption
     # affordance) is identical on both sides of the preview → editor swap.
-    writable = document.writable_by?(owner_token, user: current_user)
+    writable = document.editable_by?(owner_token, user: current_user)
     preview_editable = writable && %w[edit suggest].include?(mode)
     preview_sketch_interactive = writable && mode == "edit"
     if !open_page_reload? &&
@@ -204,6 +204,7 @@ class DocumentsController < InertiaController
                          inertia: { errors: { content: "Document content is too long" } }
     end
     source = raw_content || Document::DEFAULT_SEED
+    Document.assert_no_html!(raw_content) unless current_user
 
     creator_name = current_user&.name ||
       Document.normalize_owner_name(preferred_name(params[:name], fallback: nil))
@@ -293,6 +294,7 @@ class DocumentsController < InertiaController
     end
 
     with_document_write_access(document) do
+      document.assert_html_account!(current_user)
       document.update!(highlight_names: HighlightPalette.merge_names(document.highlight_names, names))
     end
     DocumentMetaChannel.broadcast_event(document, :highlight_names)
@@ -397,6 +399,7 @@ class DocumentsController < InertiaController
     document = Document.find_by!(slug: params[:slug])
     @write_document = document
     document.assert_write_access!(token: owner_token, user: current_user)
+    document.assert_html_account!(current_user)
     if params.key?(:content) && params.key?(:markdown)
       return render json: { error: "Send content or legacy markdown, not both." },
                     status: :unprocessable_entity
@@ -433,6 +436,8 @@ class DocumentsController < InertiaController
     document = Document.find_by!(slug: params[:slug])
     @write_document = document
     document.assert_write_access!(token: owner_token, user: current_user)
+    snapshot = params[:content].to_s
+    document.assert_html_account!(current_user, *(snapshot if snapshot.bytesize <= MAX_SNAPSHOT_BYTES))
     update = params[:update].to_s
     return head :content_too_large if update.bytesize > MAX_SYNC_UPDATE_B64_BYTES
 
@@ -462,6 +467,8 @@ class DocumentsController < InertiaController
     end
 
     head :no_content
+  rescue YjsPersistence::UpdateNotReadyError
+    render json: { error: "This update depends on one that has not arrived; retry." }, status: :conflict
   rescue Document::StaleSeedClaimError
     render json: { error: "This seed was superseded; reload the document.", seed_refused: true }, status: :conflict
   rescue ArgumentError
@@ -587,7 +594,7 @@ class DocumentsController < InertiaController
     if mode == "comment"
       document.commentable_by?(owner_token, user: current_user)
     else
-      document.writable_by?(owner_token, user: current_user)
+      document.editable_by?(owner_token, user: current_user)
     end
   end
 

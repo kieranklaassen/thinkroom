@@ -28,6 +28,7 @@ type SyncMessage = {
     | 'awareness'
     | 'awareness-leave'
     | 'write-denied'
+    | 'html-refused'
   update?: string
   sv?: string
   checksum?: string
@@ -113,6 +114,7 @@ export type ProviderEvent =
   | 'write-denied'
   | 'stale'
   | 'access-changed'
+  | 'html-refused'
 
 /** Origin tag for the page's server-rendered Yjs state applied at session
  *  creation (collab_session.ts). It is server state, never a local change. */
@@ -184,6 +186,8 @@ export class CableProvider {
   // The local doc was superseded and the page is reloading: nothing more is
   // sent from it or merged into it.
   discarded = false
+  // HTML in the document or the edit needs an account: nothing more is sent.
+  htmlRefused = false
   // Peer updates that arrived while `seedClaim` was unsettled. Merging them
   // into a seed the server then refuses would double the text.
   private heldUpdates: Uint8Array[] = []
@@ -445,6 +449,7 @@ export class CableProvider {
     if (
       this.destroyed ||
       this.discarded ||
+      this.htmlRefused ||
       !this.canWrite ||
       !this.synced ||
       this.inFlight ||
@@ -501,7 +506,7 @@ export class CableProvider {
   }
 
   private sendDurableSave(snapshot?: DurableSnapshotPayload, unload = false): void {
-    if (!this.canWrite || this.discarded) return
+    if (!this.canWrite || this.discarded || this.htmlRefused) return
     const parts = this.unackedParts()
     if (
       unload &&
@@ -565,6 +570,10 @@ export class CableProvider {
           // anew, so the handshake decides.
           const current = this.synced && this.seedClaim === sentClaim
           if (refusal?.seed_refused && current && !this.destroyed) this.discardLocalSeed()
+        }
+        if (response.status === 403) {
+          const refusal = (await response.json().catch(() => null)) as { error_code?: string } | null
+          if (refusal?.error_code === 'html_account_required') return this.refuseHtml()
         }
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         if (this.destroyed || this.discarded) return
@@ -714,6 +723,9 @@ export class CableProvider {
           this.flush('update')
         }
         break
+      case 'html-refused':
+        this.refuseHtml()
+        break
       case 'update':
       case 'sync-reply':
         this.serverChecksum = null
@@ -761,6 +773,14 @@ export class CableProvider {
         this.emit(data.stale || data.reason === 'stale' ? 'stale' : 'write-denied')
         break
     }
+  }
+
+  private refuseHtml(): void {
+    if (this.htmlRefused || this.destroyed || this.discarded) return
+    this.htmlRefused = true
+    this.clearTimers()
+    this.requeueInFlight()
+    this.emit('html-refused')
   }
 
   private handleDocUpdate = (update: Uint8Array, origin: unknown): void => {

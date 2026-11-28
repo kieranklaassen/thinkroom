@@ -74,6 +74,7 @@ class SuggestionTest < ActiveSupport::TestCase
       document:,
       author_name: "Scout",
       author_kind: "agent",
+      user: User.new,
       body: '<p onclick="bad()">Hello <span data-provenance data-kind="human" data-state="endorsed">world</span></p>'
     )
 

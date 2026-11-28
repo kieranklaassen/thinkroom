@@ -1,4 +1,5 @@
 import { $remark } from '@milkdown/kit/utils'
+import { escapeMarkupAttribute } from '../markdown_text'
 
 interface MdastNode {
   type: string
@@ -13,9 +14,6 @@ const CLOSE_INS = /^<\/ins>$/
 const OPEN_DEL =
   /^<del\s+data-suggestion-id="([^"]*)"\s*(?:data-author="([^"]*)")?\s*>$/
 const CLOSE_DEL = /^<\/del>$/
-
-const escapeAttr = (value: string): string =>
-  value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
 
 interface PhrasingState {
   containerPhrasing: (n: MdastNode, i: unknown) => string
@@ -35,14 +33,14 @@ export const suggestStringify = $remark('suggestStringify', () =>
       handlers: {
         suggestInsertion: (node: MdastNode, _parent: unknown, state: PhrasingState, info: unknown) => {
           const inner = state.containerPhrasing(node, info)
-          const id = escapeAttr((node.suggestionId as string) ?? '')
-          const author = escapeAttr((node.author as string) ?? '')
+          const id = escapeMarkupAttribute((node.suggestionId as string) ?? '')
+          const author = escapeMarkupAttribute((node.author as string) ?? '')
           return `<ins data-suggestion-id="${id}" data-author="${author}">${inner}</ins>`
         },
         suggestDeletion: (node: MdastNode, _parent: unknown, state: PhrasingState, info: unknown) => {
           const inner = state.containerPhrasing(node, info)
-          const id = escapeAttr((node.suggestionId as string) ?? '')
-          const author = escapeAttr((node.author as string) ?? '')
+          const id = escapeMarkupAttribute((node.suggestionId as string) ?? '')
+          const author = escapeMarkupAttribute((node.author as string) ?? '')
           return `<del data-suggestion-id="${id}" data-author="${author}">${inner}</del>`
         },
         // Formatting-change marker: content only, no wrapper (v1 pass-through).

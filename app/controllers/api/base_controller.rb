@@ -19,6 +19,14 @@ module Api
       render json: { error: e.message }, status: :unprocessable_entity
     end
 
+    rescue_from Document::HtmlAccountRequiredError do |e|
+      render json: {
+        error: e.message,
+        error_code: Document::HtmlAccountRequiredError::CODE,
+        next_action: "Run `thinkroom login` and send the access token as a Bearer token."
+      }, status: :forbidden
+    end
+
     rescue_from Document::EditingLockedError do
       render json: {
         error: "This link does not allow editing.",

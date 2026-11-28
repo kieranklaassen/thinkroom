@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react'
-import { Head, Link, router, useForm } from '@inertiajs/react'
+import { Head, Link, router, useForm, usePage } from '@inertiajs/react'
 import { NativeNavbar, NativeButton, NativeMenuItem, NativeFab, nativeHaptic } from '@ruby-native/react'
 import { FeedbackButton } from '../../components/feedback_button'
 import { AccountControl } from '../../components/account_control'
@@ -382,7 +382,7 @@ export default function DocumentsIndex({
   const agentInstruction =
     `Create a Thinkroom document for me: POST ${origin}/api/docs with JSON ` +
     `{"title": "…", "format": "markdown", "content": "# …"} ` +
-    `or use "format": "html" with HTML content, plus an X-Agent-Name header. ` +
+    `plus an X-Agent-Name header ("format": "html" also needs a Thinkroom account token). ` +
     `The response includes the share URL — open it and we'll collaborate live. ` +
     `Fetch the share URL (Accept: text/plain) for the full API guide.`
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'refused'>('idle')
@@ -495,6 +495,7 @@ export default function DocumentsIndex({
   // ownership; this is just the affordance. WKWebView shows confirm() as a
   // native alert.
   const [deletingSlug, setDeletingSlug] = useState<string | null>(null)
+  const { errors } = usePage().props
   const [deleteError, setDeleteError] = useState<string | null>(null)
   // Bumped on failure so every SwipeRow snaps closed (per R6, the error
   // message shouldn't sit next to a still-armed Delete).
@@ -824,6 +825,11 @@ export default function DocumentsIndex({
 
             {/* Above the list branches: a failed delete re-scopes the props,
                 and the message must survive whatever the list becomes. */}
+            {typeof errors.html_account === 'string' && (
+              <p className="document-delete-error" role="alert">
+                {errors.html_account} <a href="/login?return_to=%2F">Sign in</a>
+              </p>
+            )}
             {deleteError && (
               <p className="document-delete-error" role="alert">
                 {deleteError}

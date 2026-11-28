@@ -86,7 +86,9 @@ class HomeDocuments
   end
 
   def row_with_ownership(document)
-    row(document).merge(document.ownership_props(@token, viewer_user: @user))
+    row(document).merge(document.ownership_props(
+      @token, viewer_user: @user, editable: document.writable_by?(@token, user: @user)
+    ))
   end
 
   def row(document)

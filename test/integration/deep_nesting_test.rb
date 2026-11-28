@@ -53,6 +53,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
   end
 
   test "the source page shows the source as text, with no script and no seed claim" do
+    sign_in_as(User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD))
     content = "#{MARKDOWN}</pre></template><script>alert(1)</script><img src=x onerror=alert(1)>"
     document = Document.create!(title: "</title><script>alert(2)</script>", seed_content: content)
     [ document_page_path(document.slug), document_mode_path(document.slug, "edit"), document_mode_path(document.slug, "comment") ].each do |path|
@@ -74,6 +75,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
   end
 
   test "an Inertia visit goes to the source page" do
+    sign_in_as(User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD))
     document = deep_document(MARKDOWN)
     [ {}, partial("document", component: "documents/index") ].each do |headers|
       get document_mode_path(document.slug, "edit"), headers: inertia(headers)
@@ -87,8 +89,10 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
   # and for anything else it reloads.
   [ "document,ownership", "document,ownership,viewer", "document", "document.title", "suggestions,comments" ].each do |props|
     test "a partial reload of #{props} answers the open page" do
+      sign_in_as(User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD))
       document = live_document
-      post document_snapshot_path(document.slug), params: { content: PREVIEW_ONLY }, as: :json
+      post document_snapshot_path(document.slug),
+           params: { content: PREVIEW_ONLY, state_vector: encode(live_ydoc.encode_state_vector) }, as: :json
       assert_response :success
       assert_not document.reload.formattable?
 
@@ -125,7 +129,8 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
   end
 
   test "a source stored through the API that only its preview cannot format has the source page" do
-    post api_docs_path, params: { content: PREVIEW_ONLY }, as: :json, headers: AGENT
+    agent = account_agent
+    post api_docs_path, params: { content: PREVIEW_ONLY }, as: :json, headers: agent
     assert_response :created
     get document_page_path(response.parsed_body["slug"]), headers: BROWSER
     assert_source_page(PREVIEW_ONLY)
@@ -191,6 +196,7 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
   end
 
   test "browser create stores the source as sent" do
+    sign_in_as(User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD))
     assert_difference -> { Document.count } do
       post documents_path, params: { content: MARKDOWN }
     end
@@ -202,21 +208,23 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
 
   { "markdown" => MARKDOWN, "html" => HTML }.each do |format, content|
     test "API create and update of #{format} give a reason and store nothing" do
+      agent = account_agent
       assert_no_difference -> { Document.count } do
-        post api_docs_path, params: { content:, format: }, as: :json, headers: AGENT
+        post api_docs_path, params: { content:, format: }, as: :json, headers: agent
       end
       assert_refused
 
       document = Document.create!(title: "Kept", content_format: format, seed_content: "kept")
-      patch api_doc_path(document.slug), params: { content: }, as: :json, headers: AGENT
+      patch api_doc_path(document.slug), params: { content: }, as: :json, headers: agent
       assert_refused
-      patch api_doc_path(document.slug), params: { replaces: "kept", with: content }, as: :json, headers: AGENT
+      patch api_doc_path(document.slug), params: { replaces: "kept", with: content }, as: :json, headers: agent
       assert_refused
       assert_equal "kept", document.reload.current_content
       assert_empty document.activities
     end
 
     test "a #{format} snapshot gives a reason and a live document keeps its last one" do
+      sign_in_as(User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD))
       ydoc = live_ydoc
       document = live_document(content_format: format, content_snapshot: "good")
 
@@ -238,9 +246,12 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
   end
 
   test "an html suggestion gives a reason and is not stored" do
+    user = User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD)
+    agent = AGENT.merge("Authorization" => "Bearer #{CliAccessToken.issue!(user:).last}")
     document = Document.create!(title: "Page", content_format: "html", seed_content: "<p>kept</p>")
-    post api_doc_suggestions_path(document.slug), params: { body: HTML }, as: :json, headers: AGENT
+    post api_doc_suggestions_path(document.slug), params: { body: HTML }, as: :json, headers: agent
     assert_refused
+    sign_in_as(user)
     post document_suggestions_path(document.slug), params: { body: HTML }
     assert_redirected_to document_page_path(document.slug)
     get document_page_path(document.slug), headers: inertia
@@ -249,15 +260,16 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
   end
 
   test "a markdown suggestion is stored as sent" do
+    agent = account_agent
     document = Document.create!(title: "Page", seed_content: "words")
-    post api_doc_suggestions_path(document.slug), params: { body: MARKDOWN }, as: :json, headers: AGENT
+    post api_doc_suggestions_path(document.slug), params: { body: MARKDOWN }, as: :json, headers: agent
     assert_response :created
     assert_equal MARKDOWN, document.suggestions.sole.body
   end
 
   test "a source too deep can be replaced by one that is not" do
     document = deep_document(MARKDOWN)
-    patch api_doc_path(document.slug), params: { content: "fine" }, as: :json, headers: AGENT
+    patch api_doc_path(document.slug), params: { content: "fine" }, as: :json, headers: account_agent
     assert_response :success
     get document_page_path(document.slug), headers: inertia
     assert_response :success
@@ -271,7 +283,8 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
   end
 
   test "an element with many attributes is refused with the same reason" do
-    post api_docs_path, params: { content: "<p #{(1..500).map { |i| "a#{i}=1" }.join(" ")}>words</p>", format: "html" }, as: :json
+    agent = account_agent
+    post api_docs_path, params: { content: "<p #{(1..500).map { |i| "a#{i}=1" }.join(" ")}>words</p>", format: "html" }, as: :json, headers: agent
     assert_refused
   end
 
@@ -280,6 +293,11 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
   end
 
   private
+
+  def account_agent(headers = AGENT)
+    user = User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD)
+    headers.merge("Authorization" => "Bearer #{CliAccessToken.issue!(user:).last}")
+  end
 
   def deep_document(content, **attributes)
     Document.create!(title: "Deep", seed_content: content, **attributes)

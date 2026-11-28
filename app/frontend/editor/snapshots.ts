@@ -103,9 +103,8 @@ export async function pushSnapshot(
     if (signal?.aborted) return { ok: false, status: response.status }
     return pushSnapshot(target, attempt + 1)
   }
-  if (!response.ok) return { ok: false, status: response.status }
   const body = (await response.json().catch(() => null)) as Record<string, unknown> | null
-  return { ok: true, status: response.status, body }
+  return { ok: response.ok, status: response.status, body }
 }
 
 export interface SnapshotScheduler {
@@ -132,10 +131,12 @@ export function createSnapshotScheduler(options: {
    *  console — the CRDT keeps every edit while agents and previews serve
    *  the last accepted copy. Fired once per scheduler lifetime. */
   onTooLarge?: () => void
+  onHtmlRefused?: () => void
 }): SnapshotScheduler {
-  const { editor, ydoc, slug, contentFormat, canWrite, onTooLarge } = options
+  const { editor, ydoc, slug, contentFormat, canWrite, onTooLarge, onHtmlRefused } = options
   let timer: ReturnType<typeof setTimeout> | null = null
   let reportedTooLarge = false
+  let reportedHtml = false
   const lifetime = new AbortController()
 
   const push = () => {
@@ -148,6 +149,10 @@ export function createSnapshotScheduler(options: {
         if (outcome.status === 413 && !reportedTooLarge) {
           reportedTooLarge = true
           onTooLarge?.()
+        }
+        if (outcome.status === 403 && outcome.body?.error_code === 'html_account_required' && !reportedHtml) {
+          reportedHtml = true
+          onHtmlRefused?.()
         }
       },
     )

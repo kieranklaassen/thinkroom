@@ -98,6 +98,13 @@ import {
 } from './mermaid'
 import { richBlockWidthControls } from './rich_block_width'
 import { documentSizeGuard, documentSizeGuardCtx } from './document_size_guard'
+import {
+  HTML_KEPT_AS_TEXT_NOTICE,
+  htmlGuard,
+  htmlGuardCtx,
+  type DocumentNotice,
+} from './html_guard'
+import { configureMarkdownText } from './markdown_text'
 
 export interface EditorHandle {
   editor: Editor
@@ -146,6 +153,7 @@ export interface EditorProps {
   /** Server-authorized capability. Unlike `editable`, this gates every
    * outgoing CRDT frame and durable snapshot while preserving inbound sync. */
   canWrite?: boolean
+  authenticated?: boolean
   /** Coarse server-known identity used to refresh Action Cable after auth changes. */
   connectionIdentity?: string
   /** Suggest mode: typing is intercepted into tracked insertion/deletion
@@ -175,13 +183,17 @@ export interface EditorProps {
   /** User-facing notices the editor cannot render itself: an edit refused
    *  for pushing the document past its size limit, a durable snapshot the
    *  server refused as too large. */
-  onNotice?: (message: string) => void
+  onNotice?: (notice: DocumentNotice) => void
+  /** HTML in the document or the edit needs an account; the last edits are not saved. */
+  onHtmlRefused?: () => void
 }
 
-const REFUSED_EDIT_NOTICE =
-  'That edit was not applied: it would push this document past its 2 MB limit.'
-const SNAPSHOT_TOO_LARGE_NOTICE =
-  'This document is over the 2 MB source limit, so its saved copy is stale. Shorten it to keep agents and previews current.'
+const REFUSED_EDIT_NOTICE: DocumentNotice = {
+  text: 'That edit was not applied: it would push this document past its 2 MB limit.',
+}
+const SNAPSHOT_TOO_LARGE_NOTICE: DocumentNotice = {
+  text: 'This document is over the 2 MB source limit, so its saved copy is stale. Shorten it to keep agents and previews current.',
+}
 
 interface ActiveSketch {
   data: SketchData
@@ -304,6 +316,7 @@ function CollabEditor({
   seedAuthorKind,
   seedAuthorName,
   canWrite = true,
+  authenticated = false,
   connectionIdentity = 'guest',
   editable = true,
   suggesting = false,
@@ -318,13 +331,14 @@ function CollabEditor({
   onAccessChanged,
   onRejected,
   onNotice,
+  onHtmlRefused,
 }: EditorProps) {
   const [sketchDraft, setSketchDraft] = useState<ActiveSketch | undefined>(undefined)
   const insertSketchRef = useRef<() => void>(() => undefined)
   const saveSketchRef = useRef<(data: SketchData) => void>(() => undefined)
   const deleteSketchRef = useRef<(id: string) => void>(() => undefined)
-  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice })
-  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice }
+  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice, onHtmlRefused })
+  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice, onHtmlRefused }
   // Ref so the editable() closure always reads the live value; the effect
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
@@ -335,6 +349,8 @@ function CollabEditor({
   taskInteractiveRef.current = taskInteractive
   const canWriteRef = useRef(canWrite)
   canWriteRef.current = canWrite
+  const needsAccountRef = useRef(!authenticated)
+  needsAccountRef.current = !authenticated
   // Suggesting only syncs into plugin state after start() — the gate that
   // keeps seed/initial-sync transactions out of the dispatch transform.
   const startedRef = useRef(false)
@@ -350,6 +366,10 @@ function CollabEditor({
             ...prev,
             onRefused: () => callbacksRef.current.onNotice?.(REFUSED_EDIT_NOTICE),
           }))
+          ctx.set(htmlGuardCtx.key, {
+            needsAccount: () => needsAccountRef.current,
+            onKeptAsText: () => callbacksRef.current.onNotice?.(HTML_KEPT_AS_TEXT_NOTICE),
+          })
           ctx.set(sketchControlsCtx.key, {
             edit: (data, mount, wrapper) => setSketchDraft({ data, mount, wrapper }),
             save: (data) => saveSketchRef.current(data),
@@ -385,6 +405,7 @@ function CollabEditor({
             enableHtmlFileUploader: true,
           }))
           configureCleanClipboard(ctx)
+          configureMarkdownText(ctx)
           configureSlashMenu(ctx)
           renderSoftBreaks(ctx)
           // The defaults are bare text ('+', 'left', …) — real icons required.
@@ -436,6 +457,7 @@ function CollabEditor({
         // already-attributed text (KTD 6 registration order).
         .use(suggestState)
         .use(suggestGuard)
+        .use(htmlGuard)
         .use(documentSizeGuard)
         .use(selectionWatcher)
         .use(agentCursors)
@@ -469,9 +491,6 @@ function CollabEditor({
     provider.on('stale', stale)
     provider.on('access-changed', accessChanged)
     provider.on('rejected', rejected)
-    // Discarded while no editor was listening (a remount reusing the session).
-    if (provider.discarded) stale()
-
     let cancelled = false
     let unbindMermaidHints: (() => void) | null = null
     let spansFrame = 0
@@ -480,10 +499,17 @@ function CollabEditor({
       ydoc,
       slug,
       contentFormat,
-      canWrite: () => canWriteRef.current,
+      canWrite: () => canWriteRef.current && !provider.htmlRefused,
       onTooLarge: () => callbacksRef.current.onNotice?.(SNAPSHOT_TOO_LARGE_NOTICE),
+      onHtmlRefused: () => callbacksRef.current.onHtmlRefused?.(),
     })
     const scheduleSnapshot = snapshots.schedule
+
+    const htmlRefused = () => callbacksRef.current.onHtmlRefused?.()
+    provider.on('html-refused', htmlRefused)
+    // Discarded or refused while no editor was listening (a remount reusing the session).
+    if (provider.discarded) stale()
+    else if (provider.htmlRefused) htmlRefused()
 
     let started = false
     const start = () => {
@@ -560,6 +586,7 @@ function CollabEditor({
         callbacksRef.current.onSpans?.(collectSpans(ctx.get(editorViewCtx).state.doc, { excludePendingInsertions: true }))
 
         ctx.get(listenerCtx).updated((_listenerCtx, doc) => {
+          if (cancelled) return
           // Live summary updates use the document watcher above: unlike this
           // debounced listener it also sees remote and history-excluded edits.
           // Persisted snapshots remain complete, including pending insertions.
@@ -618,6 +645,7 @@ function CollabEditor({
       provider.off('stale', stale)
       provider.off('access-changed', accessChanged)
       provider.off('rejected', rejected)
+      provider.off('html-refused', htmlRefused)
       unbindMermaidHints?.()
       if (spansFrame) cancelAnimationFrame(spansFrame)
       snapshots.dispose()

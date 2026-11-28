@@ -5,9 +5,21 @@ module DocumentWriteAuthorization
     rescue_from Document::EditingLockedError, with: :render_document_read_only
     rescue_from Document::CommentingLockedError, with: :render_document_commenting_disabled
     rescue_from Document::StaleGenerationError, with: :render_document_stale_generation
+    rescue_from Document::HtmlAccountRequiredError, with: :render_html_account_required
   end
 
   private
+
+  def render_html_account_required(error)
+    back = @write_document ? document_page_path(@write_document.slug) : root_path
+    if request.format.json?
+      render json: { error: error.message, error_code: Document::HtmlAccountRequiredError::CODE,
+                     sign_in: login_path(return_to: back) },
+             status: :forbidden
+    else
+      redirect_back fallback_location: back, inertia: { errors: { html_account: error.message } }
+    end
+  end
 
   def with_document_write_access(document, &block)
     @write_document = document

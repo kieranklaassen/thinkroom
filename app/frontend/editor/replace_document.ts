@@ -7,6 +7,7 @@ import { SKIP_PROVENANCE } from './provenance'
 import { SUGGESTION_MARK_NAMES } from './suggest_changes/marks'
 import { serializeHtml, sourceParser, type DocumentFormat } from './document_format'
 import { firstHeadingTitle } from './document_title'
+import { hasHtml, htmlGuardCtx } from './html_guard'
 import { documentSizeGuardCtx, exceedsDocumentSize } from './document_size_guard'
 
 export interface ReplaceDocumentOptions {
@@ -24,7 +25,7 @@ export type ReplaceDocumentOutcome =
       /** First level-1 heading of the new document, or null. */
       title: string | null
     }
-  | { error: 'empty' | 'no_provenance' | 'too_large' }
+  | { error: 'empty' | 'no_provenance' | 'too_large' | 'html_account_required' }
 
 /** Inline leaves that carry no content of their own. */
 const STRUCTURAL_LEAVES = new Set(['hardbreak'])
@@ -85,6 +86,11 @@ export function replaceDocumentContent(
     const parsed = sourceParser(format, ctx.get(parserCtx), schema)(source)
     if (!parsed || isEmptyDocument(parsed)) {
       outcome = { error: 'empty' }
+      return
+    }
+
+    if (ctx.get(htmlGuardCtx.key).needsAccount() && (hasHtml(state.doc) || hasHtml(parsed))) {
+      outcome = { error: 'html_account_required' }
       return
     }
 

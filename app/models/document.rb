@@ -2,6 +2,14 @@ class Document < ApplicationRecord
   class EditingLockedError < StandardError; end
   class CommentingLockedError < StandardError; end
   class NotOwnerError < StandardError; end
+
+  class HtmlAccountRequiredError < StandardError
+    CODE = "html_account_required".freeze
+    MESSAGE = "Creating or suggesting HTML needs an account.".freeze
+
+    def initialize(message = MESSAGE) = super
+  end
+
   DEFAULT_SEED = "# Untitled\n\nStart writing — everything you type is attributed to you.\n"
   DEFAULT_HTML_SEED = "<h1>Untitled</h1><p>Start writing — everything you type is attributed to you.</p>"
   CONTENT_FORMATS = %w[markdown html].freeze
@@ -189,6 +197,27 @@ class Document < ApplicationRecord
 
   def writable_by?(token, user: nil)
     link_access == "edit" || owned_by?(token, user:)
+  end
+
+  # Content that holds HTML is edited by an account only.
+  def editable_by?(token, user: nil)
+    writable_by?(token, user:) && (user.present? || !raw_html?)
+  end
+
+  # Whether the document is HTML, or its stored or live Markdown holds any.
+  def raw_html?(ydoc: nil)
+    html? || RawHtml.in_markdown?(current_content) || YjsPersistence.raw_html?(self, ydoc:)
+  end
+
+  def assert_html_account!(user, *sources, ydoc: nil)
+    return if user
+
+    self.class.assert_no_html!(*sources)
+    raise HtmlAccountRequiredError if raw_html?(ydoc:)
+  end
+
+  def self.assert_no_html!(*sources)
+    raise HtmlAccountRequiredError if sources.any? { |source| RawHtml.in_markdown?(source) }
   end
 
   def commentable_by?(token, user: nil)
@@ -416,7 +445,7 @@ class Document < ApplicationRecord
     seed_claimed_at&.utc&.iso8601(6)
   end
 
-  def ownership_props(viewer_token, viewer_user: nil)
+  def ownership_props(viewer_token, viewer_user: nil, editable: editable_by?(viewer_token, user: viewer_user))
     {
       claimed: claimed?,
       claimable: claimable?,
@@ -424,7 +453,8 @@ class Document < ApplicationRecord
       yours: owned_by?(viewer_token, user: viewer_user),
       link_access:,
       editing_locked: editing_locked?,
-      can_write: writable_by?(viewer_token, user: viewer_user),
+      can_write: editable,
+      html_needs_account: writable_by?(viewer_token, user: viewer_user) && !editable,
       can_comment: commentable_by?(viewer_token, user: viewer_user)
     }
   end

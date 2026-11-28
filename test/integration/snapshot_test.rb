@@ -1,6 +1,7 @@
 require "test_helper"
 
 class SnapshotTest < ActionDispatch::IntegrationTest
+  include CompoundWritingHelpers
   include ActionCable::TestHelper
 
   PNG = Base64.decode64(
@@ -160,6 +161,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   end
 
   test "HTML snapshot is sanitized while valid review metadata survives" do
+    sign_in_as(User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD))
     document = Document.create!(
       title: "HTML",
       content_format: "html",
@@ -185,6 +187,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   end
 
   test "HTML snapshot preserves a valid sketch and exposes its semantics" do
+    sign_in_as(User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD))
     document = Document.create!(
       title: "HTML sketch",
       content_format: "html",
@@ -209,6 +212,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   end
 
   test "HTML snapshot claims an image uploaded by the browser API" do
+    sign_in_as(User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD))
     upload = Tempfile.new([ "snapshot-image", ".png" ])
     upload.binmode
     upload.write(PNG)
@@ -252,6 +256,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   end
 
   test "HTML snapshot rejects the legacy markdown field" do
+    sign_in_as(User.create!(name: "Ann", email: "ann-legacy@example.com", password: PASSWORD))
     document = Document.create!(
       title: "HTML",
       content_format: "html",
@@ -271,6 +276,7 @@ class SnapshotTest < ActionDispatch::IntegrationTest
   end
 
   test "HTML snapshot requires a state vector" do
+    sign_in_as(User.create!(name: "Ann", email: "ann-sv@example.com", password: PASSWORD))
     document = Document.create!(
       title: "HTML",
       content_format: "html",

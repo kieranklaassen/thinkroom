@@ -22,8 +22,10 @@ class SessionsController < InertiaController
   end
 
   def destroy
+    user = current_user
     reset_session
     replace_owner_token!
+    ActionCable.server.remote_connections.where(current_user: user).disconnect if user
     redirect_to root_path, status: :see_other
   end
 end

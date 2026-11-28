@@ -4,9 +4,36 @@ import { chromium } from 'playwright'
 import { expectedBrowserNoise, waitForLive } from './lib/check_helpers.mjs'
 
 const BASE = process.env.BASE_URL ?? 'http://localhost:3000'
-const AGENT_HEADERS = {
+const EMAIL = process.env.CHECK_EMAIL ?? 'compound-check@example.com'
+const PASSWORD = process.env.CHECK_PASSWORD ?? 'thoughtful-passphrase'
+const BASE_AGENT_HEADERS = {
   'X-Agent-Name': 'HTML Check',
   'Content-Type': 'application/json',
+}
+
+const signInAndAuthorizeCli = async (page) => {
+  await page.goto(`${BASE}/login`)
+  await page.locator('input[name="email"]').fill(EMAIL)
+  await page.locator('input[name="password"]').fill(PASSWORD)
+  await page.locator('#auth-submit').click()
+  await page.waitForFunction(() => location.pathname !== '/login')
+
+  const startResponse = await fetch(`${BASE}/api/cli/device_authorizations`, { method: 'POST' })
+  if (startResponse.status !== 201) throw new Error(`CLI device start failed: ${startResponse.status}`)
+  const { device_code: deviceCode, user_code: userCode } = await startResponse.json()
+
+  await page.goto(`${BASE}/cli/authorize?code=${encodeURIComponent(userCode)}`)
+  await page.locator('.cli-auth-submit').click()
+  await page.locator('.cli-auth-card', { hasText: 'CLI connected' }).waitFor({ timeout: 10000 })
+
+  const tokenResponse = await fetch(`${BASE}/api/cli/device_authorizations/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_code: deviceCode }),
+  })
+  if (tokenResponse.status !== 200) throw new Error(`CLI token exchange failed: ${tokenResponse.status}`)
+  const { access_token: accessToken } = await tokenResponse.json()
+  return accessToken
 }
 
 const checks = []
@@ -46,6 +73,31 @@ for (const [label, page] of [
 }
 
 try {
+  phase = 'anonymous HTML refusal'
+  const refusedResponse = await fetch(`${BASE}/api/docs`, {
+    method: 'POST',
+    headers: BASE_AGENT_HEADERS,
+    body: JSON.stringify({
+      title: 'Anonymous HTML attempt',
+      format: 'html',
+      content: '<p>Needs an account.</p>',
+    }),
+  })
+  const refusedBody = await refusedResponse.json().catch(() => ({}))
+  assert(
+    refusedResponse.status === 403 && refusedBody.error_code === 'html_account_required',
+    'anonymous HTML creation requires an account',
+    `${refusedResponse.status} ${JSON.stringify(refusedBody)}`,
+  )
+
+  phase = 'account sign-in'
+  const accessToken = await signInAndAuthorizeCli(a)
+  const AGENT_HEADERS = {
+    ...BASE_AGENT_HEADERS,
+    Authorization: `Bearer ${accessToken}`,
+  }
+
+  phase = 'authenticated HTML creation'
   const createdResponse = await fetch(`${BASE}/api/docs`, {
     method: 'POST',
     headers: AGENT_HEADERS,

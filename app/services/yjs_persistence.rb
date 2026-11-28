@@ -11,6 +11,8 @@ class YjsPersistence
   # YjsRecovery.heal_corrupt_state! and retry.
   class CorruptStateError < StandardError; end
 
+  class UpdateNotReadyError < StandardError; end
+
   # Bounded 64-stripe in-process lock table. ActionCable handles channel
   # actions on a thread pool; without this, two concurrent receives could
   # both read the same stored blob and the later write would drop the earlier
@@ -60,11 +62,11 @@ class YjsPersistence
     end
 
     # Merge a base64-encoded Yjs update into the document's persisted state.
-    # Convenience wrapper over merge_bytes for callers holding a base64 frame;
-    # transport boundaries (SyncChannel, DocumentsController) decode once and
-    # call merge_bytes directly.
+    # Convenience wrapper over merge_bytes for trusted content in a base64
+    # frame. Transport boundaries (SyncChannel, DocumentsController) decode once
+    # and call merge_bytes, which checks a guest's content.
     def merge(document, base64_update, generation: document.content_generation, seed_claim: nil, token: nil, user: nil)
-      merge_bytes(document, decode(base64_update), generation:, seed_claim:, token:, user:)
+      merge_bytes(document, decode(base64_update), generation:, seed_claim:, token:, user:, html: true)
     end
 
     # Merge raw binary Yjs update bytes into the document's persisted state.
@@ -77,7 +79,7 @@ class YjsPersistence
     #
     # `seed_claim` is present on a claimant's writes until its seed is known to
     # be stored. The first seed stored wins; see seed_claim_holds?.
-    def merge_bytes(document, update, generation:, seed_claim: nil, token: nil, user: nil)
+    def merge_bytes(document, update, generation:, seed_claim: nil, token: nil, user: nil, html: user.present?)
       update = update.b
       ActiveSupport::Notifications.instrument(
         "merge.yjs", document_id: document.id, update_bytes: update.bytesize
@@ -127,6 +129,8 @@ class YjsPersistence
               payload[:outcome] = "rejected_seed_claim"
               raise Document::StaleSeedClaimError, "Another seed is already stored."
             end
+
+            assert_no_html!(document, update) unless html
 
             # The durable act: an O(update) append. No Y::Doc is built on
             # this path — folds materialize the tail into the snapshot
@@ -225,7 +229,7 @@ class YjsPersistence
 
           # The staleness gate must compare against the full live state,
           # so unfolded tail rows are folded into the snapshot first.
-          perform_fold(document) if document.yjs_document_updates.exists?
+          folded_ydoc = perform_fold(document) if document.yjs_document_updates.exists?
 
           if client_state && document.yjs_state.present?
             server_state = begin
@@ -245,6 +249,8 @@ class YjsPersistence
             end
           end
 
+          document.assert_html_account!(user, content, ydoc: folded_ydoc)
+
           attributes = { title:, content_snapshot: content, provenance_spans: spans }
           if render_hints.present?
             attributes[:render_hints] = RenderHints.merge(document.render_hints || {}, render_hints)
@@ -262,6 +268,13 @@ class YjsPersistence
         payload[:error] = e.message
         false
       end
+    end
+
+    # Whether the live document holds HTML; one that cannot be read does.
+    def raw_html?(document, ydoc: nil)
+      RawHtml.in_live?(ydoc || apply_tail(document, load_ydoc(document)))
+    rescue StandardError
+      true
     end
 
     # Fold the document's update tail into its snapshot columns, acquiring
@@ -422,6 +435,28 @@ class YjsPersistence
     end
 
     private
+
+    # Callers hold both locks. The document is checked as it is and as the
+    # update would leave it.
+    def assert_no_html!(document, update)
+      ydoc = load_ydoc_with_tail(document)
+      document.assert_html_account!(nil, ydoc:)
+      raise UpdateNotReadyError, "update depends on missing updates" unless ydoc.update_ready?(update)
+
+      ydoc.apply_update(update)
+      raise Document::HtmlAccountRequiredError if RawHtml.in_live?(ydoc)
+    end
+
+    def load_ydoc_with_tail(document)
+      ydoc = load_or_heal_ydoc(document)
+      apply_tail(document, ydoc)
+    end
+
+    def apply_tail(document, ydoc)
+      YjsDocumentUpdate.where(document_id: document.id, content_generation: document.content_generation)
+                       .order(:id).pluck(:payload).each { |payload| ydoc.apply_update(payload) }
+      ydoc
+    end
 
     # Callers hold both locks. While nothing is stored any claimant may write,
     # even one whose claim was taken over: there is nothing to double yet.

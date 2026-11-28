@@ -16,6 +16,7 @@
 #                              { type: "nack", seq, reason: "retryable" | "invalid" }
 #                              { type: "write-denied", locked: true }          # read-only link
 #                              { type: "write-denied", locked: false, stale: true } # document was replaced, generation missing, or a seed frame not matching the stored content or its claim
+#                              { type: "html-refused", seq? }                    # HTML in the document or the edit needs an account
 #   client -> server         : { type: "sync-reply", update, cid, seq?, generation, seed_claim? } # unacked edits flushed on reconnect
 #                              { type: "update", update, cid, seq?, generation, seed_claim? } # incremental edit
 #                              { type: "awareness", update, cid, client_id? }        # presence/cursors, cached + relayed (4 KiB cap)
@@ -195,7 +196,7 @@ class SyncChannel < ApplicationCable::Channel
   end
 
   def writable?
-    @document.writable_by?(connection_owner_token, user: connection_current_user)
+    @document.editable_by?(connection_owner_token, user: connection_current_user)
   end
 
   # Sent by a writer whose handshake was seed_pending. The claimant may have
@@ -341,6 +342,8 @@ class SyncChannel < ApplicationCable::Channel
     transmit({ type: "ack", seq: }) if seq
   rescue Document::EditingLockedError
     transmit({ type: "write-denied", locked: true })
+  rescue Document::HtmlAccountRequiredError
+    transmit({ type: "html-refused", seq: }.compact)
   rescue Document::StaleGenerationError
     # The document was replaced (Document#replace_content!) since this client
     # last synced, or the frame omitted a valid generation. Drop the frame —

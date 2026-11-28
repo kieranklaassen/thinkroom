@@ -85,6 +85,7 @@ class SyncChannelTest < ActionCable::Channel::TestCase
       seed_content: "<h1>Template</h1>"
     )
 
+    stub_connection(current_user: User.create!(name: "Ann", email: "ann@example.com", password: CompoundWritingHelpers::PASSWORD))
     subscribe slug: doc.slug
 
     message = transmissions.last

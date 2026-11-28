@@ -16,6 +16,7 @@ class SuggestionsController < InertiaController
         document:,
         author_name: preferred_name(params[:author_name], fallback: "Anonymous"),
         author_kind: "human",
+        user: current_user,
         body: params[:body].to_s,
         intent: (params[:intent].presence if params[:intent].is_a?(String)),
         anchor_text: (params[:anchor_text].presence if params[:anchor_text].is_a?(String)),
@@ -54,8 +55,12 @@ class SuggestionsController < InertiaController
     ids = if params.key?(:ids)
       Array(params[:ids]).filter_map { |id| Integer(id, exception: false) }.uniq
     end
+    needs_account = 0
     accepted = with_document_write_access(document) do
-      winners = Suggestion.accept_all!(document:, by:, ids:)
+      document.assert_html_account!(current_user)
+      winners = Suggestion.accept_all!(document:, by:, ids:, html: current_user.present?) do |left|
+        needs_account = left.size
+      end
       if winners.any?
         Activity.log!(
           document:,
@@ -69,7 +74,7 @@ class SuggestionsController < InertiaController
     end
     DocumentMetaChannel.broadcast_event(document, :suggestions) if accepted.any?
 
-    render json: { accepted: accepted.map(&:as_props) }
+    render json: { accepted: accepted.map(&:as_props), needs_account: }
   rescue ActiveRecord::RecordNotFound
     # JSON in, JSON out — an HTML 404 page here is unparseable to the client.
     render json: { error: "No document with that slug." }, status: :not_found
@@ -77,6 +82,7 @@ class SuggestionsController < InertiaController
 
   def accept
     with_document_write_access(@suggestion.document) do
+      @suggestion.document.assert_html_account!(current_user, @suggestion.body)
       @suggestion.accept!(by: preferred_name(params[:by], fallback: "human"))
       log_suggestion_activity("accepted_suggestion", "accepted “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
     end
@@ -91,6 +97,7 @@ class SuggestionsController < InertiaController
   def reopen
     by = preferred_name(params[:by], fallback: "human")
     with_document_write_access(@suggestion.document) do
+      @suggestion.document.assert_html_account!(current_user, @suggestion.body)
       @suggestion.reopen_after_failed_apply!(by:)
       Activity.log!(
         document: @suggestion.document,
@@ -108,6 +115,7 @@ class SuggestionsController < InertiaController
 
   def reject
     with_document_write_access(@suggestion.document) do
+      @suggestion.document.assert_html_account!(current_user)
       @suggestion.reject!(by: preferred_name(params[:by], fallback: "human"))
       log_suggestion_activity("rejected_suggestion", "rejected “#{@suggestion.intent.presence || 'a suggestion'}” from #{@suggestion.author_name}")
     end

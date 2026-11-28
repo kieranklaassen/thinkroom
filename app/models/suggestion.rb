@@ -28,13 +28,15 @@ class Suggestion < ApplicationRecord
   # The single entry point for proposing a suggestion — the UI's AI path and
   # the agent API both flow through here (create + activity + live broadcast),
   # so there is no side channel around the review machinery.
-  def self.propose!(document:, author_name:, author_kind:, body:, intent: nil, anchor_text: nil, replaces: nil)
+  def self.propose!(document:, author_name:, author_kind:, body:, user: nil, intent: nil, anchor_text: nil, replaces: nil)
     body = body.to_s
     if body.bytesize > MAX_BODY_BYTES
       invalid = document.suggestions.build(author_name:, author_kind:, body:, intent:, anchor_text:, replaces:)
       invalid.errors.add(:body, "is too long")
       raise ActiveRecord::RecordInvalid.new(invalid)
     end
+
+    document.assert_html_account!(user, body)
 
     normalization = document.html? ? HtmlDocumentSanitizer.external(body) : nil
     suggestion = document.suggestions.create!(
@@ -60,6 +62,8 @@ class Suggestion < ApplicationRecord
   end
   private_class_method :resolve_pending
 
+  def brings_html? = RawHtml.in_markdown?(body)
+
   def accept!(by: nil)
     transition!("accepted", by:)
   end
@@ -80,12 +84,17 @@ class Suggestion < ApplicationRecord
   # or every pending row when ids are omitted, in one transaction. A row
   # resolved concurrently by a single accept loses its pending status and is
   # excluded — the caller only merges winners, so no text applies twice.
-  def self.accept_all!(document:, by: nil, ids: nil)
+  def self.accept_all!(document:, by: nil, ids: nil, html: true)
     document.transaction do
       pending = document.suggestions.pending
       pending = pending.where(id: ids) unless ids.nil?
       # A row lost to a concurrent resolve since this read changes nothing.
-      won = pending.order(:id).ids.select { |id| resolve_pending(id, "accepted", by:) }
+      pending = pending.order(:id)
+      unless html
+        left, pending = pending.to_a.partition(&:brings_html?)
+        yield left if left.any? && block_given?
+      end
+      won = (html ? pending.ids : pending.map(&:id)).select { |id| resolve_pending(id, "accepted", by:) }
       document.suggestions.where(id: won).order(:id).to_a
     end
   end

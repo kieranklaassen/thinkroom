@@ -18,10 +18,13 @@ export const NO_PROVENANCE_ERROR =
   'this editor cannot attribute agent text; the document was not changed'
 export const TOO_LARGE_ERROR =
   'refused: new content would push this document past its 2 MB limit; the document was not changed'
+export const HTML_ACCOUNT_ERROR =
+  'refused: creating or suggesting HTML needs an account. Send Markdown without HTML, or have the person sign in; the document was not changed'
 const REPLACE_REFUSALS = {
   empty: EMPTY_CONTENT_ERROR,
   no_provenance: NO_PROVENANCE_ERROR,
   too_large: TOO_LARGE_ERROR,
+  html_account_required: HTML_ACCOUNT_ERROR,
 } as const
 const PERSISTENCE_LAG_NOTE = 'snapshot not persisted yet; reads may lag until the next snapshot'
 
@@ -77,7 +80,15 @@ export async function executeEditorTool(
       author,
     })
     if ('error' in outcome) {
-      return refuse({ error: REPLACE_REFUSALS[outcome.error] })
+      return refuse({
+        error: REPLACE_REFUSALS[outcome.error],
+        ...(outcome.error === 'html_account_required'
+          ? {
+              error_code: outcome.error,
+              next_action: 'Send Markdown without HTML, or have the person sign in and retry.',
+            }
+          : {}),
+      })
     }
 
     // Dispatched: from here on nothing is rolled back, including on abort.
@@ -111,10 +122,17 @@ export async function executeEditorTool(
           : 'Not logged to the activity feed because the snapshot did not persist.'),
     }
     if (!snap.ok) {
-      const accessLost = snap.status === 403 || snap.status === 423
-      result.persistence_note = accessLost
-        ? `${PERSISTENCE_LAG_NOTE}. ${NOT_WRITABLE_ERROR}`
-        : PERSISTENCE_LAG_NOTE
+      const htmlRefused =
+        snap.status === 403 && snap.body?.error_code === 'html_account_required'
+      const accessLost = snap.status === 423
+      if (htmlRefused) {
+        result.error_code = 'html_account_required'
+        result.persistence_note = `${PERSISTENCE_LAG_NOTE}. ${HTML_ACCOUNT_ERROR}`
+      } else if (accessLost) {
+        result.persistence_note = `${PERSISTENCE_LAG_NOTE}. ${NOT_WRITABLE_ERROR}`
+      } else {
+        result.persistence_note = PERSISTENCE_LAG_NOTE
+      }
       if (snap.status !== null) result.snapshot_status = snap.status
     }
     return textResult(withContext(result))

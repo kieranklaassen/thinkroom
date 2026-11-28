@@ -138,5 +138,6 @@ export interface OwnershipPayload {
   link_access: LinkAccess
   editing_locked: boolean
   can_write: boolean
+  html_needs_account: boolean
   can_comment: boolean
 }
