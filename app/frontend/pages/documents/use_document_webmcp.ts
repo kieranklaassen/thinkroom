@@ -51,8 +51,8 @@ export function useDocumentWebmcp({
         return executeEditorTool(tool, args, {
           handle: handleRef.current,
           canWrite: can_write,
-          slug: slug,
-          contentFormat: contentFormat,
+          slug,
+          contentFormat,
           signal,
           viewerContext,
         })
