@@ -39,21 +39,30 @@ class InertiaProtocolTest < ActionDispatch::IntegrationTest
     assert_redirected_to login_path
 
     get login_path, headers: inertia_headers("X-Inertia-Version" => "older")
-    assert_response :conflict
-    assert_equal login_url, response.headers["X-Inertia-Location"]
-    assert_equal InertiaController.safe_vite_digest.to_s, response.headers["X-Inertia-Version"]
+    assert_reloads login_url
 
     get login_path, headers: BROWSER
     assert_equal "Invalid email or password", inertia.props.dig(:errors, :email)
   end
 
-  test "a background reload from older assets names the new version" do
-    get document_mode_path(@document.slug, "edit"), headers: inertia_headers(
+  test "a background reload from older assets reloads the page" do
+    page = document_mode_path(@document.slug, "edit")
+    get page, headers: inertia_headers(
       "X-Inertia-Version" => "older", "X-Inertia-Partial-Component" => "documents/show",
       "X-Inertia-Partial-Data" => "presences"
     )
-    assert_response :conflict
-    assert_equal InertiaController.safe_vite_digest.to_s, response.headers["X-Inertia-Version"]
+    assert_reloads document_mode_url(@document.slug, "edit")
+  end
+
+  test "a write from older assets is kept and reloads the page" do
+    page = document_mode_url(@document.slug, "edit")
+    headers = inertia_headers("X-Inertia-Version" => "older", "Referer" => page)
+    post identity_path, params: { name: "Guest" }, headers: headers
+    assert_redirected_to page
+    assert_equal "Guest", session[:display_name]
+
+    get page, headers: headers
+    assert_reloads page
   end
 
   # Production reads the request as HTTPS on the default port; the Referer
@@ -83,6 +92,14 @@ class InertiaProtocolTest < ActionDispatch::IntegrationTest
   end
 
   private
+
+  # The client follows this for every visit. With X-Inertia-Version it would
+  # leave the page as it is after an async one.
+  def assert_reloads(url)
+    assert_response :conflict
+    assert_equal url, response.headers["X-Inertia-Location"]
+    assert_nil response.headers["X-Inertia-Version"]
+  end
 
   def inertia_headers(headers = {})
     BROWSER.merge("X-Inertia" => "true", "X-Inertia-Version" => InertiaController.safe_vite_digest.to_s, **headers)
