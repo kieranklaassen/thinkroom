@@ -18,14 +18,13 @@ import {
   storedSketchViewport,
 } from './preview'
 import {
-  EMPTY_SKETCH_SCENE,
-  DEFAULT_SKETCH_HEIGHT,
   MAX_SKETCH_DESCRIPTION,
+  newSketchData,
   sketchAccessibleLabel,
   type SketchData,
 } from './scene'
 
-interface SketchControls {
+export interface SketchControls {
   edit: (data: SketchData, mount: HTMLElement, wrapper: HTMLElement) => void
   save: (data: SketchData) => void
   insert: () => void
@@ -366,14 +365,6 @@ const sketchInteractivity = $prose(
       },
     }),
 )
-
-const newSketchData = (): SketchData => ({
-  id: crypto.randomUUID(),
-  formatVersion: 1,
-  description: '',
-  height: DEFAULT_SKETCH_HEIGHT,
-  scene: structuredClone(EMPTY_SKETCH_SCENE),
-})
 
 const activateSketch = (view: EditorView, id: string) => {
   requestAnimationFrame(() => {
