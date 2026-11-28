@@ -88,7 +88,8 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
     test "a partial reload of #{props} answers the open page" do
       sign_in_as(User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD))
       document = live_document
-      post document_snapshot_path(document.slug), params: { content: PREVIEW_ONLY }, as: :json
+      post document_snapshot_path(document.slug),
+           params: { content: PREVIEW_ONLY, state_vector: encode(live_ydoc.encode_state_vector) }, as: :json
       assert_response :success
       assert_not document.reload.formattable?
 
@@ -245,9 +246,12 @@ class DeepNestingTest < ActionDispatch::IntegrationTest
   end
 
   test "an html suggestion gives a reason and is not stored" do
+    user = User.create!(name: "Ann", email: "ann@example.com", password: PASSWORD)
+    agent = AGENT.merge("Authorization" => "Bearer #{CliAccessToken.issue!(user:).last}")
     document = Document.create!(title: "Page", content_format: "html", seed_content: "<p>kept</p>")
-    post api_doc_suggestions_path(document.slug), params: { body: HTML }, as: :json, headers: AGENT
+    post api_doc_suggestions_path(document.slug), params: { body: HTML }, as: :json, headers: agent
     assert_refused
+    sign_in_as(user)
     post document_suggestions_path(document.slug), params: { body: HTML }
     assert_redirected_to document_page_path(document.slug)
     get document_page_path(document.slug), headers: inertia
