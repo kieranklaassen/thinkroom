@@ -487,7 +487,10 @@ function CollabEditor({
       slug,
       contentFormat,
       canWrite: () => canWriteRef.current,
-      onTooLarge: () => callbacksRef.current.onNotice?.(SNAPSHOT_TOO_LARGE_NOTICE),
+      onTooLarge: () => {
+        // Shortening the document would not get a held edit saved.
+        if (!provider.unsavedEdit) callbacksRef.current.onNotice?.(SNAPSHOT_TOO_LARGE_NOTICE)
+      },
     })
     const scheduleSnapshot = snapshots.schedule
 
