@@ -156,3 +156,30 @@ test('text saves as text', async () => {
   }
   assert.equal(escapeMarkupAttribute('a\n\n"<b>'), 'a &quot;&lt;b>')
 })
+
+test('attributes and text beside code save without becoming HTML', async () => {
+  const { schema: s, serialize, parse } = await buildEditor()
+  const para = (...nodes) => s.node('paragraph', null, nodes)
+  const code = (text) => s.text(text, [s.marks.inlineCode.create()])
+  const block = (text) => s.node('code_block', null, [s.text(text)])
+  const title = 't\n\nx <b>hi</b>'
+  const cases = [
+    [para(s.text('q', [s.marks.strong.create({ marker: '<b>' })]))],
+    [para(s.text('q', [s.marks.emphasis.create({ marker: '<b>' })]))],
+    [para(s.text('q', [s.marks.link.create({ href: 'a', title })]))],
+    [para(s.text('q', [s.marks.link.create({ href: '<b>(' })]), s.text('['))],
+    [para(s.node('image', { src: 'a', alt: 'x', title }))],
+    [para(s.node('footnote_reference', { label: title }))],
+    [para(s.node('footnote_reference', { label: 'a`' }), code('<b>'))],
+    [s.node('footnote_definition', { label: title }, [para(s.text('note'))])],
+    [para(s.text('press the ` key or '), code('<b>'))],
+    [para(s.text('``` ')), block('<b>')],
+    [para(s.text('~~~ ')), block('~~~\n<b>')],
+  ]
+  for (const nodes of cases) {
+    const saved = serialize(s.node('doc', null, nodes))
+    assert.deepEqual(htmlValues(parse(saved)), [], saved)
+  }
+  const kept = serialize(s.node('doc', null, [para(s.text('q', [s.marks.strong.create({ marker: '_' })]))]))
+  assert.equal(kept, '__q__\n')
+})

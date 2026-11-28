@@ -25,6 +25,17 @@ class RawHtml
   FRONTMATTER = "frontmatter"
   MAX_LIVE_DEPTH = 1_000
 
+  # Where the two parsers disagree on what starts a block: a row like a table's
+  # delimiter next to a quote, a list item or an empty line, a numbered item that
+  # opens with a tagged fence or a definition, and a null character.
+  UNDECIDED = Regexp.union(
+    /^[ \t>]*(?=[^\n]*-)(?=[^\n]*[|:])[ \t|:-]+\n[ \t]*(?:>|[-+*][ \t]|\d+[.)])/,
+    /^[ \t>]*<br ?\/?>[ \t]*\n[ \t>]*(?=[|:-]*-|[|:])[ \t|:-]+$/,
+    /\d[.)][ \t]+(?:(?:`{3}|~{3})[^\n]*<|\[[^\]\n]*\]:)/,
+    /\0/
+  )
+  LINK = %r{(?:www\.|https?://)\S*}i
+
   class << self
     def in_markdown?(source)
       source = sanitize_encoding(source)
@@ -58,11 +69,16 @@ class RawHtml
     # carry trailing spaces; after front matter that never closes, the editor
     # knows no lists or quotes; in a comment it allows dashes, and a comment
     # that never closes hides nothing that follows; table: false reads extra
-    # body columns that Commonmarker's GFM table parser discards.
+    # body columns that Commonmarker's GFM table parser discards; a bare link
+    # takes a backslash in; a CDATA section ends at any run of brackets.
     def editor_html?(source)
       source = source.gsub(/\r\n?/, "\n").gsub(/^[ \t]+$/, "")
       normalized_fm = source.gsub(/^---[ \t]+$/, "---")
+      return true if source.match?(UNDECIDED)
+
       sources = []
+      sources << normalized_fm.gsub(LINK) { |link| link.delete("\\") } if normalized_fm.include?("\\")
+      sources << normalized_fm.gsub(/\]{3,}>/, "]]>") if normalized_fm.include?("]]]")
       sources << source if normalized_fm != source
       if normalized_fm.match?(/\A---(?:\n|\z)/) &&
          Commonmarker.parse(normalized_fm, options: EDITOR).first_child&.type != :frontmatter

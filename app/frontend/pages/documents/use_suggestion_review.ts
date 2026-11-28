@@ -64,6 +64,11 @@ export function useSuggestionReview({
   docTick,
 }: Options): SuggestionReview {
   const [suggestionNotice, setSuggestionNotice] = useState<DocumentNotice | null>(null)
+  const noticeAccount = useCallback((errors: Record<string, unknown>) => {
+    if (typeof errors.html_account === 'string') {
+      setSuggestionNotice({ text: errors.html_account, offerSignIn: true })
+    }
+  }, [])
   const suggestionsRef = useRef(suggestions)
   suggestionsRef.current = suggestions
 
@@ -142,16 +147,12 @@ export function useSuggestionReview({
                   })
                 }
               },
-              onError: (errors) => {
-                if (typeof errors.html_account === 'string') {
-                  setSuggestionNotice({ text: errors.html_account, offerSignIn: true })
-                }
-              },
+              onError: noticeAccount,
               onFinish: () => resolve(),
             },
           )
       }),
-    [handleRef, identityName, contentFormat, reopenSuggestion],
+    [handleRef, identityName, contentFormat, reopenSuggestion, noticeAccount],
   )
 
   const acceptSuggestion = useCallback(
@@ -171,10 +172,10 @@ export function useSuggestionReview({
         .patch(
           `/suggestions/${suggestion.id}/reject`,
           { by: identityName },
-          { preserveScroll: true, only: ['suggestions', 'activities'], async: true },
+          { preserveScroll: true, only: ['suggestions', 'activities'], async: true, onError: noticeAccount },
         )
     },
-    [identityName],
+    [identityName, noticeAccount],
   )
 
   // Doc-native tracked edits resolve via local ProseMirror commands that
@@ -301,6 +302,10 @@ export function useSuggestionReview({
         succeeded = true
       } else {
         console.warn('pruf: accept all rejected', response.status)
+        const refusal = (await response.json().catch(() => null)) as { error_code?: string } | null
+        if (refusal?.error_code === 'html_account_required') {
+          setSuggestionNotice({ text: `${HTML_ACCOUNT_NOTICE}.`, offerSignIn: true })
+        }
       }
     } catch (error) {
       console.warn('pruf: accept all failed', error)

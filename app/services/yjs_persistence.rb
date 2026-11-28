@@ -62,9 +62,9 @@ class YjsPersistence
     end
 
     # Merge a base64-encoded Yjs update into the document's persisted state.
-    # Convenience wrapper over merge_bytes for the server's own callers holding
-    # a base64 frame; transport boundaries (SyncChannel, DocumentsController)
-    # decode once and call merge_bytes directly.
+    # Convenience wrapper over merge_bytes for trusted content in a base64
+    # frame. Transport boundaries (SyncChannel, DocumentsController) decode once
+    # and call merge_bytes, which checks a guest's content.
     def merge(document, base64_update, generation: document.content_generation, seed_claim: nil, token: nil, user: nil)
       merge_bytes(document, decode(base64_update), generation:, seed_claim:, token:, user:, html: true)
     end

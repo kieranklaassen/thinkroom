@@ -10,19 +10,34 @@ const longestRun = (value: string): number =>
 /**
  * Text saves as text. The editor's own handler writes a value that ends in
  * space without escaping it, and inline code with a line break in it could
- * end at a blank line.
+ * end at a blank line. Titles, labels and markers stay on one line and hold no
+ * tags for the same reason.
  */
 export const configureMarkdownText = (ctx: Ctx): void => {
   const options = readOptions(ctx)
   const handlers: Handlers = options.handlers ?? {}
   const text = handlers.text
+  const marked = (handler: Handlers['strong']): Handlers['strong'] =>
+    handler &&
+    ((node, parent, state, info) =>
+      handler({ ...node, marker: node.marker === '_' ? '_' : '*' }, parent, state, info))
   ctx.set(remarkStringifyOptionsCtx, {
     ...options,
+    unsafe: [
+      ...(options.unsafe ?? []),
+      ...['<', '`', '\n', '\r'].flatMap((character) =>
+        ['titleQuote', 'titleApostrophe', 'destinationRaw', 'label', 'reference'].map(
+          (inConstruct) => ({ character, inConstruct }) as NonNullable<typeof options.unsafe>[number],
+        ),
+      ),
+    ],
     handlers: {
       ...handlers,
+      strong: marked(handlers.strong),
+      emphasis: marked(handlers.emphasis) as Handlers['emphasis'],
       text: (node, parent, state, info) => {
         const value = String(node.value)
-        if (!text || !value.includes('<')) return text?.(node, parent, state, info) ?? value
+        if (!text || !/[<`~[\]]/.test(value)) return text?.(node, parent, state, info) ?? value
         const end = /\s*$/.exec(value)![0]
         const start = value.slice(0, value.length - end.length)
         return state.safe(start, { ...info, after: end || info.after, encode: [] } as typeof info) + end

@@ -1,4 +1,4 @@
-import type { DocumentNotice } from '../../editor/html_guard'
+import { HTML_NOT_SAVED, type DocumentNotice } from '../../editor/html_guard'
 import { findCommentAnchorRange } from '../../editor/comment_anchors'
 import { clearHighlight, domRange, setHighlight } from '../../lib/highlights'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
@@ -191,7 +191,7 @@ export default function DocumentShow({
   document: doc,
   viewer,
   ui,
-  ownership,
+  ownership: pageOwnership,
   suggestions,
   comments,
   activities,
@@ -205,6 +205,15 @@ export default function DocumentShow({
   webmcp,
   nativeApp,
 }: DocumentProps) {
+  // After a refusal the page stops editing and keeps its session, so what was
+  // typed stays on screen to copy.
+  const [refusedSlug, setRefusedSlug] = useState<string | null>(null)
+  useEffect(() => () => setRefusedSlug(null), [doc.slug])
+  const htmlRefused = refusedSlug === doc.slug
+  const ownership = useMemo(
+    () => (htmlRefused ? { ...pageOwnership, can_write: false, html_needs_account: true } : pageOwnership),
+    [htmlRefused, pageOwnership],
+  )
   // SSR/hydration island flag: the live editor and any render-time browser
   // reads are gated on this so the server (and the client's first hydration
   // render) produce identical markup. It flips true on the next client commit.
@@ -313,7 +322,8 @@ export default function DocumentShow({
   const showCompound = effectiveMode === 'comment' && writingAvailable
   const signInPath = `/login?return_to=${encodeURIComponent(documentModePath(doc.slug, effectiveMode))}`
   const connectionIdentity = viewer.account ? `account:${viewer.account.id}` : 'guest'
-  const editorSessionKey = `${doc.slug}:${ownership.can_write ? 'write' : 'read'}:${connectionIdentity}`
+  const sessionWritable = htmlRefused || ownership.can_write
+  const editorSessionKey = `${doc.slug}:${sessionWritable ? 'write' : 'read'}:${connectionIdentity}`
   // Live handle for code that runs after awaits or inside stable callbacks —
   // a closure-captured handle goes stale when the editor remounts mid-flight.
   const handleRef = useRef<EditorHandle | null>(null)
@@ -1018,7 +1028,7 @@ export default function DocumentShow({
         )}
         {ownership.html_needs_account && (
           <div className="doc-notice" role="status">
-            <span>Editing a document with HTML needs an account. <a href={signInPath}>Sign in</a></span>
+            <span>{htmlRefused ? HTML_NOT_SAVED : 'Editing a document with HTML needs an account.'} <a href={signInPath}>Sign in</a></span>
           </div>
         )}
         {!isReading && suggestionNotice && (
@@ -1098,7 +1108,7 @@ export default function DocumentShow({
                 onHandle={setHandle}
                 slug={doc.slug}
                 identity={identity}
-                canWrite={ownership.can_write}
+                canWrite={sessionWritable}
                 authenticated={Boolean(viewer.account)}
                 connectionIdentity={connectionIdentity}
                 contentFormat={doc.content_format}
@@ -1132,6 +1142,7 @@ export default function DocumentShow({
                 // gone; same exit path as the deleted broadcast.
                 onRejected={onDocumentGone}
                 onNotice={setEditorNotice}
+                onHtmlRefused={() => setRefusedSlug(doc.slug)}
               />
             </article>
             <DocumentWidthHandle

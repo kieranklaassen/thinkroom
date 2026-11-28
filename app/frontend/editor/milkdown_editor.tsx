@@ -100,7 +100,6 @@ import { richBlockWidthControls } from './rich_block_width'
 import { documentSizeGuard, documentSizeGuardCtx } from './document_size_guard'
 import {
   HTML_KEPT_AS_TEXT_NOTICE,
-  HTML_NOT_SAVED_NOTICE,
   htmlGuard,
   htmlGuardCtx,
   type DocumentNotice,
@@ -185,6 +184,8 @@ export interface EditorProps {
    *  for pushing the document past its size limit, a durable snapshot the
    *  server refused as too large. */
   onNotice?: (notice: DocumentNotice) => void
+  /** HTML in the document or the edit needs an account; the last edits are not saved. */
+  onHtmlRefused?: () => void
 }
 
 const REFUSED_EDIT_NOTICE: DocumentNotice = {
@@ -330,13 +331,14 @@ function CollabEditor({
   onAccessChanged,
   onRejected,
   onNotice,
+  onHtmlRefused,
 }: EditorProps) {
   const [sketchDraft, setSketchDraft] = useState<ActiveSketch | undefined>(undefined)
   const insertSketchRef = useRef<() => void>(() => undefined)
   const saveSketchRef = useRef<(data: SketchData) => void>(() => undefined)
   const deleteSketchRef = useRef<(id: string) => void>(() => undefined)
-  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice })
-  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice }
+  const callbacksRef = useRef({ onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice, onHtmlRefused })
+  callbacksRef.current = { onReady, onStatus, onSpans, onSelection, onTitleChange, onStale, onAccessChanged, onRejected, onNotice, onHtmlRefused }
   // Ref so the editable() closure always reads the live value; the effect
   // below nudges ProseMirror to re-read it when the mode changes.
   const editableRef = useRef(editable)
@@ -499,11 +501,11 @@ function CollabEditor({
       contentFormat,
       canWrite: () => canWriteRef.current && !provider.htmlRefused,
       onTooLarge: () => callbacksRef.current.onNotice?.(SNAPSHOT_TOO_LARGE_NOTICE),
-      onHtmlRefused: () => callbacksRef.current.onNotice?.(HTML_NOT_SAVED_NOTICE),
+      onHtmlRefused: () => callbacksRef.current.onHtmlRefused?.(),
     })
     const scheduleSnapshot = snapshots.schedule
 
-    const htmlRefused = () => callbacksRef.current.onNotice?.(HTML_NOT_SAVED_NOTICE)
+    const htmlRefused = () => callbacksRef.current.onHtmlRefused?.()
     provider.on('html-refused', htmlRefused)
     // Discarded or refused while no editor was listening (a remount reusing the session).
     if (provider.discarded) stale()

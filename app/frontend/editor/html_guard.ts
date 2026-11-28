@@ -13,10 +13,7 @@ export const HTML_KEPT_AS_TEXT_NOTICE: DocumentNotice = {
   text: `${HTML_ACCOUNT_NOTICE}, so it was kept as text.`,
   offerSignIn: true,
 }
-export const HTML_NOT_SAVED_NOTICE: DocumentNotice = {
-  text: `${HTML_ACCOUNT_NOTICE}. Changes since then are not saved; copy them before you leave this page.`,
-  offerSignIn: true,
-}
+export const HTML_NOT_SAVED = `${HTML_ACCOUNT_NOTICE}. Your latest changes are not saved; copy them before you leave this page.`
 
 export const htmlGuardCtx = $ctx<
   { needsAccount: () => boolean; onKeptAsText: (() => void) | null },

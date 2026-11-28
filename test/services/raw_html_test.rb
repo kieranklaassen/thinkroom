@@ -46,6 +46,12 @@ class RawHtmlTest < ActiveSupport::TestCase
     "a tracked change in another of its kind" => '<ins data-suggestion-id="1"><ins data-suggestion-id="2">a</ins></ins>',
     "a fence in front matter that a code block closes" => "---\n```\n---\n\n```\n<b>\n```",
     "a tag behind many comparisons" => "<div>#{"1 < 2 " * 12}<a href=\"https://example.com\" x=\"",
+    "a tag after a link that takes the backslash in" => "[1]www.example.com/\\<img src=x>",
+    "a CDATA that ends with more brackets" => "a <![CDATA[x]]]>",
+    "a quote after a delimiter row" => "|-|\n> 2) ~~~ `<b>`",
+    "an item that opens with a tagged fence" => "a\n2) -->\n>\t2)  ```</b>",
+    "an item that opens with a definition" => "2) [a]: -->\n\n\n    ![</b>",
+    "an empty line before a delimiter row" => "a\n<br />\n| - |",
     "reversed editor tags" => '</span><span data-highlighter data-color="blue">'
   }.freeze
 
@@ -63,6 +69,9 @@ class RawHtmlTest < ActiveSupport::TestCase
     "a rule, then a list with code" => "***\n-     <b>",
     "front matter" => "---\ntitle: a -- b\n---\n\n- one\n\n      code",
     "a comment as code" => "`<!-- a -- b -->`",
+    "a list after a rule, and a table, with code" => "---\n- `<b>`\n\n| a |\n| - |\n| `<b>` |\n\n> `<i>`",
+    "numbered items with code" => "1. `<b>`\n2. two\n\n   ```html\n   <p>\n   ```\n3. ```\n   <p>\n   ```",
+    "a link and an escape" => "https://example.com and \\<b>",
     "an empty line" => "a\n\n<br />\n\nb",
     "provenance" => '<span data-provenance data-kind="human" data-author="Ann" data-state="verbatim">a</span>',
     "a highlight" => '<span data-highlighter data-color="blue">a</span>',

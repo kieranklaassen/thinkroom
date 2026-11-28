@@ -68,7 +68,7 @@ tools for agents that drive a browser. In Chrome 149+ (origin trial, or
 `chrome://flags/#enable-webmcp-testing` locally), a document page exposes
 `thinkroom_*` tools on `document.modelContext` for reading, suggesting,
 commenting, resolving, presence, events, and creating unclaimed drafts; the
-index exposes guide and create. Request tools carry an `agent_name` and run at
+index exposes guide and create. Every write carries an `agent_name`. Request tools run at
 anonymous link-holder privilege (creating or suggesting HTML, raw HTML in
 Markdown included, returns 403 `html_account_required`). A writable document
 page — opened through an Edit link, claimed or not, or owned by the viewer (and
