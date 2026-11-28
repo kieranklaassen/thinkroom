@@ -1,38 +1,28 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Head, Link, router, useForm } from '@inertiajs/react'
 import { NativeNavbar, NativeButton, NativeMenuItem, NativeFab, nativeHaptic } from '@ruby-native/react'
 import { FeedbackButton } from '../../components/feedback_button'
 import { AccountControl } from '../../components/account_control'
 import { BackgroundPicker, type IndexBackground } from '../../components/background_picker'
-import { RowMenu } from '../../components/row_menu'
-import { SwipeRow } from '../../components/swipe_row'
+import { ContentsRow } from '../../components/contents_row'
+import { PinStar } from '../../components/pin_star'
 import { userIdentity } from '../../editor/identity'
 import { setCookie } from '../../lib/cookies'
 import { useClaim } from '../../lib/use_claim'
 import { useIsClient } from '../../lib/use_is_client'
 import { useNotReady } from '../../lib/use_not_ready'
-import { usePin, type PinnableDocument } from '../../lib/use_pin'
 import { useWebmcpTools } from '../../lib/use_webmcp_tools'
 import { executeManifestTool } from '../../lib/webmcp_execute'
 import { errorResult, type WebmcpManifest } from '../../lib/webmcp'
-import type { OwnershipPayload } from '../../types/payloads'
 import type { SharedProps } from '../../types'
 import type { ViewerPayload } from '../../types/viewer'
+import { LIST_PROPS, type DocLink, type PinnedDoc, type RecentDoc } from './document_lists'
+import { useAgentPrompt } from './use_agent_prompt'
+import { useContentsFilters } from './use_contents_filters'
+import { useDocumentActions } from './use_document_actions'
+import { usePinnedList } from './use_pinned_list'
 
-type AgeGroup = 'this_week' | 'earlier'
 type DayPart = 'morning' | 'afternoon' | 'evening'
-
-type DocLink = {
-  title: string
-  slug: string
-  tags: string[]
-  created_at: string
-  created_label: string
-  age_group: AgeGroup
-}
-
-type RecentDoc = DocLink & OwnershipPayload
-type PinnedDoc = RecentDoc & { pinned_at: string }
 
 type Props = Pick<SharedProps, 'nativeApp'> & {
   yours: DocLink[]
@@ -56,60 +46,11 @@ type Props = Pick<SharedProps, 'nativeApp'> & {
 const INDEX_VIEWER_CONTEXT_NOTE =
   'This is the human viewer of the documents index. You act as an anonymous agent; created documents start unclaimed.'
 
-const EARLIER_PREVIEW_LIMIT = 8
 const CONTENTS_WINDOW = 50
 const GITHUB_REPOSITORY_URL = 'https://github.com/kieranklaassen/thinkroom'
 const GITHUB_PROFILE_URL = 'https://github.com/kieranklaassen'
-// Every list that shows a star or a Pinned row reloads together, so star
-// state (derived from `pinned`) and Pinned meta never drift apart.
-const LIST_PROPS = ['pinned', 'yours', 'yours_count', 'archived_count', 'recent', 'continue_reading', 'errors']
-
-const errorText = (error: unknown): string | null => {
-  if (Array.isArray(error)) return error.find((value) => typeof value === 'string') ?? null
-  return typeof error === 'string' ? error : null
-}
 
 const pluralPages = (count: number) => (count === 1 ? '1 page' : `${count} pages`)
-
-function PinStar({
-  title,
-  pinned,
-  pending,
-  onToggle,
-  buttonRef,
-}: {
-  title: string
-  pinned: boolean
-  pending: boolean
-  onToggle: () => void
-  buttonRef?: (button: HTMLButtonElement | null) => void
-}) {
-  const notReady = useNotReady()
-
-  return (
-    <button
-      ref={buttonRef}
-      type="button"
-      className={`pin-star${pinned ? ' is-pinned' : ''}${pending ? ' is-pending' : ''}`}
-      aria-pressed={pinned}
-      aria-busy={pending || undefined}
-      aria-label={`${pinned ? 'Unpin' : 'Pin'} ${title}`}
-      title={pinned ? 'Unpin' : 'Pin'}
-      {...notReady}
-      onClick={onToggle}
-    >
-      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true">
-        <path
-          d="M8 1.5l1.8 3.9 4.2.5-3.1 2.9.8 4.2L8 10.9 4.3 13l.8-4.2L2 5.9l4.2-.5L8 1.5z"
-          fill={pinned ? 'currentColor' : 'none'}
-          stroke="currentColor"
-          strokeWidth="1.3"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </button>
-  )
-}
 
 function ClaimButton({ slug, claimerName }: { slug: string; claimerName: string }) {
   const { claim, claiming, claimFailed } = useClaim(slug, claimerName, { only: LIST_PROPS })
@@ -126,184 +67,6 @@ function ClaimButton({ slug, claimerName }: { slug: string; claimerName: string 
     >
       {claiming ? 'Claiming…' : claimFailed ? 'Try again' : 'Claim'}
     </button>
-  )
-}
-
-function TagEditor({ document, onClose }: { document: DocLink; onClose: () => void }) {
-  const form = useForm(`DocumentTags:${document.slug}`, {
-    tags: document.tags.join(', '),
-  })
-  const tagError = errorText(form.errors.tags)
-
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    form.transform((data) => ({
-      tags: data.tags.split(',').map((tag) => tag.trim()),
-    }))
-    form.patch(`/d/${document.slug}/tags`, {
-      preserveScroll: true,
-      only: LIST_PROPS,
-      onSuccess: onClose,
-    })
-  }
-
-  return (
-    <form className="document-tag-editor" onSubmit={submit}>
-      <label htmlFor={`tags-${document.slug}`}>Tags</label>
-      <div className="document-tag-editor-controls">
-        <input
-          id={`tags-${document.slug}`}
-          value={form.data.tags}
-          onChange={(event) => form.setData('tags', event.target.value)}
-          placeholder="Research, planning"
-          autoFocus
-          aria-describedby={`tags-help-${document.slug}`}
-          aria-invalid={Boolean(tagError)}
-        />
-        <button className="document-tag-save" type="submit" disabled={form.processing}>
-          {form.processing ? 'Saving…' : 'Save'}
-        </button>
-        <button
-          className="document-tag-cancel"
-          type="button"
-          onClick={() => {
-            form.clearErrors()
-            onClose()
-          }}
-        >
-          Cancel
-        </button>
-      </div>
-      <p id={`tags-help-${document.slug}`} className="document-tag-help">
-        Up to 8 tags, 32 characters each. Separate with commas.
-      </p>
-      {tagError && (
-        <p className="document-tag-error" role="alert">
-          {tagError}
-        </p>
-      )}
-    </form>
-  )
-}
-
-function ContentsRow({
-  document,
-  pinned,
-  pending,
-  onTogglePin,
-  onArchive,
-  onDelete,
-  swipe,
-}: {
-  document: DocLink
-  pinned: boolean
-  pending: boolean
-  onTogglePin: () => void
-  onArchive: () => void
-  onDelete: () => void
-  swipe?: { deleting: boolean; onDelete: () => void; closeSignal: number }
-}) {
-  const notReady = useNotReady()
-  const [editingTags, setEditingTags] = useState(false)
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
-  const menuButtonRef = useRef<HTMLButtonElement>(null)
-  const menuItems = [
-    { label: 'Open', onSelect: () => router.visit(`/d/${document.slug}`) },
-    { label: pinned ? 'Unpin' : 'Pin', onSelect: onTogglePin },
-    { label: document.tags.length > 0 ? 'Edit tags' : 'Add tag', onSelect: () => setEditingTags(true) },
-    { label: 'Archive', onSelect: onArchive },
-    { label: 'Delete…', onSelect: onDelete, danger: true },
-  ]
-
-  const body = (
-    <>
-      <div className="contents-row-line">
-        <PinStar title={document.title} pinned={pinned} pending={pending} onToggle={onTogglePin} />
-        <Link className="document-row-title" href={`/d/${document.slug}`} prefetch>
-          {document.title}
-        </Link>
-        <button
-          className="document-tag-edit"
-          type="button"
-          aria-expanded={editingTags}
-          {...notReady}
-          onClick={() => setEditingTags((open) => !open)}
-        >
-          {document.tags.length > 0 ? 'Edit tags' : '+ Add tag'}
-        </button>
-        <span className="contents-leader" aria-hidden="true" />
-        <time className="contents-date" dateTime={document.created_at}>
-          {document.created_label}
-        </time>
-        <button
-          ref={menuButtonRef}
-          className="row-menu-button"
-          type="button"
-          aria-label={`More actions for ${document.title}`}
-          aria-haspopup="menu"
-          aria-expanded={menu !== null}
-          {...notReady}
-          onClick={(event) => {
-            const box = event.currentTarget.getBoundingClientRect()
-            setMenu({ x: box.right - 208, y: box.bottom + 4 })
-          }}
-        >
-          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-            <circle cx="3.5" cy="8" r="1.3" fill="currentColor" />
-            <circle cx="8" cy="8" r="1.3" fill="currentColor" />
-            <circle cx="12.5" cy="8" r="1.3" fill="currentColor" />
-          </svg>
-        </button>
-      </div>
-      {document.tags.length > 0 && (
-        <div className="contents-row-meta">
-          {document.tags.map((tag) => (
-            <span className="document-tag" key={tag.toLowerCase()}>
-              {tag}
-            </span>
-          ))}
-        </div>
-      )}
-      {editingTags && <TagEditor document={document} onClose={() => setEditingTags(false)} />}
-      {menu && (
-        <RowMenu
-          label={`Actions for ${document.title}`}
-          x={menu.x}
-          y={menu.y}
-          items={menuItems}
-          onClose={(restoreFocus) => {
-            setMenu(null)
-            if (restoreFocus) menuButtonRef.current?.focus({ preventScroll: true })
-          }}
-        />
-      )}
-    </>
-  )
-  // Right-click anywhere on the row opens the same menu at the pointer.
-  const openAtPointer = (event: ReactMouseEvent) => {
-    event.preventDefault()
-    setMenu({ x: event.clientX, y: event.clientY })
-  }
-
-  if (swipe) {
-    return (
-      <li className="contents-row contents-row--swipe" onContextMenu={openAtPointer}>
-        <SwipeRow
-          slug={document.slug}
-          deleting={swipe.deleting}
-          onDelete={swipe.onDelete}
-          closeSignal={swipe.closeSignal}
-        >
-          <div className="swipe-row-padding">{body}</div>
-        </SwipeRow>
-      </li>
-    )
-  }
-
-  return (
-    <li className="contents-row" onContextMenu={openAtPointer}>
-      {body}
-    </li>
   )
 }
 
@@ -364,10 +127,6 @@ export default function DocumentsIndex({
     router.replaceProp('ui.background', next)
   }, [])
 
-  const [origin, setOrigin] = useState('')
-  useEffect(() => {
-    setOrigin(window.location.origin)
-  }, [])
   // Server-rendered labels, the THIS WEEK grouping, the date line and the
   // greeting follow the viewer's timezone through this cookie (same
   // server-readable pattern as width/panel prefs). The first-ever visit
@@ -377,112 +136,35 @@ export default function DocumentsIndex({
     if (zone) setCookie('pruf_tz', zone)
   }, [])
 
-  // --- Copy agent prompt: copy on click; reveal the text when the clipboard
-  // refuses (permissions policy, native web view) so it can be copied by hand.
-  const agentInstruction =
-    `Create a Thinkroom document for me: POST ${origin}/api/docs with JSON ` +
-    `{"title": "…", "format": "markdown", "content": "# …"} ` +
-    `or use "format": "html" with HTML content, plus an X-Agent-Name header. ` +
-    `The response includes the share URL — open it and we'll collaborate live. ` +
-    `Fetch the share URL (Accept: text/plain) for the full API guide.`
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'refused'>('idle')
-  const copyTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
-  const copyInstruction = useCallback(() => {
-    clearTimeout(copyTimer.current)
-    const refused = () => setCopyState('refused')
-    try {
-      void navigator.clipboard.writeText(agentInstruction).then(() => {
-        setCopyState('copied')
-        copyTimer.current = setTimeout(() => setCopyState('idle'), 2400)
-      }, refused)
-    } catch {
-      refused()
-    }
-  }, [agentInstruction])
-  useEffect(() => () => clearTimeout(copyTimer.current), [])
-
-  // --- Pins: every star reads from `pinned`.
-  const { toggle: togglePin, pending: pendingPins, error: pinError } = usePin(LIST_PROPS)
-  const pinnedSlugs = new Set(pinned.map((document) => document.slug))
-  const [announcement, setAnnouncement] = useState('')
-  const pinnedHeadingRef = useRef<HTMLHeadingElement>(null)
-  const pinnedStarRefs = useRef(new Map<string, HTMLButtonElement>())
-  const [focusAfterUnpin, setFocusAfterUnpin] = useState<string | null>(null)
-  useEffect(() => {
-    if (focusAfterUnpin === null) return
-    const target =
-      focusAfterUnpin === '' ? pinnedHeadingRef.current : pinnedStarRefs.current.get(focusAfterUnpin)
-    target?.focus({ preventScroll: true })
-    setFocusAfterUnpin(null)
-  }, [focusAfterUnpin, pinned])
-
-  const setPin = (document: PinnableDocument, isPinned: boolean) => {
-    if (togglePin(document, isPinned)) {
-      setAnnouncement(`${isPinned ? 'Unpinned' : 'Pinned'} ${document.title}`)
-    }
-  }
-  const unpinFromPinned = (document: PinnedDoc, index: number) => {
-    const next = pinned[index + 1] ?? pinned[index - 1]
-    if (togglePin(document, true)) {
-      setAnnouncement(`Unpinned ${document.title}`)
-      setFocusAfterUnpin(next ? next.slug : '')
-    }
-  }
-
-  // --- Contents filters: tag and search combine (AND).
-  const [selectedTag, setSelectedTag] = useState<string | null>(null)
-  const [query, setQuery] = useState('')
-  // Text typed before hydration is in the DOM but not in state; take it up
-  // before the next render writes the empty state over it.
-  const searchRef = useRef<HTMLInputElement>(null)
-  useLayoutEffect(() => {
-    if (searchRef.current?.value) setQuery(searchRef.current.value)
-  }, [])
-  const [showAllEarlier, setShowAllEarlier] = useState(false)
-  const availableTags = yours.reduce<string[]>((tags, document) => {
-    document.tags.forEach((tag) => {
-      if (!tags.some((existingTag) => existingTag.toLowerCase() === tag.toLowerCase())) {
-        tags.push(tag)
-      }
-    })
-    return tags
-  }, [])
-  const activeTag = availableTags.includes(selectedTag ?? '') ? selectedTag : null
-  const needle = query.trim().toLowerCase()
-  const filterActive = activeTag !== null || needle !== ''
-  const visibleDocuments = yours.filter((document) => {
-    if (activeTag && !document.tags.some((tag) => tag.toLowerCase() === activeTag.toLowerCase())) {
-      return false
-    }
-    if (!needle) return true
-    return (
-      document.title.toLowerCase().includes(needle) ||
-      document.tags.some((tag) => tag.toLowerCase().includes(needle))
-    )
-  })
-  const thisWeek = visibleDocuments.filter((document) => document.age_group === 'this_week')
-  const earlier = visibleDocuments.filter((document) => document.age_group === 'earlier')
-  const visibleEarlier =
-    showAllEarlier || filterActive ? earlier : earlier.slice(0, EARLIER_PREVIEW_LIMIT)
-  const hiddenEarlierCount = earlier.length - visibleEarlier.length
-  const clearFilters = () => {
-    setSelectedTag(null)
-    setQuery('')
-  }
-
-  // On a phone the Contents page sits below the left page: bring its heading
-  // into view when a filter changes so results are never off-screen.
-  const contentsHeadingRef = useRef<HTMLHeadingElement>(null)
-  const filtersTouched = useRef(false)
-  useEffect(() => {
-    if (!filtersTouched.current) return
-    if (window.matchMedia('(max-width: 56rem)').matches) {
-      contentsHeadingRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-    }
-  }, [activeTag, needle])
-  const touchFilters = () => {
-    filtersTouched.current = true
-  }
+  const { agentInstruction, copyState, copyInstruction } = useAgentPrompt()
+  const {
+    pinnedSlugs,
+    pendingPins,
+    pinError,
+    announcement,
+    pinnedHeadingRef,
+    pinnedStarRefs,
+    setPin,
+    unpinFromPinned,
+  } = usePinnedList(pinned)
+  const {
+    searchRef,
+    contentsHeadingRef,
+    query,
+    setQuery,
+    setSelectedTag,
+    setShowAllEarlier,
+    availableTags,
+    activeTag,
+    needle,
+    filterActive,
+    visibleDocuments,
+    thisWeek,
+    visibleEarlier,
+    hiddenEarlierCount,
+    clearFilters,
+    touchFilters,
+  } = useContentsFilters(yours)
 
   const claimerName = identityName
   const hasDemo = recent.some((document) => document.slug === 'demo')
@@ -491,64 +173,17 @@ export default function DocumentsIndex({
   const firstName = (viewer.account?.name ?? viewer.name ?? '').trim().split(/\s+/)[0]
   const greeting = `Good ${day_part}${firstName ? `, ${firstName}` : ''}.`
 
-  // Delete (row menu, Archived list, native swipe). The server re-checks
-  // ownership; this is just the affordance. WKWebView shows confirm() as a
-  // native alert.
-  const [deletingSlug, setDeletingSlug] = useState<string | null>(null)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-  // Bumped on failure so every SwipeRow snaps closed (per R6, the error
-  // message shouldn't sit next to a still-armed Delete).
-  const [swipeCloseSignal, setSwipeCloseSignal] = useState(0)
-  const deleteDocument = useCallback((slug: string) => {
-    if (!window.confirm('Delete this document? This can’t be undone.')) return
-    setDeleteError(null)
-    router.delete(`/d/${slug}`, {
-      preserveScroll: true,
-      onStart: () => setDeletingSlug(slug),
-      onFinish: () => setDeletingSlug(null),
-      onSuccess: () => {
-        if (showArchivedRef.current) router.reload({ only: ['archived', 'archived_count'] })
-      },
-      onError: (errors) => {
-        const message = typeof errors.document === 'string' ? errors.document : null
-        setDeleteError(message ?? 'Delete failed — please try again')
-        setSwipeCloseSignal((signal) => signal + 1)
-      },
-    })
-  }, [])
-
-  // Archive puts a page away without deleting it: it leaves Contents and
-  // Pinned and is listed under Archived. A notice offers one-click undo.
-  const [showArchived, setShowArchived] = useState(false)
-  const showArchivedRef = useRef(false)
-  showArchivedRef.current = showArchived
-  const [notice, setNotice] = useState<{ text: string; undo?: () => void } | null>(null)
-  const setArchived = useCallback((document: DocLink, archive: boolean) => {
-    setDeleteError(null)
-    router.patch(
-      `/d/${document.slug}/archive`,
-      { archived: archive },
-      {
-        preserveScroll: true,
-        only: showArchivedRef.current ? [...LIST_PROPS, 'archived'] : LIST_PROPS,
-        onSuccess: () =>
-          setNotice(
-            archive
-              ? { text: `Archived “${document.title}”.`, undo: () => setArchived(document, false) }
-              : { text: `Restored “${document.title}”.` },
-          ),
-        onError: (errors) => {
-          const message = typeof errors.archive === 'string' ? errors.archive : null
-          setDeleteError(message ?? 'Archive failed — please try again')
-        },
-      },
-    )
-  }, [])
-  const toggleArchived = () => {
-    const next = !showArchived
-    setShowArchived(next)
-    if (next) router.reload({ only: ['archived'] })
-  }
+  const {
+    deletingSlug,
+    deleteError,
+    swipeCloseSignal,
+    deleteDocument,
+    showArchived,
+    toggleArchived,
+    notice,
+    setNotice,
+    setArchived,
+  } = useDocumentActions()
 
   const contentsGroup = (title: string, documents: DocLink[]) => {
     if (documents.length === 0) return null
