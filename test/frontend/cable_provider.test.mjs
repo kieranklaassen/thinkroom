@@ -871,7 +871,7 @@ function stubLimitedFetch(t) {
   console.warn = (...args) => warnings.push(args)
   globalThis.fetch = (url, init) => {
     const bytes = new TextEncoder().encode(init.body).byteLength
-    const call = { url, bytes, keepalive: init.keepalive === true, body: JSON.parse(init.body), refused: false }
+    const call = { url, bytes, keepalive: init.keepalive === true, body: JSON.parse(init.body), headers: init.headers, refused: false }
     calls.push(call)
     if (call.keepalive && inFlight + bytes > KEEPALIVE_LIMIT) {
       call.refused = true
@@ -1080,6 +1080,21 @@ test('pagehide alone flushes unacked in-flight and queued edits', (t) => {
   assert.equal(calls[0].url, '/d/demo-slug/sync_update')
   assert.equal(calls[0].keepalive, true)
   assert.equal(savedText(calls[0]), 'in-flight-queued')
+})
+
+test('a save on pagehide sends the token of a session changed in another tab', (t) => {
+  const { calls } = stubLimitedFetch(t)
+  t.after(() => {
+    delete document.cookie
+  })
+  document.cookie = 'XSRF-TOKEN=before-sign-in'
+  const h = createHarness(t, { ackTimeoutMs: 5000 })
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'typed')
+
+  document.cookie = 'XSRF-TOKEN=after-sign-in'
+  window.dispatchEvent('pagehide')
+  assert.equal(calls[0].headers['X-CSRF-Token'], 'after-sign-in')
 })
 
 test('beforeunload followed by pagehide with no new edits sends one save and counts keepalive once', (t) => {

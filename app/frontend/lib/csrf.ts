@@ -16,12 +16,20 @@ function cookieToken(): string {
   }
 }
 
+export function sessionHeaders(): Record<string, string> {
+  return {
+    'X-CSRF-Token': csrfToken(),
+    // The answer can set the session cookie; this makes it set the token with it.
+    'X-Requested-With': 'XMLHttpRequest',
+  }
+}
+
 export function jsonHeaders(): Record<string, string> {
   return {
     // Without it a refusal is a redirect, which fetch follows to another answer.
     Accept: 'application/json',
     'Content-Type': 'application/json',
-    'X-CSRF-Token': csrfToken(),
+    ...sessionHeaders(),
   }
 }
 

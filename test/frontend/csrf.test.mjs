@@ -37,6 +37,7 @@ for (const [method, send] of Object.entries({ POST: postJSON, PATCH: patchJSON }
     const headers = new Headers(request.headers)
     assert.equal(headers.get('Content-Type'), 'application/json')
     assert.equal(headers.get('X-CSRF-Token'), 'test-csrf-token')
+    assert.equal(headers.get('X-Requested-With'), 'XMLHttpRequest')
   })
 }
 
