@@ -64,7 +64,7 @@ flowchart TB
   P[CableProvider: handshake, seed claim, generation, events] --> O[UpdateOutbox: queue, frame in flight, ack and retry timers]
   P --> S[DurableSaves: HTTP body, keepalive budget, parts carried]
   P --> W[SeedWait: retry and answer timers]
-  P --> A[AwarenessBroadcast: throttle and sends]
+  P --> A[AwarenessRelay: throttle, sends and receives]
   O -->|is this part in a save?| S
   O -->|canSend, transmit| P
   S -->|stored, seedRefused| P
@@ -124,7 +124,7 @@ flowchart TB
 - **Goal:** Each timer pair lives with its state, and the two copies of the throttle reset become one.
 - **Requirements:** R1
 - **Dependencies:** U2
-- **Files:** `app/frontend/editor/seed_wait.ts`, `app/frontend/editor/awareness_broadcast.ts`, `app/frontend/editor/cable_provider.ts`
+- **Files:** `app/frontend/editor/seed_wait.ts`, `app/frontend/editor/awareness_relay.ts`, `app/frontend/editor/cable_provider.ts`
 - **Test scenarios:** U1's seed and awareness scenarios.
 - **Verification:** Mutating either timer or the immediate-send rule fails a test.
 
