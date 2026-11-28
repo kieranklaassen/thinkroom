@@ -314,4 +314,51 @@ class DocumentPreviewHtmlTest < ActiveSupport::TestCase
     assert_includes hinted, "min-height: 240px"
     refute_includes shown, "min-height: 240px"
   end
+
+  test "wraps outer and sibling tables once without wrapping nested tables" do
+    source = <<~HTML
+      <table><tbody><tr><td>
+        <table><tbody><tr><td>inner</td></tr></tbody></table>
+      </td></tr></tbody></table>
+      <table><tbody><tr><td>second</td></tr></tbody></table>
+    HTML
+
+    html = DocumentPreviewHtml.call(format: "html", content: source)
+    fragment = Nokogiri::HTML5.fragment(html)
+
+    assert_equal 2, fragment.css("div.milkdown-table-block").length
+    assert_equal 2, fragment.css("div.table-wrapper").length
+    assert_equal 3, fragment.css("table").length
+    assert_equal 0, fragment.css("table div.milkdown-table-block").length
+  end
+
+  test "adds trailing breaks for empty paragraphs and trailing hard breaks after newline collapse" do
+    html = DocumentPreviewHtml.call(
+      format: "html",
+      content: "<p></p><p>line<br>\n</p><p>line<br>\nnext</p>"
+    )
+
+    assert_includes html, '<p><br class="ProseMirror-trailingBreak"></p>'
+    assert_includes html, '<p>line<br><br class="ProseMirror-trailingBreak"></p>'
+    assert_includes html, "<p>line<br>next</p>"
+  end
+
+  test "preserves text runs adjacent to unwrapped elements instead of dropping surrounding whitespace" do
+    source = "<ul>\n  <li><p>item</p></li>\n</ul>\n<custom-tag>\n  kept\n</custom-tag>"
+
+    html = DocumentPreviewHtml.call(format: "html", content: source)
+
+    assert_equal "<ul><li><p>item</p></li></ul>\n\n  kept\n", html
+  end
+
+  test "handles case-insensitive Mermaid fences in markdown" do
+    html = DocumentPreviewHtml.call(
+      format: "markdown",
+      content: "```MERMAID\nflowchart LR\n  A --> B\n```",
+      editable: false
+    )
+
+    assert_includes html, 'class="mermaid-diagram"'
+    refute_includes html, "flowchart LR"
+  end
 end

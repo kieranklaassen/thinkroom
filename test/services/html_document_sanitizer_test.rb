@@ -236,4 +236,51 @@ class HtmlDocumentSanitizerTest < ActiveSupport::TestCase
     assert_equal %w[svg style math template style], found.map(&:name)
     assert_equal fragment.css(HtmlDocumentSanitizer::DROP_WITH_CONTENT.join(",")).to_a, found.to_a
   end
+
+  test "drops foreign-namespace and raw-text mXSS payloads with their content" do
+    source = <<~HTML
+      <p>safe</p>
+      <svg><p><style><a id="</style><img src=x onerror=alert(1)>"></style></p></svg>
+      <math><mtext><table><mglyph><style><!--</style><img title="--&gt;&lt;img src=1 onerror=alert(1)&gt;"></table></mtext></math>
+      <noscript><img src="https://evil.example/x.png" onerror="alert(1)"></noscript>
+      <a href="java&#x09;script:alert(1)">bad</a>
+    HTML
+
+    result = HtmlDocumentSanitizer.external(source)
+
+    assert result.changed?
+    assert_includes result.content, "<p>safe</p>"
+    assert_includes result.content, "<a>bad</a>"
+    refute_match(/svg|math|style|onerror|alert|evil\.example|javascript/i, result.content)
+  end
+
+  test "reports changed? accurately for empty, canonical, and modified html" do
+    empty = HtmlDocumentSanitizer.snapshot("")
+    assert_equal "", empty.content
+    assert_not empty.changed?
+
+    canonical = HtmlDocumentSanitizer.snapshot("<p>Already <strong>clean</strong>.</p>")
+    assert_equal "<p>Already <strong>clean</strong>.</p>", canonical.content
+    assert_not canonical.changed?
+
+    modified = HtmlDocumentSanitizer.snapshot("<p onclick=\"evil()\">Cleaned</p>")
+    assert_equal "<p>Cleaned</p>", modified.content
+    assert modified.changed?
+  end
+
+  test "removes images with missing or blank src and normalizes css-commented table alignment" do
+    source = <<~HTML
+      <p><img alt="missing"><img src="   " alt="blank"><img src="/rails/active_storage/disk/tok/pic.png" alt="ok"></p>
+      <table><tbody><tr><td style="/* comment */ text-align: LEFT;">cell</td></tr></tbody></table>
+      <p style="text-align: center">ignored</p>
+    HTML
+
+    result = HtmlDocumentSanitizer.snapshot(source)
+    fragment = Nokogiri::HTML5.fragment(result.content)
+
+    assert_equal 1, fragment.css("img").length
+    assert_equal "/rails/active_storage/disk/tok/pic.png", fragment.at_css("img")["src"]
+    assert_equal "text-align: left", fragment.at_css("td")["style"]
+    assert_nil fragment.css("p")[1]["style"]
+  end
 end
