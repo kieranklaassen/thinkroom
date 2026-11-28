@@ -117,6 +117,18 @@ test('earlier pages past the first eight wait for the reveal, unless a filter is
   assert.deepEqual(counts(render()), [1, 10, 0])
 })
 
+test('a chosen tag shows every earlier page that has it', () => {
+  const earlier = Array.from({ length: 10 }, (_, i) => doc(`old-${i}`, { age_group: 'earlier', tags: ['Kept'] }))
+  const counts = ({ visibleEarlier, hiddenEarlierCount }) => [visibleEarlier.length, hiddenEarlierCount]
+  const render = start(useContentsFilters, [...earlier, doc('other', { age_group: 'earlier' })])
+
+  assert.deepEqual(counts(render()), [8, 3])
+  render().setSelectedTag('Kept')
+  assert.deepEqual(counts(render()), [10, 0])
+  render().setSelectedTag(null)
+  assert.deepEqual(counts(render()), [8, 3])
+})
+
 test('text typed before the page script runs is taken up as the search', () => {
   const render = start(useContentsFilters, [doc('a'), doc('b')])
 
@@ -214,6 +226,27 @@ test('pinning and unpinning are announced, but not a repeat while the first is o
   const before = runtime.visits.length
   render().setPin(doc('b', { title: 'Notes' }), true)
   assert.deepEqual([render().announcement, runtime.visits.length], ['Unpinned Plan', before])
+})
+
+test('a repeated unpin from the Pinned section announces nothing and leaves focus alone', () => {
+  const pinned = [doc('a', { title: 'Plan' }), doc('b', { title: 'Notes' })]
+  const render = start(usePinnedList, pinned)
+  const focused = []
+  render().pinnedStarRefs.current.set('b', { focus: () => focused.push('b') })
+  const settleFocus = () => {
+    render()
+    runEffects()
+  }
+
+  render().unpinFromPinned(pinned[0], 0)
+  settleFocus()
+  assert.deepEqual([render().announcement, focused], ['Unpinned Plan', ['b']])
+
+  render().setPin(doc('c', { title: 'Other' }), false)
+  const before = runtime.visits.length
+  render().unpinFromPinned(pinned[0], 0)
+  settleFocus()
+  assert.deepEqual([render().announcement, focused, runtime.visits.length], ['Pinned Other', ['b'], before])
 })
 
 test('a copied agent prompt says so for a moment; a refused copy reveals the text', async (t) => {
