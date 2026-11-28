@@ -1,7 +1,19 @@
+/** Signing in or out in another tab replaces the token this page loaded with;
+ *  the cookie is shared by every tab and replaced by those same answers. */
 export function csrfToken(): string {
   return (
-    document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? ''
+    cookieToken() ||
+    (document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? '')
   )
+}
+
+function cookieToken(): string {
+  try {
+    const value = /(?:^|;\s*)XSRF-TOKEN=([^;]*)/.exec(document.cookie)?.[1] ?? ''
+    return decodeURIComponent(value)
+  } catch {
+    return ''
+  }
 }
 
 export function jsonHeaders(): Record<string, string> {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { patchJSON, postJSON } from '../../app/frontend/lib/csrf.ts'
+import { csrfToken, patchJSON, postJSON } from '../../app/frontend/lib/csrf.ts'
 
 globalThis.document ??= {
   querySelector: () => ({ content: 'test-csrf-token' }),
@@ -39,3 +39,29 @@ for (const [method, send] of Object.entries({ POST: postJSON, PATCH: patchJSON }
     assert.equal(headers.get('X-CSRF-Token'), 'test-csrf-token')
   })
 }
+
+test('a save sends the token of the current session, not the one the page loaded with', (t) => {
+  const originalDocument = globalThis.document
+  t.after(() => {
+    globalThis.document = originalDocument
+  })
+  const page = { cookie: '', querySelector: () => ({ content: 'page-load-token' }) }
+  globalThis.document = page
+
+  page.cookie = 'proof_theme=whitey; XSRF-TOKEN=signed-in-token%3D%3D; other=1'
+  assert.equal(csrfToken(), 'signed-in-token==')
+
+  page.cookie = 'XSRF-TOKEN=signed-out-token'
+  assert.equal(csrfToken(), 'signed-out-token')
+
+  for (const unusable of ['', 'XSRF-TOKEN=', 'XSRF-TOKEN=%', 'NOT-XSRF-TOKEN=other']) {
+    page.cookie = unusable
+    assert.equal(csrfToken(), 'page-load-token', unusable)
+  }
+  Object.defineProperty(page, 'cookie', {
+    get() {
+      throw new Error('cookies are unavailable')
+    },
+  })
+  assert.equal(csrfToken(), 'page-load-token')
+})
