@@ -35,7 +35,7 @@ The lockfile also holds three packages, and a lockfile update must keep the hold
 
 - `prosemirror-model` 1.25.11. With 1.25.13, rejecting any suggestion throws while a heading or code block that was retyped in Suggest mode is still pending: the suggestion library restores the old `id` or `language` as null, and the validator rejects it. The review panel swallows the error, so Reject does nothing.
 - `prosemirror-view` 1.42.4, which has the paste advisory fix (1.42.3 and later). 1.42.5 and later need model 1.25.12. From 1.43.0, dragging or double-clicking text in Read or Comment mode also leaves the browser selection empty.
-- `prosemirror-transform` 1.12.0. Version 1.12.6 can build a table header with no paragraph when part of a table is inserted elsewhere (1.12.4 does not), and y-prosemirror deletes such a node. 1.12.1 to 1.12.4 place some inserted blocks differently.
+- `prosemirror-transform` 1.12.0. Versions 1.12.5 to 1.12.7 can build a table header or cell with no paragraph when part of a table is inserted elsewhere (1.12.4 does not), and y-prosemirror deletes such a node. 1.12.1 to 1.12.4 place some inserted blocks differently.
 
 ## Prevention
 
