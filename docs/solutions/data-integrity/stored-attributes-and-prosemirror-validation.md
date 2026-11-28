@@ -31,7 +31,11 @@ From version 1.25.12, `prosemirror-model` validates attributes whenever a node i
 
 `app/frontend/editor/schema_attributes.ts` widens the validators to the values that parsing produces and stored documents contain: `boolean|string` for `spread`, `string|null` for image `alt` and `title`. It exports `markdownPresets`, which the editor and the test share. Order matters: the GFM preset re-registers `list_item`, which would restore the strict validator.
 
-The lockfile also holds `prosemirror-view` 1.42.4 with `prosemirror-model` 1.25.11. That view has the paste advisory fix (1.42.3 and later) and is the newest one that accepts a model without validation on creation. The next lockfile update undoes the hold; the schema change remains.
+The lockfile also holds three packages, and a lockfile update must keep the hold until each reason is gone:
+
+- `prosemirror-model` 1.25.11. With 1.25.13, rejecting any suggestion throws while a heading or code block that was retyped in Suggest mode is still pending: the suggestion library restores the old `id` or `language` as null, and the validator rejects it. The review panel swallows the error, so Reject does nothing.
+- `prosemirror-view` 1.42.4, which has the paste advisory fix (1.42.3 and later). 1.42.5 and later need model 1.25.12. From 1.43.0, dragging or double-clicking text in Read or Comment mode also leaves the browser selection empty.
+- `prosemirror-transform` 1.12.0. Version 1.12.6 can build a table header with no paragraph when part of a table is inserted elsewhere (1.12.4 does not), and y-prosemirror deletes such a node. 1.12.1 to 1.12.4 place some inserted blocks differently.
 
 ## Prevention
 
