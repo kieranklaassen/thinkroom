@@ -260,7 +260,7 @@ class AgentGuideWebmcpTest < ActiveSupport::TestCase
     content = tool[:input_schema][:properties][:content]
     assert_equal Document::MAX_CONTENT_BYTES, content[:maxLength]
     assert_includes content[:description], "UTF-8 bytes"
-    assert_equal %w[html markdown], tool[:input_schema][:properties][:format][:enum].sort
+    assert_equal %w[markdown], tool[:input_schema][:properties][:format][:enum].sort
     assert_equal "required", tool[:request][:agent_identity]
     assert_match(/unclaimed draft/, tool[:description])
   end
