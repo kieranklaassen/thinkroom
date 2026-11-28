@@ -9,7 +9,7 @@ class FakeElement extends FakeNode {
     super()
     this.anchor = anchor
   }
-  closest = () => this.anchor
+  closest = (selector) => (selector === 'a[href]' ? this.anchor : null)
 }
 class FakeMouseEvent {
   button = 0

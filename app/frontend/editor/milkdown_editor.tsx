@@ -366,7 +366,8 @@ function CollabEditor({
     contentFormat,
     get,
     controlsRef: sketchControlsRef,
-    canEdit: () => editableRef.current && !suggestingRef.current,
+    editableRef,
+    suggestingRef,
   })
 
   return (

@@ -64,13 +64,14 @@ function start({ editor = { action: (run) => run({ get: (token) => token }) }, .
     writes: [],
     session: { ydoc: 'ydoc', provider: { persistCurrentState: (payload) => saved.push(payload) } },
   })
-  const mode = { editing: true }
+  const editableRef = { current: true }
+  const suggestingRef = { current: false }
   const controlsRef = { current: null }
   const render = () => useSketchEditing({
-    slug: 'doc', contentFormat: 'html', get: () => editor, controlsRef, canEdit: () => mode.editing, ...options,
+    slug: 'doc', contentFormat: 'html', get: () => editor, controlsRef, editableRef, suggestingRef, ...options,
   })
   render()
-  return { saved, mode, render, controls: controlsRef.current, controlsRef }
+  return { saved, editableRef, suggestingRef, render, controls: controlsRef.current, controlsRef }
 }
 const sketch = (id, description = '') => ({ id, description })
 const classes = () => {
@@ -101,7 +102,8 @@ test('an inserted sketch is empty, its own, and opened', () => {
   )
   assert.equal(activate, true)
   assert.notEqual(first.id, second.id)
-  assert.notEqual(first.scene, EMPTY_SKETCH_SCENE)
+  assert.notEqual(first.scene.elements, EMPTY_SKETCH_SCENE.elements)
+  assert.notEqual(first.scene.elements, second.scene.elements)
   assert.equal(saved.length, 2)
 })
 
@@ -127,11 +129,12 @@ test('a write that changed nothing, or with no session, persists nothing', () =>
   assert.deepEqual(other.saved, [])
 })
 
-test('nothing is written while editing is off, read when the control is used', () => {
-  const { controls, saved, mode } = start()
+const READ_ONLY = [['reading', 'editableRef', false], ['suggesting', 'suggestingRef', true]]
+for (const [mode, ref, value] of READ_ONLY) test(`nothing is written while ${mode}, checked when a control is used`, () => {
+  const { controls, saved, [ref]: live } = start()
   open(controls, sketch('a'))
   assert.equal(controls.enabled(), true)
-  mode.editing = false
+  live.current = value
   assert.equal(controls.enabled(), false)
   controls.insert()
   controls.delete('a')
@@ -213,7 +216,7 @@ test('the controls are the latest render\'s', () => {
   const { controlsRef, saved } = start({ slug: 'elsewhere' })
   useSketchEditing({
     slug: 'doc', contentFormat: 'html', get: () => ({ action: (run) => run({ get: (token) => token }) }),
-    controlsRef, canEdit: () => true,
+    controlsRef, editableRef: { current: true }, suggestingRef: { current: false },
   })
   controlsRef.current.save(sketch('a'))
   assert.deepEqual(saved, durable)

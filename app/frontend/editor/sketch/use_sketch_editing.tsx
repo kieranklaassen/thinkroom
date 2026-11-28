@@ -22,8 +22,8 @@ interface SketchEditingOptions {
   get: () => Editor | undefined
   /** Filled on every render with what the sketch node views call. */
   controlsRef: RefObject<SketchControls | null>
-  /** Read at call time: the mode can change between renders. */
-  canEdit: () => boolean
+  editableRef: RefObject<boolean>
+  suggestingRef: RefObject<boolean>
 }
 
 /** Sketch edits from node views and the open inline editor; returns that editor's portal. */
@@ -32,9 +32,11 @@ export function useSketchEditing({
   contentFormat,
   get,
   controlsRef,
-  canEdit,
+  editableRef,
+  suggestingRef,
 }: SketchEditingOptions): ReactNode {
   const [sketchDraft, setSketchDraft] = useState<ActiveSketch | undefined>(undefined)
+  const canEdit = () => editableRef.current && !suggestingRef.current
 
   // Sketch writes bypass the debounced snapshot: a closed sketch editor must
   // be durable immediately (persistCurrentState uses keepalive when the save
