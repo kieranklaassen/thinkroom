@@ -168,7 +168,7 @@ export class CableProvider {
   // that part alone.
   private inFlight: { seq: number; parts: Uint8Array[] } | null = null
   private queued: Uint8Array[] = []
-  private carriedBySave = new WeakMap<Uint8Array, number>()
+  private carriedBySave = new WeakMap<Uint8Array, { saves: number; keepalive: number }>()
   private ackTimer: ReturnType<typeof setTimeout> | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryAttempt = 0
@@ -497,8 +497,19 @@ export class CableProvider {
    * fits what browsers allow, ordinary otherwise.
    */
   persistCurrentState = (snapshot?: DurableSnapshotPayload): void => {
+    this.sendDurableSave(snapshot)
+  }
+
+  private sendDurableSave(snapshot?: DurableSnapshotPayload, unload = false): void {
     if (!this.canWrite || this.discarded) return
     const parts = this.unackedParts()
+    if (
+      unload &&
+      (parts.length === 0 ||
+        parts.every((part) => (this.carriedBySave.get(part)?.keepalive ?? 0) > 0))
+    ) {
+      return
+    }
     const pending = parts.length > 0 ? Y.mergeUpdates(parts) : null
     const sentClaim = this.seedClaim
     if (!pending && !snapshot) return
@@ -529,9 +540,16 @@ export class CableProvider {
     // goes as an ordinary request, which only lasts as long as the page.
     const bodyBytes = byteLength(body)
     const keepalive = fitsKeepalive(bodyBytes)
+    if (unload && !keepalive && parts.every((part) => this.carriedBySave.has(part))) return
     if (keepalive) keepaliveBytesInFlight += bodyBytes
     for (const part of parts) {
-      this.carriedBySave.set(part, (this.carriedBySave.get(part) ?? 0) + 1)
+      const counts = this.carriedBySave.get(part)
+      if (counts) {
+        counts.saves += 1
+        if (keepalive) counts.keepalive += 1
+      } else {
+        this.carriedBySave.set(part, { saves: 1, keepalive: keepalive ? 1 : 0 })
+      }
     }
 
     void fetch(`/d/${this.slug}/sync_update`, {
@@ -558,9 +576,11 @@ export class CableProvider {
       .finally(() => {
         if (keepalive) keepaliveBytesInFlight -= bodyBytes
         for (const part of parts) {
-          const remaining = (this.carriedBySave.get(part) ?? 0) - 1
-          if (remaining > 0) this.carriedBySave.set(part, remaining)
-          else this.carriedBySave.delete(part)
+          const counts = this.carriedBySave.get(part)
+          if (!counts) continue
+          counts.saves -= 1
+          if (keepalive) counts.keepalive -= 1
+          if (counts.saves <= 0) this.carriedBySave.delete(part)
         }
       })
   }
@@ -818,8 +838,6 @@ export class CableProvider {
 
   private handleUnload = (): void => {
     removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload')
-    if (this.unackedParts().some((part) => !this.carriedBySave.has(part))) {
-      this.persistCurrentState()
-    }
+    this.sendDurableSave(undefined, true)
   }
 }

@@ -1163,3 +1163,57 @@ test('destroy removes the pagehide listener so later pagehide events do not flus
   window.dispatchEvent('beforeunload')
   assert.equal(calls.length, 1)
 })
+
+test('pagehide upgrades an in-flight non-keepalive save once budget frees up, without duplicating >64 KiB saves', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = editedHarness(t, 30_000)
+
+  // Save 1 holds ~40 KiB of the 64 KiB keepalive budget.
+  h.provider.persistCurrentState()
+  // Save 2 carries the new edit with keepalive: false because budget is full.
+  h.doc.getText('t').insert(0, 'later-')
+  h.provider.persistCurrentState()
+  assert.deepEqual(
+    calls.map((call) => call.keepalive),
+    [true, false],
+  )
+
+  // Save 1 settles, freeing keepalive room while Save 2 (keepalive: false) is still in flight.
+  await calls[0].respond(204)
+  window.dispatchEvent('pagehide')
+  assert.equal(calls.length, 3)
+  assert.equal(calls[2].keepalive, true)
+  assert.equal(savedByAll([calls[0], calls[2]]), h.doc.getText('t').toString())
+  h.provider.destroy()
+
+  // A >64 KiB edit cannot fit keepalive, so beforeunload + pagehide still sends only one request.
+  const large = stubLimitedFetch(t)
+  editedHarness(t, 100_000)
+  window.dispatchEvent('beforeunload')
+  window.dispatchEvent('pagehide')
+  assert.equal(large.calls.length, 1)
+  assert.equal(large.calls[0].keepalive, false)
+})
+
+test('overlapping saves hold unload deduplication until the last save carrying a part settles', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t, { ackTimeoutMs: 5000 })
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'overlap')
+
+  h.provider.persistCurrentState()
+  h.provider.persistCurrentState()
+  assert.equal(calls.length, 2)
+
+  // First save fails while second keepalive save is still in flight: pagehide must not resend yet.
+  await calls[0].fail()
+  window.dispatchEvent('pagehide')
+  assert.equal(calls.length, 2)
+
+  // Once the second save also fails, pagehide flushes the still-unacked edit.
+  await calls[1].fail()
+  window.dispatchEvent('pagehide')
+  assert.equal(calls.length, 3)
+  assert.equal(calls[2].keepalive, true)
+  assert.equal(savedText(calls[2]), 'overlap')
+})
