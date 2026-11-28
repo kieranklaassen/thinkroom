@@ -128,12 +128,29 @@ class DocumentPreviewHtmlTest < ActiveSupport::TestCase
     assert_match(/<div class="milkdown-table-block"><div class="table-wrapper"><table>/, html)
   end
 
-  test "strips raw script blocks in markdown via the sanitizer" do
+  test "raw script blocks render as inert text, matching the editor" do
     html = DocumentPreviewHtml.call(format: "markdown", content: "<script>alert(1)</script>\n\nsafe")
 
+    # The editor shows raw HTML blocks as literal text (data-type="html"
+    # spans); DocumentMarkdown's GFM tagfilter + the sanitizer keep the preview
+    # identical — visible escaped source, never an executable element.
     refute_includes html, "<script"
-    refute_includes html, "alert(1)"
+    assert_includes html, "&lt;script"
     assert_includes html, "safe"
+  end
+
+  test "unclosed raw HTML tags in markdown prose do not truncate or corrupt following blocks" do
+    %w[script style iframe textarea plaintext title xmp noembed noframes].each do |tag|
+      html = DocumentPreviewHtml.call(
+        format: "markdown",
+        content: "Avoid <#{tag}> tags.\n\n## Section 2\n\n**Keep me**"
+      )
+
+      refute_includes html, "<#{tag}", tag
+      assert_includes html, "&lt;#{tag}", tag
+      assert_includes html, "<h2>Section 2</h2>", tag
+      assert_includes html, "<strong>Keep me</strong>", tag
+    end
   end
 
   test "keeps provenance spans from raw markdown HTML so tints paint first frame" do

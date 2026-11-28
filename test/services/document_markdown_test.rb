@@ -98,6 +98,17 @@ class DocumentMarkdownTest < ActiveSupport::TestCase
     end
   end
 
+  test "unsafe markdown escapes GFM disallowed raw HTML tags while keeping allowed inline HTML" do
+    html = DocumentMarkdown.to_html(
+      %(<script>alert(1)</script> <TEXTAREA>x</textarea> <span data-provenance>ok</span>),
+      **OPTIONS
+    )
+
+    assert_includes html, "&lt;script>alert(1)&lt;/script>"
+    assert_includes html, "&lt;TEXTAREA>x&lt;/textarea>"
+    assert_includes html, "<span data-provenance>ok</span>"
+  end
+
   private
 
   def table(columns, rows: 2, row: "|#{"a|" * columns}", container: "", newline: "\n")
