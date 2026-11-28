@@ -869,9 +869,9 @@ function stubLimitedFetch(t) {
   const originalWarn = console.warn
   const warnings = []
   console.warn = (...args) => warnings.push(args)
-  globalThis.fetch = (_url, init) => {
+  globalThis.fetch = (url, init) => {
     const bytes = new TextEncoder().encode(init.body).byteLength
-    const call = { bytes, keepalive: init.keepalive === true, body: JSON.parse(init.body), refused: false }
+    const call = { url, bytes, keepalive: init.keepalive === true, body: JSON.parse(init.body), refused: false }
     calls.push(call)
     if (call.keepalive && inFlight + bytes > KEEPALIVE_LIMIT) {
       call.refused = true
@@ -1066,4 +1066,100 @@ test('an edit typed during a save that was refused goes out with everything stil
     h.provider.persistCurrentState()
     assert.equal(savedText(calls[1]), h.doc.getText('t').toString())
   }
+})
+
+test('pagehide alone flushes unacked in-flight and queued edits', (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t, { ackTimeoutMs: 5000 })
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'in-flight-')
+  h.doc.getText('t').insert(10, 'queued')
+
+  window.dispatchEvent('pagehide')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].url, '/d/demo-slug/sync_update')
+  assert.equal(calls[0].keepalive, true)
+  assert.equal(savedText(calls[0]), 'in-flight-queued')
+})
+
+test('beforeunload followed by pagehide with no new edits sends one save and counts keepalive once', (t) => {
+  const { calls } = stubLimitedFetch(t)
+  editedHarness(t, 25_000)
+
+  window.dispatchEvent('beforeunload')
+  window.dispatchEvent('pagehide')
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].keepalive, true)
+  assert.equal(calls[0].refused, false)
+  assert.equal(savedText(calls[0]).length, 25_000)
+
+  editedHarness(t, 20_000).provider.persistCurrentState()
+  assert.equal(calls[1].keepalive, true, 'pagehide must not double-count keepalive bytes')
+  assert.equal(calls[1].refused, false)
+})
+
+test('an edit made between beforeunload and pagehide is flushed on pagehide', (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t, { ackTimeoutMs: 5000 })
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'before-')
+
+  window.dispatchEvent('beforeunload')
+  assert.equal(calls.length, 1)
+  assert.equal(savedText(calls[0]), 'before-')
+
+  h.doc.getText('t').insert(7, 'after')
+  window.dispatchEvent('pagehide')
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1].keepalive, true)
+  assert.equal(savedText(calls[1]), 'before-after')
+})
+
+test('pagehide flushes remaining unacked edits after a failed or partial beforeunload save', async (t) => {
+  for (const settle of [(call) => call.fail(), (call) => call.respond(423)]) {
+    const { calls } = stubLimitedFetch(t)
+    const h = createHarness(t, { ackTimeoutMs: 5000 })
+    h.receive(emptySyncFrame(1))
+    h.doc.getText('t').insert(0, 'retry-me')
+
+    window.dispatchEvent('beforeunload')
+    assert.equal(calls.length, 1)
+    await settle(calls[0])
+
+    window.dispatchEvent('pagehide')
+    assert.equal(calls.length, 2)
+    assert.equal(calls[1].keepalive, true)
+    assert.equal(savedText(calls[1]), 'retry-me')
+    h.provider.destroy()
+  }
+
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t, { ackTimeoutMs: 5000 })
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'settled')
+
+  window.dispatchEvent('beforeunload')
+  h.doc.getText('t').insert(0, 'remaining-')
+  await calls[0].respond(204)
+
+  window.dispatchEvent('pagehide')
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1].keepalive, true)
+  assert.equal(savedText(calls[0]), 'settled')
+  assert.equal(savedByAll(calls), 'remaining-settled')
+})
+
+test('destroy removes the pagehide listener so later pagehide events do not flush again', async (t) => {
+  const { calls } = stubLimitedFetch(t)
+  const h = createHarness(t, { ackTimeoutMs: 5000 })
+  h.receive(emptySyncFrame(1))
+  h.doc.getText('t').insert(0, 'once')
+
+  h.provider.destroy()
+  assert.equal(calls.length, 1)
+  await calls[0].fail()
+
+  window.dispatchEvent('pagehide')
+  window.dispatchEvent('beforeunload')
+  assert.equal(calls.length, 1)
 })

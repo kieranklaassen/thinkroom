@@ -163,11 +163,12 @@ export class CableProvider {
   // edits owe a flush on reconnect or unload — a read-only open has neither
   // and sends nothing.
   //
-  // Both hold parts rather than one update: a part an HTTP save carried is never
-  // merged with later edits, so the save's success settles that part alone.
+  // Both hold parts rather than one update: a part an in-flight HTTP save
+  // carries is never merged with later edits, so the save's success settles
+  // that part alone.
   private inFlight: { seq: number; parts: Uint8Array[] } | null = null
   private queued: Uint8Array[] = []
-  private carriedBySave = new WeakSet<Uint8Array>()
+  private carriedBySave = new WeakMap<Uint8Array, number>()
   private ackTimer: ReturnType<typeof setTimeout> | null = null
   private retryTimer: ReturnType<typeof setTimeout> | null = null
   private retryAttempt = 0
@@ -253,6 +254,7 @@ export class CableProvider {
     this.awareness.on('update', this.handleAwarenessUpdate)
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', this.handleUnload)
+      window.addEventListener('pagehide', this.handleUnload)
       window.addEventListener('blur', this.handleBlur)
     }
   }
@@ -276,6 +278,7 @@ export class CableProvider {
     this.stopSeedWait()
     if (typeof window !== 'undefined') {
       window.removeEventListener('beforeunload', this.handleUnload)
+      window.removeEventListener('pagehide', this.handleUnload)
       window.removeEventListener('blur', this.handleBlur)
     }
     this.doc.off('update', this.handleDocUpdate)
@@ -499,12 +502,11 @@ export class CableProvider {
     const pending = parts.length > 0 ? Y.mergeUpdates(parts) : null
     const sentClaim = this.seedClaim
     if (!pending && !snapshot) return
-    parts.forEach((part) => this.carriedBySave.add(part))
 
     const updatePayload = {
       update: toBase64(pending ?? EMPTY_UPDATE),
       cid: this.clientId,
-      // Same staleness guard as flush(): this beforeunload/keepalive
+      // Same staleness guard as flush(): this unload/keepalive
       // fallback merges through the identical YjsPersistence.merge_bytes path
       // as SyncChannel, so it always carries content_generation (initialized
       // from page props even before the WebSocket handshake completes).
@@ -528,6 +530,9 @@ export class CableProvider {
     const bodyBytes = byteLength(body)
     const keepalive = fitsKeepalive(bodyBytes)
     if (keepalive) keepaliveBytesInFlight += bodyBytes
+    for (const part of parts) {
+      this.carriedBySave.set(part, (this.carriedBySave.get(part) ?? 0) + 1)
+    }
 
     void fetch(`/d/${this.slug}/sync_update`, {
       method: 'POST',
@@ -552,6 +557,11 @@ export class CableProvider {
       .catch((error) => console.warn('CableProvider: durable sync failed', error))
       .finally(() => {
         if (keepalive) keepaliveBytesInFlight -= bodyBytes
+        for (const part of parts) {
+          const remaining = (this.carriedBySave.get(part) ?? 0) - 1
+          if (remaining > 0) this.carriedBySave.set(part, remaining)
+          else this.carriedBySave.delete(part)
+        }
       })
   }
 
@@ -808,7 +818,7 @@ export class CableProvider {
 
   private handleUnload = (): void => {
     removeAwarenessStates(this.awareness, [this.doc.clientID], 'unload')
-    if (this.inFlight || this.queued.length > 0) {
+    if (this.unackedParts().some((part) => !this.carriedBySave.has(part))) {
       this.persistCurrentState()
     }
   }
