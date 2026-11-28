@@ -232,6 +232,73 @@ test('retryable NACK merges inFlight back ahead of queued edits and retries with
   h.receive({ type: 'ack', seq: 2 })
 })
 
+test('a refusal of another update leaves the one in flight waiting for its own answer', (t) => {
+  t.mock.method(console, 'warn', () => {})
+  const h = createHarness(t)
+  h.receive(emptySyncFrame(0))
+  h.doc.getText('t').insert(0, 'first')
+  h.doc.getText('t').insert(5, ' second')
+
+  for (const reason of ['invalid', 'retryable']) h.receive({ type: 'nack', seq: 99, reason })
+  assert.equal(h.sentUpdates().length, 1)
+  h.receive({ type: 'ack', seq: 1 })
+  assert.equal(h.sentUpdates().length, 2)
+  h.receive({ type: 'ack', seq: 2 })
+})
+
+test('a broken frame from a peer does not stop later edits from arriving', (t) => {
+  t.mock.method(console, 'warn', () => {})
+  const h = createHarness(t)
+  h.receive(emptySyncFrame(0))
+  const peer = new Y.Doc()
+  peer.getText('t').insert(0, 'from a peer')
+
+  for (const type of ['update', 'awareness']) {
+    assert.doesNotThrow(() => h.receive({ type, update: toBase64(new Uint8Array([255, 255, 255])) }))
+  }
+  h.receive({ type: 'update', update: toBase64(Y.encodeStateAsUpdate(peer)) })
+  assert.equal(h.doc.getText('t').toString(), 'from a peer')
+})
+
+test('a document deleted while offline is reported, and nothing typed after is sent', (t) => {
+  const h = createHarness(t)
+  h.receive(emptySyncFrame(0))
+  let rejected = 0
+  h.provider.on('rejected', () => { rejected += 1 })
+
+  h.disconnect()
+  h.doc.getText('t').insert(0, 'typed offline')
+  h.reject()
+  h.doc.getText('t').insert(0, 'typed after ')
+  assert.deepEqual([rejected, h.sentUpdates().length], [1, 0])
+})
+
+test('one failing listener does not keep the others from hearing the document is live', (t) => {
+  t.mock.method(console, 'error', () => {})
+  const h = createHarness(t)
+  let heard = false
+  h.provider.on('synced', () => { throw new Error('editor was destroyed') })
+  h.provider.on('synced', () => { heard = true })
+
+  h.receive(emptySyncFrame(0))
+  assert.equal(heard, true)
+})
+
+test('peers leave the page when the connection drops, and this writer stays', (t) => {
+  const h = createHarness(t)
+  h.receive(emptySyncFrame(0))
+  h.provider.awareness.setLocalState({ user: { name: 'Ada' } })
+  const peer = createHarness(t)
+  peer.provider.awareness.setLocalState({ user: { name: 'Grace' } })
+  peer.receive(emptySyncFrame(0))
+  h.receive(peer.sent.find(({ type }) => type === 'awareness'))
+  const names = () => [...h.provider.awareness.getStates().values()].map(({ user }) => user.name).sort()
+  assert.deepEqual(names(), ['Ada', 'Grace'])
+
+  h.disconnect()
+  assert.deepEqual(names(), ['Ada'])
+})
+
 test('ACK timeout requeues inFlight ahead of queued edits and retries', async (t) => {
   const h = createHarness(t, { ackTimeoutMs: 40, retryBaseMs: 20, retryMaxMs: 200 })
   h.receive(emptySyncFrame(0))
