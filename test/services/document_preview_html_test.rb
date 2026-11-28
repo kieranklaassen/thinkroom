@@ -128,14 +128,11 @@ class DocumentPreviewHtmlTest < ActiveSupport::TestCase
     assert_match(/<div class="milkdown-table-block"><div class="table-wrapper"><table>/, html)
   end
 
-  test "raw script blocks render as inert text, matching the editor" do
+  test "strips raw script blocks in markdown via the sanitizer" do
     html = DocumentPreviewHtml.call(format: "markdown", content: "<script>alert(1)</script>\n\nsafe")
 
-    # The editor shows raw HTML blocks as literal text (data-type="html"
-    # spans); Commonmarker's tagfilter + the sanitizer keep the preview
-    # identical — visible escaped source, never an executable element.
     refute_includes html, "<script"
-    assert_includes html, "&lt;script"
+    refute_includes html, "alert(1)"
     assert_includes html, "safe"
   end
 

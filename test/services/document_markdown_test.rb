@@ -90,6 +90,14 @@ class DocumentMarkdownTest < ActiveSupport::TestCase
     assert_empty fragment.css("[id], a")
   end
 
+  test "deeply nested markdown exceeding Commonmarker's limit raises TooComplex" do
+    deep_lists = (0...600).map { |level| "#{"  " * level}- words" }.join("\n")
+
+    assert_raises(DocumentHtml::TooComplex) do
+      DocumentMarkdown.to_html(deep_lists, **OPTIONS)
+    end
+  end
+
   private
 
   def table(columns, rows: 2, row: "|#{"a|" * columns}", container: "", newline: "\n")

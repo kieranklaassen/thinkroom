@@ -17,6 +17,8 @@ class DocumentMarkdown
       off[:table] = false if large_tables?(bytes)
       options = options.merge(extension: { **options[:extension], **off }) if off.any?
       Commonmarker.to_html(source, options:, plugins:)
+    rescue Commonmarker::NestingDepthExceededError
+      raise DocumentHtml::TooComplex
     end
 
     private
