@@ -508,7 +508,7 @@ export class CableProvider {
 
   /**
    * Persist strictly the merged unacked outbox bytes (`inFlight` +
-   * `queued`) over an HTTP request so discrete edits or an immediate
+   * `queued`, as many leading parts as the server takes in one update) over an HTTP request so discrete edits or an immediate
    * navigation/unload survive ActionCable teardown: `keepalive` when the body
    * fits what browsers allow, ordinary otherwise.
    */
