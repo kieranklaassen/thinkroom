@@ -79,7 +79,7 @@ export function FeedbackButton({ automationEnabled = false }: { automationEnable
     const refresh = async () => {
       try {
         const response = await fetch(`/feedback_runs/${runId}`, {
-          headers: { Accept: 'application/json' },
+          headers: { Accept: 'application/json', ...sessionHeaders() },
         })
         if ([401, 403, 404].includes(response.status)) {
           if (cancelled) return
