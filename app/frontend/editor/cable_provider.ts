@@ -87,6 +87,8 @@ const fromBase64 = (b64: string): Uint8Array =>
   Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
 
 const EMPTY_UPDATE = new Uint8Array([0, 0])
+// The largest update the server takes (YjsPersistence::MAX_UPDATE_BYTES).
+const MAX_UPDATE_BYTES = 2 * 1024 * 1024
 const DEFAULT_ACK_TIMEOUT_MS = 10_000
 const DEFAULT_RETRY_BASE_MS = 250
 const DEFAULT_RETRY_MAX_MS = 8_000
@@ -106,6 +108,13 @@ const fitsKeepalive = (bytes: number): boolean =>
 const isEmptyUpdate = (update: Uint8Array): boolean =>
   update.length === EMPTY_UPDATE.length && update.every((byte, i) => byte === EMPTY_UPDATE[i])
 
+// The leading parts that merge into one update the server takes.
+const partsThatFit = (parts: Uint8Array[]): Uint8Array[] => {
+  let bytes = 0
+  const end = parts.findIndex((part) => (bytes += part.length) > MAX_UPDATE_BYTES)
+  return end === -1 ? parts : parts.slice(0, end)
+}
+
 export type ProviderEvent =
   | 'synced'
   | 'seed'
@@ -113,6 +122,7 @@ export type ProviderEvent =
   | 'write-denied'
   | 'stale'
   | 'access-changed'
+  | 'unsaved-edit'
 
 /** Origin tag for the page's server-rendered Yjs state applied at session
  *  creation (collab_session.ts). It is server state, never a local change. */
@@ -133,6 +143,11 @@ export class CableProvider {
   readonly awareness: Awareness
   readonly clientId = crypto.randomUUID()
   synced = false
+  /** A local edit was too large for the server. Later local edits follow it in
+   *  the Yjs history and can depend on it, so none is sent. Undo
+   *  does not help (the history keeps the text), so this lasts as long as the
+   *  session. */
+  unsavedEdit = false
   seedContent: string | null = null
   /** Held from the seed grant until the server is known to store this
    *  client's seed; sent with every write in between. */
@@ -320,7 +335,8 @@ export class CableProvider {
 
   private enqueue(update: Uint8Array): void {
     const last = this.queued[this.queued.length - 1]
-    if (last && !this.carriedBySave.has(last)) {
+    const fits = last && last.length + update.length <= MAX_UPDATE_BYTES
+    if (fits && !this.carriedBySave.has(last)) {
       this.queued[this.queued.length - 1] = Y.mergeUpdates([last, update])
     } else {
       this.queued.push(update)
@@ -453,8 +469,8 @@ export class CableProvider {
     ) {
       return
     }
-    const parts = this.queued
-    this.queued = []
+    const parts = partsThatFit(this.queued)
+    this.queued = this.queued.slice(parts.length)
     this.updateSequence += 1
     const seq = this.updateSequence
     this.inFlight = { seq, parts }
@@ -492,7 +508,7 @@ export class CableProvider {
 
   /**
    * Persist strictly the merged unacked outbox bytes (`inFlight` +
-   * `queued`) over an HTTP request so discrete edits or an immediate
+   * `queued`, as many leading parts as the server takes in one update) over an HTTP request so discrete edits or an immediate
    * navigation/unload survive ActionCable teardown: `keepalive` when the body
    * fits what browsers allow, ordinary otherwise.
    */
@@ -502,7 +518,7 @@ export class CableProvider {
 
   private sendDurableSave(snapshot?: DurableSnapshotPayload, unload = false): void {
     if (!this.canWrite || this.discarded) return
-    const parts = this.unackedParts()
+    const parts = partsThatFit(this.unackedParts())
     if (
       unload &&
       (parts.length === 0 ||
@@ -767,6 +783,12 @@ export class CableProvider {
     // Updates we applied from the wire carry `this` as origin — don't echo
     // them; the page's server-rendered hydration is server state too.
     if (origin === this || origin === SERVER_HYDRATE_ORIGIN || !this.canWrite) return
+    if (this.unsavedEdit) return
+    if (update.length > MAX_UPDATE_BYTES) {
+      this.unsavedEdit = true
+      this.emit('unsaved-edit')
+      return
+    }
     this.enqueue(update)
     this.flush('update')
   }

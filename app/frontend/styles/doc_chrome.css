@@ -151,6 +151,21 @@
   font-size: 0.76rem;
 }
 
+/* Stays in view while the document scrolls. The offset is the header's least
+   height, so a taller header overlaps only the extra padding. The native shell
+   shows no header. */
+.doc-notice--pinned {
+  position: sticky;
+  top: calc(2.75rem + var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top)));
+  z-index: 29;
+  padding-top: 1.35rem;
+}
+
+[data-native-app] .doc-notice--pinned {
+  top: var(--ruby-native-safe-area-inset-top, env(safe-area-inset-top));
+  padding-top: 0.5rem;
+}
+
 .doc-notice button {
   border: 0;
   background: transparent;
