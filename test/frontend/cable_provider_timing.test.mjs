@@ -264,9 +264,9 @@ test('edits too large for one frame leave oldest first after a drop', (t) => {
 
 function holdSaves(t) {
   const calls = []
-  t.mock.method(globalThis, 'fetch', (_url, { body, keepalive }) =>
+  t.mock.method(globalThis, 'fetch', (_url, { method, body, keepalive }) =>
     new Promise((resolve, reject) => {
-      calls.push({ bytes: Buffer.byteLength(body), body: JSON.parse(body), keepalive, fail: () => reject(new Error('offline')) })
+      calls.push({ method, bytes: Buffer.byteLength(body), body: JSON.parse(body), keepalive, fail: () => reject(new Error('offline')) })
     }),
   )
   t.after(() => calls.forEach(({ fail }) => fail()))
@@ -305,7 +305,54 @@ test('a large edit whose save failed is sent again when the page closes', async 
   await settled()
   windowListeners.get('pagehide')()
   assert.equal(calls.length, 2)
+  assert.equal(calls[1].method, 'POST')
   assert.equal(textOf([calls[1].body]).length, 100_000)
+})
+
+test('a save with more than fits takes the frame in flight first', (t) => {
+  const h = connect(t)
+  const calls = holdSaves(t)
+  h.receive(handshake())
+  h.type('a'.repeat(1_200_000))
+  h.type('b'.repeat(1_200_000))
+  h.provider.persistCurrentState()
+  assert.ok(textOf([calls[0].body]) === 'a'.repeat(1_200_000))
+})
+
+test('a stored save settles the seed claim before the next frame leaves', async (t) => {
+  const h = connect(t)
+  h.receive(handshake({ seed: true, seed_content: 'x', seed_claim: 'claim' }))
+  h.type('seed')
+  const peer = new Y.Doc()
+  peer.getText('t').insert(0, 'peer')
+  h.receive({ type: 'update', update: toBase64(Y.encodeStateAsUpdate(peer)) })
+  h.provider.persistCurrentState()
+  h.type('!')
+  await settled()
+  assert.equal(h.updates().length, 2)
+  assert.ok(!('seed_claim' in h.updates()[1]))
+  assert.match(h.updates()[1].text, /peer/)
+})
+
+test('a superseded seed is neither saved when the page closes nor merged with what is stored', (t) => {
+  const h = connect(t)
+  const calls = holdSaves(t)
+  h.receive(handshake({ seed: true, seed_content: 'x', seed_claim: 'claim' }))
+  h.type('seed')
+  h.receive({ type: 'write-denied', stale: true })
+  assert.equal(h.provider.discarded, true)
+  h.type(' late')
+  windowListeners.get('pagehide')()
+  assert.equal(calls.length, 0)
+
+  const stored = new Y.Doc()
+  Y.applyUpdate(stored, Y.encodeStateAsUpdate(h.doc))
+  stored.getText('t').insert(0, 'stored ')
+  h.receive(handshake({
+    update: toBase64(Y.encodeStateAsUpdate(stored)),
+    sv: toBase64(Y.encodeStateVector(stored)),
+  }))
+  assert.equal(h.doc.getText('t').toString(), 'seed late')
 })
 
 test('a receipt or a save that comes after a destroy sends and merges nothing', async (t) => {
