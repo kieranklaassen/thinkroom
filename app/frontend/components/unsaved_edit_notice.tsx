@@ -3,9 +3,9 @@ export function UnsavedEditNotice({ unsaved }: { unsaved: boolean }) {
   return (
     <div className="doc-notice" role="alert">
       <span>
-        The latest changes in this tab are not saved because one edit is too large. Anything you
-        change after it is not saved either, even if you undo it. Copy what you need before you
-        reload or leave this page.
+        This tab holds a change that is too large to save. That change and any later changes to
+        the text can be lost, even if you undo it. Copy what you need before you reload or leave
+        this page.
       </span>
     </div>
   )

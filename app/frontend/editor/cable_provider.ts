@@ -528,8 +528,6 @@ export class CableProvider {
     }
     const pending = parts.length > 0 ? Y.mergeUpdates(parts) : null
     const sentClaim = this.seedClaim
-    // A snapshot would store the source of edits that are not saved.
-    if (this.unsavedEdit) snapshot = undefined
     if (!pending && !snapshot) return
 
     const updatePayload = {

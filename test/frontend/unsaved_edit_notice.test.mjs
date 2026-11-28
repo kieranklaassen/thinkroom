@@ -23,7 +23,7 @@ test('the notice shows only for an unsaved edit, says what to do, and cannot be 
   assert.equal(renderToString(createElement(UnsavedEditNotice, { unsaved: false })), '')
   const html = renderToString(createElement(UnsavedEditNotice, { unsaved: true }))
   assert.match(html, /role="alert"/)
-  assert.match(html, /not saved/)
+  assert.match(html, /too large to save/)
   assert.match(html, /Copy what you need before you reload or leave/)
   assert.doesNotMatch(html, /<button/)
 })
