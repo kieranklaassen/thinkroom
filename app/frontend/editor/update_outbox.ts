@@ -1,7 +1,7 @@
 import * as Y from 'yjs'
 import { MAX_UPDATE_BYTES } from './sync_wire'
 
-export type UpdateFrameType = 'sync-reply' | 'update'
+type UpdateFrameType = 'sync-reply' | 'update'
 
 interface UpdateOutboxOptions {
   ackTimeoutMs: number
@@ -62,11 +62,12 @@ export class UpdateOutbox {
     const parts = partsThatFit(this.queued)
     this.queued = this.queued.slice(parts.length)
     this.sequence += 1
-    this.inFlight = { seq: this.sequence, parts }
-    this.options.transmit(type, this.sequence, Y.mergeUpdates(parts))
+    const seq = this.sequence
+    this.inFlight = { seq, parts }
+    this.options.transmit(type, seq, Y.mergeUpdates(parts))
     this.ackTimer = setTimeout(() => {
       this.ackTimer = null
-      this.retryLater()
+      if (this.awaitsReceipt(seq)) this.retryLater()
     }, this.options.ackTimeoutMs)
   }
 
@@ -79,7 +80,7 @@ export class UpdateOutbox {
     return this.inFlight !== null && this.inFlight.seq === seq
   }
 
-  /** The server answered for the frame in flight, so nothing of it is owed. */
+  /** Nothing of the frame in flight is owed any more. */
   settleInFlight(): void {
     this.clearAckTimer()
     this.inFlight = null

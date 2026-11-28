@@ -217,12 +217,12 @@ export class CableProvider {
     this.awareness.destroy()
   }
 
-  /** Edits the server has not confirmed, for inspection. */
-  get inFlight(): UpdateOutbox['inFlight'] {
+  /** Edits the server has not confirmed: the frame awaiting its receipt and the rest. */
+  get inFlight(): Readonly<UpdateOutbox['inFlight']> {
     return this.outbox.inFlight
   }
 
-  get queued(): Uint8Array[] {
+  get queued(): readonly Uint8Array[] {
     return this.outbox.queued
   }
 
@@ -312,8 +312,9 @@ export class CableProvider {
   }
 
   /**
-   * Persist strictly the unacked outbox over an HTTP request, so discrete edits
-   * or an immediate navigation/unload survive ActionCable teardown.
+   * Persist strictly the unacked outbox (as many leading parts as the server
+   * takes in one update) over an HTTP request, so discrete edits or an immediate
+   * navigation/unload survive ActionCable teardown.
    */
   persistCurrentState = (snapshot?: DurableSnapshotPayload): void => {
     this.sendDurableSave(snapshot)

@@ -165,6 +165,22 @@ test('the wait for a receipt belongs to one frame, and ends with it', (t) => {
   assert.equal(h.updates().length, 3)
 })
 
+test('a frame answered before its wait began does not time out the next one', (t) => {
+  const h = connect(t)
+  h.receive(handshake())
+  const { send } = h.subscription
+  h.subscription.send = (frame) => {
+    send(frame)
+    if (frame.type === 'update') h.receive({ type: 'ack', seq: frame.seq })
+  }
+  h.type('a')
+  h.subscription.send = send
+  h.tick(6_000)
+  h.type('b')
+  h.tick(4_000)
+  assert.ok(h.provider.inFlight)
+})
+
 test('edits typed during a backoff wait for it', (t) => {
   const h = connect(t)
   h.receive(handshake())

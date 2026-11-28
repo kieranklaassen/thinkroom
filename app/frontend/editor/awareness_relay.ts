@@ -43,7 +43,7 @@ export class AwarenessRelay {
     if (this.timer !== null) return
     const elapsed = Date.now() - this.lastSentAt
     if (elapsed >= THROTTLE_MS) this.flush()
-    else this.timer = setTimeout(() => this.flush(), Math.max(0, THROTTLE_MS - elapsed))
+    else this.timer = setTimeout(() => this.flush(), THROTTLE_MS - elapsed)
   }
 
   /** Sends the local state, changed or not. */
@@ -90,7 +90,7 @@ export class AwarenessRelay {
   dropAllPeers(): void {
     const { awareness } = this.options
     const peers = [...awareness.getStates().keys()].filter((id) => id !== this.localId)
-    if (peers.length > 0) this.remove(peers)
+    this.remove(peers)
   }
 
   leave(): void {
